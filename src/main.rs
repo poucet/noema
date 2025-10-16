@@ -1,5 +1,7 @@
-use llm::{ChatModel, ModelProvider} ;
+use llm::{ChatModel, ModelProvider};
 use llm::providers::OllamaProvider;
+use futures::{StreamExt};
+use tokio::pin;
 
 #[tokio::main]
 async fn main() {
@@ -14,6 +16,11 @@ async fn main() {
             content: "Hello, Ollama!".to_string(),
         },
     ];
-    let response = model.chat(messages).await;
-    println!("Model response: {:?}", response);
+    let stream = model.stream_chat(messages).await.unwrap();
+    pin!(stream);
+    print!("Response: ");
+    while let Some(chunk) = stream.next().await {
+        print!("{:}", chunk.content);
+    }
+    println!("");
 }
