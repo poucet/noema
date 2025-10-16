@@ -11,6 +11,7 @@ pub (crate) struct ListModelsResponse {
     pub (crate) models: Vec<ModelDefinition>,
 }
 
+// Ollama representation of messages.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub (crate) struct Message {
     pub (crate) role: Role,
@@ -27,6 +28,24 @@ impl From<Message> for crate::ChatMessage {
 }
 
 impl Into<Message> for crate::ChatMessage {
+    fn into(self) -> Message {
+        Message {
+            role: self.role,
+            content: self.content,
+        }
+    }
+}
+
+impl From<Message> for crate::ChatChunk {
+    fn from(msg: Message) -> Self {
+        crate::ChatChunk {
+            role: msg.role,
+            content: msg.content,
+        }
+    }
+}
+
+impl Into<Message> for crate::ChatChunk {
     fn into(self) -> Message {
         Message {
             role: self.role,

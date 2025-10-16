@@ -18,11 +18,19 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ChatChunk {
+    pub role: Role,
+    pub content: String,
+}
+
+
 #[async_trait]
 pub trait ChatModel {
     async fn chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatMessage>;
 
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<impl Stream<Item = ChatMessage>>;
+    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<impl Stream<Item = ChatChunk>>;
 }
 
 #[async_trait]

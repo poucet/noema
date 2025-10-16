@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use crate::{ChatModel, ChatMessage, ModelProvider};
+use crate::{ChatChunk, ChatModel, ChatMessage, ModelProvider};
 use reqwest;
 mod api;
 use api::{ChatRequest, ChatResponse, ListModelsResponse};
@@ -96,7 +96,7 @@ impl ChatModel for OllamaChatModel {
     }
 
 
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<impl Stream<Item = ChatMessage>> {
+    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<impl Stream<Item = ChatChunk>> {
         let url = format!("{}/api/chat", self.base_url);
 
         let ollama_messages: Vec<_> = messages
@@ -126,7 +126,7 @@ impl ChatModel for OllamaChatModel {
                 }
             };
             let chunk_str = String::from_utf8_lossy(&chunk);
-            let messages: Vec<ChatMessage> = chunk_str
+            let messages: Vec<ChatChunk> = chunk_str
                 .lines()
                 .filter(|line| !line.trim().is_empty())
                 .filter_map(|line| {
