@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use crate::{ChatRequest, ChatChunk, ChatStream, ChatMessage, ChatModel, ModelProvider};
-use reqwest;
+use reqwest::{self, header};
 mod api;
 use api::{GenerateContentRequest, GenerateContentResponse, ListModelsResponse};
 use futures::{stream::{self}, StreamExt};
@@ -9,7 +9,6 @@ use futures::{stream::{self}, StreamExt};
 pub struct GeminiProvider {
     client: reqwest::Client,
     base_url: String,
-    api_key: String,
 }
 
 impl GeminiProvider {
@@ -18,10 +17,12 @@ impl GeminiProvider {
     }
 
     pub fn new(base_url: &str, api_key: &str) -> Self {
+        let mut headers = header::HeaderMap::new();
+        headers.insert("Content-Type", "application/json".parse().unwrap());
+        headers.insert("x-goog-api-key", api_key.parse().unwrap());
         GeminiProvider {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder().default_headers(headers).build().unwrap(),
             base_url: base_url.to_string(),
-            api_key: api_key.to_string(),
         }
     }
 }
@@ -30,16 +31,14 @@ pub struct GeminiChatModel {
     client: reqwest::Client,
     base_url: String,
     model_name: String,
-    api_key: String,
 }
 
 impl GeminiChatModel {
-    pub fn new(client: reqwest::Client, base_url: String, model_name: String, api_key: String) -> Self {
+    pub fn new(client: reqwest::Client, base_url: String, model_name: String) -> Self {
         GeminiChatModel {
             client,
             base_url,
             model_name,
-            api_key,
         }
     }
 }
@@ -50,8 +49,7 @@ impl ModelProvider for GeminiProvider {
 
     async fn list_models(&self) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/models", self.base_url);
-        let resp = self.client.get(&url)
-            .header("x-goog-api-key", self.api_key.clone()).send().await;
+        let resp = self.client.get(&url).send().await;
 
         match resp {
             Ok(response) => {
@@ -73,7 +71,6 @@ impl ModelProvider for GeminiProvider {
             self.client.clone(),
             self.base_url.clone(),
             model_name.to_string(),
-            self.api_key.clone(),
         ))
     }
 }
@@ -85,8 +82,6 @@ impl ChatModel for GeminiChatModel {
         let request = GenerateContentRequest::from(request);
         let response = self.client
             .post(&url)
-            .header("x-goog-api-key", self.api_key.clone())
-            .header("Content-Type", "application/json")
             .json(&request).send().await?;
         if !response.status().is_success() {
             return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
@@ -96,14 +91,11 @@ impl ChatModel for GeminiChatModel {
         Ok((&message.candidates.first().unwrap().content).into())
     }
 
-
     async fn stream_chat(&self, request: &ChatRequest) -> anyhow::Result<ChatStream> {
         let url = format!("{}/{}:streamGenerateContent?alt=sse", self.base_url, self.model_name);
         let request = GenerateContentRequest::from(request);
         let response = self.client
             .post(&url)
-            .header("x-goog-api-key", self.api_key.clone())
-            .header("Content-Type", "application/json")
             .json(&request).send().await?;
         if !response.status().is_success() {
             return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
