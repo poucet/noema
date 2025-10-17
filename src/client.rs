@@ -22,7 +22,7 @@ impl Client {
 
     pub fn with_headers(headers: HeaderMap) -> Self {
         Client {
-            client: reqwest::Client::builder().default_headers(headers).build().unwrap()
+            client: reqwest::Client::builder().default_headers(headers).build().expect("Failed to build headers")
         }
     }
 
@@ -33,7 +33,7 @@ impl Client {
     {
         let response = self.client.get(url).send().await?;
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()))
+            return Err(anyhow::anyhow!("Request failed with status: {} - {:?}", response.status(), response.error_for_status()))
         }
         Ok(response.json::<T>().await?)
     }
@@ -46,10 +46,12 @@ impl Client {
     {
         let response = self.client.post(url).json(request).send().await?;
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
+            return Err(anyhow::anyhow!("Request failed with status: {} - {:?}", response.status(), response.error_for_status()));
         }
+        let text = response.text().await?;
+        println!("Response: {}", text);
 
-        Ok(response.json::<T>().await?)
+        Ok(serde_json::from_str::<T>(&text)?)
     }
 
     pub async fn post_stream<U, S, F, T>(&self, url: U, request: S, process: F) -> anyhow::Result<BoxedStream<T>>

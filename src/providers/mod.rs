@@ -1,19 +1,24 @@
-pub(crate) mod ollama;
+pub (crate) mod claude;
 pub (crate) mod gemini;
+pub (crate) mod ollama;
 
 use async_trait::async_trait;
-use crate::{providers::{gemini::GeminiChatModel, ollama::OllamaChatModel}, ChatModel, ChatRequest, ChatStream, ModelProvider};
-pub use ollama::OllamaProvider;
-pub use gemini::GeminiProvider;
+use crate::{ChatModel, ChatRequest, ChatStream, ModelProvider};
+
+pub use claude::{ClaudeChatModel, ClaudeProvider};
+pub use ollama::{OllamaChatModel, OllamaProvider};
+pub use gemini::{GeminiChatModel, GeminiProvider};
 
 pub enum GeneralModelProvider {
     Ollama(OllamaProvider),
     Gemini(GeminiProvider),
+    Claude(ClaudeProvider)
 }
 
 pub enum GeneralChatModel {
     Ollama(OllamaChatModel),
     Gemini(GeminiChatModel),
+    Claude(ClaudeChatModel)
 }
 
 #[async_trait]
@@ -24,6 +29,7 @@ impl ModelProvider for GeneralModelProvider {
         match self {
             GeneralModelProvider::Ollama(provider) => provider.list_models().await,
             GeneralModelProvider::Gemini(provider) => provider.list_models().await,
+            GeneralModelProvider::Claude(provider) => provider.list_models().await,
         }
     }
 
@@ -35,6 +41,9 @@ impl ModelProvider for GeneralModelProvider {
             GeneralModelProvider::Gemini(provider) => {
                 provider.create_chat_model(model_name).map(GeneralChatModel::Gemini)
             },
+            GeneralModelProvider::Claude(provider) => {
+                provider.create_chat_model(model_name).map(GeneralChatModel::Claude)
+            },
         }
     }
 }
@@ -45,6 +54,7 @@ impl ChatModel for GeneralChatModel {
         match self {
             GeneralChatModel::Ollama(model) => model.chat(request).await,
             GeneralChatModel::Gemini(model) => model.chat(request).await,
+            GeneralChatModel::Claude(model) => model.chat(request).await,
         }
     }
 
@@ -52,6 +62,7 @@ impl ChatModel for GeneralChatModel {
         match self {
             GeneralChatModel::Ollama(model) => model.stream_chat(request).await,
             GeneralChatModel::Gemini(model) => model.stream_chat(request).await,
+            GeneralChatModel::Claude(model) => model.stream_chat(request).await,
         }
     }
 }
