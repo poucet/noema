@@ -52,11 +52,12 @@ impl Client {
         Ok(response.json::<T>().await?)
     }
 
-    pub async fn post_stream<U, S, T>(&self, url: U, request: S) -> anyhow::Result<BoxedStream<T>>
+    pub async fn post_stream<U, S, F, T>(&self, url: U, request: S, process: F) -> anyhow::Result<BoxedStream<T>>
     where 
         U: reqwest::IntoUrl,
         S: Serialize + Sized,
         T: DeserializeOwned + Send + 'static,
+        F: Fn(&str) -> Option<&str> + 'static + Send,
     {
         let response = self.client.post(url).json(&request).send().await?;
         if !response.status().is_success() {
@@ -64,7 +65,7 @@ impl Client {
         }
 
         let bytes = response.bytes_stream();
-        Ok(Box::pin(bytes.flat_map(|chunk| {
+        Ok(Box::pin(bytes.flat_map(move |chunk| {
             let chunk = match chunk {
                 Ok(c) => c,
                 Err(e) => {
@@ -75,6 +76,7 @@ impl Client {
             let chunk_str = String::from_utf8_lossy(&chunk);
             let messages: Vec<T> = chunk_str
                 .lines()
+                .filter_map(|line| process(line))
                 .filter(|line| !line.trim().is_empty())
                 .filter_map(|line| {
                     match serde_json::from_str::<T>(line) {

@@ -76,9 +76,8 @@ impl ChatModel for GeminiChatModel {
         let url = format!("{}/{}:streamGenerateContent?alt=sse", self.base_url, self.model_name);
 
         let request: GenerateContentRequest = GenerateContentRequest::from(request);
-        // ADD:                 .filter_map(|line: &str| line.strip_prefix("data: "))
-        // TODO: Figure out how to do this in rust.
-        let streamed_response = self.client.post_stream(url, request).await?;
+        let streamed_response = self.client
+            .post_stream(url, request, |line: &str| line.strip_prefix("data: ")).await?;
         Ok(Box::pin(streamed_response.map(|chunk: GenerateContentResponse| chunk.into())))
     }
 }
