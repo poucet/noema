@@ -18,6 +18,7 @@ pub (crate) struct Message {
     pub (crate) content: String,
 }
 
+// TODO: Can we autoderive most of these From classes for values and for references to values?
 impl From<Message> for crate::ChatMessage {
     fn from(msg: Message) -> Self {
         crate::ChatMessage {
@@ -27,11 +28,11 @@ impl From<Message> for crate::ChatMessage {
     }
 }
 
-impl Into<Message> for crate::ChatMessage {
-    fn into(self) -> Message {
+impl From<crate::ChatMessage> for Message {
+    fn from(msg: crate::ChatMessage) -> Message {
         Message {
-            role: self.role,
-            content: self.content,
+            role: msg.role,
+            content: msg.content,
         }
     }
 }
@@ -45,11 +46,11 @@ impl From<Message> for crate::ChatChunk {
     }
 }
 
-impl Into<Message> for crate::ChatChunk {
-    fn into(self) -> Message {
+impl From<crate::ChatChunk> for Message {
+    fn from(value: crate::ChatChunk) -> Self {
         Message {
-            role: self.role,
-            content: self.content,
+            role: value.role,
+            content: value.content,
         }
     }
 }

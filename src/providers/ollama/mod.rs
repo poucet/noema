@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use crate::{ChatChunk, ChatModel, ChatMessage, ModelProvider};
+use crate::{ChatChunk, ChatModel, ChatMessage, ChatStream, ModelProvider};
 use reqwest;
 mod api;
 use api::{ChatRequest, ChatResponse, ListModelsResponse};
-use futures::{stream::{self, Stream}, StreamExt};
+use futures::{stream::{self}, StreamExt};
 
 
 pub struct OllamaProvider {
@@ -32,6 +32,8 @@ pub struct OllamaChatModel {
 
 #[async_trait]
 impl ModelProvider for OllamaProvider {
+    type ModelType = OllamaChatModel;
+
     async fn list_models(&self) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/api/tags", self.base_url);
         let resp = self.client.get(&url).send().await;
@@ -51,7 +53,7 @@ impl ModelProvider for OllamaProvider {
         }
     }
 
-    fn create_chat_model(&self, model_name: &str) -> Option<impl ChatModel> {
+    fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
         Some(OllamaChatModel::new(
             self.client.clone(),
             self.base_url.clone(),
@@ -96,7 +98,7 @@ impl ChatModel for OllamaChatModel {
     }
 
 
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<impl Stream<Item = ChatChunk>> {
+    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatStream> {
         let url = format!("{}/api/chat", self.base_url);
 
         let ollama_messages: Vec<_> = messages
@@ -116,7 +118,7 @@ impl ChatModel for OllamaChatModel {
         }
 
         let bytes = response.bytes_stream();
-        Ok(bytes
+        Ok(Box::pin(bytes
         .flat_map(|chunk| {
             let chunk = match chunk {
                 Ok(c) => c,
@@ -140,6 +142,6 @@ impl ChatModel for OllamaChatModel {
                 })
                 .collect();
             stream::iter(messages)
-        }))
+        })))
     }
 }
