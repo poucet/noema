@@ -88,7 +88,7 @@ impl ChatModel for GeminiChatModel {
         }
 
         let message = response.json::<GenerateContentResponse>().await?;
-        Ok((&message.candidates.first().unwrap().content).into())
+        Ok(message.into())
     }
 
     async fn stream_chat(&self, request: &ChatRequest) -> anyhow::Result<ChatStream> {
