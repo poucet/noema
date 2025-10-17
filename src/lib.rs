@@ -4,7 +4,7 @@ use futures::stream::Stream;
 use std::pin::Pin;
 
 pub mod providers;
-
+mod client;
 
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

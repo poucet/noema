@@ -4,10 +4,11 @@ use reqwest::{self, header};
 mod api;
 use api::{GenerateContentRequest, GenerateContentResponse, ListModelsResponse};
 use futures::{stream::{self}, StreamExt};
+use crate::client::Client;
 
 
 pub struct GeminiProvider {
-    client: reqwest::Client,
+    client: Client,
     base_url: String,
 }
 
@@ -21,20 +22,20 @@ impl GeminiProvider {
         headers.insert("Content-Type", "application/json".parse().unwrap());
         headers.insert("x-goog-api-key", api_key.parse().unwrap());
         GeminiProvider {
-            client: reqwest::Client::builder().default_headers(headers).build().unwrap(),
+            client: Client::with_headers(headers),
             base_url: base_url.to_string(),
         }
     }
 }
 
 pub struct GeminiChatModel {
-    client: reqwest::Client,
+    client: Client,
     base_url: String,
     model_name: String,
 }
 
 impl GeminiChatModel {
-    pub fn new(client: reqwest::Client, base_url: String, model_name: String) -> Self {
+    pub fn new(client: Client, base_url: String, model_name: String) -> Self {
         GeminiChatModel {
             client,
             base_url,
@@ -49,12 +50,8 @@ impl ModelProvider for GeminiProvider {
 
     async fn list_models(&self) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/models", self.base_url);
-        let response = self.client.get(&url).send().await?;
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()))
-        }
-        let models =  response.json::<ListModelsResponse>().await?;
-        Ok(models.models.iter().map(|m| m.name.clone()).collect())
+        let response: ListModelsResponse = self.client.get(&url).await?;
+        Ok(response.models.iter().map(|m| m.name.clone()).collect())
     }
 
     fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
@@ -70,54 +67,18 @@ impl ModelProvider for GeminiProvider {
 impl ChatModel for GeminiChatModel {
     async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let url = format!("{}/{}:generateContent", self.base_url, self.model_name);
-        let request = GenerateContentRequest::from(request);
-        let response = self.client
-            .post(&url)
-            .json(&request).send().await?;
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
-        }
-
-        let message = response.json::<GenerateContentResponse>().await?;
-        Ok(message.into())
+        
+        let request: GenerateContentRequest = GenerateContentRequest::from(request);
+        let response: GenerateContentResponse = self.client.post(url, &request).await?;
+        Ok(response.into())
     }
-
     async fn stream_chat(&self, request: &ChatRequest) -> anyhow::Result<ChatStream> {
         let url = format!("{}/{}:streamGenerateContent?alt=sse", self.base_url, self.model_name);
-        let request = GenerateContentRequest::from(request);
-        let response = self.client
-            .post(&url)
-            .json(&request).send().await?;
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
-        }
 
-        let bytes = response.bytes_stream();
-        Ok(Box::pin(bytes
-        .flat_map(|chunk| {
-            let chunk = match chunk {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error reading chunk: {}", e);
-                    return stream::iter(vec![]);
-                }
-            };
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            let messages: Vec<ChatChunk> = chunk_str
-                .lines()
-                .filter_map(|line| line.strip_prefix("data: "))
-                .filter(|line| !line.trim().is_empty())
-                .filter_map(|line| {
-                    match serde_json::from_str::<GenerateContentResponse>(line) {
-                        Ok(chat_response) => Some(chat_response.into()),
-                        Err(e) => {
-                            eprintln!("Failed to parse chunk: {}: {}", line, e);
-                            None
-                        }
-                    }
-                })
-                .collect();
-            stream::iter(messages)
-        })))
+        let request: GenerateContentRequest = GenerateContentRequest::from(request);
+        // ADD:                 .filter_map(|line: &str| line.strip_prefix("data: "))
+        // TODO: Figure out how to do this in rust.
+        let streamed_response = self.client.post_stream(url, request).await?;
+        Ok(Box::pin(streamed_response.map(|chunk: GenerateContentResponse| chunk.into())))
     }
 }
