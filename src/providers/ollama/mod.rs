@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use futures::FutureExt;
-use crate::{ChatRequest, ChatChunk, ChatModel, ChatMessage, ChatStream, ModelProvider};
+use crate::{ChatRequest, ChatModel, ChatMessage, ChatStream, ModelProvider};
 use crate::client::Client;
 mod api;
 use api::{OllamaRequest, OllamaResponse, ListModelsResponse};

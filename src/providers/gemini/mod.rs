@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use crate::{ChatRequest, ChatChunk, ChatStream, ChatMessage, ChatModel, ModelProvider};
+use crate::{ChatRequest, ChatStream, ChatMessage, ChatModel, ModelProvider};
 use reqwest::{self, header};
 mod api;
 use api::{GenerateContentRequest, GenerateContentResponse, ListModelsResponse};
-use futures::{stream::{self}, StreamExt};
+use futures::StreamExt;
 use crate::client::Client;
 
 

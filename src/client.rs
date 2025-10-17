@@ -6,7 +6,7 @@ use std::pin::Pin;
 use futures::{stream::{self}, StreamExt};
 
 #[derive(Clone)]
-pub (crate) struct Client {
+pub struct Client {
     client: reqwest::Client,
 }
 
