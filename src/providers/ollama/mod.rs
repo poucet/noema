@@ -36,21 +36,12 @@ impl ModelProvider for OllamaProvider {
 
     async fn list_models(&self) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/api/tags", self.base_url);
-        let resp = self.client.get(&url).send().await;
-
-        match resp {
-            Ok(response) => {
-                if response.status().is_success() {
-                    match response.json::<ListModelsResponse>().await {
-                        Ok(models) => Ok(models.models.iter().map(|m| m.name.clone()).collect()),
-                        Err(_) => Err(anyhow::anyhow!("Failed to parse response")),
-                    }
-                } else {
-                    Err(anyhow::anyhow!("Request failed with status: {}", response.status()))
-                }
-            }
-            Err(_) => Err(anyhow::anyhow!("Request error")),
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()))
         }
+        let models = response.json::<ListModelsResponse>().await?;
+        Ok(models.models.iter().map(|m| m.name.clone()).collect())
     }
 
     fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
