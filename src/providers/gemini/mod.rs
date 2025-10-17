@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use serde_json::json;
-use crate::{ChatModel, ChatStream, ChatMessage, ModelProvider};
+use crate::{ChatRequest, ChatChunk, ChatStream, ChatMessage, ChatModel, ModelProvider};
 use reqwest;
 mod api;
-use api::{GenerateContentRequest, GenerateContentResponse, Content, ListModelsResponse, Part};
+use api::{GenerateContentRequest, GenerateContentResponse, ListModelsResponse};
+use futures::{stream::{self}, StreamExt};
 
 
 pub struct GeminiProvider {
@@ -78,25 +78,16 @@ impl ModelProvider for GeminiProvider {
     }
 }
 
-
 #[async_trait]
 impl ChatModel for GeminiChatModel {
-    async fn chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatMessage> {
+    async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let url = format!("{}/{}:generateContent", self.base_url, self.model_name);
-        println!("Sending request to URL: {}", url);
-
-        // Separate system messages because they need to go into the system_messages field.
-        let system_instruction = Content {
-            parts: messages.iter().filter(|m| m.role == crate::Role::System)
-            .map(|m| m.into()).collect::<Vec<Part>>(),
-            role: api::Role::User, // Role is ignored for system messages   
-        };
-        let contents = messages.iter().filter(|m| m.role != crate::Role::System)
-            .map(|msg: &ChatMessage| msg.into())
-            .collect::<Vec<Content>>();
-
-        let request = GenerateContentRequest::new(contents, Some(system_instruction));
-        let response = self.client.post(&url).header("x-goog-api-key", self.api_key.clone()).header("Content-Type", "application/json").json(&request).send().await?;
+        let request = GenerateContentRequest::from(request);
+        let response = self.client
+            .post(&url)
+            .header("x-goog-api-key", self.api_key.clone())
+            .header("Content-Type", "application/json")
+            .json(&request).send().await?;
         if !response.status().is_success() {
             return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
         }
@@ -106,8 +97,44 @@ impl ChatModel for GeminiChatModel {
     }
 
 
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatStream> {
-        // TODO
-        unimplemented!("Gemini streaming not yet implemented");
+    async fn stream_chat(&self, request: &ChatRequest) -> anyhow::Result<ChatStream> {
+        let url = format!("{}/{}:streamGenerateContent?alt=sse", self.base_url, self.model_name);
+        let request = GenerateContentRequest::from(request);
+        let response = self.client
+            .post(&url)
+            .header("x-goog-api-key", self.api_key.clone())
+            .header("Content-Type", "application/json")
+            .json(&request).send().await?;
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
+        }
+
+        let bytes = response.bytes_stream();
+        Ok(Box::pin(bytes
+        .flat_map(|chunk| {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error reading chunk: {}", e);
+                    return stream::iter(vec![]);
+                }
+            };
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            let messages: Vec<ChatChunk> = chunk_str
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|line| !line.trim().is_empty())
+                .filter_map(|line| {
+                    match serde_json::from_str::<GenerateContentResponse>(line) {
+                        Ok(chat_response) => Some(chat_response.into()),
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {}: {}", line, e);
+                            None
+                        }
+                    }
+                })
+                .collect();
+            stream::iter(messages)
+        })))
     }
 }

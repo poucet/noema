@@ -2,6 +2,8 @@ use std::vec;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ChatRequest;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub (crate) struct ModelDefinition {
     pub (crate) name: String,
@@ -160,9 +162,18 @@ impl From<Content> for crate::ChatMessage {
         Self::from(&content)
     }
 }
-impl From<crate::ChatMessage> for Content {
-    fn from(msg: crate::ChatMessage) -> Self {
-        Self::from(&msg)
+
+impl From<Content> for crate::ChatChunk {
+    fn from(content: Content) -> Self {
+        crate::ChatChunk {
+            role: content.role.into(),
+            content: content.parts.iter().filter_map(|p| match &p.data {
+                PartType::Text(t) => Some(t.clone()),
+                PartType::Image(_) => None,
+                PartType::FunctionCall(_) => None,
+                PartType::FunctionResponse(_) => None,
+            }).next().unwrap_or("".to_string()), // Take first text part or empty
+        }
     }
 }
 
@@ -172,6 +183,13 @@ impl From<&crate::ChatMessage> for Content {
             role: msg.role.try_into().unwrap(), // Safe unwrap because of prior filtering
             parts: vec![Part::new_text(msg.content.clone())],
         }
+    }
+}
+
+impl From<crate::ChatMessage> for Content {
+    // TODO: Don't rely on the const-ref version to avoid cloning, but do this in a way that keeps code-maintenance easy.
+    fn from(msg: crate::ChatMessage) -> Self {
+        Self::from(&msg)
     }
 }
 
@@ -202,6 +220,22 @@ impl GenerateContentRequest {
     }
 }
 
+impl From<&ChatRequest> for GenerateContentRequest {
+    fn from(request: &ChatRequest) -> Self {
+        // Separate system messages because they need to go into the system_messages field.
+        let system_instruction = Content {
+            parts: request.messages.iter().filter(|m| m.role == crate::Role::System)
+            .map(|m| m.into()).collect::<Vec<Part>>(),
+            role: Role::User, // Role is ignored for system messages   
+        };
+        let contents = request.messages.iter().filter(|m| m.role != crate::Role::System)
+            .map(|msg| msg.into())
+            .collect::<Vec<Content>>();
+
+        GenerateContentRequest::new(contents, Some(system_instruction))
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub (crate) struct Candidate {
     pub (crate) content: Content,
@@ -216,6 +250,20 @@ pub (crate) struct GenerateContentResponse {
 
     #[serde(flatten)]
     pub (crate) extra: Option<serde_json::Value>,
+}
+
+impl From<GenerateContentResponse> for crate::ChatMessage {
+    fn from(response: GenerateContentResponse) -> Self {
+        // TODO: Move out of candidates instead of cloning.
+        response.candidates.first().unwrap().content.clone().into()
+    }
+}
+
+impl From<GenerateContentResponse> for crate::ChatChunk {
+    fn from(response: GenerateContentResponse) -> Self {
+        // TODO: Move out of candidates instead of cloning.
+        response.candidates.first().unwrap().content.clone().into()
+    }
 }
 
 #[cfg(test)]

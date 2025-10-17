@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use crate::{ChatChunk, ChatModel, ChatMessage, ChatStream, ModelProvider};
+use crate::{ChatRequest, ChatChunk, ChatModel, ChatMessage, ChatStream, ModelProvider};
 use reqwest;
 mod api;
-use api::{ChatRequest, ChatResponse, ListModelsResponse};
+use api::{OllamaRequest, OllamaResponse, ListModelsResponse};
 use futures::{stream::{self}, StreamExt};
 
 
@@ -74,44 +74,23 @@ impl OllamaChatModel {
 
 #[async_trait]
 impl ChatModel for OllamaChatModel {
-    async fn chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatMessage> {
+    async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let url = format!("{}/api/chat", self.base_url);
 
-        let ollama_messages: Vec<_> = messages
-            .into_iter()
-            .map(|msg: ChatMessage| msg.into())
-            .collect();
-        
-        let request = ChatRequest {
-            model: self.model_name.clone(),
-            messages: ollama_messages,
-            stream: Some(false),
-        };
-
+        let request = OllamaRequest::from_chat_request(&self.model_name, request, false);
         let response = self.client.post(&url).json(&request).send().await?;
         if !response.status().is_success() {
             return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
         }
 
-        let message = response.json::<ChatResponse>().await?;
-        Ok(message.message.into())
+        let message = response.json::<OllamaResponse>().await?;
+        Ok(message.into())
     }
 
-
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatStream> {
+    async fn stream_chat(&self, request: &ChatRequest) -> anyhow::Result<ChatStream> {
         let url = format!("{}/api/chat", self.base_url);
 
-        let ollama_messages: Vec<_> = messages
-            .into_iter()
-            .map(|msg: ChatMessage| msg.into())
-            .collect();
-        
-        let request = ChatRequest {
-            model: self.model_name.clone(),
-            messages: ollama_messages,
-            stream: Some(true),
-        };
-
+        let request = OllamaRequest::from_chat_request(&self.model_name, request, true);
         let response = self.client.post(&url).json(&request).send().await?;
         if !response.status().is_success() {
             return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
@@ -132,8 +111,8 @@ impl ChatModel for OllamaChatModel {
                 .lines()
                 .filter(|line| !line.trim().is_empty())
                 .filter_map(|line| {
-                    match serde_json::from_str::<ChatResponse>(line) {
-                        Ok(chat_response) => Some(chat_response.message.into()),
+                    match serde_json::from_str::<OllamaResponse>(line) {
+                        Ok(chat_response) => Some(chat_response.into()),
                         Err(e) => {
                             eprintln!("Failed to parse chunk: {}: {}", line, e);
                             None

@@ -2,7 +2,7 @@ pub(crate) mod ollama;
 pub (crate) mod gemini;
 
 use async_trait::async_trait;
-use crate::{providers::{gemini::GeminiChatModel, ollama::OllamaChatModel}, ChatStream, ChatModel, ModelProvider};
+use crate::{providers::{gemini::GeminiChatModel, ollama::OllamaChatModel}, ChatModel, ChatRequest, ChatStream, ModelProvider};
 pub use ollama::OllamaProvider;
 pub use gemini::GeminiProvider;
 
@@ -41,17 +41,17 @@ impl ModelProvider for GeneralModelProvider {
 
 #[async_trait]
 impl ChatModel for GeneralChatModel {
-    async fn chat(&self, messages: Vec<crate::ChatMessage>) -> anyhow::Result<crate::ChatMessage> {
+    async fn chat(&self, request: &ChatRequest) -> anyhow::Result<crate::ChatMessage> {
         match self {
-            GeneralChatModel::Ollama(model) => model.chat(messages).await,
-            GeneralChatModel::Gemini(model) => model.chat(messages).await,
+            GeneralChatModel::Ollama(model) => model.chat(request).await,
+            GeneralChatModel::Gemini(model) => model.chat(request).await,
         }
     }
 
-    async fn stream_chat(&self, messages: Vec<crate::ChatMessage>) -> anyhow::Result<ChatStream> {
+    async fn stream_chat(&self, request: &ChatRequest) -> anyhow::Result<ChatStream> {
         match self {
-            GeneralChatModel::Ollama(model) => model.stream_chat(messages).await,
-            GeneralChatModel::Gemini(model) => unimplemented!(), // model.stream_chat(messages).await,
+            GeneralChatModel::Ollama(model) => model.stream_chat(request).await,
+            GeneralChatModel::Gemini(model) => model.stream_chat(request).await,
         }
     }
 }

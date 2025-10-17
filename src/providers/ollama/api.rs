@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::{Role};
+use crate::{ChatRequest, Role};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub (crate) struct ModelDefinition {
@@ -28,11 +28,11 @@ impl From<Message> for crate::ChatMessage {
     }
 }
 
-impl From<crate::ChatMessage> for Message {
-    fn from(msg: crate::ChatMessage) -> Message {
+impl From<&crate::ChatMessage> for Message {
+    fn from(msg: &crate::ChatMessage) -> Message {
         Message {
             role: msg.role,
-            content: msg.content,
+            content: msg.content.clone(),
         }
     }
 }
@@ -56,7 +56,7 @@ impl From<crate::ChatChunk> for Message {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub (crate) struct ChatRequest {
+pub (crate) struct OllamaRequest {
     pub (crate) model: String,
 
     pub (crate) messages: Vec<Message>,
@@ -65,12 +65,39 @@ pub (crate) struct ChatRequest {
     pub (crate) stream: Option<bool>,
 }
 
+impl OllamaRequest {
+    pub (crate) fn from_chat_request(model_name: &str, value: &ChatRequest, stream: bool) -> Self {
+        let ollama_messages: Vec<_> = value.messages
+            .iter()
+            .map(|msg| msg.into())
+            .collect();
+        
+        OllamaRequest {
+            model: model_name.to_string(),
+            messages: ollama_messages,
+            stream: Some(stream),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub (crate) struct ChatResponse {
+pub (crate) struct OllamaResponse {
     pub (crate) message: Message,
 
     #[serde(flatten)]
     pub (crate) extra: serde_json::Value,
+}
+
+impl From<OllamaResponse> for crate::ChatMessage {
+    fn from(response: OllamaResponse) -> Self {
+        response.message.into()
+    }   
+}
+
+impl From<OllamaResponse> for crate::ChatChunk {
+    fn from(response: OllamaResponse) -> Self {
+        response.message.into()
+    }   
 }
 
 #[cfg(test)]
@@ -89,7 +116,7 @@ mod tests {
                 content: "Hi there!".to_string(),
             },
         ];
-        let request = ChatRequest {
+        let request = OllamaRequest {
             model: "test-model".to_string(),
             messages,
             stream: None,
@@ -110,7 +137,7 @@ mod tests {
                 content: "Hi there!".to_string(),
             },
         ];
-        let request = ChatRequest {
+        let request = OllamaRequest {
             model: "test-model".to_string(),
             messages,
             stream: Some(false),

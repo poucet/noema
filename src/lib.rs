@@ -29,11 +29,24 @@ pub struct ChatChunk {
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = ChatChunk> + Send>>;
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ChatRequest {
+    messages: Vec<ChatMessage>,
+}
+
+impl ChatRequest {
+    pub fn new(messages: Vec<ChatMessage>) -> Self {
+        ChatRequest {
+            messages
+        }
+    }
+}
+
 #[async_trait]
 pub trait ChatModel {
-    async fn chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatMessage>;
+    async fn chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatMessage>;
 
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> anyhow::Result<ChatStream>;
+    async fn stream_chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatStream>;
 }
 
 #[async_trait]
