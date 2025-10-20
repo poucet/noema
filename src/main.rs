@@ -8,6 +8,8 @@ use futures::{StreamExt};
 
 use clap_derive::{Parser, ValueEnum};
 use dotenv;
+use tracing::Level;
+use tracing_subscriber::FmtSubscriber;
 
 // Load GEMINI_API_KEY from ~/.env file
 fn get_api_key(key: &str) -> String {
@@ -64,9 +66,20 @@ async fn call_model_streaming(model: &impl ChatModel, messages: Vec<llm::ChatMes
     Ok(())
 }
 
+fn setup_tracing() {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::TRACE)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Setting default subscriber failed")
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::try_parse().ok().unwrap();
+
+    setup_tracing();
+
     let provider: GeneralModelProvider = match args.model {
         ModelProviderType::Ollama => GeneralModelProvider::Ollama(OllamaProvider::default()),
         ModelProviderType::Gemini => GeneralModelProvider::Gemini(GeminiProvider::default(&get_api_key("GEMINI_API_KEY"))),
