@@ -1,10 +1,12 @@
-
-use reqwest::header::HeaderMap;
-use serde::{de::DeserializeOwned, Serialize};
 use futures::stream::Stream;
-use tracing::{event, instrument, Level};
+use futures::{
+    StreamExt,
+    stream::{self},
+};
+use reqwest::header::HeaderMap;
+use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt::Debug, pin::Pin};
-use futures::{stream::{self}, StreamExt};
+use tracing::{Level, event, instrument};
 
 #[derive(Clone)]
 pub struct Client {
@@ -13,17 +15,19 @@ pub struct Client {
 
 pub type BoxedStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
 
-
 impl Client {
     pub fn default() -> Self {
         Client {
-            client: reqwest::Client::new()
+            client: reqwest::Client::new(),
         }
     }
 
     pub fn with_headers(headers: HeaderMap) -> Self {
         Client {
-            client: reqwest::Client::builder().default_headers(headers).build().expect("Failed to build headers")
+            client: reqwest::Client::builder()
+                .default_headers(headers)
+                .build()
+                .expect("Failed to build headers"),
         }
     }
 
@@ -33,10 +37,13 @@ impl Client {
         U: reqwest::IntoUrl + std::fmt::Debug,
         T: DeserializeOwned,
     {
-        
         let response = self.client.get(url).send().await?;
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {} - {:?}", response.status(), response.error_for_status()))
+            return Err(anyhow::anyhow!(
+                "Request failed with status: {} - {:?}",
+                response.status(),
+                response.error_for_status()
+            ));
         }
         let text = response.text().await?;
         event!(Level::INFO, response = text);
@@ -46,14 +53,18 @@ impl Client {
 
     #[instrument(level = "info", skip(self, request), fields(json_request = serde_json::to_string(request).unwrap()))]
     pub async fn post<U, S, T>(&self, url: U, request: &S) -> anyhow::Result<T>
-    where 
+    where
         U: reqwest::IntoUrl + std::fmt::Debug,
         S: Serialize + Sized,
         T: DeserializeOwned,
     {
         let response = self.client.post(url).json(request).send().await?;
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {} - {:?}", response.status(), response.error_for_status()));
+            return Err(anyhow::anyhow!(
+                "Request failed with status: {} - {:?}",
+                response.status(),
+                response.error_for_status()
+            ));
         }
         let text = response.text().await?;
         event!(Level::INFO, response = text);
@@ -62,8 +73,13 @@ impl Client {
     }
 
     #[instrument(level = "info", skip(self, request, process), fields(json_request = serde_json::to_string(request).unwrap()))]
-    pub async fn post_stream<U, S, F, T>(&self, url: U, request: &S, process: F) -> anyhow::Result<BoxedStream<T>>
-    where 
+    pub async fn post_stream<U, S, F, T>(
+        &self,
+        url: U,
+        request: &S,
+        process: F,
+    ) -> anyhow::Result<BoxedStream<T>>
+    where
         U: reqwest::IntoUrl + Debug,
         S: Serialize + Sized,
         T: DeserializeOwned + Send + 'static,
@@ -71,7 +87,10 @@ impl Client {
     {
         let response = self.client.post(url).json(&request).send().await?;
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("Request failed with status: {}", response.status()));
+            return Err(anyhow::anyhow!(
+                "Request failed with status: {}",
+                response.status()
+            ));
         }
 
         let bytes = response.bytes_stream();
@@ -88,13 +107,11 @@ impl Client {
                 .lines()
                 .filter_map(|line| process(line))
                 .filter(|line| !line.trim().is_empty())
-                .filter_map(|line| {
-                    match serde_json::from_str::<T>(line) {
-                        Ok(chat_response) => Some(chat_response),
-                        Err(e) => {
-                            eprintln!("Failed to parse chunk: {}: {}", line, e);
-                            None
-                        }
+                .filter_map(|line| match serde_json::from_str::<T>(line) {
+                    Ok(chat_response) => Some(chat_response),
+                    Err(e) => {
+                        eprintln!("Failed to parse chunk: {}: {}", line, e);
+                        None
                     }
                 })
                 .collect();

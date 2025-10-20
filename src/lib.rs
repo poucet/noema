@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use futures::stream::Stream;
+use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
-pub mod providers;
 mod client;
+pub mod providers;
 
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -19,7 +19,6 @@ pub struct ChatMessage {
     pub role: Role,
     pub content: String,
 }
-
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ChatChunk {
@@ -36,9 +35,7 @@ pub struct ChatRequest {
 
 impl ChatRequest {
     pub fn new(messages: Vec<ChatMessage>) -> Self {
-        ChatRequest {
-            messages
-        }
+        ChatRequest { messages }
     }
 }
 

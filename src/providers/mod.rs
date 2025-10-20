@@ -1,28 +1,28 @@
-pub (crate) mod claude;
-pub (crate) mod gemini;
-pub (crate) mod ollama;
+pub(crate) mod claude;
+pub(crate) mod gemini;
+pub(crate) mod ollama;
 
-use async_trait::async_trait;
 use crate::{ChatModel, ChatRequest, ChatStream, ModelProvider};
+use async_trait::async_trait;
 
 pub use claude::{ClaudeChatModel, ClaudeProvider};
-pub use ollama::{OllamaChatModel, OllamaProvider};
 pub use gemini::{GeminiChatModel, GeminiProvider};
+pub use ollama::{OllamaChatModel, OllamaProvider};
 
 pub enum GeneralModelProvider {
     Ollama(OllamaProvider),
     Gemini(GeminiProvider),
-    Claude(ClaudeProvider)
+    Claude(ClaudeProvider),
 }
 
 pub enum GeneralChatModel {
     Ollama(OllamaChatModel),
     Gemini(GeminiChatModel),
-    Claude(ClaudeChatModel)
+    Claude(ClaudeChatModel),
 }
 
 #[async_trait]
-impl ModelProvider for GeneralModelProvider {   
+impl ModelProvider for GeneralModelProvider {
     type ModelType = GeneralChatModel;
 
     async fn list_models(&self) -> anyhow::Result<Vec<String>> {
@@ -35,15 +35,15 @@ impl ModelProvider for GeneralModelProvider {
 
     fn create_chat_model(&self, model_name: &str) -> Option<GeneralChatModel> {
         match self {
-            GeneralModelProvider::Ollama(provider) => {
-                provider.create_chat_model(model_name).map(GeneralChatModel::Ollama)
-            },
-            GeneralModelProvider::Gemini(provider) => {
-                provider.create_chat_model(model_name).map(GeneralChatModel::Gemini)
-            },
-            GeneralModelProvider::Claude(provider) => {
-                provider.create_chat_model(model_name).map(GeneralChatModel::Claude)
-            },
+            GeneralModelProvider::Ollama(provider) => provider
+                .create_chat_model(model_name)
+                .map(GeneralChatModel::Ollama),
+            GeneralModelProvider::Gemini(provider) => provider
+                .create_chat_model(model_name)
+                .map(GeneralChatModel::Gemini),
+            GeneralModelProvider::Claude(provider) => provider
+                .create_chat_model(model_name)
+                .map(GeneralChatModel::Claude),
         }
     }
 }
