@@ -74,7 +74,7 @@ impl ChatModel for OllamaChatModel {
 
         let request = OllamaRequest::from_chat_request(&self.model_name, request, true);
         let streamed_response = self.client
-            .post_stream(url, request, |m| Some(m)).await?;
+            .post_stream(url, &request, |m| Some(m)).await?;
         Ok(Box::pin(streamed_response.map(|chunk: OllamaResponse| chunk.into())))
     }
 }

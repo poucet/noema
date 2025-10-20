@@ -82,7 +82,7 @@ impl ChatModel for ClaudeChatModel {
 
         let request = MessagesRequest::from_chat_request(&self.model_name, request, true);
         let streamed_response = self.client
-            .post_stream(url, request, |line: &str| line.strip_prefix("data: ")).await?;
+            .post_stream(url, &request, |line: &str| line.strip_prefix("data: ")).await?;
         Ok(Box::pin(streamed_response.map(|chunk: MessagesResponse| chunk.into())))
     }
 }

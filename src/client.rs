@@ -2,7 +2,8 @@
 use reqwest::header::HeaderMap;
 use serde::{de::DeserializeOwned, Serialize};
 use futures::stream::Stream;
-use std::pin::Pin;
+use tracing::{event, instrument, Level};
+use std::{fmt::Debug, pin::Pin};
 use futures::{stream::{self}, StreamExt};
 
 #[derive(Clone)]
@@ -26,21 +27,27 @@ impl Client {
         }
     }
 
+    #[instrument(level = "info", skip(self))]
     pub async fn get<U, T>(&self, url: U) -> anyhow::Result<T>
     where
-        U: reqwest::IntoUrl,
+        U: reqwest::IntoUrl + std::fmt::Debug,
         T: DeserializeOwned,
     {
+        
         let response = self.client.get(url).send().await?;
         if !response.status().is_success() {
             return Err(anyhow::anyhow!("Request failed with status: {} - {:?}", response.status(), response.error_for_status()))
         }
-        Ok(response.json::<T>().await?)
+        let text = response.text().await?;
+        event!(Level::INFO, response = text);
+
+        Ok(serde_json::from_str::<T>(&text)?)
     }
 
+    #[instrument(level = "info", skip(self, request), fields(json_request = serde_json::to_string(request).unwrap()))]
     pub async fn post<U, S, T>(&self, url: U, request: &S) -> anyhow::Result<T>
     where 
-        U: reqwest::IntoUrl,
+        U: reqwest::IntoUrl + std::fmt::Debug,
         S: Serialize + Sized,
         T: DeserializeOwned,
     {
@@ -49,14 +56,15 @@ impl Client {
             return Err(anyhow::anyhow!("Request failed with status: {} - {:?}", response.status(), response.error_for_status()));
         }
         let text = response.text().await?;
-        println!("Response: {}", text);
+        event!(Level::INFO, response = text);
 
         Ok(serde_json::from_str::<T>(&text)?)
     }
 
-    pub async fn post_stream<U, S, F, T>(&self, url: U, request: S, process: F) -> anyhow::Result<BoxedStream<T>>
+    #[instrument(level = "info", skip(self, request, process), fields(json_request = serde_json::to_string(request).unwrap()))]
+    pub async fn post_stream<U, S, F, T>(&self, url: U, request: &S, process: F) -> anyhow::Result<BoxedStream<T>>
     where 
-        U: reqwest::IntoUrl,
+        U: reqwest::IntoUrl + Debug,
         S: Serialize + Sized,
         T: DeserializeOwned + Send + 'static,
         F: Fn(&str) -> Option<&str> + 'static + Send,

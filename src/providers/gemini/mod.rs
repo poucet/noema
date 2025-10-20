@@ -78,7 +78,7 @@ impl ChatModel for GeminiChatModel {
 
         let request: GenerateContentRequest = GenerateContentRequest::from(request);
         let streamed_response = self.client
-            .post_stream(url, request, |line: &str| line.strip_prefix("data: ")).await?;
+            .post_stream(url, &request, |line: &str| line.strip_prefix("data: ")).await?;
         Ok(Box::pin(streamed_response.map(|chunk: GenerateContentResponse| chunk.into())))
     }
 }
