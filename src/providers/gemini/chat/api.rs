@@ -45,25 +45,25 @@ pub enum Role {
     Model,
 }
 
-impl TryFrom<crate::Role> for Role {
+impl TryFrom<crate::api::Role> for Role {
     type Error = anyhow::Error;
 
-    fn try_from(value: crate::Role) -> Result<Self, Self::Error> {
+    fn try_from(value: crate::api::Role) -> Result<Self, Self::Error> {
         match value {
-            crate::Role::User => Ok(Role::User),
-            crate::Role::Assistant => Ok(Role::Model),
-            crate::Role::System => Err(anyhow::anyhow!(
+            crate::api::Role::User => Ok(Role::User),
+            crate::api::Role::Assistant => Ok(Role::Model),
+            crate::api::Role::System => Err(anyhow::anyhow!(
                 "Gemini does not support system messages directly."
             )),
         }
     }
 }
 
-impl From<Role> for crate::Role {
+impl From<Role> for crate::api::Role {
     fn from(value: Role) -> Self {
         match value {
-            Role::User => crate::Role::User,
-            Role::Model => crate::Role::Assistant,
+            Role::User => crate::api::Role::User,
+            Role::Model => crate::api::Role::Assistant,
         }
     }
 }
@@ -109,19 +109,19 @@ impl From<&Part> for crate::ChatMessage {
     fn from(part: &Part) -> Self {
         match &part.data {
             PartType::Text(t) => crate::ChatMessage {
-                role: crate::Role::Assistant,
+                role: crate::api::Role::Assistant,
                 content: t.clone(),
             },
             PartType::Image(_) => crate::ChatMessage {
-                role: crate::Role::Assistant,
+                role: crate::api::Role::Assistant,
                 content: "[Image]".to_string(),
             },
             PartType::FunctionCall(_) => crate::ChatMessage {
-                role: crate::Role::Assistant,
+                role: crate::api::Role::Assistant,
                 content: "[Function Call]".to_string(),
             },
             PartType::FunctionResponse(_) => crate::ChatMessage {
-                role: crate::Role::Assistant,
+                role: crate::api::Role::Assistant,
                 content: "[Function Response]".to_string(),
             },
         }
@@ -237,7 +237,7 @@ impl From<&ChatRequest> for GenerateContentRequest {
             parts: request
                 .messages
                 .iter()
-                .filter(|m| m.role == crate::Role::System)
+                .filter(|m| m.role == crate::api::Role::System)
                 .map(|m| m.into())
                 .collect::<Vec<Part>>(),
             role: Role::User, // Role is ignored for system messages
@@ -245,7 +245,7 @@ impl From<&ChatRequest> for GenerateContentRequest {
         let contents = request
             .messages
             .iter()
-            .filter(|m| m.role != crate::Role::System)
+            .filter(|m| m.role != crate::api::Role::System)
             .map(|msg| msg.into())
             .collect::<Vec<Content>>();
 

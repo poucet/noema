@@ -1,4 +1,4 @@
-use crate::{ChatRequest, Role};
+use crate::{ChatRequest, api::Role};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -7,25 +7,25 @@ pub enum Role {
     Assistant,
 }
 
-impl TryFrom<crate::Role> for Role {
+impl TryFrom<crate::api::Role> for Role {
     type Error = anyhow::Error;
 
-    fn try_from(value: crate::Role) -> Result<Self, Self::Error> {
+    fn try_from(value: crate::api::Role) -> Result<Self, Self::Error> {
         match value {
-            crate::Role::User => Ok(Role::User),
-            crate::Role::Assistant => Ok(Role::Assistant),
-            crate::Role::System => Err(anyhow::anyhow!(
+            crate::api::Role::User => Ok(Role::User),
+            crate::api::Role::Assistant => Ok(Role::Assistant),
+            crate::api::Role::System => Err(anyhow::anyhow!(
                 "Claude does not support system messages directly in role field."
             )),
         }
     }
 }
 
-impl From<Role> for crate::Role {
+impl From<Role> for crate::api::Role {
     fn from(value: Role) -> Self {
         match value {
-            Role::User => crate::Role::User,
-            Role::Assistant => crate::Role::Assistant,
+            Role::User => crate::api::Role::User,
+            Role::Assistant => crate::api::Role::Assistant,
         }
     }
 }
@@ -53,7 +53,7 @@ impl TryFrom<&Content> for crate::ChatMessage {
     fn try_from(content: &Content) -> Result<Self, Self::Error> {
         match content {
             Content::Text { citations, text } => Ok(crate::ChatMessage {
-                role: crate::Role::Assistant,
+                role: crate::api::Role::Assistant,
                 content: text.clone(),
             }),
         }
@@ -66,7 +66,7 @@ impl TryFrom<&Content> for crate::ChatChunk {
     fn try_from(content: &Content) -> Result<Self, Self::Error> {
         match content {
             Content::Text { citations, text } => Ok(crate::ChatChunk {
-                role: crate::Role::Assistant,
+                role: crate::api::Role::Assistant,
                 content: text.clone(),
             }),
         }
@@ -131,7 +131,7 @@ impl MessagesRequest {
         let system_instruction = request
             .messages
             .iter()
-            .filter(|m| m.role == crate::Role::System)
+            .filter(|m| m.role == crate::api::Role::System)
             .map(|m| m.content.clone())
             .collect::<Vec<String>>()
             .join("\n");
@@ -139,7 +139,7 @@ impl MessagesRequest {
         let messages = request
             .messages
             .iter()
-            .filter(|m| m.role != crate::Role::System)
+            .filter(|m| m.role != crate::api::Role::System)
             .map(|msg: &crate::ChatMessage| msg.into())
             .collect::<Vec<InputMessage>>();
 
