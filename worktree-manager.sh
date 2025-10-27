@@ -27,6 +27,7 @@ Commands:
   open      Open an existing worktree in VSCode
   merge     Merge worktree branches back into target branch (default: main)
   sync      Sync worktree with target branch - pull latest changes (default: main)
+  pull      Pull latest changes from remote into current worktree (default: main)
   push      Push target branch to origin (default: main)
   list      List all worktrees
   setup     Enable tab-completion for current shell session
@@ -40,6 +41,8 @@ Examples:
   $0 merge feature-1 develop             # Merge feature-1 branches into develop
   $0 sync feature-1                      # Sync feature-1 worktree with latest main
   $0 sync feature-1 develop              # Sync feature-1 worktree with latest develop
+  $0 pull                                # From inside a worktree: pull latest main
+  $0 pull develop                        # From inside a worktree: pull latest develop
   $0 push feature-1                      # Push main branch to origin
   $0 push feature-1 develop              # Push develop branch to origin
   $0 remove feature-1                    # Remove worktree (warns if not merged)
@@ -619,19 +622,27 @@ sync_worktree() {
             echo "→ Creating worktree for new submodule: $submodule"
 
             # Create the worktree from the main submodule
-            cd "$submodule"
+            # Need to get the absolute path to the submodule in the main repo
+            local MAIN_SUBMODULE_PATH="$REPO_ROOT/$submodule"
+            cd "$MAIN_SUBMODULE_PATH"
+
+            # Ensure SUB_PATH is absolute
+            local ABS_SUB_PATH="$SUB_PATH"
+            if [[ "$ABS_SUB_PATH" != /* ]]; then
+                ABS_SUB_PATH="$REPO_ROOT/$SUB_PATH"
+            fi
 
             # Create branch if it doesn't exist, otherwise use existing branch
             if git rev-parse --verify "$SUB_BRANCH" >/dev/null 2>&1; then
                 echo "  • Adding worktree with existing branch $SUB_BRANCH"
-                git worktree add "$SUB_PATH" "$SUB_BRANCH" 2>/dev/null || {
+                git worktree add "$ABS_SUB_PATH" "$SUB_BRANCH" 2>/dev/null || {
                     echo "  ⚠ Failed to create worktree for $submodule"
                     cd - > /dev/null
                     continue
                 }
             else
                 echo "  • Creating new branch $SUB_BRANCH from $TARGET_BRANCH"
-                git worktree add -b "$SUB_BRANCH" "$SUB_PATH" "$TARGET_BRANCH" 2>/dev/null || {
+                git worktree add -b "$SUB_BRANCH" "$ABS_SUB_PATH" "$TARGET_BRANCH" 2>/dev/null || {
                     echo "  ⚠ Failed to create worktree for $submodule"
                     cd - > /dev/null
                     continue
@@ -686,6 +697,111 @@ sync_worktree() {
     echo "Note: This merges the current state of '$TARGET_BRANCH' into your worktree."
     echo "If you need the latest changes from remote, first run 'git pull' in your"
     echo "main worktree to update '$TARGET_BRANCH', then run this sync command."
+}
+
+pull_from_worktree() {
+    local TARGET_BRANCH=${1:-main}
+
+    # Check if we're in a worktree
+    local WORKTREE_PATH=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [ -z "$WORKTREE_PATH" ]; then
+        echo "Error: Not in a git repository"
+        exit 1
+    fi
+
+    # Check if this is actually a worktree (not the main repo)
+    local IS_WORKTREE=$(git rev-parse --git-dir | grep -q "worktrees" && echo "yes" || echo "no")
+
+    echo "Pulling latest changes from origin/$TARGET_BRANCH"
+    echo "================================================"
+    echo ""
+
+    # Fetch latest changes from remote
+    echo "→ Fetching from remote"
+    git fetch origin
+    echo ""
+
+    # Pull changes for the main worktree
+    echo "→ Merging origin/$TARGET_BRANCH into current branch"
+
+    # Check for uncommitted changes
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "  ⚠ Warning: Uncommitted changes detected"
+        echo "  Please commit or stash changes before pulling"
+        exit 1
+    fi
+
+    local CURRENT_BRANCH=$(git branch --show-current)
+    echo "  • Current branch: $CURRENT_BRANCH"
+    echo "  • Merging origin/$TARGET_BRANCH"
+
+    if git merge "origin/$TARGET_BRANCH" --no-edit; then
+        echo "  ✓ Merge successful"
+    else
+        echo "  ✗ Merge conflict detected!"
+        echo "  Please resolve conflicts in current directory"
+        exit 1
+    fi
+    echo ""
+
+    # Now handle submodules
+    echo "→ Checking for submodules"
+    local SUBMODULES=($(git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}'))
+
+    if [ ${#SUBMODULES[@]} -eq 0 ]; then
+        echo "  • No submodules found"
+    else
+        echo "  • Found ${#SUBMODULES[@]} submodule(s)"
+        echo ""
+
+        for submodule in "${SUBMODULES[@]}"; do
+            if [ -d "$submodule/.git" ] || [ -f "$submodule/.git" ]; then
+                echo "→ Pulling submodule: $submodule"
+                cd "$submodule"
+
+                # Check for uncommitted changes
+                if [ -n "$(git status --porcelain)" ]; then
+                    echo "  ⚠ Warning: Uncommitted changes in $submodule"
+                    echo "  Skipping this submodule. Please commit or stash changes first."
+                    cd - > /dev/null
+                    echo ""
+                    continue
+                fi
+
+                # Fetch and merge
+                echo "  • Fetching from remote"
+                git fetch origin
+
+                local SUB_CURRENT_BRANCH=$(git branch --show-current)
+                echo "  • Current branch: $SUB_CURRENT_BRANCH"
+                echo "  • Merging origin/$TARGET_BRANCH"
+
+                if git merge "origin/$TARGET_BRANCH" --no-edit; then
+                    echo "  ✓ Merge successful"
+                else
+                    echo "  ✗ Merge conflict detected in $submodule!"
+                    echo "  Please resolve conflicts in $submodule"
+                    cd - > /dev/null
+                    exit 1
+                fi
+
+                cd - > /dev/null
+                echo ""
+            else
+                echo "  ⚠ Submodule $submodule not initialized, skipping"
+                echo ""
+            fi
+        done
+    fi
+
+    echo "================================================"
+    echo "✓ Pull complete!"
+    echo ""
+    if [ "$IS_WORKTREE" = "yes" ]; then
+        echo "Your worktree is now up to date with origin/$TARGET_BRANCH"
+    else
+        echo "Your repository is now up to date with origin/$TARGET_BRANCH"
+    fi
 }
 
 push_worktree() {
@@ -814,6 +930,9 @@ case "$COMMAND" in
         fi
         sync_worktree "$@"
         ;;
+    pull)
+        pull_from_worktree "$@"
+        ;;
     push)
         if [ $# -lt 1 ]; then
             show_usage
@@ -831,7 +950,7 @@ case "$COMMAND" in
         case $# in
             0)
                 # No words yet - complete first argument (command names)
-                echo "create remove open merge sync push list setup"
+                echo "create remove open merge sync pull push list setup"
                 ;;
             1)
                 # One word (the command) - complete second argument based on command
