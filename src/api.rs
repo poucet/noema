@@ -42,6 +42,12 @@ pub struct ChatPayload {
     pub content: Vec<ContentBlock>,
 }
 
+impl From<&String> for ChatPayload {
+    fn from(text: &String) -> Self {
+        ChatPayload::text(text)
+    }
+}
+
 impl From<String> for ChatPayload {
     fn from(text: String) -> Self {
         ChatPayload::text(text)
