@@ -356,14 +356,14 @@ merge_worktree() {
     # Merge main feature branch
     echo ""
     echo "→ Merging main feature branch"
-    
+
     # Check if feature branch exists
     if ! git rev-parse --verify "$FEATURE_BRANCH" >/dev/null 2>&1; then
         echo "  ⚠ Branch '$FEATURE_BRANCH' does not exist in main repo"
     else
         echo "  • Checking out $TARGET_BRANCH"
         git checkout "$TARGET_BRANCH"
-        
+
         echo "  • Merging $FEATURE_BRANCH into $TARGET_BRANCH"
         if git merge "$FEATURE_BRANCH" --no-edit; then
             echo "  ✓ Merge successful"
@@ -373,7 +373,78 @@ merge_worktree() {
             exit 1
         fi
     fi
-    
+
+    # Initialize any new submodules that were added in the worktree
+    if [ ${#WORKTREE_SUBMODULES[@]} -gt ${#MAIN_SUBMODULES[@]} ]; then
+        echo ""
+        echo "→ Initializing new submodules in main worktree"
+
+        # For each new submodule, we need to properly initialize it
+        for submodule in "${ALL_SUBMODULES[@]}"; do
+            # Check if this is a new submodule (exists in worktree but wasn't in main)
+            local IS_NEW=true
+            for existing in "${MAIN_SUBMODULES[@]}"; do
+                if [ "$submodule" = "$existing" ]; then
+                    IS_NEW=false
+                    break
+                fi
+            done
+
+            if [ "$IS_NEW" = true ]; then
+                echo "  • Initializing new submodule: $submodule"
+
+                local WORKTREE_SUBMODULE_PATH="$WORKTREE_PATH/$submodule"
+
+                # Check if the submodule exists in the worktree
+                if [ ! -d "$WORKTREE_SUBMODULE_PATH/.git" ] && [ ! -f "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                    echo "    ⚠ Submodule not found in worktree at $WORKTREE_SUBMODULE_PATH"
+                    continue
+                fi
+
+                # Get the submodule URL from .gitmodules
+                local SUBMODULE_URL=$(git config --file .gitmodules --get "submodule.$submodule.url")
+
+                # If URL is relative (starts with ./ or ../), we need to copy the repo from worktree
+                if [[ "$SUBMODULE_URL" == ./* ]] || [[ "$SUBMODULE_URL" == ../* ]]; then
+                    echo "    • Copying repository from worktree (relative URL: $SUBMODULE_URL)"
+
+                    # Create the submodule directory if it doesn't exist
+                    mkdir -p "$submodule"
+
+                    # Copy the entire git repository from the worktree
+                    if [ -d "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                        cp -R "$WORKTREE_SUBMODULE_PATH/.git" "$submodule/"
+                    else
+                        # .git is a file (worktree pointer), need to handle differently
+                        echo "    ⚠ Worktree submodule detected - manual initialization required"
+                        continue
+                    fi
+
+                    # Copy the working directory content
+                    rsync -a --exclude='.git' "$WORKTREE_SUBMODULE_PATH/" "$submodule/"
+
+                    # Update git config to register the submodule
+                    cd "$submodule"
+                    git checkout "$TARGET_BRANCH" 2>/dev/null || git checkout -b "$TARGET_BRANCH" || true
+                    cd - > /dev/null
+
+                    echo "    ✓ Copied and initialized $submodule"
+                else
+                    # URL is absolute, can use normal git submodule update
+                    echo "    • Cloning from remote: $SUBMODULE_URL"
+                    if git submodule update --init "$submodule"; then
+                        cd "$submodule"
+                        git checkout "$TARGET_BRANCH" 2>/dev/null || echo "    (no $TARGET_BRANCH branch in $submodule yet)"
+                        cd - > /dev/null
+                        echo "    ✓ Initialized $submodule"
+                    else
+                        echo "    ⚠ Failed to initialize $submodule"
+                    fi
+                fi
+            fi
+        done
+    fi
+
     echo ""
     echo "================================================"
     echo "✓ Merge complete!"
