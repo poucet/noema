@@ -388,6 +388,7 @@ merge_worktree() {
                 echo "  • Initializing new submodule: $submodule"
 
                 local WORKTREE_SUBMODULE_PATH="$WORKTREE_PATH/$submodule"
+                local SUB_BRANCH="$FEATURE_BRANCH-$submodule"
 
                 # Check if the submodule exists in the worktree
                 if [ ! -d "$WORKTREE_SUBMODULE_PATH/.git" ] && [ ! -f "$WORKTREE_SUBMODULE_PATH/.git" ]; then
@@ -398,33 +399,49 @@ merge_worktree() {
                 # Get the submodule URL from .gitmodules
                 local SUBMODULE_URL=$(git config --file .gitmodules --get "submodule.$submodule.url")
 
-                # If URL is relative (starts with ./ or ../), resolve it to absolute path
+                # If URL is relative (starts with ./ or ../), we need to set up the submodule properly
                 if [[ "$SUBMODULE_URL" == ./* ]] || [[ "$SUBMODULE_URL" == ../* ]]; then
                     echo "    • Setting up repository from relative URL: $SUBMODULE_URL"
 
-                    # Resolve the relative URL to an absolute path
-                    local RESOLVED_URL
-                    if [[ "$SUBMODULE_URL" == ./* ]]; then
-                        RESOLVED_URL="$REPO_ROOT/${SUBMODULE_URL#./}"
+                    # Step 1: Find the actual git repository in the worktree (handle worktree pointers)
+                    local WORKTREE_SUB_GIT_DIR
+                    if [ -f "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                        # It's a worktree pointer - find the actual git directory
+                        WORKTREE_SUB_GIT_DIR=$(cat "$WORKTREE_SUBMODULE_PATH/.git" | sed 's/^gitdir: //')
+                        # Make it absolute if it's relative
+                        if [[ "$WORKTREE_SUB_GIT_DIR" != /* ]]; then
+                            WORKTREE_SUB_GIT_DIR="$WORKTREE_SUBMODULE_PATH/$WORKTREE_SUB_GIT_DIR"
+                        fi
+                        # Get the main git directory (parent of worktrees)
+                        WORKTREE_SUB_GIT_DIR=$(dirname "$(dirname "$WORKTREE_SUB_GIT_DIR")")
+                    elif [ -d "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                        # Standalone git directory
+                        WORKTREE_SUB_GIT_DIR="$WORKTREE_SUBMODULE_PATH"
                     else
-                        RESOLVED_URL="$REPO_ROOT/$SUBMODULE_URL"
-                    fi
-
-                    # Normalize the path
-                    RESOLVED_URL=$(cd "$(dirname "$RESOLVED_URL")" && pwd)/$(basename "$RESOLVED_URL")
-
-                    echo "      Resolved URL: $RESOLVED_URL"
-
-                    # Check if the source repository exists
-                    if [ ! -d "$RESOLVED_URL/.git" ]; then
-                        echo "    ⚠ Source repository not found at $RESOLVED_URL"
+                        echo "    ⚠ Cannot find git directory for $submodule"
                         continue
                     fi
 
-                    # Clone the repository as a standalone repo (not using submodule system)
-                    echo "      Cloning as independent repository"
-                    if git clone "$RESOLVED_URL" "$submodule"; then
+                    echo "      Found source git repo at: $WORKTREE_SUB_GIT_DIR"
+
+                    # Check for uncommitted changes in the worktree submodule
+                    echo "      Checking for uncommitted changes in worktree submodule"
+                    cd "$WORKTREE_SUBMODULE_PATH"
+                    local HAS_CHANGES=false
+                    if [ -n "$(git status --porcelain)" ]; then
+                        HAS_CHANGES=true
+                        echo "      ⚠ Found uncommitted changes - will preserve them"
+                    fi
+                    cd - > /dev/null
+
+                    # Step 2: Clone the repository as a standalone repo in main
+                    echo "      Cloning as independent repository to main"
+                    if git clone "$WORKTREE_SUB_GIT_DIR" "$submodule"; then
                         cd "$submodule"
+
+                        # Remove the origin remote (we don't want it pointing to worktree)
+                        echo "      Removing origin remote"
+                        git remote remove origin 2>/dev/null || true
 
                         # Checkout the target branch if it exists
                         if git rev-parse --verify "$TARGET_BRANCH" >/dev/null 2>&1; then
@@ -435,7 +452,54 @@ merge_worktree() {
                         fi
 
                         cd - > /dev/null
-                        echo "    ✓ Cloned and initialized $submodule as independent repo"
+                        echo "    ✓ Created independent repo at $submodule"
+
+                        # Step 3: Convert the worktree submodule to be a worktree of the new main submodule
+                        echo "    • Converting worktree submodule to worktree of main submodule"
+
+                        # Save the working directory state if there are uncommitted changes
+                        local TEMP_STASH_DIR=""
+                        if [ "$HAS_CHANGES" = true ]; then
+                            echo "      Backing up uncommitted changes"
+                            TEMP_STASH_DIR=$(mktemp -d)
+                            rsync -a --exclude='.git' "$WORKTREE_SUBMODULE_PATH/" "$TEMP_STASH_DIR/"
+                        fi
+
+                        cd "$submodule"
+
+                        # Remove the worktree submodule from the worktree's git tracking
+                        # (it's currently either a standalone repo or worktree of worktree's parent)
+                        if [ -f "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                            # It's a worktree - need to remove it from its parent's worktree list
+                            local OLD_PARENT_GIT_DIR=$(dirname "$(dirname "$WORKTREE_SUB_GIT_DIR")")
+                            if [ -d "$OLD_PARENT_GIT_DIR" ]; then
+                                cd "$OLD_PARENT_GIT_DIR"
+                                git worktree remove "$WORKTREE_SUBMODULE_PATH" --force 2>/dev/null || true
+                                cd - > /dev/null
+                            fi
+                        fi
+
+                        # Now add it as a worktree of the main submodule
+                        cd "$REPO_ROOT/$submodule"
+                        echo "      Adding worktree at $WORKTREE_SUBMODULE_PATH with branch $SUB_BRANCH"
+
+                        # Check if the branch exists
+                        if git rev-parse --verify "$SUB_BRANCH" >/dev/null 2>&1; then
+                            git worktree add "$WORKTREE_SUBMODULE_PATH" "$SUB_BRANCH" --force 2>/dev/null || true
+                        else
+                            git worktree add -b "$SUB_BRANCH" "$WORKTREE_SUBMODULE_PATH" --force 2>/dev/null || true
+                        fi
+
+                        # Restore uncommitted changes if we backed them up
+                        if [ "$HAS_CHANGES" = true ] && [ -n "$TEMP_STASH_DIR" ]; then
+                            echo "      Restoring uncommitted changes"
+                            rsync -a --exclude='.git' "$TEMP_STASH_DIR/" "$WORKTREE_SUBMODULE_PATH/"
+                            rm -rf "$TEMP_STASH_DIR"
+                            echo "      ✓ Uncommitted changes preserved"
+                        fi
+
+                        cd - > /dev/null
+                        echo "    ✓ Worktree submodule now points to main submodule"
                     else
                         echo "    ⚠ Failed to clone $submodule"
                         continue
