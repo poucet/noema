@@ -46,14 +46,8 @@ impl ChatModel for ClaudeChatModel {
             async move {
                 match event {
                     StreamEvent::ContentBlockDelta { delta, .. } => match delta {
-                        Delta::TextDelta { text } => Some(crate::ChatChunk {
-                            role: crate::api::Role::Assistant,
-                            content: text,
-                        }),
-                        Delta::ThinkingDelta { thinking } => Some(crate::ChatChunk {
-                            role: crate::api::Role::Assistant,
-                            content: thinking,
-                        }),
+                        Delta::TextDelta { text } => Some(crate::ChatChunk::assistant(crate::ChatPayload::text(text))),
+                        Delta::ThinkingDelta { thinking } => Some(crate::ChatChunk::assistant(crate::ChatPayload::text(thinking))), // Represent thinking as text
                         Delta::InputJsonDelta { partial_json } => {
                             // For tool use, we could accumulate and return, but for now skip
                             warn!("Skipping tool use JSON delta: {}", partial_json);

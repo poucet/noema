@@ -5,7 +5,9 @@ use std::pin::Pin;
 pub mod api;
 mod client;
 pub mod providers;
+pub mod tools;
 pub use api::*;
+pub use tools::ToolRegistry;
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = ChatChunk> + Send>>;
 

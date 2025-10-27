@@ -37,7 +37,7 @@ pub(crate) enum Citation {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Content {
     Text {
         text: String,
@@ -45,31 +45,56 @@ pub(crate) enum Content {
         #[serde(skip_serializing_if = "Option::is_none")]
         citations: Option<Vec<Citation>>,
     },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
 }
 
-impl TryFrom<&Content> for crate::ChatMessage {
+impl TryFrom<&Content> for crate::api::ContentBlock {
     type Error = anyhow::Error;
 
     fn try_from(content: &Content) -> Result<Self, Self::Error> {
         match content {
-            Content::Text { citations: _, text } => Ok(crate::ChatMessage {
-                role: crate::api::Role::Assistant,
-                content: text.clone(),
-            }),
+            Content::Text { citations: _, text } => {
+                Ok(crate::api::ContentBlock::Text { text: text.clone() })
+            }
+            Content::ToolUse { id, name, input } => {
+                Ok(crate::api::ContentBlock::ToolCall(crate::api::ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: input.clone(),
+                }))
+            }
+            Content::ToolResult {
+                tool_use_id,
+                content,
+            } => Ok(crate::api::ContentBlock::ToolResult(
+                crate::api::ToolResult {
+                    tool_call_id: tool_use_id.clone(),
+                    content: content.clone(),
+                },
+            )),
         }
     }
 }
 
-impl TryFrom<&Content> for crate::ChatChunk {
+impl TryFrom<Vec<Content>> for crate::api::ChatPayload {
     type Error = anyhow::Error;
 
-    fn try_from(content: &Content) -> Result<Self, Self::Error> {
-        match content {
-            Content::Text { citations: _, text } => Ok(crate::ChatChunk {
-                role: crate::api::Role::Assistant,
-                content: text.clone(),
-            }),
-        }
+    fn try_from(contents: Vec<Content>) -> Result<Self, Self::Error> {
+        let content_blocks: Vec<crate::api::ContentBlock> = contents
+            .iter()
+            .filter_map(|c| c.try_into().ok())
+            .collect();
+        Ok(crate::api::ChatPayload {
+            content: content_blocks,
+        })
     }
 }
 
@@ -80,14 +105,31 @@ pub(crate) struct InputMessage {
     pub(crate) role: Role,
 }
 
+impl From<&crate::api::ContentBlock> for Content {
+    fn from(block: &crate::api::ContentBlock) -> Self {
+        match block {
+            crate::api::ContentBlock::Text { text } => Content::Text {
+                citations: None,
+                text: text.clone(),
+            },
+            crate::api::ContentBlock::ToolCall(call) => Content::ToolUse {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                input: call.arguments.clone(),
+            },
+            crate::api::ContentBlock::ToolResult(result) => Content::ToolResult {
+                tool_use_id: result.tool_call_id.clone(),
+                content: result.content.clone(),
+            },
+        }
+    }
+}
+
 impl From<&crate::ChatMessage> for InputMessage {
     fn from(msg: &crate::ChatMessage) -> InputMessage {
         InputMessage {
             role: msg.role.try_into().expect("Role not understood"),
-            content: vec![Content::Text {
-                citations: None,
-                text: msg.content.clone(),
-            }],
+            content: msg.payload.content.iter().map(|b| b.into()).collect(),
         }
     }
 }
@@ -107,6 +149,27 @@ impl SystemPrompt {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct Tool {
+    pub(crate) name: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) description: Option<String>,
+
+    pub(crate) input_schema: serde_json::Value,
+}
+
+impl From<&crate::api::ToolDefinition> for Tool {
+    fn from(def: &crate::api::ToolDefinition) -> Self {
+        Tool {
+            name: def.name.clone(),
+            description: def.description.clone(),
+            input_schema: serde_json::to_value(&def.input_schema)
+                .expect("Failed to serialize tool schema"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct MessagesRequest {
     pub(crate) model: String,
 
@@ -119,6 +182,9 @@ pub(crate) struct MessagesRequest {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) system: Option<SystemPrompt>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<Vec<Tool>>,
 }
 
 impl MessagesRequest {
@@ -132,7 +198,7 @@ impl MessagesRequest {
             .messages
             .iter()
             .filter(|m| m.role == crate::api::Role::System)
-            .map(|m| m.content.clone())
+            .map(|m| m.get_text())
             .collect::<Vec<String>>()
             .join("\n");
 
@@ -142,6 +208,11 @@ impl MessagesRequest {
             .filter(|m| m.role != crate::api::Role::System)
             .map(|msg: &crate::ChatMessage| msg.into())
             .collect::<Vec<InputMessage>>();
+
+        let tools = request
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().map(|t| t.into()).collect());
 
         MessagesRequest {
             model: model_name.to_string(),
@@ -154,6 +225,7 @@ impl MessagesRequest {
             } else {
                 Some(SystemPrompt::new(&system_instruction))
             },
+            tools,
         }
     }
 }
@@ -179,23 +251,29 @@ pub(crate) struct MessagesResponse {
 
 impl From<MessagesResponse> for crate::ChatMessage {
     fn from(response: MessagesResponse) -> Self {
-        response
+        let payload: crate::api::ChatPayload = response
             .content
-            .first()
-            .expect("No content")
             .try_into()
-            .expect("Failed to parse Claude response")
+            .expect("Failed to convert Claude response");
+
+        match response.role {
+            Role::User => crate::ChatMessage::user(payload),
+            Role::Assistant => crate::ChatMessage::assistant(payload),
+        }
     }
 }
 
 impl From<MessagesResponse> for crate::ChatChunk {
     fn from(response: MessagesResponse) -> Self {
-        response
+        let payload: crate::api::ChatPayload = response
             .content
-            .first()
-            .expect("No content")
             .try_into()
-            .expect("Failed to parse Claude response")
+            .expect("Failed to convert Claude response");
+
+        match response.role {
+            Role::User => crate::ChatChunk::user(payload),
+            Role::Assistant => crate::ChatChunk::assistant(payload),
+        }
     }
 }
 
