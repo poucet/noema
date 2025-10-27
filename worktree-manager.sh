@@ -552,8 +552,18 @@ sync_worktree() {
     # We just need to make sure the target branch exists and is up to date.
     # The user should pull in their main worktree before running sync.
 
-    # Discover submodules from the worktree
+    # Discover submodules from BOTH main and the worktree to handle new submodules
+    echo "→ Discovering submodules from main and worktree..."
+    local MAIN_SUBMODULES=($(get_submodules))
     local WORKTREE_SUBMODULES=($(cd "$WORKTREE_PATH" && git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}'))
+
+    # Combine and deduplicate submodules
+    local ALL_SUBMODULES=($(printf '%s\n' "${MAIN_SUBMODULES[@]}" "${WORKTREE_SUBMODULES[@]}" | sort -u))
+
+    if [ ${#MAIN_SUBMODULES[@]} -gt ${#WORKTREE_SUBMODULES[@]} ]; then
+        echo "  ℹ Detected new submodules in main that don't exist in worktree yet"
+    fi
+    echo ""
 
     # Sync the worktree with the target branch
     echo "→ Syncing worktree main branch with $TARGET_BRANCH"
@@ -589,11 +599,50 @@ sync_worktree() {
     cd - > /dev/null
     echo ""
 
-    # Sync each submodule worktree
-    for submodule in "${WORKTREE_SUBMODULES[@]}"; do
+    # Sync each submodule worktree (and create new ones if needed)
+    local FEATURE_BRANCH=$WORKTREE_NAME
+    for submodule in "${ALL_SUBMODULES[@]}"; do
         local SUB_PATH="$WORKTREE_PATH/$submodule"
+        local SUB_BRANCH="$FEATURE_BRANCH-$submodule"
 
-        if [ -d "$SUB_PATH/.git" ] || [ -f "$SUB_PATH/.git" ]; then
+        # Check if this is a new submodule (exists in main but not in worktree)
+        local IS_NEW=false
+        if [ -d "$submodule/.git" ] || [ -f "$submodule/.git" ]; then
+            # Submodule exists in main
+            if [ ! -d "$SUB_PATH/.git" ] && [ ! -f "$SUB_PATH/.git" ]; then
+                # But doesn't exist in worktree - need to create it
+                IS_NEW=true
+            fi
+        fi
+
+        if [ "$IS_NEW" = true ]; then
+            echo "→ Creating worktree for new submodule: $submodule"
+
+            # Create the worktree from the main submodule
+            cd "$submodule"
+
+            # Create branch if it doesn't exist, otherwise use existing branch
+            if git rev-parse --verify "$SUB_BRANCH" >/dev/null 2>&1; then
+                echo "  • Adding worktree with existing branch $SUB_BRANCH"
+                git worktree add "$SUB_PATH" "$SUB_BRANCH" 2>/dev/null || {
+                    echo "  ⚠ Failed to create worktree for $submodule"
+                    cd - > /dev/null
+                    continue
+                }
+            else
+                echo "  • Creating new branch $SUB_BRANCH from $TARGET_BRANCH"
+                git worktree add -b "$SUB_BRANCH" "$SUB_PATH" "$TARGET_BRANCH" 2>/dev/null || {
+                    echo "  ⚠ Failed to create worktree for $submodule"
+                    cd - > /dev/null
+                    continue
+                }
+            fi
+
+            echo "  ✓ Submodule worktree created"
+            cd - > /dev/null
+            echo ""
+        elif [ -d "$SUB_PATH/.git" ] || [ -f "$SUB_PATH/.git" ]; then
+            # Existing submodule worktree - sync it
             echo "→ Syncing submodule worktree: $submodule"
             cd "$SUB_PATH"
 
