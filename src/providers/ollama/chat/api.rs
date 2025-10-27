@@ -22,7 +22,7 @@ pub(crate) struct Message {
 impl From<Message> for crate::ChatMessage {
     fn from(msg: Message) -> Self {
         let role = msg.role;
-        let payload = crate::ChatPayload::text(msg.content);;
+        let payload = crate::ChatPayload::text(msg.content);
         crate::ChatMessage::new(role, payload)
     }
 }
@@ -183,7 +183,7 @@ mod tests {
         let json = serde_json::to_string(&request).unwrap();
         assert_eq!(
             json,
-            r#"{"model":"test-model","messages":[{"role":"user","content":"Hello"},{"role":"assistant","content":"Hi there!"}], "stream":false}"#
+            r#"{"model":"test-model","messages":[{"role":"user","content":"Hello"},{"role":"assistant","content":"Hi there!"}],"stream":false}"#
         );
     }
 }
