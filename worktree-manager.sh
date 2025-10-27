@@ -398,59 +398,58 @@ merge_worktree() {
                 # Get the submodule URL from .gitmodules
                 local SUBMODULE_URL=$(git config --file .gitmodules --get "submodule.$submodule.url")
 
-                # If URL is relative (starts with ./ or ../), we need to migrate the repo from worktree
+                # If URL is relative (starts with ./ or ../), resolve it to absolute path
                 if [[ "$SUBMODULE_URL" == ./* ]] || [[ "$SUBMODULE_URL" == ../* ]]; then
-                    echo "    • Migrating repository from worktree (relative URL: $SUBMODULE_URL)"
+                    echo "    • Setting up repository from relative URL: $SUBMODULE_URL"
 
-                    # Handle both standalone .git directory and worktree pointer
-                    if [ -f "$WORKTREE_SUBMODULE_PATH/.git" ]; then
-                        # It's a worktree pointer - find the actual git directory
-                        SUBMODULE_GIT_DIR=$(cat "$WORKTREE_SUBMODULE_PATH/.git" | sed 's/^gitdir: //')
-                        # Make it absolute if it's relative
-                        if [[ "$SUBMODULE_GIT_DIR" != /* ]]; then
-                            SUBMODULE_GIT_DIR="$WORKTREE_SUBMODULE_PATH/$SUBMODULE_GIT_DIR"
-                        fi
-                    elif [ -d "$WORKTREE_SUBMODULE_PATH/.git" ]; then
-                        # Standalone git directory
-                        SUBMODULE_GIT_DIR="$WORKTREE_SUBMODULE_PATH/.git"
+                    # Resolve the relative URL to an absolute path
+                    local RESOLVED_URL
+                    if [[ "$SUBMODULE_URL" == ./* ]]; then
+                        RESOLVED_URL="$REPO_ROOT/${SUBMODULE_URL#./}"
                     else
-                        echo "    ⚠ Cannot find git directory for $submodule"
+                        RESOLVED_URL="$REPO_ROOT/$SUBMODULE_URL"
+                    fi
+
+                    # Normalize the path
+                    RESOLVED_URL=$(cd "$(dirname "$RESOLVED_URL")" && pwd)/$(basename "$RESOLVED_URL")
+
+                    echo "      Resolved URL: $RESOLVED_URL"
+
+                    # Check if the source repository exists
+                    if [ ! -d "$RESOLVED_URL/.git" ]; then
+                        echo "    ⚠ Source repository not found at $RESOLVED_URL"
                         continue
                     fi
 
-                    echo "      Found git data at: $SUBMODULE_GIT_DIR"
+                    # Clone the repository as a standalone repo (not using submodule system)
+                    echo "      Cloning as independent repository"
+                    if git clone "$RESOLVED_URL" "$submodule"; then
+                        cd "$submodule"
 
-                    # Create .git/modules directory structure in main if needed
-                    mkdir -p ".git/modules"
+                        # Checkout the target branch if it exists
+                        if git rev-parse --verify "$TARGET_BRANCH" >/dev/null 2>&1; then
+                            git checkout "$TARGET_BRANCH"
+                            echo "      Checked out $TARGET_BRANCH"
+                        else
+                            echo "      Staying on current branch"
+                        fi
 
-                    # Copy the git repository to main's .git/modules
-                    echo "      Copying git repository to .git/modules/$submodule"
-                    cp -R "$SUBMODULE_GIT_DIR" ".git/modules/$submodule"
-
-                    # Initialize the submodule in main (creates the directory and .git pointer)
-                    echo "      Initializing submodule in main"
-                    git submodule update --init "$submodule" 2>/dev/null || true
-
-                    # Copy the working directory content
-                    echo "      Copying working directory content"
-                    rsync -a --exclude='.git' "$WORKTREE_SUBMODULE_PATH/" "$submodule/"
-
-                    # Checkout the target branch
-                    cd "$submodule"
-                    git checkout "$TARGET_BRANCH" 2>/dev/null || git checkout -b "$TARGET_BRANCH" || true
-                    cd - > /dev/null
-
-                    echo "    ✓ Migrated and initialized $submodule"
+                        cd - > /dev/null
+                        echo "    ✓ Cloned and initialized $submodule as independent repo"
+                    else
+                        echo "    ⚠ Failed to clone $submodule"
+                        continue
+                    fi
                 else
-                    # URL is absolute, can use normal git submodule update
+                    # URL is absolute, can use normal git clone
                     echo "    • Cloning from remote: $SUBMODULE_URL"
-                    if git submodule update --init "$submodule"; then
+                    if git clone "$SUBMODULE_URL" "$submodule"; then
                         cd "$submodule"
                         git checkout "$TARGET_BRANCH" 2>/dev/null || echo "    (no $TARGET_BRANCH branch in $submodule yet)"
                         cd - > /dev/null
-                        echo "    ✓ Initialized $submodule"
+                        echo "    ✓ Cloned $submodule"
                     else
-                        echo "    ⚠ Failed to initialize $submodule"
+                        echo "    ⚠ Failed to clone $submodule"
                     fi
                 fi
             fi
