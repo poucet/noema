@@ -1,0 +1,6 @@
+[submodule "cli"]
+	path = cli
+	url = ./cli
+[submodule "llm"]
+	path = llm
+	url = ./llm
