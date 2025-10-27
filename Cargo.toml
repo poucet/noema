@@ -6,9 +6,13 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 async-trait = "0.1.89"
+bytes = "1.10.1"
 futures = "0.3.31"
 reqwest = { version = "0.12.23", features = ["json", "stream"] }
 serde = "1.0.228"
 serde_json = "1.0.145"
 tracing = "0.1.41"
 llm_macros = { path = "llm_macros" }
+
+[dev-dependencies]
+tokio = { version = "1.47.1", features = ["full"] }
