@@ -1,33 +1,22 @@
-# Bash completion for worktree-manager.sh
+# Generic bash completion that works with any command implementing the 'complete' API
 # This file should be sourced to enable completion
+#
+# Required API:
+#   <command> complete [words...]
+#
+# The command receives all typed words (excluding the command itself)
+# and returns space-separated completion options.
 
 _worktree_manager_completion() {
-    local cur prev script_path
+    local cur script_path completions
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
-
-    # Find the script path (could be ./worktree-manager.sh or worktree-manager.sh)
     script_path="${COMP_WORDS[0]}"
 
-    # Complete command names
-    if [ $COMP_CWORD -eq 1 ]; then
-        local commands=$("$script_path" complete commands 2>/dev/null)
-        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
-        return 0
-    fi
+    # Pass all words typed so far (excluding the script name and current incomplete word)
+    completions=$("$script_path" complete "${COMP_WORDS[@]:1:$((COMP_CWORD-1))}" 2>/dev/null)
 
-    # Complete worktree names for commands that need them
-    if [ $COMP_CWORD -eq 2 ]; then
-        case "$prev" in
-            remove|open|merge|push)
-                local worktrees=$("$script_path" complete worktrees 2>/dev/null)
-                COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
-                return 0
-                ;;
-        esac
-    fi
-
+    COMPREPLY=($(compgen -W "$completions" -- "$cur"))
     return 0
 }
 

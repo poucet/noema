@@ -1,43 +1,35 @@
-# Zsh completion for worktree-manager.sh
+# Generic zsh completion that works with any command implementing the 'complete' API
 # This file should be sourced to enable completion
+#
+# Required API:
+#   <command> complete [words...]
+#
+# The command receives all typed words (excluding the command itself)
+# and returns space-separated completion options.
 
 autoload -Uz compinit && compinit
 autoload -Uz bashcompinit && bashcompinit
 
 _worktree_manager_zsh() {
-    local -a commands worktrees
-    local script_path
+    local script_path result
+    local -a completions prev_words
 
     # Find the script path from the command being completed
     script_path="${words[1]}"
 
-    if (( CURRENT == 2 )); then
-        # Complete commands - get list from the script
-        local cmd_list=$("$script_path" complete commands 2>/dev/null)
-        # Convert space-separated list to array with descriptions
-        local -a cmd_array
-        for cmd in ${(z)cmd_list}; do
-            case "$cmd" in
-                create) cmd_array+=("create:Create a new worktree with submodules and open in VSCode") ;;
-                remove) cmd_array+=("remove:Remove a worktree and its submodules (checks if merged)") ;;
-                open) cmd_array+=("open:Open an existing worktree in VSCode") ;;
-                merge) cmd_array+=("merge:Merge worktree branches back into target branch") ;;
-                push) cmd_array+=("push:Push target branch to origin") ;;
-                list) cmd_array+=("list:List all worktrees") ;;
-                setup) cmd_array+=("setup:Enable tab-completion for current shell session") ;;
-                *) cmd_array+=("$cmd") ;;
-            esac
-        done
-        _describe 'command' cmd_array
-    elif (( CURRENT == 3 )); then
-        case "$words[2]" in
-            remove|open|merge|push)
-                # Complete worktree names - get list from the script
-                local wt_list=$("$script_path" complete worktrees 2>/dev/null)
-                worktrees=(${(z)wt_list})
-                _describe 'worktree' worktrees
-                ;;
-        esac
+    # Collect words typed so far (excluding command name and current incomplete word)
+    # In zsh, words[2] is first arg, words[3] is second arg, etc.
+    # CURRENT is the index of word being completed
+    if (( CURRENT > 2 )); then
+        prev_words=("${words[@]:2:$((CURRENT-2))}")
+    fi
+
+    # Get completions from the script
+    result=$("$script_path" complete "${prev_words[@]}" 2>/dev/null)
+
+    if [ -n "$result" ]; then
+        completions=(${(z)result})
+        _describe 'option' completions
     fi
 }
 

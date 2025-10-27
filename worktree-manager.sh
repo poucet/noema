@@ -398,31 +398,49 @@ merge_worktree() {
                 # Get the submodule URL from .gitmodules
                 local SUBMODULE_URL=$(git config --file .gitmodules --get "submodule.$submodule.url")
 
-                # If URL is relative (starts with ./ or ../), we need to copy the repo from worktree
+                # If URL is relative (starts with ./ or ../), we need to migrate the repo from worktree
                 if [[ "$SUBMODULE_URL" == ./* ]] || [[ "$SUBMODULE_URL" == ../* ]]; then
-                    echo "    • Copying repository from worktree (relative URL: $SUBMODULE_URL)"
+                    echo "    • Migrating repository from worktree (relative URL: $SUBMODULE_URL)"
 
-                    # Create the submodule directory if it doesn't exist
-                    mkdir -p "$submodule"
-
-                    # Copy the entire git repository from the worktree
-                    if [ -d "$WORKTREE_SUBMODULE_PATH/.git" ]; then
-                        cp -R "$WORKTREE_SUBMODULE_PATH/.git" "$submodule/"
+                    # Handle both standalone .git directory and worktree pointer
+                    if [ -f "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                        # It's a worktree pointer - find the actual git directory
+                        SUBMODULE_GIT_DIR=$(cat "$WORKTREE_SUBMODULE_PATH/.git" | sed 's/^gitdir: //')
+                        # Make it absolute if it's relative
+                        if [[ "$SUBMODULE_GIT_DIR" != /* ]]; then
+                            SUBMODULE_GIT_DIR="$WORKTREE_SUBMODULE_PATH/$SUBMODULE_GIT_DIR"
+                        fi
+                    elif [ -d "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                        # Standalone git directory
+                        SUBMODULE_GIT_DIR="$WORKTREE_SUBMODULE_PATH/.git"
                     else
-                        # .git is a file (worktree pointer), need to handle differently
-                        echo "    ⚠ Worktree submodule detected - manual initialization required"
+                        echo "    ⚠ Cannot find git directory for $submodule"
                         continue
                     fi
 
+                    echo "      Found git data at: $SUBMODULE_GIT_DIR"
+
+                    # Create .git/modules directory structure in main if needed
+                    mkdir -p ".git/modules"
+
+                    # Copy the git repository to main's .git/modules
+                    echo "      Copying git repository to .git/modules/$submodule"
+                    cp -R "$SUBMODULE_GIT_DIR" ".git/modules/$submodule"
+
+                    # Initialize the submodule in main (creates the directory and .git pointer)
+                    echo "      Initializing submodule in main"
+                    git submodule update --init "$submodule" 2>/dev/null || true
+
                     # Copy the working directory content
+                    echo "      Copying working directory content"
                     rsync -a --exclude='.git' "$WORKTREE_SUBMODULE_PATH/" "$submodule/"
 
-                    # Update git config to register the submodule
+                    # Checkout the target branch
                     cd "$submodule"
                     git checkout "$TARGET_BRANCH" 2>/dev/null || git checkout -b "$TARGET_BRANCH" || true
                     cd - > /dev/null
 
-                    echo "    ✓ Copied and initialized $submodule"
+                    echo "    ✓ Migrated and initialized $submodule"
                 else
                     # URL is absolute, can use normal git submodule update
                     echo "    • Cloning from remote: $SUBMODULE_URL"
@@ -580,21 +598,31 @@ case "$COMMAND" in
         list_worktrees
         ;;
     complete)
-        # Internal command for shell completion
-        # Usage: complete commands|worktrees
-        case "${1:-}" in
-            commands)
+        # Generic completion API - called by shell completion scripts
+        # Usage: complete [words...]
+        # Returns space-separated completion options based on the number of words passed
+
+        case $# in
+            0)
+                # No words yet - complete first argument (command names)
                 echo "create remove open merge push list setup"
                 ;;
-            worktrees)
-                # List available worktrees
-                if [ -d "$WORKTREE_DIR" ]; then
-                    ls -1 "$WORKTREE_DIR" 2>/dev/null || true
-                fi
+            1)
+                # One word (the command) - complete second argument based on command
+                case "$1" in
+                    remove|open|merge|push)
+                        # These commands take worktree names as second argument
+                        if [ -d "$WORKTREE_DIR" ]; then
+                            ls -1 "$WORKTREE_DIR" 2>/dev/null | tr '\n' ' '
+                        fi
+                        ;;
+                    *)
+                        # Other commands don't take a second argument, or it's free-form
+                        ;;
+                esac
                 ;;
             *)
-                echo "Usage: $0 complete commands|worktrees" >&2
-                exit 1
+                # More words - no completion for additional positions
                 ;;
         esac
         ;;
