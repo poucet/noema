@@ -211,28 +211,31 @@ fn ui(f: &mut Frame, app: &App) {
                 .lines()
                 .map(|line| {
                     if line.starts_with("```") {
-                        Line::from(Span::styled(line, Style::default().fg(Color::DarkGray)))
+                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::DarkGray)))
                     } else if line.starts_with("# ") {
-                        Line::from(Span::styled(line, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                        Line::from(Span::styled(
+                            line.to_string(),
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        ))
                     } else if line.starts_with("## ") {
-                        Line::from(Span::styled(line, Style::default().fg(Color::Yellow)))
+                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Yellow)))
                     } else if line.starts_with("- ") || line.starts_with("* ") {
-                        Line::from(Span::styled(line, Style::default().fg(Color::Cyan)))
+                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Cyan)))
                     } else if line.starts_with("`") && line.ends_with("`") {
-                        Line::from(Span::styled(line, Style::default().fg(Color::Magenta)))
+                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Magenta)))
                     } else {
-                        Line::from(line)
+                        Line::from(line.to_string())
                     }
                 })
                 .collect();
 
-            let mut text = Text::default();
+            let mut text: Text<'_> = Text::default();
             text.lines.push(Line::from(Span::styled(
                 format!("[{}]", role),
                 style.add_modifier(Modifier::BOLD),
             )));
             text.lines.extend(content_lines);
-            text.lines.push(Line::from(""));
+            text.lines.push(Line::from("".to_string()));
 
             ListItem::new(text)
         })
