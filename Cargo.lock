@@ -803,10 +803,20 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
+ "llm_macros",
  "reqwest",
  "serde",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "llm_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
