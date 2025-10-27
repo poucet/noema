@@ -1,3 +1,5 @@
+
 [workspace]
 resolver = "3"
 members = ["cli", "conversation", "llm", "tui"]
+default-members = ["tui"]
