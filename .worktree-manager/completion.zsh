@@ -12,16 +12,19 @@ autoload -Uz bashcompinit && bashcompinit
 
 _worktree_manager_zsh() {
     local script_path result
-    local -a completions prev_words
+    local -a completions
 
     # Find the script path from the command being completed
     script_path="${words[1]}"
 
-    # Collect words typed so far (excluding command name and current incomplete word)
-    # In zsh, words[2] is first arg, words[3] is second arg, etc.
-    # CURRENT is the index of word being completed
+    # Build array of completed words (excluding script and current word)
+    # words array in zsh completion: words[1]=script, words[2]=arg1, words[3]=arg2, etc.
+    # CURRENT is 1-based index of word being completed
+    # Example: "./worktree-manager.sh merge <TAB>" has CURRENT=3, we need to pass "merge"
+    local -a prev_words
     if (( CURRENT > 2 )); then
-        prev_words=("${words[@]:2:$((CURRENT-2))}")
+        # Copy words from position 2 to CURRENT-1
+        prev_words=("${(@)words[2,$((CURRENT-1))]}")
     fi
 
     # Get completions from the script

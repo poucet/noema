@@ -548,77 +548,28 @@ sync_worktree() {
     echo "================================================"
     echo ""
 
-    # First, update the target branch in main repo
-    echo "→ Updating $TARGET_BRANCH in main repository"
-    local ORIGINAL_BRANCH=$(git branch --show-current)
-
-    # Check for uncommitted changes in main repo
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "  ⚠ Warning: You have uncommitted changes in the main repository."
-        echo "  Skipping main repo sync. Please commit or stash them first."
-    else
-        git checkout "$TARGET_BRANCH"
-        echo "  • Pulling latest changes from origin/$TARGET_BRANCH"
-        if git pull origin "$TARGET_BRANCH"; then
-            echo "  ✓ Main repository updated"
-        else
-            echo "  ✗ Pull failed"
-            git checkout "$ORIGINAL_BRANCH" 2>/dev/null
-            exit 1
-        fi
-        git checkout "$ORIGINAL_BRANCH" 2>/dev/null
-    fi
-    echo ""
+    # Note: Worktrees share the same git repository, so we don't need to pull.
+    # We just need to make sure the target branch exists and is up to date.
+    # The user should pull in their main worktree before running sync.
 
     # Discover submodules from the worktree
     local WORKTREE_SUBMODULES=($(cd "$WORKTREE_PATH" && git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}'))
 
-    # Update each submodule in main repo first
-    for submodule in "${WORKTREE_SUBMODULES[@]}"; do
-        if [ -d "$submodule/.git" ] || [ -f "$submodule/.git" ]; then
-            echo "→ Updating submodule $submodule in main repository"
-            cd "$submodule"
-
-            # Check for uncommitted changes
-            if [ -n "$(git status --porcelain)" ]; then
-                echo "  ⚠ Warning: Uncommitted changes in $submodule"
-                echo "  Skipping this submodule. Please commit or stash changes first."
-                cd - > /dev/null
-                continue
-            fi
-
-            local SUB_ORIGINAL_BRANCH=$(git branch --show-current)
-
-            git checkout "$TARGET_BRANCH" 2>/dev/null || {
-                echo "  ⚠ Branch $TARGET_BRANCH doesn't exist in $submodule"
-                cd - > /dev/null
-                continue
-            }
-
-            echo "  • Pulling latest changes from origin/$TARGET_BRANCH"
-            if git pull origin "$TARGET_BRANCH"; then
-                echo "  ✓ Submodule updated"
-            else
-                echo "  ✗ Pull failed for $submodule"
-                git checkout "$SUB_ORIGINAL_BRANCH" 2>/dev/null
-                cd - > /dev/null
-                exit 1
-            fi
-
-            git checkout "$SUB_ORIGINAL_BRANCH" 2>/dev/null
-            cd - > /dev/null
-            echo ""
-        fi
-    done
-
-    # Now sync the worktree with the updated main repo
-    echo "→ Syncing worktree with updated $TARGET_BRANCH"
+    # Sync the worktree with the target branch
+    echo "→ Syncing worktree main branch with $TARGET_BRANCH"
     cd "$WORKTREE_PATH"
 
     # Check for uncommitted changes in worktree
     if [ -n "$(git status --porcelain)" ]; then
         echo "  ⚠ Warning: Uncommitted changes in worktree"
         echo "  Please commit or stash changes before syncing"
+        cd - > /dev/null
+        exit 1
+    fi
+
+    # Check if target branch exists
+    if ! git rev-parse --verify "$TARGET_BRANCH" >/dev/null 2>&1; then
+        echo "  ✗ Target branch '$TARGET_BRANCH' does not exist"
         cd - > /dev/null
         exit 1
     fi
@@ -654,6 +605,13 @@ sync_worktree() {
                 continue
             fi
 
+            # Check if target branch exists
+            if ! git rev-parse --verify "$TARGET_BRANCH" >/dev/null 2>&1; then
+                echo "  ⚠ Target branch '$TARGET_BRANCH' does not exist in $submodule"
+                cd - > /dev/null
+                continue
+            fi
+
             local SUB_FEATURE_BRANCH=$(git branch --show-current)
             echo "  • Merging $TARGET_BRANCH into $SUB_FEATURE_BRANCH"
 
@@ -675,6 +633,10 @@ sync_worktree() {
     echo "✓ Sync complete!"
     echo ""
     echo "Worktree '$WORKTREE_NAME' is now up to date with '$TARGET_BRANCH'"
+    echo ""
+    echo "Note: This merges the current state of '$TARGET_BRANCH' into your worktree."
+    echo "If you need the latest changes from remote, first run 'git pull' in your"
+    echo "main worktree to update '$TARGET_BRANCH', then run this sync command."
 }
 
 push_worktree() {
