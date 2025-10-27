@@ -1,13 +1,13 @@
 use clap::Parser;
 use conversation::Conversation;
 use futures::StreamExt;
-use llm::providers::OllamaProvider;
-use llm::providers::{ClaudeProvider, GeminiProvider, OpenAIProvider, GeneralModelProvider};
+use llm::providers::{ClaudeProvider, GeminiProvider, GeneralModelProvider, OllamaProvider, OpenAIProvider};
 use llm::ModelProvider;
 
 use clap_derive::{Parser, ValueEnum};
 use dotenv;
 use std::io::{self, BufRead, Write};
+use std::str::FromStr;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -37,6 +37,20 @@ impl std::fmt::Display for ModelProviderType {
     }
 }
 
+impl FromStr for ModelProviderType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "ollama" => Ok(ModelProviderType::Ollama),
+            "gemini" => Ok(ModelProviderType::Gemini),
+            "claude" => Ok(ModelProviderType::Claude),
+            "openai" => Ok(ModelProviderType::OpenAI),
+            _ => Err(format!("Unknown provider: {}", s)),
+        }
+    }
+}
+
 #[derive(Clone, ValueEnum, Debug, PartialEq, Eq)]
 #[clap(rename_all = "lowercase")]
 enum Mode {
@@ -58,6 +72,14 @@ struct Args {
 
     #[arg(long, short)]
     tracing: bool,
+}
+
+// Application state
+struct AppState {
+    conversation: Conversation,
+    current_provider: ModelProviderType,
+    model_display_name: &'static str,
+    mode: Mode,
 }
 
 fn get_model_info(provider_type: &ModelProviderType) -> (&'static str, &'static str) {
@@ -84,19 +106,13 @@ fn create_provider(provider_type: &ModelProviderType) -> GeneralModelProvider {
     }
 }
 
-async fn chat_regular(
-    conversation: &mut Conversation,
-    message: &str,
-) -> anyhow::Result<()> {
+async fn chat_regular(conversation: &mut Conversation, message: &str) -> anyhow::Result<()> {
     let response = conversation.send(message).await?;
     println!("{}", response);
     Ok(())
 }
 
-async fn chat_streaming(
-    conversation: &mut Conversation,
-    message: &str,
-) -> anyhow::Result<()> {
+async fn chat_streaming(conversation: &mut Conversation, message: &str) -> anyhow::Result<()> {
     let mut stream = conversation.send_stream(message).await?;
     while let Some(chunk) = stream.next().await {
         print!("{}", chunk.content);
@@ -114,7 +130,6 @@ fn setup_tracing(enable: bool) {
         tracing::subscriber::set_global_default(subscriber)
             .expect("Setting default subscriber failed");
     } else {
-        // Send tracing to /dev/null
         let subscriber = FmtSubscriber::builder()
             .with_max_level(Level::ERROR)
             .with_writer(|| std::io::sink())
@@ -136,59 +151,97 @@ fn print_status_bar(model_provider: &ModelProviderType, model_name: &str) {
     println!("└{}┘", "─".repeat(terminal_width - 2));
 }
 
-fn handle_slash_command(command: &str) -> Option<SlashCommand> {
-    if !command.starts_with('/') {
-        return None;
+// Slash command parsing and handling
+mod commands {
+    use super::*;
+
+    pub enum Command {
+        Quit,
+        Help,
+        Clear,
+        SetModel(ModelProviderType),
     }
 
-    let parts: Vec<&str> = command[1..].split_whitespace().collect();
-    if parts.is_empty() {
-        return None;
+    pub enum CommandResult {
+        Continue,
+        Exit,
     }
 
-    match parts[0] {
-        "quit" | "exit" => Some(SlashCommand::Quit),
-        "help" => Some(SlashCommand::Help),
-        "clear" => Some(SlashCommand::Clear),
-        "model" => {
-            if parts.len() < 2 {
-                Some(SlashCommand::ModelMissing)
-            } else {
-                let model_str = parts[1].to_lowercase();
-                let model = match model_str.as_str() {
-                    "ollama" => Some(ModelProviderType::Ollama),
-                    "gemini" => Some(ModelProviderType::Gemini),
-                    "claude" => Some(ModelProviderType::Claude),
-                    "openai" => Some(ModelProviderType::OpenAI),
-                    _ => None,
-                };
-                match model {
-                    Some(m) => Some(SlashCommand::SetModel(m)),
-                    None => Some(SlashCommand::UnknownModel(model_str)),
+    impl Command {
+        pub fn parse(input: &str) -> Result<Self, String> {
+            if !input.starts_with('/') {
+                return Err("Not a command".to_string());
+            }
+
+            let parts: Vec<&str> = input[1..].split_whitespace().collect();
+            if parts.is_empty() {
+                return Err("Empty command".to_string());
+            }
+
+            match parts[0] {
+                "quit" | "exit" => Ok(Command::Quit),
+                "help" => Ok(Command::Help),
+                "clear" => Ok(Command::Clear),
+                "model" => {
+                    if parts.len() < 2 {
+                        return Err("Usage: /model <provider>".to_string());
+                    }
+                    ModelProviderType::from_str(parts[1])
+                        .map(Command::SetModel)
+                        .map_err(|_| format!("Unknown provider: {}. Available: ollama, gemini, claude, openai", parts[1]))
+                }
+                _ => Err(format!("Unknown command: /{}. Type /help for available commands.", parts[0])),
+            }
+        }
+
+        pub fn execute(self, state: &mut AppState) -> CommandResult {
+            match self {
+                Command::Quit => {
+                    println!("Goodbye!");
+                    CommandResult::Exit
+                }
+                Command::Help => {
+                    print_help();
+                    println!();
+                    CommandResult::Continue
+                }
+                Command::Clear => {
+                    state.conversation.clear();
+                    println!("Conversation history cleared.");
+                    println!();
+                    CommandResult::Continue
+                }
+                Command::SetModel(new_provider) => {
+                    let (new_model_id, new_model_display) = get_model_info(&new_provider);
+                    let new_provider_instance = create_provider(&new_provider);
+
+                    match new_provider_instance.create_chat_model(new_model_id) {
+                        Some(new_model) => {
+                            state.conversation.set_model(new_model);
+                            state.current_provider = new_provider;
+                            state.model_display_name = new_model_display;
+                            println!("Switched to {} • {}", state.current_provider, state.model_display_name);
+                            println!("(Conversation history preserved)");
+                        }
+                        None => {
+                            eprintln!("Failed to create model for {}", new_provider);
+                        }
+                    }
+                    println!();
+                    CommandResult::Continue
                 }
             }
         }
-        _ => Some(SlashCommand::Unknown(parts[0].to_string())),
     }
-}
 
-enum SlashCommand {
-    Quit,
-    Help,
-    Clear,
-    SetModel(ModelProviderType),
-    ModelMissing,
-    UnknownModel(String),
-    Unknown(String),
-}
-
-fn print_help() {
-    println!("Available commands:");
-    println!("  /quit, /exit           - Exit the chat");
-    println!("  /clear                 - Clear conversation history");
-    println!("  /model <provider>      - Switch model (ollama, gemini, claude, openai)");
-    println!("  /help                  - Show this help message");
-    println!("  Ctrl+D                 - Exit the chat");
+    fn print_help() {
+        println!("Available commands:");
+        println!("  /quit, /exit           - Exit the chat");
+        println!("  /clear                 - Clear conversation history");
+        println!("  /model <provider>      - Switch model (ollama, gemini, claude, openai)");
+        println!("  /help                  - Show this help message");
+        println!("  Ctrl+D                 - Exit the chat");
+    }
 }
 
 #[tokio::main]
@@ -197,15 +250,21 @@ async fn main() {
 
     setup_tracing(args.tracing);
 
-    let mut current_provider = args.model.clone();
-    let (model_id, model_display_name) = get_model_info(&current_provider);
-    let provider = create_provider(&current_provider);
+    let (model_id, model_display_name) = get_model_info(&args.model);
+    let provider = create_provider(&args.model);
     let model = provider.create_chat_model(model_id).unwrap();
 
-    let mut conversation = if let Some(system_msg) = args.system_message {
+    let conversation = if let Some(system_msg) = args.system_message {
         Conversation::with_system_message(model, system_msg)
     } else {
         Conversation::new(model)
+    };
+
+    let mut state = AppState {
+        conversation,
+        current_provider: args.model.clone(),
+        model_display_name,
+        mode: args.mode,
     };
 
     println!();
@@ -216,8 +275,7 @@ async fn main() {
     let mut lines = stdin.lock().lines();
 
     loop {
-        // Print status bar at bottom (before prompt)
-        print_status_bar(&current_provider, model_display_name);
+        print_status_bar(&state.current_provider, state.model_display_name);
         print!("> ");
         io::stdout().flush().unwrap();
 
@@ -228,7 +286,6 @@ async fn main() {
                 break;
             }
             None => {
-                // Ctrl+D pressed (EOF)
                 println!();
                 println!("Goodbye!");
                 break;
@@ -241,66 +298,27 @@ async fn main() {
             continue;
         }
 
-        // Handle slash commands
-        if let Some(cmd) = handle_slash_command(input) {
-            match cmd {
-                SlashCommand::Quit => {
-                    println!("Goodbye!");
-                    break;
-                }
-                SlashCommand::Help => {
-                    print_help();
-                    println!();
-                    continue;
-                }
-                SlashCommand::Clear => {
-                    conversation.clear();
-                    println!("Conversation history cleared.");
-                    println!();
-                    continue;
-                }
-                SlashCommand::SetModel(new_provider) => {
-                    let (new_model_id, new_model_display) = get_model_info(&new_provider);
-                    let new_provider_instance = create_provider(&new_provider);
-
-                    match new_provider_instance.create_chat_model(new_model_id) {
-                        Some(new_model) => {
-                            conversation.set_model(new_model);
-                            current_provider = new_provider;
-                            println!("Switched to {} • {}", current_provider, new_model_display);
-                            println!("(Conversation history preserved)");
-                        }
-                        None => {
-                            eprintln!("Failed to create model for {}", new_provider);
-                        }
+        // Try to parse as command
+        if input.starts_with('/') {
+            match commands::Command::parse(input) {
+                Ok(cmd) => {
+                    match cmd.execute(&mut state) {
+                        commands::CommandResult::Exit => break,
+                        commands::CommandResult::Continue => continue,
                     }
-                    println!();
-                    continue;
                 }
-                SlashCommand::ModelMissing => {
-                    println!("Usage: /model <provider>");
-                    println!("Available providers: ollama, gemini, claude, openai");
-                    println!();
-                    continue;
-                }
-                SlashCommand::UnknownModel(model) => {
-                    println!("Unknown model provider: {}", model);
-                    println!("Available providers: ollama, gemini, claude, openai");
-                    println!();
-                    continue;
-                }
-                SlashCommand::Unknown(cmd) => {
-                    println!("Unknown command: /{}", cmd);
-                    println!("Type /help for available commands.");
+                Err(err) => {
+                    println!("{}", err);
                     println!();
                     continue;
                 }
             }
         }
 
-        let result = match args.mode {
-            Mode::Chat => chat_regular(&mut conversation, input).await,
-            Mode::Stream => chat_streaming(&mut conversation, input).await,
+        // Regular message
+        let result = match state.mode {
+            Mode::Chat => chat_regular(&mut state.conversation, input).await,
+            Mode::Stream => chat_streaming(&mut state.conversation, input).await,
         };
 
         if let Err(e) = result {
@@ -310,5 +328,5 @@ async fn main() {
         println!();
     }
 
-    println!("Conversation had {} messages", conversation.message_count());
+    println!("Conversation had {} messages", state.conversation.message_count());
 }
