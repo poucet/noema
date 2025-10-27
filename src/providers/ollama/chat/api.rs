@@ -21,10 +21,9 @@ pub(crate) struct Message {
 // TODO: Can we autoderive most of these From classes for values and for references to values?
 impl From<Message> for crate::ChatMessage {
     fn from(msg: Message) -> Self {
-        crate::ChatMessage {
-            role: msg.role,
-            content: msg.content,
-        }
+        let role = msg.role;
+        let payload = crate::ChatPayload::text(msg.content);;
+        crate::ChatMessage::new(role, payload)
     }
 }
 
@@ -32,17 +31,16 @@ impl From<&crate::ChatMessage> for Message {
     fn from(msg: &crate::ChatMessage) -> Message {
         Message {
             role: msg.role,
-            content: msg.content.clone(),
+            content: msg.get_text(),
         }
     }
 }
 
 impl From<Message> for crate::ChatChunk {
     fn from(msg: Message) -> Self {
-        crate::ChatChunk {
-            role: msg.role,
-            content: msg.content,
-        }
+        let role = msg.role;
+        let payload = crate::ChatPayload::text(msg.content);
+        crate::ChatChunk::new(role, payload)
     }
 }
 
@@ -50,7 +48,36 @@ impl From<crate::ChatChunk> for Message {
     fn from(value: crate::ChatChunk) -> Self {
         Message {
             role: value.role,
-            content: value.content,
+            content: value.payload.get_text(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct OllamaTool {
+    #[serde(rename = "type")]
+    pub(crate) r#type: String,
+    pub(crate) function: OllamaFunction,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct OllamaFunction {
+    pub(crate) name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) description: Option<String>,
+    pub(crate) parameters: serde_json::Value,
+}
+
+impl From<&crate::api::ToolDefinition> for OllamaTool {
+    fn from(def: &crate::api::ToolDefinition) -> Self {
+        OllamaTool {
+            r#type: "function".to_string(),
+            function: OllamaFunction {
+                name: def.name.clone(),
+                description: def.description.clone(),
+                parameters: serde_json::to_value(&def.input_schema)
+                    .expect("Failed to serialize tool schema"),
+            },
         }
     }
 }
@@ -63,16 +90,25 @@ pub(crate) struct OllamaRequest {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) stream: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<Vec<OllamaTool>>,
 }
 
 impl OllamaRequest {
     pub(crate) fn from_chat_request(model_name: &str, value: &ChatRequest, stream: bool) -> Self {
         let ollama_messages: Vec<_> = value.messages.iter().map(|msg| msg.into()).collect();
 
+        let tools = value
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().map(|t| t.into()).collect());
+
         OllamaRequest {
             model: model_name.to_string(),
             messages: ollama_messages,
             stream: Some(stream),
+            tools,
         }
     }
 }
@@ -117,6 +153,7 @@ mod tests {
             model: "test-model".to_string(),
             messages,
             stream: None,
+            tools: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert_eq!(
@@ -141,6 +178,7 @@ mod tests {
             model: "test-model".to_string(),
             messages,
             stream: Some(false),
+            tools: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert_eq!(

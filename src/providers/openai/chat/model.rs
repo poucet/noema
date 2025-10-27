@@ -65,7 +65,7 @@ impl ChatModel for OpenAIChatModel {
             let role = choice.delta.role.unwrap_or(Role::Assistant);
             let content = choice.delta.content.clone().unwrap_or_default();
 
-            ChatChunk { role, content }
+            ChatChunk::new(role, crate::ChatPayload::text(content))
         });
 
         Ok(Box::pin(chat_stream))
