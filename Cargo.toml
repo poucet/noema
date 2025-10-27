@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.100"
 clap = { version = "4.5.49" }
 clap_derive = "4.5.49"
+conversation = { path = "../conversation" }
 directories = "6.0.0"
 dotenv = "0.15.0"
 futures = "0.3.31"

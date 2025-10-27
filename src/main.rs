@@ -1,15 +1,16 @@
 use clap::Parser;
+use conversation::Conversation;
 use futures::StreamExt;
 use llm::providers::OllamaProvider;
 use llm::providers::{ClaudeProvider, GeminiProvider, OpenAIProvider, GeneralModelProvider};
-use llm::{ChatModel, ChatRequest, ModelProvider};
+use llm::ModelProvider;
 
 use clap_derive::{Parser, ValueEnum};
 use dotenv;
+use std::io::{self, Write};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
-// Load GEMINI_API_KEY from ~/.env file
 fn get_api_key(key: &str) -> String {
     let home_dir = if let Some(home) = directories::UserDirs::new() {
         home.home_dir().to_path_buf()
@@ -43,46 +44,61 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ModelProviderType::Gemini)]
     model: ModelProviderType,
 
-    #[arg(long, value_enum, default_value_t = Mode::Chat)]
+    #[arg(long, value_enum, default_value_t = Mode::Stream)]
     mode: Mode,
+
+    #[arg(long)]
+    system_message: Option<String>,
+
+    #[arg(long, short)]
+    tracing: bool,
 }
 
-async fn call_model_regular(
-    model: &dyn ChatModel,
-    messages: Vec<llm::ChatMessage>,
+async fn chat_regular(
+    conversation: &mut Conversation,
+    message: &str,
 ) -> anyhow::Result<()> {
-    let request = ChatRequest::new(messages);
-    let response = model.chat(&request).await?;
-    println!("Response: {:}", response.content);
+    let response = conversation.send(message).await?;
+    println!("{}", response);
     Ok(())
 }
 
-async fn call_model_streaming(
-    model: &impl ChatModel,
-    messages: Vec<llm::ChatMessage>,
+async fn chat_streaming(
+    conversation: &mut Conversation,
+    message: &str,
 ) -> anyhow::Result<()> {
-    let request = ChatRequest::new(messages);
-    let mut stream = model.stream_chat(&request).await?;
-    print!("Response: ");
+    let mut stream = conversation.send_stream(message).await?;
     while let Some(chunk) = stream.next().await {
-        print!("{:}", chunk.content);
+        print!("{}", chunk.content);
+        io::stdout().flush()?;
     }
-    println!("");
+    println!();
     Ok(())
 }
 
-fn setup_tracing() {
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed")
+fn setup_tracing(enable: bool) {
+    if enable {
+        let subscriber = FmtSubscriber::builder()
+            .with_max_level(Level::TRACE)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Setting default subscriber failed");
+    } else {
+        // Send tracing to /dev/null
+        let subscriber = FmtSubscriber::builder()
+            .with_max_level(Level::ERROR)
+            .with_writer(|| std::io::sink())
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Setting default subscriber failed");
+    }
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    setup_tracing();
+    setup_tracing(args.tracing);
 
     let provider: GeneralModelProvider = match args.model {
         ModelProviderType::Ollama => GeneralModelProvider::Ollama(OllamaProvider::default()),
@@ -102,16 +118,46 @@ async fn main() {
         ModelProviderType::Claude => "claude-sonnet-4-5-20250929",
         ModelProviderType::OpenAI => "gpt-4o-mini",
     };
-    let models = provider.list_models().await;
-    println!("Available models: {:?}", models);
 
     let model = provider.create_chat_model(model_name).unwrap();
-    let messages = vec![llm::ChatMessage {
-        role: llm::Role::User,
-        content: "Hello, please return a long meaningful message!".to_string(),
-    }];
-    match args.mode {
-        Mode::Chat => call_model_regular(&model, messages).await.unwrap(),
-        Mode::Stream => call_model_streaming(&model, messages).await.unwrap(),
+
+    let mut conversation = if let Some(system_msg) = args.system_message {
+        Conversation::with_system_message(model, system_msg)
+    } else {
+        Conversation::new(model)
+    };
+
+    println!("Chat started. Type 'exit' or 'quit' to end the conversation.");
+    println!();
+
+    loop {
+        print!("> ");
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        let input = input.trim();
+
+        if input.is_empty() {
+            continue;
+        }
+
+        if input == "exit" || input == "quit" {
+            println!("Goodbye!");
+            break;
+        }
+
+        let result = match args.mode {
+            Mode::Chat => chat_regular(&mut conversation, input).await,
+            Mode::Stream => chat_streaming(&mut conversation, input).await,
+        };
+
+        if let Err(e) = result {
+            eprintln!("Error: {}", e);
+        }
+
+        println!();
     }
+
+    println!("Conversation had {} messages", conversation.message_count());
 }
