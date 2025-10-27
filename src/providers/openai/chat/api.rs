@@ -2,43 +2,15 @@ use crate::api::{ChatMessage, ChatRequest, Role};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OpenAIRole {
-    System,
-    User,
-    Assistant,
-}
-
-impl From<Role> for OpenAIRole {
-    fn from(role: Role) -> Self {
-        match role {
-            Role::System => OpenAIRole::System,
-            Role::User => OpenAIRole::User,
-            Role::Assistant => OpenAIRole::Assistant,
-        }
-    }
-}
-
-impl From<OpenAIRole> for Role {
-    fn from(role: OpenAIRole) -> Self {
-        match role {
-            OpenAIRole::System => Role::System,
-            OpenAIRole::User => Role::User,
-            OpenAIRole::Assistant => Role::Assistant,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Message {
-    pub role: OpenAIRole,
+    pub role: Role,
     pub content: String,
 }
 
 impl From<&ChatMessage> for Message {
     fn from(msg: &ChatMessage) -> Self {
         Message {
-            role: msg.role.into(),
+            role: msg.role,
             content: msg.content.clone(),
         }
     }
@@ -82,7 +54,7 @@ impl From<ChatCompletionResponse> for ChatMessage {
     fn from(response: ChatCompletionResponse) -> Self {
         let choice = &response.choices[0];
         ChatMessage {
-            role: choice.message.role.clone().into(),
+            role: choice.message.role,
             content: choice.message.content.clone(),
         }
     }
@@ -91,7 +63,7 @@ impl From<ChatCompletionResponse> for ChatMessage {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ChatCompletionChunkDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub role: Option<OpenAIRole>,
+    pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }

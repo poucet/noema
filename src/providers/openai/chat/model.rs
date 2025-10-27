@@ -62,7 +62,7 @@ impl ChatModel for OpenAIChatModel {
 
         let chat_stream = stream.map(|chunk| {
             let choice = &chunk.choices[0];
-            let role = choice.delta.role.clone().map(|r| r.into()).unwrap_or(Role::Assistant);
+            let role = choice.delta.role.unwrap_or(Role::Assistant);
             let content = choice.delta.content.clone().unwrap_or_default();
 
             ChatChunk { role, content }
