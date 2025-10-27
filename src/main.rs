@@ -80,7 +80,7 @@ fn setup_tracing() {
 
 #[tokio::main]
 async fn main() {
-    let args = Args::try_parse().ok().unwrap();
+    let args = Args::parse();
 
     setup_tracing();
 
