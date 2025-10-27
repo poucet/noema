@@ -51,7 +51,7 @@ impl FromStr for ModelProviderType {
     }
 }
 
-#[derive(Clone, ValueEnum, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, ValueEnum, Debug, PartialEq, Eq)]
 #[clap(rename_all = "lowercase")]
 enum Mode {
     Chat,
@@ -93,46 +93,6 @@ fn get_model_info(provider_type: &ModelProviderType) -> (&'static str, &'static 
 
 fn create_provider(provider_type: &ModelProviderType) -> GeneralModelProvider {
     match provider_type {
-}
-
-async fn call_model_regular(
-    model: &dyn ChatModel,
-    messages: Vec<llm::ChatMessage>,
-) -> anyhow::Result<()> {
-    let request = ChatRequest::new(messages);
-    let response = model.chat(&request).await?;
-    println!("Response: {:}", response.get_text());
-    Ok(())
-}
-
-async fn call_model_streaming(
-    model: &impl ChatModel,
-    messages: Vec<llm::ChatMessage>,
-) -> anyhow::Result<()> {
-    let request = ChatRequest::new(messages);
-    let mut stream = model.stream_chat(&request).await?;
-    print!("Response: ");
-    while let Some(chunk) = stream.next().await {
-        print!("{:}", chunk.get_text());
-    }
-    println!("");
-    Ok(())
-}
-
-fn setup_tracing() {
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed")
-}
-
-#[tokio::main]
-async fn main() {
-    let args = Args::parse();
-
-    setup_tracing();
-
-    let provider: GeneralModelProvider = match args.model {
         ModelProviderType::Ollama => GeneralModelProvider::Ollama(OllamaProvider::default()),
         ModelProviderType::Gemini => {
             GeneralModelProvider::Gemini(GeminiProvider::default(&get_api_key("GEMINI_API_KEY")))
@@ -146,16 +106,40 @@ async fn main() {
     }
 }
 
+async fn call_model_regular(
+    model: &dyn llm::ChatModel,
+    messages: Vec<llm::ChatMessage>,
+) -> anyhow::Result<()> {
+    let request = llm::ChatRequest::new(messages);
+    let response = model.chat(&request).await?;
+    println!("Response: {:}", response.get_text());
+    Ok(())
+}
+
+async fn call_model_streaming(
+    model: &impl llm::ChatModel,
+    messages: Vec<llm::ChatMessage>,
+) -> anyhow::Result<()> {
+    let request = llm::ChatRequest::new(messages);
+    let mut stream = model.stream_chat(&request).await?;
+    print!("Response: ");
+    while let Some(chunk) = stream.next().await {
+        print!("{:}", chunk.get_text());
+    }
+    println!("");
+    Ok(())
+}
+
 async fn chat_regular(conversation: &mut Conversation, message: &str) -> anyhow::Result<()> {
     let response = conversation.send(message).await?;
-    println!("{}", response);
+    println!("{}", response.get_text());
     Ok(())
 }
 
 async fn chat_streaming(conversation: &mut Conversation, message: &str) -> anyhow::Result<()> {
     let mut stream = conversation.send_stream(message).await?;
     while let Some(chunk) = stream.next().await {
-        print!("{}", chunk.content);
+        print!("{}", chunk.payload.get_text());
         io::stdout().flush()?;
     }
     println!();
@@ -369,15 +353,12 @@ async fn main() {
     }
 
     println!("Conversation had {} messages", state.conversation.message_count());
-    };
     let model_name = match args.model {
         ModelProviderType::Ollama => "gemma3n:latest",
         ModelProviderType::Gemini => "models/gemini-2.5-flash",
         ModelProviderType::Claude => "claude-sonnet-4-5-20250929",
         ModelProviderType::OpenAI => "gpt-4o-mini",
     };
-    let models = provider.list_models().await;
-    println!("Available models: {:?}", models);
 
     let model = provider.create_chat_model(model_name).unwrap();
     let messages = vec![llm::ChatMessage::user(llm::ChatPayload::text("Hello, how are you?".to_string()))];
