@@ -207,7 +207,7 @@ fn ui(f: &mut Frame, app: &App) {
             };
 
             // Parse markdown and render
-            let content_lines: Vec<Line> = msg.content
+            let content_lines: Vec<Line> = msg.get_text()
                 .lines()
                 .map(|line| {
                     if line.starts_with("```") {
