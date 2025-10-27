@@ -26,6 +26,7 @@ Commands:
   remove    Remove a worktree and its submodule worktrees (checks if merged)
   open      Open an existing worktree in VSCode
   merge     Merge worktree branches back into target branch (default: main)
+  sync      Sync worktree with target branch - pull latest changes (default: main)
   push      Push target branch to origin (default: main)
   list      List all worktrees
   setup     Enable tab-completion for current shell session
@@ -37,6 +38,8 @@ Examples:
   $0 open feature-1                      # Open existing worktree in VSCode
   $0 merge feature-1                     # Merge feature-1 branches into main
   $0 merge feature-1 develop             # Merge feature-1 branches into develop
+  $0 sync feature-1                      # Sync feature-1 worktree with latest main
+  $0 sync feature-1 develop              # Sync feature-1 worktree with latest develop
   $0 push feature-1                      # Push main branch to origin
   $0 push feature-1 develop              # Push develop branch to origin
   $0 remove feature-1                    # Remove worktree (warns if not merged)
@@ -531,6 +534,149 @@ merge_worktree() {
     echo "     $0 remove $WORKTREE_NAME"
 }
 
+sync_worktree() {
+    local WORKTREE_NAME=$1
+    local TARGET_BRANCH=${2:-main}
+    local WORKTREE_PATH="$WORKTREE_DIR/$WORKTREE_NAME"
+
+    if [ ! -d "$WORKTREE_PATH" ]; then
+        echo "Error: Worktree $WORKTREE_NAME not found at $WORKTREE_PATH"
+        exit 1
+    fi
+
+    echo "Syncing worktree '$WORKTREE_NAME' with '$TARGET_BRANCH'"
+    echo "================================================"
+    echo ""
+
+    # First, update the target branch in main repo
+    echo "→ Updating $TARGET_BRANCH in main repository"
+    local ORIGINAL_BRANCH=$(git branch --show-current)
+
+    # Check for uncommitted changes in main repo
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "  ⚠ Warning: You have uncommitted changes in the main repository."
+        echo "  Skipping main repo sync. Please commit or stash them first."
+    else
+        git checkout "$TARGET_BRANCH"
+        echo "  • Pulling latest changes from origin/$TARGET_BRANCH"
+        if git pull origin "$TARGET_BRANCH"; then
+            echo "  ✓ Main repository updated"
+        else
+            echo "  ✗ Pull failed"
+            git checkout "$ORIGINAL_BRANCH" 2>/dev/null
+            exit 1
+        fi
+        git checkout "$ORIGINAL_BRANCH" 2>/dev/null
+    fi
+    echo ""
+
+    # Discover submodules from the worktree
+    local WORKTREE_SUBMODULES=($(cd "$WORKTREE_PATH" && git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{print $2}'))
+
+    # Update each submodule in main repo first
+    for submodule in "${WORKTREE_SUBMODULES[@]}"; do
+        if [ -d "$submodule/.git" ] || [ -f "$submodule/.git" ]; then
+            echo "→ Updating submodule $submodule in main repository"
+            cd "$submodule"
+
+            # Check for uncommitted changes
+            if [ -n "$(git status --porcelain)" ]; then
+                echo "  ⚠ Warning: Uncommitted changes in $submodule"
+                echo "  Skipping this submodule. Please commit or stash changes first."
+                cd - > /dev/null
+                continue
+            fi
+
+            local SUB_ORIGINAL_BRANCH=$(git branch --show-current)
+
+            git checkout "$TARGET_BRANCH" 2>/dev/null || {
+                echo "  ⚠ Branch $TARGET_BRANCH doesn't exist in $submodule"
+                cd - > /dev/null
+                continue
+            }
+
+            echo "  • Pulling latest changes from origin/$TARGET_BRANCH"
+            if git pull origin "$TARGET_BRANCH"; then
+                echo "  ✓ Submodule updated"
+            else
+                echo "  ✗ Pull failed for $submodule"
+                git checkout "$SUB_ORIGINAL_BRANCH" 2>/dev/null
+                cd - > /dev/null
+                exit 1
+            fi
+
+            git checkout "$SUB_ORIGINAL_BRANCH" 2>/dev/null
+            cd - > /dev/null
+            echo ""
+        fi
+    done
+
+    # Now sync the worktree with the updated main repo
+    echo "→ Syncing worktree with updated $TARGET_BRANCH"
+    cd "$WORKTREE_PATH"
+
+    # Check for uncommitted changes in worktree
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "  ⚠ Warning: Uncommitted changes in worktree"
+        echo "  Please commit or stash changes before syncing"
+        cd - > /dev/null
+        exit 1
+    fi
+
+    local FEATURE_BRANCH=$(git branch --show-current)
+    echo "  • Merging $TARGET_BRANCH into $FEATURE_BRANCH"
+
+    if git merge "$TARGET_BRANCH" --no-edit; then
+        echo "  ✓ Worktree main branch synced"
+    else
+        echo "  ✗ Merge conflict detected in worktree!"
+        echo "  Please resolve conflicts in $WORKTREE_PATH"
+        cd - > /dev/null
+        exit 1
+    fi
+
+    cd - > /dev/null
+    echo ""
+
+    # Sync each submodule worktree
+    for submodule in "${WORKTREE_SUBMODULES[@]}"; do
+        local SUB_PATH="$WORKTREE_PATH/$submodule"
+
+        if [ -d "$SUB_PATH/.git" ] || [ -f "$SUB_PATH/.git" ]; then
+            echo "→ Syncing submodule worktree: $submodule"
+            cd "$SUB_PATH"
+
+            # Check for uncommitted changes
+            if [ -n "$(git status --porcelain)" ]; then
+                echo "  ⚠ Warning: Uncommitted changes in $submodule worktree"
+                echo "  Skipping this submodule. Please commit or stash changes first."
+                cd - > /dev/null
+                continue
+            fi
+
+            local SUB_FEATURE_BRANCH=$(git branch --show-current)
+            echo "  • Merging $TARGET_BRANCH into $SUB_FEATURE_BRANCH"
+
+            if git merge "$TARGET_BRANCH" --no-edit; then
+                echo "  ✓ Submodule worktree synced"
+            else
+                echo "  ✗ Merge conflict detected in $submodule worktree!"
+                echo "  Please resolve conflicts in $SUB_PATH"
+                cd - > /dev/null
+                exit 1
+            fi
+
+            cd - > /dev/null
+            echo ""
+        fi
+    done
+
+    echo "================================================"
+    echo "✓ Sync complete!"
+    echo ""
+    echo "Worktree '$WORKTREE_NAME' is now up to date with '$TARGET_BRANCH'"
+}
+
 push_worktree() {
     local WORKTREE_NAME=$1
     local TARGET_BRANCH=${2:-main}
@@ -651,6 +797,12 @@ case "$COMMAND" in
         fi
         merge_worktree "$@"
         ;;
+    sync)
+        if [ $# -lt 1 ]; then
+            show_usage
+        fi
+        sync_worktree "$@"
+        ;;
     push)
         if [ $# -lt 1 ]; then
             show_usage
@@ -668,12 +820,12 @@ case "$COMMAND" in
         case $# in
             0)
                 # No words yet - complete first argument (command names)
-                echo "create remove open merge push list setup"
+                echo "create remove open merge sync push list setup"
                 ;;
             1)
                 # One word (the command) - complete second argument based on command
                 case "$1" in
-                    remove|open|merge|push)
+                    remove|open|merge|sync|push)
                         # These commands take worktree names as second argument
                         if [ -d "$WORKTREE_DIR" ]; then
                             ls -1 "$WORKTREE_DIR" 2>/dev/null | tr '\n' ' '
