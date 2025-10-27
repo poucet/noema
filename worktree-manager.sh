@@ -31,6 +31,7 @@ Commands:
   pull      Pull latest changes from remote into current worktree (default: main)
   push      Push target branch (and its submodules) to origin (default: main)
   list      List all worktrees
+  fix-remotes Fix submodule remotes in an existing worktree
   setup     Enable tab-completion for current shell session
   complete  Internal command for shell completion (use: complete commands|worktrees)
 
@@ -93,6 +94,15 @@ create_worktree() {
     )
     echo "  ✓ Submodules initialized."
     # --- [END FIXES] ---
+
+    echo "→ Re-pointing submodule remotes to main repository..."
+    for sub in "${SUBMODULES[@]}"; do
+        (
+            cd "$WORKTREE_PATH/$sub"
+            git remote set-url origin "$REPO_ROOT/$sub"
+        )
+    done
+    echo "  ✓ Submodule remotes re-pointed."
     
     # Create VSCode workspace file
     create_vscode_workspace "$WORKTREE_NAME" "$WORKTREE_PATH"
@@ -223,6 +233,29 @@ remove_worktree() {
     # --- [END NEW LOGIC] ---
 }
 
+fix_remotes() {
+    local WORKTREE_NAME=$1
+    local WORKTREE_PATH="$WORKTREE_DIR/$WORKTREE_NAME"
+
+    if [ ! -d "$WORKTREE_PATH" ]; then
+        echo "Error: Worktree $WORKTREE_NAME not found at $WORKTREE_PATH"
+        exit 1
+    fi
+
+    echo "→ Re-pointing submodule remotes to main repository for worktree '$WORKTREE_NAME'..."
+    for sub in "${SUBMODULES[@]}"; do
+        (
+            cd "$WORKTREE_PATH/$sub"
+            if git remote | grep -q "origin"; then
+                git remote set-url origin "$REPO_ROOT/$sub"
+            else
+                git remote add origin "$REPO_ROOT/$sub"
+            fi
+        )
+    done
+    echo "  ✓ Submodule remotes re-pointed."
+}
+
 merge_worktree() {
     local WORKTREE_NAME=$1
     local TARGET_BRANCH=${2:-main}
@@ -264,7 +297,7 @@ merge_worktree() {
         echo "  Please resolve conflicts in the main repo, then run:"
         echo "    git merge --continue"
         echo "  After resolving, you must manually run:"
-        echo "    git -c protocol.file.allow=always submodule update --init --recursive"
+        echo "    git submodule update --init --recursive"
         git checkout "$ORIGINAL_BRANCH" > /dev/null 2>&1 || true
         exit 1
     fi
@@ -486,6 +519,12 @@ case "$COMMAND" in
             show_usage
         fi
         open_in_vscode "$1"
+        ;;
+    fix-remotes)
+        if [ $# -lt 1 ]; then
+            show_usage
+        fi
+        fix_remotes "$1"
         ;;
     merge)
         if [ $# -lt 1 ]; then
