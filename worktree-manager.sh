@@ -7,7 +7,7 @@ set -e
 
 # Get the absolute path to the repository root
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-WORKTREE_DIR="$(dirname "$REPO_ROOT")/athena-worktrees"
+WORKTREE_DIR=$(realpath "$(dirname "$REPO_ROOT")/athena-worktrees")
 
 # Dynamically discover submodules
 get_submodules() {
@@ -89,7 +89,10 @@ create_worktree() {
     echo "→ Initializing submodules in new worktree..."
     (
         cd "$WORKTREE_PATH"
-        git -c protocol.file.allow=always submodule update --init --recursive --reference "$REPO_ROOT"
+        for sub in ${SUBMODULES[@]}; do
+            url=$(git config -f .gitmodules submodule.$sub.url)
+            git clone --reference "$REPO_ROOT" "$url" "$sub"
+        done
     )
     echo "  ✓ Submodules initialized."
     # --- [END FIXES] ---
@@ -233,9 +236,11 @@ merge_worktree() {
         exit 1
     fi
 
-    # --- [NEW LOGIC] ---
-    # Reliably get the branch name from the worktree path
-    local FEATURE_BRANCH=$(get_branch_from_worktree_path "$WORKTREE_PATH")
+    local ORIGINAL_DIR=$(pwd)
+    cd "$WORKTREE_PATH"
+    local FEATURE_BRANCH=$(git branch --show-current)
+    cd "$ORIGINAL_DIR"
+
     if [ -z "$FEATURE_BRANCH" ]; then
         echo "Error: Could not determine branch for worktree $WORKTREE_NAME."
         exit 1
@@ -245,52 +250,47 @@ merge_worktree() {
     echo "================================================"
     echo ""
 
-    # Save current branch in main repo
     local ORIGINAL_BRANCH=$(git branch --show-current)
 
-    # Check for uncommitted changes in main repo (must be clean to merge)
     if [ -n "$(git status --porcelain)" ]; then
         echo "Error: You have uncommitted changes in the main repository."
         echo "Please commit or stash them before merging."
         exit 1
     fi
     
-    # 1. Go to target branch
     echo "→ Checking out '$TARGET_BRANCH' in main repo"
     git checkout "$TARGET_BRANCH"
 
-    # 2. Merge the single feature branch
     echo "→ Merging '$FEATURE_BRANCH' into '$TARGET_BRANCH'"
     if ! git merge "$FEATURE_BRANCH" --no-edit; then
         echo "  ✗ MERGE CONFLICT DETECTED!"
         echo "  Please resolve conflicts in the main repo, then run:"
         echo "    git merge --continue"
         echo "  After resolving, you must manually run:"
-        echo "    git submodule update --init --recursive"
-        git checkout "$ORIGINAL_BRANCH" > /dev/null 2>&1 || true # Try to go back
+        echo "    git -c protocol.file.allow=always submodule update --init --recursive"
+        git checkout "$ORIGINAL_BRANCH" > /dev/null 2>&1 || true
         exit 1
     fi
     echo "  ✓ Merge successful"
     
-    # 3. Update all submodules to match the new pointers
     echo "→ Syncing submodules to their new merged state..."
-    if ! git submodule update --init --recursive; then
+    # --- [FIXED LINE] ---
+    if ! git submodule foreach 'git pull origin main'; then
+    # --- [END FIX] ---
         echo "  ✗ FAILED to update submodules."
         echo "  This can happen if a submodule commit was not pushed."
-        echo "  Please check the merge and run 'git submodule update' manually."
+        echo "  Please check the merge and run 'git -c protocol.file.allow=always submodule update' manually."
         git checkout "$ORIGINAL_BRANCH" > /dev/null 2>&1 || true
         exit 1
     fi
     echo "  ✓ Submodules synced."
     
-    # Go back to original branch
     git checkout "$ORIGINAL_BRANCH" > /dev/null 2>&1 || true
 
     echo ""
     echo "================================================"
     echo "✓ Merge complete!"
     echo "'$TARGET_BRANCH' is now updated with changes from '$FEATURE_BRANCH'."
-    # --- [END NEW LOGIC] ---
 }
 
 sync_worktree() {
@@ -339,7 +339,7 @@ sync_worktree() {
         
         # 2. Update submodules to pull in any new ones from the merge
         echo "→ Updating submodules in worktree..."
-        if ! git submodule update --init --recursive; then
+        if ! git submodule foreach 'git pull origin main'; then
              echo "  ✗ FAILED to update submodules in worktree."
              exit 1
         fi
@@ -382,7 +382,7 @@ pull_from_worktree() {
     echo "  ✓ Main branch pulled."
     
     echo "→ Updating submodules to match pulled state..."
-    if ! git submodule update --init --recursive; then
+    if ! git submodule foreach 'git pull origin main'; then
         echo "  ✗ FAILED to update submodules."
         exit 1
     fi
