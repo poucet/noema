@@ -53,7 +53,7 @@ async fn call_model_regular(
 ) -> anyhow::Result<()> {
     let request = ChatRequest::new(messages);
     let response = model.chat(&request).await?;
-    println!("Response: {:}", response.content);
+    println!("Response: {:}", response.get_text());
     Ok(())
 }
 
@@ -65,7 +65,7 @@ async fn call_model_streaming(
     let mut stream = model.stream_chat(&request).await?;
     print!("Response: ");
     while let Some(chunk) = stream.next().await {
-        print!("{:}", chunk.content);
+        print!("{:}", chunk.get_text());
     }
     println!("");
     Ok(())
@@ -106,10 +106,7 @@ async fn main() {
     println!("Available models: {:?}", models);
 
     let model = provider.create_chat_model(model_name).unwrap();
-    let messages = vec![llm::ChatMessage {
-        role: llm::Role::User,
-        content: "Hello, please return a long meaningful message!".to_string(),
-    }];
+    let messages = vec![llm::ChatMessage::user(llm::ChatPayload::text("Hello, how are you?".to_string()))];
     match args.mode {
         Mode::Chat => call_model_regular(&model, messages).await.unwrap(),
         Mode::Stream => call_model_streaming(&model, messages).await.unwrap(),
