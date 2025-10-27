@@ -7,3 +7,6 @@
 [submodule "conversation"]
 	path = conversation
 	url = ./conversation
+[submodule "tui"]
+	path = tui
+	url = ./tui
