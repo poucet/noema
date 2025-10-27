@@ -89,10 +89,7 @@ create_worktree() {
     echo "→ Initializing submodules in new worktree..."
     (
         cd "$WORKTREE_PATH"
-        for sub in ${SUBMODULES[@]}; do
-            url=$(git config -f .gitmodules submodule.$sub.url)
-            git clone --reference "$REPO_ROOT" "$url" "$sub"
-        done
+        git submodule update --init --recursive
     )
     echo "  ✓ Submodules initialized."
     # --- [END FIXES] ---
@@ -274,12 +271,10 @@ merge_worktree() {
     echo "  ✓ Merge successful"
     
     echo "→ Syncing submodules to their new merged state..."
-    # --- [FIXED LINE] ---
-    if ! git submodule foreach 'git -c protocol.file.allow=always pull origin main'; then
-    # --- [END FIX] ---
+    if ! git submodule update --recursive; then
         echo "  ✗ FAILED to update submodules."
         echo "  This can happen if a submodule commit was not pushed."
-        echo "  Please check the merge and run 'git -c protocol.file.allow=always submodule update' manually."
+        echo "  Please check the merge and run 'git submodule update' manually."
         git checkout "$ORIGINAL_BRANCH" > /dev/null 2>&1 || true
         exit 1
     fi
@@ -339,7 +334,7 @@ sync_worktree() {
         
         # 2. Update submodules to pull in any new ones from the merge
         echo "→ Updating submodules in worktree..."
-        if ! git submodule foreach 'git -c protocol.file.allow=always pull origin main'; then
+        if ! git submodule update --recursive; then
              echo "  ✗ FAILED to update submodules in worktree."
              exit 1
         fi
@@ -382,7 +377,7 @@ pull_from_worktree() {
     echo "  ✓ Main branch pulled."
     
     echo "→ Updating submodules to match pulled state..."
-    if ! git submodule foreach 'git -c protocol.file.allow=always pull origin main'; then
+    if ! git submodule update --recursive; then
         echo "  ✗ FAILED to update submodules."
         exit 1
     fi
