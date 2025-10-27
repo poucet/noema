@@ -98,24 +98,13 @@ create_vscode_workspace() {
 
     echo "→ Creating VSCode workspace file"
 
-    # Build the folders JSON array dynamically
-    local FOLDERS='        {
-            "name": "athena (root)",
-            "path": "."
-        }'
-
-    for submodule in "${SUBMODULES[@]}"; do
-        FOLDERS="$FOLDERS,
-        {
-            \"name\": \"$submodule\",
-            \"path\": \"$submodule\"
-        }"
-    done
-
     cat > "$WORKSPACE_FILE" << EOF
 {
     "folders": [
-$FOLDERS
+        {
+            "name": "athena",
+            "path": "."
+        }
     ],
     "settings": {
         "git.enabled": true,
