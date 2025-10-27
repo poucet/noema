@@ -4,3 +4,6 @@
 [submodule "llm"]
 	path = llm
 	url = ./llm
+[submodule "conversation"]
+	path = conversation
+	url = ./conversation
