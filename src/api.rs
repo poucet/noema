@@ -37,9 +37,21 @@ pub enum ContentBlock {
     ToolResult(ToolResult),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct ChatPayload {
     pub content: Vec<ContentBlock>,
+}
+
+impl From<String> for ChatPayload {
+    fn from(text: String) -> Self {
+        ChatPayload::text(text)
+    }
+}
+
+impl From<&str> for ChatPayload {
+    fn from(text: &str) -> Self {
+        ChatPayload::text(text)
+    }
 }
 
 impl ChatPayload {
@@ -171,7 +183,7 @@ impl From<ChatChunk> for ChatMessage {
     fn from(chunk: ChatChunk) -> Self {
         ChatMessage {
             role: chunk.role,
-            content: chunk.content,
+            payload: chunk.payload,
         }
     }
 }
