@@ -186,16 +186,15 @@ impl Conversation {
     }
 
     /// Send a user message and get a response, updating the conversation history
-    pub async fn send(&mut self, message: impl Into<ChatPayload>) -> Result<ChatPayload> {
+    pub async fn send(&mut self, message: impl Into<ChatPayload>) -> Result<ChatMessage > {
         self.add_user_message(message);
 
         let request = ChatRequest::new(self.history.clone());
         let response = self.model.chat(&request).await?;
 
-        let response_payload = response.payload.clone();
-        self.history.push(response);
+        self.history.push(response.clone());
 
-        Ok(response_payload)
+        Ok(response)
     }
 
     /// Send a user message and get a streaming response that automatically saves to history
