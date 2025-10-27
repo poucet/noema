@@ -1,12 +1,12 @@
 [submodule "cli"]
 	path = cli
-	url = ./cli
+	url = ../modules/cli.git
 [submodule "llm"]
 	path = llm
-	url = ./llm
+	url = ../modules/llm.git
 [submodule "conversation"]
 	path = conversation
-	url = ./conversation
+	url = ../modules/conversation.git
 [submodule "tui"]
 	path = tui
-	url = ./tui
+	url = ../modules/tui.git
