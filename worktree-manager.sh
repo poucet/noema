@@ -19,6 +19,7 @@ Commands:
   remove    Remove a worktree and its submodule worktrees
   open      Open an existing worktree in VSCode
   merge     Merge worktree branches back into target branch (default: main)
+  push      Push target branch to origin (default: main)
   list      List all worktrees
 
 Examples:
@@ -27,6 +28,8 @@ Examples:
   $0 open feature-1                      # Open existing worktree in VSCode
   $0 merge feature-1                     # Merge feature-1 branches into main
   $0 merge feature-1 develop             # Merge feature-1 branches into develop
+  $0 push feature-1                      # Push main branch to origin
+  $0 push feature-1 develop              # Push develop branch to origin
   $0 remove feature-1
   $0 list
 EOF
@@ -226,14 +229,6 @@ merge_worktree() {
             echo "  • Merging $SUB_BRANCH into $TARGET_BRANCH"
             if git merge "$SUB_BRANCH" --no-edit; then
                 echo "  ✓ Merge successful"
-                
-                # Ask if user wants to push
-                read -p "  Push $submodule/$TARGET_BRANCH to remote? [y/N] " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    git push origin "$TARGET_BRANCH"
-                    echo "  ✓ Pushed to remote"
-                fi
             else
                 echo "  ✗ Merge conflict detected!"
                 echo "  Please resolve conflicts in $submodule, then run:"
@@ -271,14 +266,6 @@ merge_worktree() {
         echo "  • Merging $FEATURE_BRANCH into $TARGET_BRANCH"
         if git merge "$FEATURE_BRANCH" --no-edit; then
             echo "  ✓ Merge successful"
-            
-            # Ask if user wants to push
-            read -p "  Push main/$TARGET_BRANCH to remote? [y/N] " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                git push origin "$TARGET_BRANCH"
-                echo "  ✓ Pushed to remote"
-            fi
         else
             echo "  ✗ Merge conflict detected!"
             echo "  Please resolve conflicts, then run: git merge --continue"
@@ -292,8 +279,66 @@ merge_worktree() {
     echo ""
     echo "Next steps:"
     echo "  1. Test the merged changes"
-    echo "  2. If everything looks good, remove the worktree:"
+    echo "  2. Push changes to remote: $0 push $WORKTREE_NAME"
+    echo "  3. If everything looks good, remove the worktree:"
     echo "     $0 remove $WORKTREE_NAME"
+}
+
+push_worktree() {
+    local WORKTREE_NAME=$1
+    local TARGET_BRANCH=${2:-main}
+    local FEATURE_BRANCH=$WORKTREE_NAME
+
+    echo "Pushing '$TARGET_BRANCH' branches to origin"
+    echo "================================================"
+    echo ""
+
+    # Push each submodule
+    for submodule in "${SUBMODULES[@]}"; do
+        if [ -d "$submodule/.git" ] || [ -f "$submodule/.git" ]; then
+            echo "→ Processing submodule: $submodule"
+            cd "$submodule"
+
+            local CURRENT_BRANCH=$(git branch --show-current)
+
+            # Only push if we're on the target branch
+            if [ "$CURRENT_BRANCH" = "$TARGET_BRANCH" ]; then
+                echo "  • Pushing $TARGET_BRANCH to origin"
+                if git push origin "$TARGET_BRANCH"; then
+                    echo "  ✓ Push successful"
+                else
+                    echo "  ✗ Push failed"
+                    cd - > /dev/null
+                    exit 1
+                fi
+            else
+                echo "  ⚠ Not on $TARGET_BRANCH (currently on $CURRENT_BRANCH), skipping"
+            fi
+
+            cd - > /dev/null
+            echo ""
+        fi
+    done
+
+    # Push main branch
+    echo "→ Pushing main repository"
+    local CURRENT_BRANCH=$(git branch --show-current)
+
+    if [ "$CURRENT_BRANCH" = "$TARGET_BRANCH" ]; then
+        echo "  • Pushing $TARGET_BRANCH to origin"
+        if git push origin "$TARGET_BRANCH"; then
+            echo "  ✓ Push successful"
+        else
+            echo "  ✗ Push failed"
+            exit 1
+        fi
+    else
+        echo "  ⚠ Not on $TARGET_BRANCH (currently on $CURRENT_BRANCH), skipping"
+    fi
+
+    echo ""
+    echo "================================================"
+    echo "✓ Push complete!"
 }
 
 list_worktrees() {
@@ -358,6 +403,12 @@ case "$COMMAND" in
             show_usage
         fi
         merge_worktree "$@"
+        ;;
+    push)
+        if [ $# -lt 1 ]; then
+            show_usage
+        fi
+        push_worktree "$@"
         ;;
     list)
         list_worktrees
