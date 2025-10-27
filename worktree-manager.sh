@@ -280,6 +280,18 @@ merge_worktree() {
     echo "================================================"
     echo ""
 
+    echo "→ Pushing submodule changes from worktree..."
+    for sub in "${SUBMODULES[@]}"; do
+        local SUBMODULE_PATH_IN_WORKTREE="$WORKTREE_PATH/$sub"
+        if [ -d "$SUBMODULE_PATH_IN_WORKTREE" ]; then
+            (
+                cd "$SUBMODULE_PATH_IN_WORKTREE"
+                git push
+            )
+        fi
+    done
+    echo "  ✓ Submodule changes pushed."
+
     local ORIGINAL_BRANCH=$(git branch --show-current)
 
     if [ -n "$(git status --porcelain)" ]; then
