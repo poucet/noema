@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::StreamExt;
 use llm::providers::OllamaProvider;
-use llm::providers::{ClaudeProvider, GeminiProvider, GeneralModelProvider};
+use llm::providers::{ClaudeProvider, GeminiProvider, OpenAIProvider, GeneralModelProvider};
 use llm::{ChatModel, ChatRequest, ModelProvider};
 
 use clap_derive::{Parser, ValueEnum};
@@ -27,6 +27,7 @@ enum ModelProviderType {
     Ollama,
     Gemini,
     Claude,
+    OpenAI,
 }
 
 #[derive(Clone, ValueEnum, Debug, PartialEq, Eq)]
@@ -91,11 +92,15 @@ async fn main() {
         ModelProviderType::Claude => {
             GeneralModelProvider::Claude(ClaudeProvider::default(&get_api_key("CLAUDE_API_KEY")))
         }
+        ModelProviderType::OpenAI => {
+            GeneralModelProvider::OpenAI(OpenAIProvider::default(&get_api_key("OPENAI_API_KEY")))
+        }
     };
     let model_name = match args.model {
         ModelProviderType::Ollama => "gemma3n:latest",
         ModelProviderType::Gemini => "models/gemini-2.5-flash",
         ModelProviderType::Claude => "claude-sonnet-4-5-20250929",
+        ModelProviderType::OpenAI => "gpt-4o-mini",
     };
     let models = provider.list_models().await;
     println!("Available models: {:?}", models);
