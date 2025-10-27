@@ -28,6 +28,8 @@ Commands:
   merge     Merge worktree branches back into target branch (default: main)
   push      Push target branch to origin (default: main)
   list      List all worktrees
+  setup     Enable tab-completion for current shell session
+  complete  Internal command for shell completion (use: complete commands|worktrees)
 
 Examples:
   $0 create feature-1                    # Create from current branch and open in VSCode
@@ -41,8 +43,11 @@ Examples:
   $0 list
 
 Bash Completion:
-  To enable tab-completion for worktree names, add this to your ~/.bashrc:
-    source $0 completion
+  For current shell session only:
+    source <($0 setup)
+
+  To enable permanently, add this to your ~/.bashrc:
+    source <($0 setup)
 EOF
     exit 1
 }
@@ -574,46 +579,70 @@ case "$COMMAND" in
     list)
         list_worktrees
         ;;
+    complete)
+        # Internal command for shell completion
+        # Usage: complete commands|worktrees
+        case "${1:-}" in
+            commands)
+                echo "create remove open merge push list setup"
+                ;;
+            worktrees)
+                # List available worktrees
+                if [ -d "$WORKTREE_DIR" ]; then
+                    ls -1 "$WORKTREE_DIR" 2>/dev/null || true
+                fi
+                ;;
+            *)
+                echo "Usage: $0 complete commands|worktrees" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    setup)
+        # Output source command for the appropriate completion file
+        # Detect shell type
+        DETECTED_SHELL=""
+
+        # Try to detect from parent process
+        if command -v ps >/dev/null 2>&1; then
+            PARENT_PID=$PPID
+            PARENT_PROC=$(ps -p $PARENT_PID -o comm= 2>/dev/null | tr -d ' ')
+            if [[ "$PARENT_PROC" == *"zsh"* ]]; then
+                DETECTED_SHELL="zsh"
+            elif [[ "$PARENT_PROC" == *"bash"* ]]; then
+                DETECTED_SHELL="bash"
+            fi
+        fi
+
+        # Get the directory where this script is located
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        COMPLETION_DIR="$SCRIPT_DIR/.worktree-manager"
+
+        if [ "$DETECTED_SHELL" = "zsh" ]; then
+            COMPLETION_FILE="$COMPLETION_DIR/completion.zsh"
+            if [ -f "$COMPLETION_FILE" ]; then
+                cat "$COMPLETION_FILE"
+                echo "echo '✓ Zsh tab completion enabled for current shell session'"
+            else
+                echo "echo 'Error: Completion file not found: $COMPLETION_FILE' >&2" >&2
+                exit 1
+            fi
+        elif [ "$DETECTED_SHELL" = "bash" ]; then
+            COMPLETION_FILE="$COMPLETION_DIR/completion.bash"
+            if [ -f "$COMPLETION_FILE" ]; then
+                cat "$COMPLETION_FILE"
+                echo "echo '✓ Bash tab completion enabled for current shell session'"
+            else
+                echo "echo 'Error: Completion file not found: $COMPLETION_FILE' >&2" >&2
+                exit 1
+            fi
+        else
+            echo "echo 'Error: Unsupported shell. Please use bash or zsh.' >&2" >&2
+            exit 1
+        fi
+        ;;
     *)
         echo "Error: Unknown command '$COMMAND'"
         show_usage
         ;;
 esac
-
-# Bash completion function
-# To enable, add to your ~/.bashrc or ~/.bash_profile:
-#   source /path/to/worktree-manager.sh completion
-_worktree_manager_completion() {
-    local cur prev commands
-    COMPREPLY=()
-    cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="create remove open merge push list"
-
-    # Complete command names
-    if [ $COMP_CWORD -eq 1 ]; then
-        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
-        return 0
-    fi
-
-    # Complete worktree names for commands that need them
-    if [ $COMP_CWORD -eq 2 ]; then
-        case "$prev" in
-            remove|open|merge|push)
-                if [ -d "$WORKTREE_DIR" ]; then
-                    local worktrees=$(ls -1 "$WORKTREE_DIR" 2>/dev/null)
-                    COMPREPLY=($(compgen -W "$worktrees" -- "$cur"))
-                fi
-                return 0
-                ;;
-        esac
-    fi
-
-    return 0
-}
-
-# If sourced with 'completion' argument, set up completion
-if [ "${BASH_SOURCE[0]}" != "${0}" ] && [ "$1" = "completion" ]; then
-    complete -F _worktree_manager_completion worktree-manager.sh
-    complete -F _worktree_manager_completion ./worktree-manager.sh
-fi
