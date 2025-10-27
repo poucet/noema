@@ -52,7 +52,7 @@ impl TryFrom<&Content> for crate::ChatMessage {
 
     fn try_from(content: &Content) -> Result<Self, Self::Error> {
         match content {
-            Content::Text { citations, text } => Ok(crate::ChatMessage {
+            Content::Text { citations: _, text } => Ok(crate::ChatMessage {
                 role: crate::api::Role::Assistant,
                 content: text.clone(),
             }),
@@ -65,7 +65,7 @@ impl TryFrom<&Content> for crate::ChatChunk {
 
     fn try_from(content: &Content) -> Result<Self, Self::Error> {
         match content {
-            Content::Text { citations, text } => Ok(crate::ChatChunk {
+            Content::Text { citations: _, text } => Ok(crate::ChatChunk {
                 role: crate::api::Role::Assistant,
                 content: text.clone(),
             }),
@@ -197,4 +197,95 @@ impl From<MessagesResponse> for crate::ChatChunk {
             .try_into()
             .expect("Failed to parse Claude response")
     }
+}
+
+// Streaming event types
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum StreamEvent {
+    MessageStart {
+        message: MessageStartPayload,
+    },
+    ContentBlockStart {
+        index: usize,
+        content_block: ContentBlock,
+    },
+    ContentBlockDelta {
+        index: usize,
+        delta: Delta,
+    },
+    ContentBlockStop {
+        index: usize,
+    },
+    MessageDelta {
+        delta: MessageDeltaPayload,
+        usage: Option<Usage>,
+    },
+    MessageStop,
+    Ping,
+    Error {
+        error: ErrorPayload,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct MessageStartPayload {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub role: Role,
+    pub content: Vec<Content>,
+    pub model: String,
+    pub stop_reason: Option<String>,
+    pub stop_sequence: Option<String>,
+    pub usage: Option<Usage>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct Usage {
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum ContentBlock {
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    Thinking {
+        thinking: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum Delta {
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
+    ThinkingDelta {
+        thinking: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct MessageDeltaPayload {
+    pub stop_reason: Option<String>,
+    pub stop_sequence: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ErrorPayload {
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub message: String,
 }
