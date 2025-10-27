@@ -275,7 +275,7 @@ merge_worktree() {
     
     echo "→ Syncing submodules to their new merged state..."
     # --- [FIXED LINE] ---
-    if ! git submodule foreach 'git pull origin main'; then
+    if ! git submodule foreach 'git -c protocol.file.allow=always pull origin main'; then
     # --- [END FIX] ---
         echo "  ✗ FAILED to update submodules."
         echo "  This can happen if a submodule commit was not pushed."
@@ -339,7 +339,7 @@ sync_worktree() {
         
         # 2. Update submodules to pull in any new ones from the merge
         echo "→ Updating submodules in worktree..."
-        if ! git submodule foreach 'git pull origin main'; then
+        if ! git submodule foreach 'git -c protocol.file.allow=always pull origin main'; then
              echo "  ✗ FAILED to update submodules in worktree."
              exit 1
         fi
@@ -382,7 +382,7 @@ pull_from_worktree() {
     echo "  ✓ Main branch pulled."
     
     echo "→ Updating submodules to match pulled state..."
-    if ! git submodule foreach 'git pull origin main'; then
+    if ! git submodule foreach 'git -c protocol.file.allow=always pull origin main'; then
         echo "  ✗ FAILED to update submodules."
         exit 1
     fi
