@@ -94,28 +94,46 @@ impl Client {
         }
 
         let bytes = response.bytes_stream();
-        Ok(Box::pin(bytes.flat_map(move |chunk| {
+
+        // Use scan to maintain state (buffer) across chunks
+        let buffered_stream = bytes.scan(String::new(), move |buffer, chunk| {
             let chunk = match chunk {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Error reading chunk: {}", e);
-                    return stream::iter(vec![]);
+                    return futures::future::ready(Some(vec![]));
                 }
             };
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            let messages: Vec<T> = chunk_str
-                .lines()
-                .filter_map(|line| process(line))
-                .filter(|line| !line.trim().is_empty())
-                .filter_map(|line| match serde_json::from_str::<T>(line) {
-                    Ok(chat_response) => Some(chat_response),
-                    Err(e) => {
-                        eprintln!("Failed to parse chunk: {}: {}", line, e);
-                        None
+
+            // Append new chunk data to buffer
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete lines (ending with \n)
+            let mut messages: Vec<T> = vec![];
+            let mut last_newline_pos = 0;
+
+            for (idx, _) in buffer.match_indices('\n') {
+                let line = &buffer[last_newline_pos..idx];
+                last_newline_pos = idx + 1;
+
+                if let Some(processed) = process(line) {
+                    if !processed.trim().is_empty() {
+                        match serde_json::from_str::<T>(processed) {
+                            Ok(chat_response) => messages.push(chat_response),
+                            Err(e) => {
+                                eprintln!("Failed to parse line: {}: {}", processed, e);
+                            }
+                        }
                     }
-                })
-                .collect();
-            stream::iter(messages)
-        })))
+                }
+            }
+
+            // Keep incomplete line in buffer
+            *buffer = buffer[last_newline_pos..].to_string();
+
+            futures::future::ready(Some(messages))
+        });
+
+        Ok(Box::pin(buffered_stream.flat_map(|messages| stream::iter(messages))))
     }
 }
