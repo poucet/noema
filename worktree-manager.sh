@@ -7,7 +7,7 @@ set -e
 
 # Get the absolute path to the repository root
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-WORKTREE_DIR=$(realpath "$(dirname "$REPO_ROOT")/athena-worktrees")
+WORKTREE_DIR=$(realpath "$(dirname "$REPO_ROOT")/worktrees")
 
 # Dynamically discover submodules
 get_submodules() {
@@ -90,19 +90,19 @@ create_worktree() {
     echo "→ Initializing submodules in new worktree..."
     (
         cd "$WORKTREE_PATH"
-        git submodule update --init --recursive
+        git -c protocol.file.allow=always submodule update --init --recursive
     )
     echo "  ✓ Submodules initialized."
     # --- [END FIXES] ---
 
-    echo "→ Re-pointing submodule remotes to main repository..."
-    for sub in "${SUBMODULES[@]}"; do
-        (
-            cd "$WORKTREE_PATH/$sub"
-            git remote set-url origin "$REPO_ROOT/$sub"
-        )
-    done
-    echo "  ✓ Submodule remotes re-pointed."
+    # echo "→ Re-pointing submodule remotes to main repository..."
+    # for sub in "${SUBMODULES[@]}"; do
+    #     (
+    #         cd "$WORKTREE_PATH/$sub"
+    #         git remote set-url origin "$REPO_ROOT/$sub.git"
+    #     )
+    # done
+    # echo "  ✓ Submodule remotes re-pointed."
     
     # Create VSCode workspace file
     create_vscode_workspace "$WORKTREE_NAME" "$WORKTREE_PATH"
@@ -286,16 +286,25 @@ merge_worktree() {
         if [ -d "$SUBMODULE_PATH_IN_WORKTREE" ]; then
             (
                 cd "$SUBMODULE_PATH_IN_WORKTREE"
-                git push
+                git push origin HEAD:main
             )
         fi
     done
     echo "  ✓ Submodule changes pushed."
 
+    echo "→ Cleaning up submodules in main repository..."
+    for sub in "${SUBMODULES[@]}"; do
+        (
+            cd "$sub"
+            git reset --hard
+        )
+    done
+    echo "  ✓ Submodules cleaned up."
+
     local ORIGINAL_BRANCH=$(git branch --show-current)
 
-    if [ -n "$(git status --porcelain)" ]; then
-        echo "Error: You have uncommitted changes in the main repository."
+    if [ -n "$(git status --porcelain | grep -v 'worktree-manager.sh')" ]; then
+        echo "Error: You have uncommitted changes in the main repository (ignoring worktree-manager.sh)."
         echo "Please commit or stash them before merging."
         exit 1
     fi
