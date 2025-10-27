@@ -12,18 +12,21 @@ WORKTREE_DIR="$(dirname "$REPO_ROOT")/athena-worktrees"
 
 show_usage() {
     cat << EOF
-Usage: $0 <command> <worktree-name> [branch-name]
+Usage: $0 <command> <worktree-name> [branch-name|target-branch]
 
 Commands:
   create    Create a new worktree with submodule worktrees and open in VSCode
   remove    Remove a worktree and its submodule worktrees
   open      Open an existing worktree in VSCode
+  merge     Merge worktree branches back into target branch (default: main)
   list      List all worktrees
 
 Examples:
   $0 create feature-1                    # Create from current branch and open in VSCode
   $0 create feature-1 my-branch          # Create from specific branch and open in VSCode
   $0 open feature-1                      # Open existing worktree in VSCode
+  $0 merge feature-1                     # Merge feature-1 branches into main
+  $0 merge feature-1 develop             # Merge feature-1 branches into develop
   $0 remove feature-1
   $0 list
 EOF
@@ -168,6 +171,131 @@ remove_worktree() {
     echo "⚠ Remember to close the VSCode window for this worktree"
 }
 
+merge_worktree() {
+    local WORKTREE_NAME=$1
+    local TARGET_BRANCH=${2:-main}
+    local FEATURE_BRANCH=$WORKTREE_NAME
+    local WORKTREE_PATH="$WORKTREE_DIR/$WORKTREE_NAME"
+    
+    if [ ! -d "$WORKTREE_PATH" ]; then
+        echo "Error: Worktree $WORKTREE_NAME not found at $WORKTREE_PATH"
+        exit 1
+    fi
+    
+    echo "Merging worktree '$WORKTREE_NAME' into '$TARGET_BRANCH'"
+    echo "================================================"
+    echo ""
+    
+    # Save current branch in main repo
+    local ORIGINAL_BRANCH=$(git branch --show-current)
+    
+    # Check for uncommitted changes in main repo
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: You have uncommitted changes in the main repository."
+        echo "Please commit or stash them first."
+        exit 1
+    fi
+    
+    # Merge each submodule
+    for submodule in "${SUBMODULES[@]}"; do
+        if [ -d "$submodule/.git" ] || [ -f "$submodule/.git" ]; then
+            echo "→ Processing submodule: $submodule"
+            cd "$submodule"
+            
+            local SUB_BRANCH="$FEATURE_BRANCH-$submodule"
+            local SUB_ORIGINAL_BRANCH=$(git branch --show-current)
+            
+            # Check if feature branch exists
+            if ! git rev-parse --verify "$SUB_BRANCH" >/dev/null 2>&1; then
+                echo "  ⚠ Branch '$SUB_BRANCH' does not exist, skipping"
+                cd - > /dev/null
+                continue
+            fi
+            
+            # Check for uncommitted changes
+            if [ -n "$(git status --porcelain)" ]; then
+                echo "  Error: Uncommitted changes in submodule $submodule"
+                cd - > /dev/null
+                exit 1
+            fi
+            
+            # Checkout target branch and merge
+            echo "  • Checking out $TARGET_BRANCH"
+            git checkout "$TARGET_BRANCH"
+            
+            echo "  • Merging $SUB_BRANCH into $TARGET_BRANCH"
+            if git merge "$SUB_BRANCH" --no-edit; then
+                echo "  ✓ Merge successful"
+                
+                # Ask if user wants to push
+                read -p "  Push $submodule/$TARGET_BRANCH to remote? [y/N] " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    git push origin "$TARGET_BRANCH"
+                    echo "  ✓ Pushed to remote"
+                fi
+            else
+                echo "  ✗ Merge conflict detected!"
+                echo "  Please resolve conflicts in $submodule, then run:"
+                echo "    cd $submodule && git merge --continue && cd .."
+                exit 1
+            fi
+            
+            cd - > /dev/null
+            echo ""
+        fi
+    done
+    
+    # Update submodule references in main repo
+    echo "→ Updating submodule references in main repository"
+    git add "${SUBMODULES[@]}"
+    
+    if [ -n "$(git status --porcelain)" ]; then
+        git commit -m "Update submodules after merging $FEATURE_BRANCH"
+        echo "  ✓ Submodule references updated"
+    else
+        echo "  • No submodule reference changes needed"
+    fi
+    
+    # Merge main feature branch
+    echo ""
+    echo "→ Merging main feature branch"
+    
+    # Check if feature branch exists
+    if ! git rev-parse --verify "$FEATURE_BRANCH" >/dev/null 2>&1; then
+        echo "  ⚠ Branch '$FEATURE_BRANCH' does not exist in main repo"
+    else
+        echo "  • Checking out $TARGET_BRANCH"
+        git checkout "$TARGET_BRANCH"
+        
+        echo "  • Merging $FEATURE_BRANCH into $TARGET_BRANCH"
+        if git merge "$FEATURE_BRANCH" --no-edit; then
+            echo "  ✓ Merge successful"
+            
+            # Ask if user wants to push
+            read -p "  Push main/$TARGET_BRANCH to remote? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                git push origin "$TARGET_BRANCH"
+                echo "  ✓ Pushed to remote"
+            fi
+        else
+            echo "  ✗ Merge conflict detected!"
+            echo "  Please resolve conflicts, then run: git merge --continue"
+            exit 1
+        fi
+    fi
+    
+    echo ""
+    echo "================================================"
+    echo "✓ Merge complete!"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Test the merged changes"
+    echo "  2. If everything looks good, remove the worktree:"
+    echo "     $0 remove $WORKTREE_NAME"
+}
+
 list_worktrees() {
     echo "Main repository worktrees:"
     git worktree list
@@ -224,6 +352,12 @@ case "$COMMAND" in
             show_usage
         fi
         open_in_vscode "$1"
+        ;;
+    merge)
+        if [ $# -lt 1 ]; then
+            show_usage
+        fi
+        merge_worktree "$@"
         ;;
     list)
         list_worktrees
