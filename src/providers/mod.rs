@@ -1,6 +1,7 @@
 pub(crate) mod claude;
 pub(crate) mod gemini;
 pub(crate) mod ollama;
+pub(crate) mod openai;
 
 use crate::{ChatModel, ChatRequest, ChatStream, ModelProvider};
 use async_trait::async_trait;
@@ -8,17 +9,20 @@ use async_trait::async_trait;
 pub use claude::{ClaudeChatModel, ClaudeProvider};
 pub use gemini::{GeminiChatModel, GeminiProvider};
 pub use ollama::{OllamaChatModel, OllamaProvider};
+pub use openai::{OpenAIChatModel, OpenAIProvider};
 
 pub enum GeneralModelProvider {
     Ollama(OllamaProvider),
     Gemini(GeminiProvider),
     Claude(ClaudeProvider),
+    OpenAI(OpenAIProvider),
 }
 
 pub enum GeneralChatModel {
     Ollama(OllamaChatModel),
     Gemini(GeminiChatModel),
     Claude(ClaudeChatModel),
+    OpenAI(OpenAIChatModel),
 }
 
 #[async_trait]
@@ -30,6 +34,7 @@ impl ModelProvider for GeneralModelProvider {
             GeneralModelProvider::Ollama(provider) => provider.list_models().await,
             GeneralModelProvider::Gemini(provider) => provider.list_models().await,
             GeneralModelProvider::Claude(provider) => provider.list_models().await,
+            GeneralModelProvider::OpenAI(provider) => provider.list_models().await,
         }
     }
 
@@ -44,6 +49,9 @@ impl ModelProvider for GeneralModelProvider {
             GeneralModelProvider::Claude(provider) => provider
                 .create_chat_model(model_name)
                 .map(GeneralChatModel::Claude),
+            GeneralModelProvider::OpenAI(provider) => provider
+                .create_chat_model(model_name)
+                .map(GeneralChatModel::OpenAI),
         }
     }
 }
@@ -55,6 +63,7 @@ impl ChatModel for GeneralChatModel {
             GeneralChatModel::Ollama(model) => model.chat(request).await,
             GeneralChatModel::Gemini(model) => model.chat(request).await,
             GeneralChatModel::Claude(model) => model.chat(request).await,
+            GeneralChatModel::OpenAI(model) => model.chat(request).await,
         }
     }
 
@@ -63,6 +72,7 @@ impl ChatModel for GeneralChatModel {
             GeneralChatModel::Ollama(model) => model.stream_chat(request).await,
             GeneralChatModel::Gemini(model) => model.stream_chat(request).await,
             GeneralChatModel::Claude(model) => model.stream_chat(request).await,
+            GeneralChatModel::OpenAI(model) => model.stream_chat(request).await,
         }
     }
 }
