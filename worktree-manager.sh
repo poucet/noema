@@ -270,14 +270,19 @@ merge_worktree() {
     done
     echo "  ✓ Submodule changes pushed."
 
-    echo "→ Cleaning up submodules in main repository..."
+    echo "→ Pulling latest submodule changes into main repository..."
     for sub in "${SUBMODULES[@]}"; do
-        (
-            cd "$sub"
-            git reset --hard
-        )
+        if [ -d "$sub" ]; then
+            (
+                cd "$sub"
+                # Ensure we're on main branch
+                git checkout main 2>/dev/null || true
+                # Pull from the bare repo
+                git pull origin main
+            )
+        fi
     done
-    echo "  ✓ Submodules cleaned up."
+    echo "  ✓ Submodule changes pulled from bare repos."
 
     local ORIGINAL_BRANCH=$(git branch --show-current)
 
