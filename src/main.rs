@@ -1,5 +1,5 @@
 use anyhow::Result;
-use commands::AsyncCompleter;
+use commands::Registrable;
 use conversation::Conversation;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -92,6 +92,7 @@ enum MessageResponse {
 
 enum CompletionState {
     Idle,
+    Loading,
     Showing { completions: Vec<commands::Completion>, selected: usize },
 }
 
@@ -155,28 +156,46 @@ impl App {
             return;
         }
 
+        // Set loading state
+        self.completion_state = CompletionState::Loading;
+
         if let Some(ref registry) = self.command_registry {
-            let cursor = input.len(); // Cursor position at end of input
+            let cursor = input.len();
+
+            // DEBUG: Log what we're completing
+            eprintln!("DEBUG: Completing '{}' at cursor {}", input, cursor);
+
             match registry.complete(self, input, cursor).await {
-                Ok(completions) if completions.len() == 1 => {
-                    // Only one completion - auto-accept it
-                    self.completion_state = CompletionState::Showing {
-                        completions,
-                        selected: 0,
-                    };
-                    self.accept_completion();
+                Ok(completions) => {
+                    eprintln!("DEBUG: Got {} completions", completions.len());
+                    for c in &completions {
+                        eprintln!("  - {}: {:?}", c.value, c.description);
+                    }
+
+                    if completions.len() == 1 {
+                        // Only one completion - auto-accept it
+                        self.completion_state = CompletionState::Showing {
+                            completions,
+                            selected: 0,
+                        };
+                        self.accept_completion();
+                    } else if !completions.is_empty() {
+                        // Multiple completions - show popup
+                        self.completion_state = CompletionState::Showing {
+                            completions,
+                            selected: 0,
+                        };
+                    } else {
+                        self.completion_state = CompletionState::Idle;
+                    }
                 }
-                Ok(completions) if !completions.is_empty() => {
-                    // Multiple completions - show popup
-                    self.completion_state = CompletionState::Showing {
-                        completions,
-                        selected: 0,
-                    };
-                }
-                _ => {
+                Err(e) => {
+                    eprintln!("DEBUG: Completion error: {}", e);
                     self.completion_state = CompletionState::Idle;
                 }
             }
+        } else {
+            self.completion_state = CompletionState::Idle;
         }
     }
 
@@ -215,7 +234,7 @@ impl App {
     /// Setup commands for this app instance
     fn setup_commands() -> commands::CommandRegistry<App> {
         let mut registry = commands::CommandRegistry::new();
-        App::register_all_commands(&mut registry);
+        App::register(&mut registry);
         registry
     }
 
@@ -516,6 +535,8 @@ fn ui(f: &mut Frame, app: &App) {
     let message_count = app.conversation.try_lock().map(|c| c.message_count()).unwrap_or(0);
     let status_text = if let Some(ref msg) = app.status_message {
         format!(" {} • {} | {} ", app.current_provider, app.model_display_name, msg)
+    } else if matches!(app.completion_state, CompletionState::Loading) {
+        format!(" {} • {} | {} Loading completions... ", app.current_provider, app.model_display_name, app.get_thinking_indicator())
     } else if app.is_streaming {
         format!(" {} • {} | {} Thinking... ", app.current_provider, app.model_display_name, app.get_thinking_indicator())
     } else {
