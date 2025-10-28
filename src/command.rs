@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 
-use crate::completion::AsyncCompleter;
 use crate::error::CommandError;
 use crate::parsed_args::ParsedArgs;
 

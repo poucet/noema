@@ -61,10 +61,46 @@ pub struct TokenStream {
 }
 
 impl TokenStream {
+    /// Create TokenStream with simple whitespace tokenization (for completion)
     pub fn new(input: &str) -> Self {
-        // Simple whitespace tokenization
-        // TODO: Handle quotes properly
         let tokens = input.split_whitespace().map(String::from).collect();
+        Self { tokens }
+    }
+
+    /// Create TokenStream respecting quotes (for command argument parsing)
+    pub fn from_quoted(input: &str) -> Self {
+        let mut tokens = Vec::new();
+        let mut current = String::new();
+        let mut in_quotes = false;
+        let mut chars = input.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '"' => {
+                    in_quotes = !in_quotes;
+                }
+                ' ' | '\t' if !in_quotes => {
+                    if !current.is_empty() {
+                        tokens.push(current.clone());
+                        current.clear();
+                    }
+                }
+                '\\' if in_quotes => {
+                    // Handle escape sequences in quotes
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                    }
+                }
+                _ => {
+                    current.push(ch);
+                }
+            }
+        }
+
+        if !current.is_empty() {
+            tokens.push(current);
+        }
+
         Self { tokens }
     }
 

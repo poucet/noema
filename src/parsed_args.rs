@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::completion::TokenStream;
 use crate::error::ParseError;
 
 /// Parsed command arguments (internal utility, hidden from users)
@@ -8,31 +9,22 @@ pub struct ParsedArgs {
     /// Raw input string
     pub raw: String,
 
-    /// Parsed tokens (respects quotes)
-    pub tokens: Vec<String>,
+    /// Parsed tokens (uses TokenStream for consistency)
+    tokens: TokenStream,
 }
 
 impl ParsedArgs {
     /// Create ParsedArgs from raw string
     pub fn new(raw: impl Into<String>) -> Self {
         let raw = raw.into();
-        let tokens = parse_tokens(&raw);
+        let tokens = TokenStream::from_quoted(&raw);
 
         Self { raw, tokens }
     }
 
     /// Get positional arg by index
     pub fn get(&self, index: usize) -> Option<&str> {
-        self.tokens.get(index).map(|s| s.as_str())
-    }
-
-    /// Get all args after index (for variadic args in future)
-    pub fn rest(&self, from: usize) -> &[String] {
-        if from < self.tokens.len() {
-            &self.tokens[from..]
-        } else {
-            &[]
-        }
+        self.tokens.get(index)
     }
 
     /// Parse arg at position as type T
@@ -41,11 +33,14 @@ impl ParsedArgs {
         T: FromStr,
         T::Err: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
     {
-        let value = self
-            .get(index)
-            .ok_or(ParseError::MissingArg(index))?;
-
-        value.parse().map_err(|e| ParseError::Custom(format!("Failed to parse argument at position {}: {}", index, e)))
+        self.tokens.parse(index)
+            .ok_or(ParseError::MissingArg(index))
+            .and_then(|v| Ok(v))
+            .or_else(|_| {
+                // If parse failed, try to get the value for better error message
+                let value = self.get(index).ok_or(ParseError::MissingArg(index))?;
+                value.parse().map_err(|e| ParseError::Custom(format!("Failed to parse argument at position {}: {}", index, e)))
+            })
     }
 
     /// Try to parse optional arg at position
@@ -54,9 +49,10 @@ impl ParsedArgs {
         T: FromStr,
         T::Err: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
     {
-        match self.get(index) {
-            Some(_) => self.parse(index).map(Some),
-            None => Ok(None),
+        if self.get(index).is_some() {
+            self.parse(index).map(Some)
+        } else {
+            Ok(None)
         }
     }
 
@@ -71,43 +67,6 @@ impl ParsedArgs {
     }
 }
 
-/// Parse tokens from input string, respecting quotes
-fn parse_tokens(input: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' => {
-                in_quotes = !in_quotes;
-            }
-            ' ' | '\t' if !in_quotes => {
-                if !current.is_empty() {
-                    tokens.push(current.clone());
-                    current.clear();
-                }
-            }
-            '\\' if in_quotes => {
-                // Handle escape sequences in quotes
-                if let Some(next) = chars.next() {
-                    current.push(next);
-                }
-            }
-            _ => {
-                current.push(ch);
-            }
-        }
-    }
-
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-
-    tokens
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,19 +74,23 @@ mod tests {
     #[test]
     fn test_parse_simple_args() {
         let args = ParsedArgs::new("foo bar baz");
-        assert_eq!(args.tokens, vec!["foo", "bar", "baz"]);
+        assert_eq!(args.get(0), Some("foo"));
+        assert_eq!(args.get(1), Some("bar"));
+        assert_eq!(args.get(2), Some("baz"));
     }
 
     #[test]
     fn test_parse_quoted_args() {
         let args = ParsedArgs::new(r#"foo "hello world" bar"#);
-        assert_eq!(args.tokens, vec!["foo", "hello world", "bar"]);
+        assert_eq!(args.get(0), Some("foo"));
+        assert_eq!(args.get(1), Some("hello world"));
+        assert_eq!(args.get(2), Some("bar"));
     }
 
     #[test]
     fn test_parse_escaped_quotes() {
         let args = ParsedArgs::new(r#""hello \"world\"""#);
-        assert_eq!(args.tokens, vec![r#"hello "world""#]);
+        assert_eq!(args.get(0), Some(r#"hello "world""#));
     }
 
     #[test]

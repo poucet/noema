@@ -6,8 +6,8 @@ use crate::error::{CommandError, CompletionError};
 use crate::parsed_args::ParsedArgs;
 
 /// Trait for types that can register themselves with a CommandRegistry
-pub trait Registrable<T> {
-    fn register(registry: &mut CommandRegistry<T>);
+pub trait Registrable<R> {
+    fn register(registry: &mut R);
 }
 
 /// Registry for managing and dispatching commands for type T

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use serde::Serialize;
 use tokio::sync::RwLock;
 
 use crate::completion::{AsyncCompleter, Completion, CompletionContext};

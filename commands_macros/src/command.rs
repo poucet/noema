@@ -586,7 +586,7 @@ pub fn impl_command(input: ItemImpl) -> Result<TokenStream> {
 
     // Generate Registrable trait impl
     let registrable_impl = quote! {
-        impl ::commands::Registrable<#self_type> for #self_type {
+        impl ::commands::Registrable<::commands::CommandRegistry<#self_type>> for #self_type {
             fn register(registry: &mut ::commands::CommandRegistry<Self>) {
                 #(registry.register(#command_struct_names::default());)*
             }
