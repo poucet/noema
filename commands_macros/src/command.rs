@@ -13,6 +13,7 @@ struct CommandInfo {
     return_type: ReturnType,
     command_name: String,
     help_text: String,
+    completers: std::collections::HashMap<String, Ident>, // arg_name -> completer_method_name
 }
 
 /// Information about a method argument
@@ -20,6 +21,8 @@ struct ArgInfo {
     name: Ident,
     ty: Type,
     is_optional: bool,
+    /// Inner type for Option<T> (for completion routing)
+    inner_ty: Option<Type>,
 }
 
 /// Parse command attributes to extract name and help text
@@ -71,24 +74,33 @@ fn parse_arg_info(pat_type: &PatType) -> Result<ArgInfo> {
 
     let ty = (*pat_type.ty).clone();
 
-    // Check if type is Option<T>
-    let is_optional = is_option_type(&ty);
+    // Check if type is Option<T> and extract inner type
+    let (is_optional, inner_ty) = extract_option_inner_type(&ty);
 
     Ok(ArgInfo {
         name,
         ty,
         is_optional,
+        inner_ty,
     })
 }
 
-/// Check if a type is Option<T>
-fn is_option_type(ty: &Type) -> bool {
+/// Check if a type is Option<T> and extract T
+fn extract_option_inner_type(ty: &Type) -> (bool, Option<Type>) {
     if let Type::Path(type_path) = ty {
         if let Some(segment) = type_path.path.segments.last() {
-            return segment.ident == "Option";
+            if segment.ident == "Option" {
+                // Extract the T from Option<T>
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                        return (true, Some(inner.clone()));
+                    }
+                }
+                return (true, None);
+            }
         }
     }
-    false
+    (false, None)
 }
 
 /// Generate the command wrapper struct and implementations
@@ -108,14 +120,24 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     // Generate argument parsing code
     let parse_args = info.args.iter().enumerate().map(|(i, arg)| {
         let arg_name = &arg.name;
-        let arg_ty = &arg.ty;
 
         if arg.is_optional {
-            quote! {
-                let #arg_name = args.parse_optional::<#arg_ty>(#i)
-                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
+            // For Option<T>, use the inner type
+            if let Some(ref inner_ty) = arg.inner_ty {
+                quote! {
+                    let #arg_name = args.parse_optional::<#inner_ty>(#i)
+                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
+                }
+            } else {
+                // Fallback if we couldn't extract inner type
+                let arg_ty = &arg.ty;
+                quote! {
+                    let #arg_name: #arg_ty = args.parse_optional(#i)
+                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
+                }
             }
         } else {
+            let arg_ty = &arg.ty;
             quote! {
                 let #arg_name = args.parse::<#arg_ty>(#i)
                     .map_err(|e| ::commands::CommandError::ParseError(e))?;
@@ -130,19 +152,68 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     let result_conversion = generate_result_conversion(&info.return_type);
 
     // Generate completion routing for each argument
-    let completion_arms = info.args.iter().enumerate().map(|(i, arg)| {
-        let arg_ty = &arg.ty;
+    let completion_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
+        let arg_name_str = arg.name.to_string();
 
-        // Try to use the type's AsyncCompleter impl if it exists
-        // This will work for types annotated with #[completable]
-        quote! {
+        // Check if there's a custom completer for this argument
+        if let Some(completer_method) = info.completers.get(&arg_name_str) {
+            // Use custom completer method
+            // The completer receives parsed previous args
+            let prev_args_parsing: Vec<_> = info.args.iter().take(i).enumerate().map(|(j, prev_arg)| {
+                let prev_name = &prev_arg.name;
+                let prev_ty = if prev_arg.is_optional {
+                    prev_arg.inner_ty.as_ref().unwrap_or(&prev_arg.ty)
+                } else {
+                    &prev_arg.ty
+                };
+
+                quote! {
+                    let #prev_name = context.tokens.get(#j + 1)
+                        .and_then(|s| s.parse::<#prev_ty>().ok());
+                }
+            }).collect();
+
+            let prev_arg_names: Vec<_> = info.args.iter().take(i).map(|a| &a.name).collect();
+            let prev_arg_refs: Vec<_> = prev_arg_names.iter().map(|name| {
+                quote! { &#name }
+            }).collect();
+
+            return Some(quote! {
+                #i => {
+                    // Parse previous arguments for context
+                    #(#prev_args_parsing)*
+
+                    // Check all required previous args are present
+                    if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
+                        let inner = self.inner.lock().await;
+                        inner.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
+                            .map_err(|e| ::commands::CompletionError::Custom(e.to_string()))
+                    } else {
+                        Ok(vec![])
+                    }
+                }
+            });
+        }
+
+        // Use inner type for Option<T>, otherwise use the type itself
+        let completion_ty = if arg.is_optional {
+            arg.inner_ty.as_ref()?
+        } else {
+            &arg.ty
+        };
+
+        // Skip non-completable built-in types
+        if is_builtin_type(completion_ty) {
+            return None; // No automatic completion for these
+        }
+
+        // Generate completion for completable types (enums with #[completable])
+        Some(quote! {
             #i => {
-                // Try to complete using the type's AsyncCompleter implementation
-                // This requires the type to implement AsyncCompleter (e.g., via #[completable])
-                let dummy_value = <#arg_ty as ::std::default::Default>::default();
+                let dummy_value = <#completion_ty as ::std::default::Default>::default();
                 dummy_value.complete(partial, context).await
             }
-        }
+        })
     });
 
     let num_args = info.args.len();
@@ -267,6 +338,25 @@ fn generate_result_conversion(return_type: &ReturnType) -> TokenStream {
     }
 }
 
+/// Check if a type is a built-in type that doesn't support completion
+fn is_builtin_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            let ident_str = segment.ident.to_string();
+            matches!(
+                ident_str.as_str(),
+                "String" | "str" | "i8" | "i16" | "i32" | "i64" | "i128" |
+                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "isize" |
+                "f32" | "f64" | "bool" | "char"
+            )
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}
+
 /// Check if a type is Result<(), E>
 fn is_result_unit_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty {
@@ -383,6 +473,9 @@ fn extract_command_info_by_name(
         }
     }
 
+    // Find completer methods for this command
+    let completers = find_completers_for_command(impl_block, command_name)?;
+
     Ok(CommandInfo {
         method_name,
         self_type,
@@ -390,14 +483,50 @@ fn extract_command_info_by_name(
         return_type,
         command_name: command_name.to_string(),
         help_text: help_text.to_string(),
+        completers,
     })
 }
 
-/// Strip #[command] attributes from impl block
+/// Find completer methods in the impl block
+fn find_completers_for_command(
+    impl_block: &ItemImpl,
+    _command_name: &str,
+) -> Result<std::collections::HashMap<String, Ident>> {
+    let mut completers = std::collections::HashMap::new();
+
+    for item in &impl_block.items {
+        if let ImplItem::Fn(method) = item {
+            for attr in &method.attrs {
+                if attr.path().is_ident("completer") {
+                    // Parse #[completer(arg = "arg_name")]
+                    let mut arg_name = None;
+                    attr.parse_nested_meta(|meta| {
+                        if meta.path.is_ident("arg") {
+                            let value = meta.value()?;
+                            let s: syn::LitStr = value.parse()?;
+                            arg_name = Some(s.value());
+                        }
+                        Ok(())
+                    })?;
+
+                    if let Some(arg) = arg_name {
+                        completers.insert(arg, method.sig.ident.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(completers)
+}
+
+/// Strip #[command] and #[completer] attributes from impl block
 fn strip_command_attrs(mut input: ItemImpl) -> ItemImpl {
     for item in &mut input.items {
         if let ImplItem::Fn(method) = item {
-            method.attrs.retain(|attr| !attr.path().is_ident("command"));
+            method.attrs.retain(|attr| {
+                !attr.path().is_ident("command") && !attr.path().is_ident("completer")
+            });
         }
     }
     input
