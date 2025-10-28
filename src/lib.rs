@@ -17,7 +17,7 @@ pub use cache::CachedCompleter;
 pub use parsed_args::ParsedArgs; // For generated code
 
 // Re-export from macros crate
-pub use commands_macros::{command, completable, completer};
+pub use commands_macros::{commandable, command, completable, completer};
 
 // Re-export async_trait for macro-generated code
 pub use async_trait;

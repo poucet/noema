@@ -151,48 +151,13 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     // Generate result conversion based on return type
     let result_conversion = generate_result_conversion(&info.return_type);
 
-    // Generate completion routing for each argument
-    let completion_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
+    // Generate completion routing for enum-based arguments (no target needed)
+    let enum_completion_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
         let arg_name_str = arg.name.to_string();
 
-        // Check if there's a custom completer for this argument
-        if let Some(completer_method) = info.completers.get(&arg_name_str) {
-            // Use custom completer method
-            // The completer receives parsed previous args
-            let prev_args_parsing: Vec<_> = info.args.iter().take(i).enumerate().map(|(j, prev_arg)| {
-                let prev_name = &prev_arg.name;
-                let prev_ty = if prev_arg.is_optional {
-                    prev_arg.inner_ty.as_ref().unwrap_or(&prev_arg.ty)
-                } else {
-                    &prev_arg.ty
-                };
-
-                quote! {
-                    let #prev_name = context.tokens.get(#j + 1)
-                        .and_then(|s| s.parse::<#prev_ty>().ok());
-                }
-            }).collect();
-
-            let prev_arg_names: Vec<_> = info.args.iter().take(i).map(|a| &a.name).collect();
-            let prev_arg_refs: Vec<_> = prev_arg_names.iter().map(|name| {
-                quote! { &#name }
-            }).collect();
-
-            return Some(quote! {
-                #i => {
-                    // Parse previous arguments for context
-                    #(#prev_args_parsing)*
-
-                    // Check all required previous args are present
-                    if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
-                        let inner = self.inner.lock().await;
-                        inner.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
-                            .map_err(|e| ::commands::CompletionError::Custom(e.to_string()))
-                    } else {
-                        Ok(vec![])
-                    }
-                }
-            });
+        // Skip arguments with custom completers (they need target access)
+        if info.completers.contains_key(&arg_name_str) {
+            return None;
         }
 
         // Use inner type for Option<T>, otherwise use the type itself
@@ -204,7 +169,7 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
 
         // Skip non-completable built-in types
         if is_builtin_type(completion_ty) {
-            return None; // No automatic completion for these
+            return None;
         }
 
         // Generate completion for completable types (enums with #[completable])
@@ -217,17 +182,77 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     });
 
     let num_args = info.args.len();
+    let has_custom_completers = !info.completers.is_empty();
 
-    quote! {
-        pub struct #wrapper_name {
-            inner: ::std::sync::Arc<::tokio::sync::Mutex<#self_type>>,
-        }
+    // Generate complete_with_target override if there are custom completers
+    let complete_with_target_impl = if has_custom_completers {
+        // Find completion arms that use custom completers (need target access)
+        let completion_with_target_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
+            let arg_name_str = arg.name.to_string();
 
-        impl #wrapper_name {
-            pub fn new(inner: ::std::sync::Arc<::tokio::sync::Mutex<#self_type>>) -> Self {
-                Self { inner }
+            if let Some(completer_method) = info.completers.get(&arg_name_str) {
+                let prev_args_parsing: Vec<_> = info.args.iter().take(i).enumerate().map(|(j, prev_arg)| {
+                    let prev_name = &prev_arg.name;
+                    let prev_ty = if prev_arg.is_optional {
+                        prev_arg.inner_ty.as_ref().unwrap_or(&prev_arg.ty)
+                    } else {
+                        &prev_arg.ty
+                    };
+
+                    quote! {
+                        let #prev_name = context.tokens.get(#j + 1)
+                            .and_then(|s| s.parse::<#prev_ty>().ok());
+                    }
+                }).collect();
+
+                let prev_arg_names: Vec<_> = info.args.iter().take(i).map(|a| &a.name).collect();
+                let prev_arg_refs: Vec<_> = prev_arg_names.iter().map(|name| {
+                    quote! { &#name }
+                }).collect();
+
+                Some(quote! {
+                    #i => {
+                        #(#prev_args_parsing)*
+
+                        if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
+                            target.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
+                                .map_err(|e| ::commands::CompletionError::Custom(e.to_string()))
+                        } else {
+                            Ok(vec![])
+                        }
+                    }
+                })
+            } else {
+                None
+            }
+        });
+
+        quote! {
+            async fn complete_with_target(
+                &self,
+                target: &#self_type,
+                partial: &str,
+                context: &::commands::CompletionContext,
+            ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
+                let arg_index = if context.tokens.len() > 1 {
+                    context.tokens.len() - 2
+                } else {
+                    0
+                };
+
+                match arg_index {
+                    #(#completion_with_target_arms)*
+                    _ => self.complete(partial, context).await
+                }
             }
         }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        // Zero-sized command struct (no state!)
+        pub struct #wrapper_name;
 
         #[::commands::async_trait::async_trait]
         impl ::commands::AsyncCompleter for #wrapper_name {
@@ -238,43 +263,39 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
                 partial: &str,
                 context: &::commands::CompletionContext,
             ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
-                // Determine which argument we're completing
-                // tokens includes command name, so arg_index = tokens.len() - 1
+                // Base completion without target (only for enums)
                 let arg_index = if context.tokens.len() > 1 {
-                    context.tokens.len() - 2 // -1 for command, -1 for 0-indexing
+                    context.tokens.len() - 2
                 } else {
                     0
                 };
 
-                // Route to appropriate completer based on argument position
+                // Only use enum-based completions here (no target access)
                 match arg_index {
-                    #(#completion_arms)*
-                    _ if arg_index >= #num_args => {
-                        // No more arguments to complete
-                        Ok(vec![])
-                    }
+                    #(#enum_completion_arms)*
                     _ => Ok(vec![])
                 }
             }
         }
 
         #[::commands::async_trait::async_trait]
-        impl ::commands::Command for #wrapper_name {
+        impl ::commands::Command<#self_type> for #wrapper_name {
             async fn execute(
-                &mut self,
+                &self,
+                target: &mut #self_type,
                 args: ::commands::ParsedArgs,
             ) -> ::std::result::Result<::commands::CommandResult, ::commands::CommandError> {
-                let mut inner = self.inner.lock().await;
-
                 // Parse arguments
                 #(#parse_args)*
 
                 // Call user method
-                let result = inner.#method_name(#(#arg_names),*).await;
+                let result = target.#method_name(#(#arg_names),*).await;
 
                 // Convert result to CommandResult
                 #result_conversion
             }
+
+            #complete_with_target_impl
 
             fn metadata(&self) -> &::commands::CommandMetadata {
                 static METADATA: ::commands::CommandMetadata = ::commands::CommandMetadata {
@@ -285,11 +306,9 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
             }
         }
 
-        /// Helper function to create the command wrapper
-        pub fn #method_name(
-            inner: ::std::sync::Arc<::tokio::sync::Mutex<#self_type>>
-        ) -> #wrapper_name {
-            #wrapper_name::new(inner)
+        /// Helper function to create the command (zero-sized, just returns the type)
+        pub fn #method_name() -> #wrapper_name {
+            #wrapper_name
         }
     }
 }

@@ -32,10 +32,11 @@ pub fn completable(_args: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Marks a method as a command
+/// Marks an impl block as containing commands
 ///
 /// # Example
 /// ```ignore
+/// #[commandable]
 /// impl App {
 ///     #[command(name = "model", help = "Switch model provider")]
 ///     async fn set_model(&mut self, provider: Provider) -> Result<String, anyhow::Error> {
@@ -44,12 +45,23 @@ pub fn completable(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn commandable(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemImpl);
 
     impl_command(input)
         .unwrap_or_else(|err| err.to_compile_error())
         .into()
+}
+
+/// Marks a single method or function as a command (for standalone commands)
+///
+/// Note: When used inside an impl block, the impl block should use #[commandable] instead
+#[proc_macro_attribute]
+pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
+    // For now, this is a marker attribute that #[commandable] looks for
+    // When used standalone, it would need different handling
+    // TODO: Support standalone #[command] on free functions
+    input
 }
 
 /// Marks a method as a completer for a specific argument

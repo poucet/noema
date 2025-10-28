@@ -1,6 +1,4 @@
-use commands::{command, completable, AsyncCompleter, Command, CommandRegistry};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use commands::{commandable, completable, AsyncCompleter, Command, CommandRegistry};
 
 #[completable]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,7 +13,7 @@ struct TestApp {
     value: String,
 }
 
-#[command]
+#[commandable]
 impl TestApp {
     #[command(name = "set", help = "Set a value")]
     async fn set_value(&mut self, provider: TestProvider) -> Result<String, anyhow::Error> {
@@ -53,14 +51,14 @@ async fn test_completable_enum() {
 
 #[tokio::test]
 async fn test_command_execution() {
-    let app = Arc::new(Mutex::new(TestApp {
+    let mut app = TestApp {
         value: String::new(),
-    }));
+    };
 
-    let mut set_cmd = set_value(Arc::clone(&app));
+    let set_cmd = set_value();
     let args = commands::ParsedArgs::new("provider1");
 
-    let result = set_cmd.execute(args).await.unwrap();
+    let result = set_cmd.execute(&mut app, args).await.unwrap();
 
     match result {
         commands::CommandResult::Success(msg) => {
@@ -70,22 +68,21 @@ async fn test_command_execution() {
     }
 
     // Verify value was set
-    let app_locked = app.lock().await;
-    assert_eq!(app_locked.value, "Provider1");
+    assert_eq!(app.value, "Provider1");
 }
 
 #[tokio::test]
 async fn test_command_registry() {
-    let app = Arc::new(Mutex::new(TestApp {
+    let mut app = TestApp {
         value: String::new(),
-    }));
+    };
 
     let mut registry = CommandRegistry::new();
-    registry.register(set_value(Arc::clone(&app)));
-    registry.register(get_value(Arc::clone(&app)));
+    registry.register(set_value());
+    registry.register(get_value());
 
     // Execute set command
-    let result = registry.execute("/set provider2").await.unwrap();
+    let result = registry.execute(&mut app, "/set provider2").await.unwrap();
     match result {
         commands::CommandResult::Success(msg) => {
             assert!(msg.contains("Provider2"));
@@ -94,7 +91,7 @@ async fn test_command_registry() {
     }
 
     // Execute get command
-    let result = registry.execute("/get").await.unwrap();
+    let result = registry.execute(&mut app, "/get").await.unwrap();
     match result {
         commands::CommandResult::Success(value) => {
             assert_eq!(value, "Provider2");
@@ -105,11 +102,11 @@ async fn test_command_registry() {
 
 #[tokio::test]
 async fn test_automatic_completion() {
-    let app = Arc::new(Mutex::new(TestApp {
+    let app = TestApp {
         value: String::new(),
-    }));
+    };
 
-    let set_cmd = set_value(Arc::clone(&app));
+    let set_cmd = set_value();
 
     // Test completing the provider argument
     let ctx = commands::CompletionContext::new("/set prov".to_string(), 10);
@@ -129,5 +126,91 @@ async fn test_automatic_completion() {
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].value, "provider1");
     assert_eq!(completions[0].description, Some("First provider".to_string()));
+}
+
+// Test custom completers with context
+struct CompleterTestApp {
+    current_provider: Option<TestProvider>,
+}
+
+#[commandable]
+impl CompleterTestApp {
+    #[command(name = "configure", help = "Configure with provider and model")]
+    async fn configure(
+        &mut self,
+        provider: TestProvider,
+        model_name: Option<String>
+    ) -> Result<String, anyhow::Error> {
+        self.current_provider = Some(provider.clone());
+        Ok(format!("Configured with {:?} and model {:?}", provider, model_name))
+    }
+
+    #[completer(arg = "model_name")]
+    async fn complete_model_name(
+        &self,
+        provider: &TestProvider,
+        partial: &str
+    ) -> Result<Vec<commands::Completion>, anyhow::Error> {
+        // Return different models based on provider
+        let models = match provider {
+            TestProvider::Provider1 => vec!["model1a", "model1b"],
+            TestProvider::Provider2 => vec!["model2a", "model2b"],
+        };
+
+        Ok(models
+            .into_iter()
+            .filter(|m| m.starts_with(partial))
+            .map(|m| commands::Completion::simple(m))
+            .collect())
+    }
+}
+
+#[tokio::test]
+async fn test_custom_completer_with_context() {
+    let app = CompleterTestApp {
+        current_provider: None,
+    };
+
+    let cmd = configure();
+
+    // Test that custom completer receives parsed provider argument
+    let ctx = commands::CompletionContext::new("/configure provider1 mod".to_string(), 20);
+    let completions = cmd.complete_with_target(&app, "mod", &ctx).await.unwrap();
+
+    // Should get Provider1's models
+    assert_eq!(completions.len(), 2);
+    assert!(completions.iter().any(|c| c.value == "model1a"));
+    assert!(completions.iter().any(|c| c.value == "model1b"));
+}
+
+#[tokio::test]
+async fn test_optional_arguments() {
+    let mut app = CompleterTestApp {
+        current_provider: None,
+    };
+
+    let cmd = configure();
+
+    // Test with just provider (no model)
+    let args = commands::ParsedArgs::new("provider1");
+    let result = cmd.execute(&mut app, args).await.unwrap();
+    match result {
+        commands::CommandResult::Success(msg) => {
+            assert!(msg.contains("Provider1"));
+            assert!(msg.contains("None"));
+        }
+        _ => panic!("Expected Success"),
+    }
+
+    // Test with provider and model
+    let args = commands::ParsedArgs::new("provider2 model2a");
+    let result = cmd.execute(&mut app, args).await.unwrap();
+    match result {
+        commands::CommandResult::Success(msg) => {
+            assert!(msg.contains("Provider2"));
+            assert!(msg.contains("model2a"));
+        }
+        _ => panic!("Expected Success"),
+    }
 }
 

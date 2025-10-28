@@ -5,12 +5,12 @@ use crate::completion::{Completion, CompletionContext};
 use crate::error::{CommandError, CompletionError};
 use crate::parsed_args::ParsedArgs;
 
-/// Registry for managing and dispatching commands
-pub struct CommandRegistry {
-    commands: HashMap<String, Box<dyn Command<Metadata = ()>>>,
+/// Registry for managing and dispatching commands for type T
+pub struct CommandRegistry<T> {
+    commands: HashMap<String, Box<dyn Command<T, Metadata = ()>>>,
 }
 
-impl CommandRegistry {
+impl<T> CommandRegistry<T> {
     /// Create a new empty command registry
     pub fn new() -> Self {
         Self {
@@ -21,28 +21,29 @@ impl CommandRegistry {
     /// Register a command
     pub fn register<C>(&mut self, command: C)
     where
-        C: Command<Metadata = ()> + 'static,
+        C: Command<T, Metadata = ()> + 'static,
     {
         let name = command.metadata().name.to_string();
         self.commands.insert(name, Box::new(command));
     }
 
-    /// Execute a command from input string
-    pub async fn execute(&mut self, input: &str) -> Result<CommandResult, CommandError> {
+    /// Execute a command from input string on the target
+    pub async fn execute(&self, target: &mut T, input: &str) -> Result<CommandResult, CommandError> {
         let (cmd_name, args_str) = parse_command_input(input)?;
 
         let command = self
             .commands
-            .get_mut(cmd_name)
+            .get(cmd_name)
             .ok_or_else(|| CommandError::UnknownCommand(cmd_name.to_string()))?;
 
         let args = ParsedArgs::new(args_str);
-        command.execute(args).await
+        command.execute(target, args).await
     }
 
-    /// Get completions for the current input
+    /// Get completions for the current input with access to target
     pub async fn complete(
         &self,
+        target: &T,
         input: &str,
         cursor: usize,
     ) -> Result<Vec<Completion<()>>, CompletionError> {
@@ -52,7 +53,7 @@ impl CommandRegistry {
         if let Ok((cmd_name, args_str)) = parse_command_input(input) {
             // Complete command arguments
             if let Some(command) = self.commands.get(cmd_name) {
-                command.complete(args_str, &ctx).await
+                command.complete_with_target(target, args_str, &ctx).await
             } else {
                 // Unknown command, no completions
                 Ok(vec![])
@@ -80,7 +81,7 @@ impl CommandRegistry {
     }
 }
 
-impl Default for CommandRegistry {
+impl<T> Default for CommandRegistry<T> {
     fn default() -> Self {
         Self::new()
     }
