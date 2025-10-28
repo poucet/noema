@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
+commands = { path = "../commands" }
 conversation = { path = "../conversation" }
 crossterm = "0.28"
 directories = "6.0.0"
