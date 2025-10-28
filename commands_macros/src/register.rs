@@ -32,7 +32,7 @@ pub fn impl_register_commands(input: TokenStream) -> Result<TokenStream> {
         );
 
         quote! {
-            #registry.register_cmd::<#struct_name>();
+            #registry.register(#struct_name::default());
         }
     });
 

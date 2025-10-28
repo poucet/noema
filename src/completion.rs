@@ -54,6 +54,46 @@ impl<M> Completion<M> {
     }
 }
 
+/// Parsed tokens with methods for consumption
+#[derive(Clone, Debug)]
+pub struct TokenStream {
+    tokens: Vec<String>,
+}
+
+impl TokenStream {
+    pub fn new(input: &str) -> Self {
+        // Simple whitespace tokenization
+        // TODO: Handle quotes properly
+        let tokens = input.split_whitespace().map(String::from).collect();
+        Self { tokens }
+    }
+
+    /// Get token at index
+    pub fn get(&self, index: usize) -> Option<&str> {
+        self.tokens.get(index).map(|s| s.as_str())
+    }
+
+    /// Get the last token (what's being completed)
+    pub fn last(&self) -> Option<&str> {
+        self.tokens.last().map(|s| s.as_str())
+    }
+
+    /// Number of tokens
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    /// Is empty
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+
+    /// Parse token at index as type T
+    pub fn parse<T: std::str::FromStr>(&self, index: usize) -> Option<T> {
+        self.get(index).and_then(|s| s.parse().ok())
+    }
+}
+
 /// Context provided to completers during completion
 pub struct CompletionContext<'a, T> {
     /// Full input string
@@ -62,8 +102,8 @@ pub struct CompletionContext<'a, T> {
     /// Cursor position in input
     pub cursor: usize,
 
-    /// Parsed tokens (for convenience)
-    pub tokens: Vec<String>,
+    /// Parsed tokens
+    pub tokens: TokenStream,
 
     /// Reference to the target for context-aware completion
     pub target: &'a T,
@@ -72,15 +112,31 @@ pub struct CompletionContext<'a, T> {
 impl<'a, T> CompletionContext<'a, T> {
     /// Create a new completion context
     pub fn new(input: String, cursor: usize, target: &'a T) -> Self {
-        // Simple whitespace tokenization
-        // TODO: Handle quotes properly
-        let tokens = input.split_whitespace().map(String::from).collect();
+        let tokens = TokenStream::new(&input);
 
         Self {
             input,
             cursor,
             tokens,
             target,
+        }
+    }
+
+    /// Calculate which argument index is being completed
+    pub fn arg_index(&self) -> usize {
+        if self.input.ends_with(char::is_whitespace) {
+            self.tokens.len().saturating_sub(1)
+        } else {
+            self.tokens.len().saturating_sub(2)
+        }
+    }
+
+    /// Get the partial word being completed
+    pub fn partial(&self) -> &str {
+        if self.input.ends_with(char::is_whitespace) {
+            ""  // Completing a new word
+        } else {
+            self.tokens.last().unwrap_or("")
         }
     }
 }

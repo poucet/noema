@@ -138,14 +138,10 @@ fn generate_arg_parse(arg: &ArgInfo, index: usize) -> TokenStream {
     }
 }
 
-/// Calculate arg_index from context (DRY helper)
+/// Generate arg_index calculation (uses context method)
 fn generate_arg_index_calc() -> TokenStream {
     quote! {
-        let arg_index = if context.input.ends_with(char::is_whitespace) {
-            context.tokens.len().saturating_sub(1)
-        } else {
-            context.tokens.len().saturating_sub(2)
-        };
+        let arg_index = context.arg_index();
     }
 }
 
@@ -186,18 +182,18 @@ fn generate_enum_completion_arm(
 /// Generate completion arm for custom completer
 fn generate_custom_completion_arm(
     arg_index: usize,
-    arg: &ArgInfo,
+    _arg: &ArgInfo,
     all_args: &[ArgInfo],
     completer_method: &Ident,
 ) -> TokenStream {
-    // Parse all previous arguments
+    // Parse all previous arguments using TokenStream.parse()
     let prev_args_parsing: Vec<_> = all_args.iter().take(arg_index).enumerate().map(|(j, prev_arg)| {
         let prev_name = &prev_arg.name;
         let prev_ty = get_effective_type(prev_arg);
+        let token_index = j + 1; // +1 to skip command name
 
         quote! {
-            let #prev_name = context.tokens.get(#j + 1)
-                .and_then(|s| s.parse::<#prev_ty>().ok());
+            let #prev_name = context.tokens.parse::<#prev_ty>(#token_index);
         }
     }).collect();
 
@@ -208,18 +204,12 @@ fn generate_custom_completion_arm(
 
     quote! {
         #arg_index => {
-            eprintln!("DEBUG: Matched arg_index {}, calling custom completer", #arg_index);
             #(#prev_args_parsing)*
 
-            eprintln!("DEBUG: Parsed previous args: {:?}", vec![#(#prev_arg_names.as_ref().map(|v| format!("{:?}", v))),*]);
             if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
-                eprintln!("DEBUG: All required args present, calling {} with partial='{}'", stringify!(#completer_method), partial);
-                let result = target.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
-                    .map_err(|e| ::commands::CompletionError::Custom(e.to_string()));
-                eprintln!("DEBUG: Completer returned {} completions", result.as_ref().map(|v| v.len()).unwrap_or(0));
-                result
+                target.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
+                    .map_err(|e| ::commands::CompletionError::Custom(e.to_string()))
             } else {
-                eprintln!("DEBUG: Missing required previous args");
                 Ok(vec![])
             }
         }
@@ -282,13 +272,8 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
                 // Target is available via context.target
                 let target = context.target;
 
-                // Extract the actual partial word being completed
-                let partial = if context.input.ends_with(char::is_whitespace) {
-                    ""  // Completing a new word
-                } else {
-                    // Get the last token
-                    context.tokens.last().map(|s| s.as_str()).unwrap_or("")
-                };
+                // Get the partial word being completed
+                let partial = context.partial();
 
                 match arg_index {
                     #(#enum_completion_arms)*
