@@ -62,8 +62,11 @@ EOF
 # Find the branch name associated with a worktree path
 get_branch_from_worktree_path() {
     local WORKTREE_PATH=$1
-    # Use porcelain format to reliably parse
-    git worktree list --porcelain | grep "^worktree $WORKTREE_PATH" -A 1 | grep "^branch " | sed 's|^branch refs/heads/||'
+    # Use porcelain format to reliably parse - need to escape the path for grep
+    local ESCAPED_PATH=$(printf '%s\n' "$WORKTREE_PATH" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    git worktree list --porcelain | awk -v path="$WORKTREE_PATH" '
+        $1 == "worktree" && $2 == path { getline; if ($1 == "branch") { sub(/^branch refs\/heads\//, ""); print; exit } }
+    '
 }
 
 create_worktree() {
@@ -203,7 +206,15 @@ remove_worktree() {
     fi
 
     echo "Removing worktree: $WORKTREE_NAME"
-    
+
+    # Deinitialize submodules first to avoid "directory not empty" errors
+    echo "→ Deinitializing submodules in worktree..."
+    (
+        cd "$WORKTREE_PATH"
+        git submodule deinit --all --force 2>/dev/null || true
+    )
+    echo "  ✓ Submodules deinitialized."
+
     # Remove main worktree (this is all that's needed)
     echo "→ Removing main worktree"
     git worktree remove "$WORKTREE_PATH" --force
