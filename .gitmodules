@@ -1,12 +1,12 @@
 [submodule "cli"]
 	path = cli
-	url = ../modules/cli.git
+	url = ./.git-remotes/cli.git
 [submodule "llm"]
 	path = llm
-	url = ../modules/llm.git
+	url = ./.git-remotes/llm.git
 [submodule "conversation"]
 	path = conversation
-	url = ../modules/conversation.git
+	url = ./.git-remotes/conversation.git
 [submodule "tui"]
 	path = tui
-	url = ../modules/tui.git
+	url = ./.git-remotes/tui.git

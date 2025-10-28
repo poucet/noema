@@ -7,7 +7,7 @@ set -e
 
 # Get the absolute path to the repository root
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-WORKTREE_DIR=$(realpath "$(dirname "$REPO_ROOT")/worktrees")
+WORKTREE_DIR=$(realpath "$REPO_ROOT/.git-worktrees")
 
 # Dynamically discover submodules
 get_submodules() {
@@ -93,15 +93,6 @@ create_worktree() {
     )
     echo "  ✓ Submodules initialized."
     # --- [END FIXES] ---
-
-    # echo "→ Re-pointing submodule remotes to main repository..."
-    # for sub in "${SUBMODULES[@]}"; do
-    #     (
-    #         cd "$WORKTREE_PATH/$sub"
-    #         git remote set-url origin "$REPO_ROOT/$sub.git"
-    #     )
-    # done
-    # echo "  ✓ Submodule remotes re-pointed."
     
     # Create VSCode workspace file
     create_vscode_workspace "$WORKTREE_NAME" "$WORKTREE_PATH"
