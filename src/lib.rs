@@ -3,6 +3,7 @@ pub mod command;
 pub mod error;
 pub mod registry;
 pub mod cache;
+pub mod token_stream;
 
 // ParsedArgs is public for generated code but users shouldn't need it
 #[doc(hidden)]

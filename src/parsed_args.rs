@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::completion::TokenStream;
+use crate::token_stream::TokenStream;
 use crate::error::ParseError;
 
 /// Parsed command arguments (internal utility, hidden from users)
