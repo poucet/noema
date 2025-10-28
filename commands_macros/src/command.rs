@@ -120,20 +120,20 @@ fn generate_arg_parse(arg: &ArgInfo, index: usize) -> TokenStream {
         if let Some(ref inner_ty) = arg.inner_ty {
             quote! {
                 let #arg_name = args.parse_optional::<#inner_ty>(#index)
-                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
+                    .map_err(::commands::CommandError::ParseError)?;
             }
         } else {
             let arg_ty = &arg.ty;
             quote! {
                 let #arg_name: #arg_ty = args.parse_optional(#index)
-                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
+                    .map_err(::commands::CommandError::ParseError)?;
             }
         }
     } else {
         let arg_ty = &arg.ty;
         quote! {
-            let #arg_name = args.parse::<#arg_ty>(#index)
-                .map_err(|e| ::commands::CommandError::ParseError(e))?;
+            let #arg_name = args.parse_arg::<#arg_ty>(#index)
+                .map_err(::commands::CommandError::ParseError)?;
         }
     }
 }
@@ -288,7 +288,7 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
             async fn execute(
                 &self,
                 target: &mut #self_type,
-                args: ::commands::ParsedArgs,
+                args: ::commands::token_stream::TokenStream,
             ) -> ::std::result::Result<::commands::CommandResult, ::commands::CommandError> {
                 // Parse arguments
                 #(#parse_args)*

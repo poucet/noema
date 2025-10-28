@@ -76,9 +76,37 @@ impl TokenStream {
         self.tokens.is_empty()
     }
 
-    /// Parse token at index as type T
+    /// Parse token at index as type T (returns Option for simple cases)
     pub fn parse<T: std::str::FromStr>(&self, index: usize) -> Option<T> {
         self.get(index).and_then(|s| s.parse().ok())
+    }
+
+    /// Parse token at index with error handling (for command execution)
+    pub fn parse_arg<T>(&self, index: usize) -> Result<T, crate::error::ParseError>
+    where
+        T: std::str::FromStr,
+        T::Err: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
+    {
+        let value = self.get(index)
+            .ok_or(crate::error::ParseError::MissingArg(index))?;
+
+        value.parse()
+            .map_err(|e| crate::error::ParseError::Custom(
+                format!("Failed to parse argument at position {}: {}", index, e)
+            ))
+    }
+
+    /// Parse optional token at index (for Option<T> arguments)
+    pub fn parse_optional<T>(&self, index: usize) -> Result<Option<T>, crate::error::ParseError>
+    where
+        T: std::str::FromStr,
+        T::Err: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
+    {
+        if self.get(index).is_some() {
+            self.parse_arg(index).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 
     /// Calculate which argument index is being completed

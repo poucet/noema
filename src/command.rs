@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::error::CommandError;
-use crate::parsed_args::ParsedArgs;
+use crate::token_stream::TokenStream;
 
 /// Result of executing a command
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub struct CommandMetadata {
 #[async_trait]
 pub trait Command<T = ()>: crate::completion::AsyncCompleter<T> {
     /// Execute the command with parsed arguments on the target
-    async fn execute(&self, target: &mut T, args: ParsedArgs) -> Result<CommandResult, CommandError>;
+    async fn execute(&self, target: &mut T, args: TokenStream) -> Result<CommandResult, CommandError>;
 
     /// Get command metadata
     fn metadata(&self) -> &CommandMetadata;

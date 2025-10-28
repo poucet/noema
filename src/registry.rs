@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::command::{Command, CommandResult};
 use crate::completion::{Completion, CompletionContext};
 use crate::error::{CommandError, CompletionError};
-use crate::parsed_args::ParsedArgs;
+use crate::token_stream::TokenStream;
 
 /// Trait for types that can register themselves with a CommandRegistry
 pub trait Registrable<R> {
@@ -41,7 +41,7 @@ impl<T> CommandRegistry<T> {
             .get(cmd_name)
             .ok_or_else(|| CommandError::UnknownCommand(cmd_name.to_string()))?;
 
-        let args = ParsedArgs::new(args_str);
+        let args = TokenStream::from_quoted(args_str);
         command.execute(target, args).await
     }
 
