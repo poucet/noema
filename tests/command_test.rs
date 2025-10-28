@@ -55,7 +55,7 @@ async fn test_command_execution() {
         value: String::new(),
     };
 
-    let set_cmd = set_value();
+    let set_cmd = TestAppSetValueCommand;
     let args = commands::ParsedArgs::new("provider1");
 
     let result = set_cmd.execute(&mut app, args).await.unwrap();
@@ -78,8 +78,7 @@ async fn test_command_registry() {
     };
 
     let mut registry = CommandRegistry::new();
-    registry.register(set_value());
-    registry.register(get_value());
+    TestApp::register_all_commands(&mut registry);
 
     // Execute set command
     let result = registry.execute(&mut app, "/set provider2").await.unwrap();
@@ -106,7 +105,7 @@ async fn test_automatic_completion() {
         value: String::new(),
     };
 
-    let set_cmd = set_value();
+    let set_cmd = TestAppSetValueCommand;
 
     // Test completing the provider argument
     let ctx = commands::CompletionContext::new("/set prov".to_string(), 10);
@@ -221,13 +220,12 @@ struct GlobalContext {
 
 #[tokio::test]
 async fn test_command_name_completion() {
-    let mut app = TestApp {
+    let app = TestApp {
         value: String::new(),
     };
 
     let mut registry = CommandRegistry::new();
-    registry.register(set_value());
-    registry.register(get_value());
+    TestApp::register_all_commands(&mut registry);
 
     // Test completing command names
     let completions = registry.complete(&app, "/se", 3).await.unwrap();
@@ -243,11 +241,11 @@ async fn test_command_name_completion() {
 
 #[tokio::test]
 async fn test_second_argument_completion() {
-    let mut app = CompleterTestApp {
+    let app = CompleterTestApp {
         current_provider: None,
     };
 
-    let cmd = configure();
+    let cmd = CompleterTestAppConfigureCommand;
 
     // Completing first argument (provider) - should use enum completion
     let ctx = commands::CompletionContext::new("/configure prov".to_string(), 15);
@@ -279,7 +277,7 @@ impl Global {
 #[tokio::test]
 async fn test_global_command_on_unit_struct() {
     let mut global = Global;
-    let cmd = show_version();
+    let cmd = GlobalShowVersionCommand;
     let args = commands::ParsedArgs::new("");
     let result = cmd.execute(&mut global, args).await.unwrap();
 
@@ -289,5 +287,26 @@ async fn test_global_command_on_unit_struct() {
         }
         _ => panic!("Expected Success"),
     }
+}
+
+#[tokio::test]
+async fn test_register_all_commands_helper() {
+    let mut app = TestApp {
+        value: String::new(),
+    };
+
+    let mut registry = CommandRegistry::new();
+
+    // Use the generated helper - no need to know struct names!
+    TestApp::register_all_commands(&mut registry);
+
+    // Verify commands are registered
+    assert_eq!(registry.command_names().len(), 2);
+    assert!(registry.command_names().contains(&"set"));
+    assert!(registry.command_names().contains(&"get"));
+
+    // Verify they work
+    let result = registry.execute(&mut app, "/set provider1").await.unwrap();
+    assert!(matches!(result, commands::CommandResult::Success(_)));
 }
 

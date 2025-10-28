@@ -257,6 +257,7 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
 
     quote! {
         // Zero-sized command struct (no state!)
+        #[derive(Default)]
         pub struct #wrapper_name;
 
         #[::commands::async_trait::async_trait]
@@ -566,21 +567,47 @@ pub fn impl_command(input: ItemImpl) -> Result<TokenStream> {
         return Ok(quote! { #input });
     }
 
+    // Get self type for helper method
+    let self_type = &input.self_ty;
+
     // Strip #[command] attributes from the impl block for output
     let cleaned_input = strip_command_attrs(input.clone());
 
     // Generate wrappers for all commands
     let mut wrappers = Vec::new();
+    let mut command_struct_names = Vec::new();
+
     for (command_name, help_text) in &commands {
         let info = extract_command_info_by_name(&input, command_name, help_text)?;
         let wrapper = generate_command_wrapper(&info);
         wrappers.push(wrapper);
+
+        // Store struct name for registration helper
+        let method_name = &info.method_name;
+        let struct_name = format_ident!(
+            "{}{}Command",
+            self_type.to_token_stream().to_string().replace(" ", ""),
+            method_name.to_string().to_pascal_case()
+        );
+        command_struct_names.push(struct_name);
     }
+
+    // Generate helper method to register all commands
+    let register_all_helper = quote! {
+        impl #self_type {
+            /// Register all commands for this type
+            pub fn register_all_commands(registry: &mut ::commands::CommandRegistry<Self>) {
+                #(registry.register_cmd::<#command_struct_names>();)*
+            }
+        }
+    };
 
     Ok(quote! {
         #cleaned_input
 
         #(#wrappers)*
+
+        #register_all_helper
     })
 }
 
@@ -702,16 +729,15 @@ pub fn impl_command_function(func: ItemFn) -> Result<TokenStream> {
         })
     });
 
-    // Rename the original function to avoid conflict
+    // Keep the original function as-is, just strip the attribute
     let mut cleaned_func = func.clone();
     cleaned_func.attrs.retain(|attr| !attr.path().is_ident("command"));
-    let original_func_name = format_ident!("__{}_impl", func_name);
-    cleaned_func.sig.ident = original_func_name.clone();
 
     Ok(quote! {
-        // Keep original function with renamed internal name
+        // Keep original function unchanged
         #cleaned_func
 
+        // Generate command wrapper struct
         pub struct #wrapper_name;
 
         #[::commands::async_trait::async_trait]
@@ -745,7 +771,7 @@ pub fn impl_command_function(func: ItemFn) -> Result<TokenStream> {
             ) -> ::std::result::Result<::commands::CommandResult, ::commands::CommandError> {
                 #(#parse_args)*
 
-                let result = #original_func_name(target, #(#arg_names),*).await;
+                let result = #func_name(target, #(#arg_names),*).await;
 
                 #result_conversion
             }
@@ -759,10 +785,7 @@ pub fn impl_command_function(func: ItemFn) -> Result<TokenStream> {
             }
         }
 
-        // Helper function to create the command (uses original function name)
-        // The original function is renamed to __<name>_impl
-        pub fn #func_name() -> #wrapper_name {
-            #wrapper_name
-        }
+        // Note: To get the command struct, use the wrapper struct name directly
+        // or use the command!() macro helper (to be implemented)
     })
 }

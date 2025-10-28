@@ -18,13 +18,22 @@ impl<T> CommandRegistry<T> {
         }
     }
 
-    /// Register a command
+    /// Register a command instance
     pub fn register<C>(&mut self, command: C)
     where
         C: Command<T, Metadata = ()> + 'static,
     {
         let name = command.metadata().name.to_string();
         self.commands.insert(name, Box::new(command));
+    }
+
+    /// Register a command by type (for zero-sized commands with Default)
+    pub fn register_cmd<C>(&mut self)
+    where
+        C: Command<T, Metadata = ()> + Default + 'static,
+    {
+        let command = C::default();
+        self.register(command);
     }
 
     /// Execute a command from input string on the target
