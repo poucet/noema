@@ -12,7 +12,7 @@ pub mod parsed_args;
 pub use completion::{AsyncCompleter, Completion, CompletionContext};
 pub use command::{Command, CommandMetadata, CommandResult};
 pub use error::{CommandError, CompletionError, ParseError};
-pub use registry::CommandRegistry;
+pub use registry::{CommandRegistry, Registrable};
 pub use cache::CachedCompleter;
 pub use parsed_args::ParsedArgs; // For generated code
 

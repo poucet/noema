@@ -5,9 +5,14 @@ use crate::completion::{Completion, CompletionContext};
 use crate::error::{CommandError, CompletionError};
 use crate::parsed_args::ParsedArgs;
 
+/// Trait for types that can register themselves with a CommandRegistry
+pub trait Registrable<T> {
+    fn register(registry: &mut CommandRegistry<T>);
+}
+
 /// Registry for managing and dispatching commands for type T
 pub struct CommandRegistry<T> {
-    commands: HashMap<String, Box<dyn Command<T, Metadata = ()>>>,
+    commands: HashMap<String, Box<dyn Command<T>>>,
 }
 
 impl<T> CommandRegistry<T> {
@@ -21,19 +26,10 @@ impl<T> CommandRegistry<T> {
     /// Register a command instance
     pub fn register<C>(&mut self, command: C)
     where
-        C: Command<T, Metadata = ()> + 'static,
+        C: Command<T> + 'static,
     {
         let name = command.metadata().name.to_string();
         self.commands.insert(name, Box::new(command));
-    }
-
-    /// Register a command by type (for zero-sized commands with Default)
-    pub fn register_cmd<C>(&mut self)
-    where
-        C: Command<T, Metadata = ()> + Default + 'static,
-    {
-        let command = C::default();
-        self.register(command);
     }
 
     /// Execute a command from input string on the target
@@ -55,15 +51,15 @@ impl<T> CommandRegistry<T> {
         target: &T,
         input: &str,
         cursor: usize,
-    ) -> Result<Vec<Completion<()>>, CompletionError> {
-        let ctx = CompletionContext::new(input.to_string(), cursor);
+    ) -> Result<Vec<Completion>, CompletionError> {
+        let ctx = CompletionContext::new(input.to_string(), cursor, target);
 
         // Try to parse command name
         if let Ok((cmd_name, args_str)) = parse_command_input(input) {
             // Check if command exists
             if let Some(command) = self.commands.get(cmd_name) {
-                // Complete command arguments
-                command.complete_with_target(target, args_str, &ctx).await
+                // Complete command arguments - target is in context
+                command.complete(args_str, &ctx).await
             } else {
                 // Unknown command - fall back to command name completion
                 let partial = input.trim_start_matches('/');

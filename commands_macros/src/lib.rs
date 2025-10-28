@@ -6,9 +6,11 @@ use syn::{
 
 mod completable;
 mod command;
+mod register;
 
 use completable::impl_completable;
 use command::{impl_command, impl_command_function, impl_completer};
+use register::impl_register_commands;
 
 /// Makes an enum automatically completable with case-insensitive matching
 ///
@@ -107,55 +109,13 @@ pub fn completer(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn register_commands(input: TokenStream) -> TokenStream {
     let input = proc_macro2::TokenStream::from(input);
 
-    // Parse: registry, Type => [method1, method2, ...]
-    let parsed: syn::Result<(syn::Expr, syn::Type, Vec<syn::Ident>)> = (|| {
-        use syn::parse::Parser;
-        use syn::punctuated::Punctuated;
-        use syn::Token;
-
-        let parser = |input: syn::parse::ParseStream| {
-            let registry: syn::Expr = input.parse()?;
-            input.parse::<Token![,]>()?;
-            let type_name: syn::Type = input.parse()?;
-            input.parse::<Token![=>]>()?;
-
-            let content;
-            syn::bracketed!(content in input);
-            let methods = Punctuated::<syn::Ident, Token![,]>::parse_terminated(&content)?
-                .into_iter()
-                .collect();
-
-            Ok((registry, type_name, methods))
-        };
-
-        parser.parse2(input)
-    })();
-
-    match parsed {
-        Ok((registry, type_name, methods)) => {
-            let registrations = methods.iter().map(|method| {
-                // Generate struct name from method name (e.g., cmd_help → AppCmdHelpCommand)
-                let struct_name = format_ident!(
-                    "{}{}Command",
-                    quote::quote!(#type_name).to_string().replace(" ", ""),
-                    method.to_string().to_pascal_case()
-                );
-
-                quote::quote! {
-                    #registry.register_cmd::<#struct_name>();
-                }
-            });
-
-            quote::quote! {
-                #(#registrations)*
-            }.into()
-        }
-        Err(e) => e.to_compile_error().into()
-    }
+    impl_register_commands(input)
+        .unwrap_or_else(|err| err.to_compile_error())
+        .into()
 }
 
-// Helper trait for pascal case conversion
-trait ToPascalCase {
+// Helper trait for pascal case conversion (used by multiple modules)
+pub(crate) trait ToPascalCase {
     fn to_pascal_case(&self) -> String;
 }
 

@@ -28,7 +28,7 @@ async fn test_enum_completion() {
     use commands::AsyncCompleter;
 
     let provider = Simple::One;
-    let ctx = commands::CompletionContext::new("/test".to_string(), 0);
+    let ctx = commands::CompletionContext::new("/test".to_string(), 0, &());
 
     // Test completion
     let completions = provider.complete("o", &ctx).await.unwrap();

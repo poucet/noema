@@ -10,24 +10,32 @@ use crate::completion::{AsyncCompleter, Completion, CompletionContext};
 use crate::error::CompletionError;
 
 /// Wrapper that adds caching to any AsyncCompleter
-pub struct CachedCompleter<T: AsyncCompleter> {
+pub struct CachedCompleter<T, U>
+where
+    T: AsyncCompleter<U>,
+{
     inner: T,
-    cache: Arc<RwLock<HashMap<String, CachedEntry<T::Metadata>>>>,
+    cache: Arc<RwLock<HashMap<String, CachedEntry>>>,
     ttl: Duration,
+    _phantom: std::marker::PhantomData<U>,
 }
 
-struct CachedEntry<M: Serialize> {
-    completions: Vec<Completion<M>>,
+struct CachedEntry {
+    completions: Vec<Completion>,
     timestamp: Instant,
 }
 
-impl<T: AsyncCompleter> CachedCompleter<T> {
+impl<T, U> CachedCompleter<T, U>
+where
+    T: AsyncCompleter<U>,
+{
     /// Create a new cached completer with the given TTL
     pub fn new(inner: T, ttl: Duration) -> Self {
         Self {
             inner,
             cache: Arc::new(RwLock::new(HashMap::new())),
             ttl,
+            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -42,20 +50,22 @@ impl<T: AsyncCompleter> CachedCompleter<T> {
     }
 
     /// Create cache key from partial input and context
-    fn cache_key(partial: &str, context: &CompletionContext) -> String {
+    fn cache_key<V>(partial: &str, context: &CompletionContext<V>) -> String {
         format!("{}:{}", context.input, partial)
     }
 }
 
 #[async_trait]
-impl<T: AsyncCompleter> AsyncCompleter for CachedCompleter<T> {
-    type Metadata = T::Metadata;
-
+impl<T, U> AsyncCompleter<U> for CachedCompleter<T, U>
+where
+    T: AsyncCompleter<U>,
+    U: Send + Sync,
+{
     async fn complete(
         &self,
         partial: &str,
-        context: &CompletionContext,
-    ) -> Result<Vec<Completion<Self::Metadata>>, CompletionError> {
+        context: &CompletionContext<U>,
+    ) -> Result<Vec<Completion>, CompletionError> {
         let cache_key = Self::cache_key(partial, context);
 
         // Check cache
@@ -94,14 +104,12 @@ mod tests {
     struct MockCompleter;
 
     #[async_trait]
-    impl AsyncCompleter for MockCompleter {
-        type Metadata = ();
-
+    impl AsyncCompleter<()> for MockCompleter {
         async fn complete(
             &self,
             partial: &str,
-            _context: &CompletionContext,
-        ) -> Result<Vec<Completion<()>>, CompletionError> {
+            _context: &CompletionContext<()>,
+        ) -> Result<Vec<Completion>, CompletionError> {
             Ok(vec![Completion::simple(format!("completion-{}", partial))])
         }
     }
@@ -109,7 +117,7 @@ mod tests {
     #[tokio::test]
     async fn test_caching() {
         let completer = CachedCompleter::new(MockCompleter, Duration::from_secs(1));
-        let ctx = CompletionContext::new("/test".to_string(), 5);
+        let ctx = CompletionContext::new("/test".to_string(), 5, &());
 
         // First call - should hit inner completer
         let result1 = completer.complete("foo", &ctx).await.unwrap();

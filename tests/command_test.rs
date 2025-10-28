@@ -1,4 +1,4 @@
-use commands::{commandable, completable, AsyncCompleter, Command, CommandRegistry};
+use commands::{commandable, completable, AsyncCompleter, Command, CommandRegistry, Registrable};
 
 #[completable]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +31,7 @@ impl TestApp {
 async fn test_completable_enum() {
     // Test case-insensitive completion
     let provider = TestProvider::Provider1;
-    let ctx = commands::CompletionContext::new("/test".to_string(), 0);
+    let ctx = commands::CompletionContext::new("/test".to_string(), 0, &());
 
     let completions = provider.complete("prov", &ctx).await.unwrap();
     assert_eq!(completions.len(), 2);
@@ -55,10 +55,11 @@ async fn test_command_execution() {
         value: String::new(),
     };
 
-    let set_cmd = TestAppSetValueCommand;
-    let args = commands::ParsedArgs::new("provider1");
+    // Use registry - command structs are internal
+    let mut registry = CommandRegistry::new();
+    TestApp::register(&mut registry);
 
-    let result = set_cmd.execute(&mut app, args).await.unwrap();
+    let result = registry.execute(&mut app, "/set provider1").await.unwrap();
 
     match result {
         commands::CommandResult::Success(msg) => {
@@ -78,7 +79,7 @@ async fn test_command_registry() {
     };
 
     let mut registry = CommandRegistry::new();
-    TestApp::register_all_commands(&mut registry);
+    TestApp::register(&mut registry);
 
     // Execute set command
     let result = registry.execute(&mut app, "/set provider2").await.unwrap();
@@ -105,11 +106,12 @@ async fn test_automatic_completion() {
         value: String::new(),
     };
 
-    let set_cmd = TestAppSetValueCommand;
+    // Use registry for completion - command structs are internal
+    let mut registry = CommandRegistry::new();
+    TestApp::register(&mut registry);
 
     // Test completing the provider argument
-    let ctx = commands::CompletionContext::new("/set prov".to_string(), 10);
-    let completions = set_cmd.complete("prov", &ctx).await.unwrap();
+    let completions = registry.complete(&app, "/set prov", 9).await.unwrap();
 
     // Should get completions from TestProvider enum automatically
     assert_eq!(completions.len(), 2);
@@ -117,11 +119,11 @@ async fn test_automatic_completion() {
     assert!(completions.iter().any(|c| c.value == "provider2"));
 
     // Test case-insensitive
-    let completions = set_cmd.complete("PROV", &ctx).await.unwrap();
+    let completions = registry.complete(&app, "/set PROV", 9).await.unwrap();
     assert_eq!(completions.len(), 2);
 
     // Test specific match
-    let completions = set_cmd.complete("provider1", &ctx).await.unwrap();
+    let completions = registry.complete(&app, "/set provider1", 14).await.unwrap();
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].value, "provider1");
     assert_eq!(completions[0].description, Some("First provider".to_string()));
@@ -170,11 +172,12 @@ async fn test_custom_completer_with_context() {
         current_provider: None,
     };
 
-    let cmd = configure();
+    // Use registry
+    let mut registry = CommandRegistry::new();
+    CompleterTestApp::register(&mut registry);
 
     // Test that custom completer receives parsed provider argument
-    let ctx = commands::CompletionContext::new("/configure provider1 mod".to_string(), 20);
-    let completions = cmd.complete_with_target(&app, "mod", &ctx).await.unwrap();
+    let completions = registry.complete(&app, "/configure provider1 mod", 24).await.unwrap();
 
     // Should get Provider1's models
     assert_eq!(completions.len(), 2);
@@ -188,11 +191,12 @@ async fn test_optional_arguments() {
         current_provider: None,
     };
 
-    let cmd = configure();
+    // Use registry
+    let mut registry = CommandRegistry::new();
+    CompleterTestApp::register(&mut registry);
 
     // Test with just provider (no model)
-    let args = commands::ParsedArgs::new("provider1");
-    let result = cmd.execute(&mut app, args).await.unwrap();
+    let result = registry.execute(&mut app, "/configure provider1").await.unwrap();
     match result {
         commands::CommandResult::Success(msg) => {
             assert!(msg.contains("Provider1"));
@@ -202,8 +206,7 @@ async fn test_optional_arguments() {
     }
 
     // Test with provider and model
-    let args = commands::ParsedArgs::new("provider2 model2a");
-    let result = cmd.execute(&mut app, args).await.unwrap();
+    let result = registry.execute(&mut app, "/configure provider2 model2a").await.unwrap();
     match result {
         commands::CommandResult::Success(msg) => {
             assert!(msg.contains("Provider2"));
@@ -213,11 +216,6 @@ async fn test_optional_arguments() {
     }
 }
 
-// Test standalone function commands (not methods)
-struct GlobalContext {
-    counter: i32,
-}
-
 #[tokio::test]
 async fn test_command_name_completion() {
     let app = TestApp {
@@ -225,7 +223,7 @@ async fn test_command_name_completion() {
     };
 
     let mut registry = CommandRegistry::new();
-    TestApp::register_all_commands(&mut registry);
+    TestApp::register(&mut registry);
 
     // Test completing command names
     let completions = registry.complete(&app, "/se", 3).await.unwrap();
@@ -245,17 +243,17 @@ async fn test_second_argument_completion() {
         current_provider: None,
     };
 
-    let cmd = CompleterTestAppConfigureCommand;
+    // Use registry
+    let mut registry = CommandRegistry::new();
+    CompleterTestApp::register(&mut registry);
 
     // Completing first argument (provider) - should use enum completion
-    let ctx = commands::CompletionContext::new("/configure prov".to_string(), 15);
-    let completions = cmd.complete("prov", &ctx).await.unwrap();
+    let completions = registry.complete(&app, "/configure prov", 15).await.unwrap();
     assert_eq!(completions.len(), 2);
     assert!(completions.iter().any(|c| c.value == "provider1"));
 
     // Completing second argument (model_name) - should use custom completer
-    let ctx = commands::CompletionContext::new("/configure provider1 mod".to_string(), 22);
-    let completions = cmd.complete_with_target(&app, "mod", &ctx).await.unwrap();
+    let completions = registry.complete(&app, "/configure provider1 mod", 24).await.unwrap();
     assert_eq!(completions.len(), 2);
     assert!(completions.iter().any(|c| c.value == "model1a"));
     assert!(completions.iter().any(|c| c.value == "model1b"));
@@ -277,9 +275,12 @@ impl Global {
 #[tokio::test]
 async fn test_global_command_on_unit_struct() {
     let mut global = Global;
-    let cmd = GlobalShowVersionCommand;
-    let args = commands::ParsedArgs::new("");
-    let result = cmd.execute(&mut global, args).await.unwrap();
+
+    // Use registry
+    let mut registry = CommandRegistry::new();
+    Global::register(&mut registry);
+
+    let result = registry.execute(&mut global, "/version").await.unwrap();
 
     match result {
         commands::CommandResult::Success(msg) => {
@@ -298,7 +299,7 @@ async fn test_register_all_commands_helper() {
     let mut registry = CommandRegistry::new();
 
     // Use the generated helper - no need to know struct names!
-    TestApp::register_all_commands(&mut registry);
+    TestApp::register(&mut registry);
 
     // Verify commands are registered
     assert_eq!(registry.command_names().len(), 2);
@@ -309,4 +310,3 @@ async fn test_register_all_commands_helper() {
     let result = registry.execute(&mut app, "/set provider1").await.unwrap();
     assert!(matches!(result, commands::CommandResult::Success(_)));
 }
-

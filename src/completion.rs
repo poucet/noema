@@ -55,8 +55,7 @@ impl<M> Completion<M> {
 }
 
 /// Context provided to completers during completion
-#[derive(Clone, Debug)]
-pub struct CompletionContext {
+pub struct CompletionContext<'a, T> {
     /// Full input string
     pub input: String,
 
@@ -65,11 +64,14 @@ pub struct CompletionContext {
 
     /// Parsed tokens (for convenience)
     pub tokens: Vec<String>,
+
+    /// Reference to the target for context-aware completion
+    pub target: &'a T,
 }
 
-impl CompletionContext {
+impl<'a, T> CompletionContext<'a, T> {
     /// Create a new completion context
-    pub fn new(input: String, cursor: usize) -> Self {
+    pub fn new(input: String, cursor: usize, target: &'a T) -> Self {
         // Simple whitespace tokenization
         // TODO: Handle quotes properly
         let tokens = input.split_whitespace().map(String::from).collect();
@@ -78,20 +80,19 @@ impl CompletionContext {
             input,
             cursor,
             tokens,
+            target,
         }
     }
 }
 
 /// Trait for types that can provide async completions
+/// Type parameter T is the target type (defaults to () for context-free completion)
 #[async_trait]
-pub trait AsyncCompleter: Send + Sync {
-    /// Metadata type for completions
-    type Metadata: Serialize + Send + Sync + Clone;
-
-    /// Generate completions for the given partial input
+pub trait AsyncCompleter<T = ()>: Send + Sync {
+    /// Generate completions for the given partial input with access to target
     async fn complete(
         &self,
         partial: &str,
-        context: &CompletionContext,
-    ) -> Result<Vec<Completion<Self::Metadata>>, CompletionError>;
+        context: &CompletionContext<T>,
+    ) -> Result<Vec<Completion>, CompletionError>;
 }

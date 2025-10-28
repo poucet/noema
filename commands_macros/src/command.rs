@@ -103,6 +103,129 @@ fn extract_option_inner_type(ty: &Type) -> (bool, Option<Type>) {
     (false, None)
 }
 
+/// Get the type to use for parsing/completion (unwraps Option<T> to T)
+fn get_effective_type(arg: &ArgInfo) -> &Type {
+    if arg.is_optional {
+        arg.inner_ty.as_ref().unwrap_or(&arg.ty)
+    } else {
+        &arg.ty
+    }
+}
+
+/// Generate a single argument parsing statement
+fn generate_arg_parse(arg: &ArgInfo, index: usize) -> TokenStream {
+    let arg_name = &arg.name;
+
+    if arg.is_optional {
+        if let Some(ref inner_ty) = arg.inner_ty {
+            quote! {
+                let #arg_name = args.parse_optional::<#inner_ty>(#index)
+                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
+            }
+        } else {
+            let arg_ty = &arg.ty;
+            quote! {
+                let #arg_name: #arg_ty = args.parse_optional(#index)
+                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
+            }
+        }
+    } else {
+        let arg_ty = &arg.ty;
+        quote! {
+            let #arg_name = args.parse::<#arg_ty>(#index)
+                .map_err(|e| ::commands::CommandError::ParseError(e))?;
+        }
+    }
+}
+
+/// Calculate arg_index from context (DRY helper)
+fn generate_arg_index_calc() -> TokenStream {
+    quote! {
+        let arg_index = if context.input.ends_with(char::is_whitespace) {
+            context.tokens.len().saturating_sub(1)
+        } else {
+            context.tokens.len().saturating_sub(2)
+        };
+    }
+}
+
+/// Generate completion arm for enum-based completion
+fn generate_enum_completion_arm(
+    arg_index: usize,
+    arg: &ArgInfo,
+    completers: &std::collections::HashMap<String, Ident>,
+) -> Option<TokenStream> {
+    let arg_name_str = arg.name.to_string();
+
+    // Skip arguments with custom completers
+    if completers.contains_key(&arg_name_str) {
+        return None;
+    }
+
+    let completion_ty = get_effective_type(arg);
+
+    // Skip non-completable built-in types
+    if is_builtin_type(completion_ty) {
+        return None;
+    }
+
+    Some(quote! {
+        #arg_index => {
+            let dummy_value = <#completion_ty as ::std::default::Default>::default();
+            // Enum completions use () as target - create unit context
+            let unit_ctx = ::commands::CompletionContext::new(
+                context.input.clone(),
+                context.cursor,
+                &()
+            );
+            dummy_value.complete(partial, &unit_ctx).await
+        }
+    })
+}
+
+/// Generate completion arm for custom completer
+fn generate_custom_completion_arm(
+    arg_index: usize,
+    arg: &ArgInfo,
+    all_args: &[ArgInfo],
+    completer_method: &Ident,
+) -> TokenStream {
+    // Parse all previous arguments
+    let prev_args_parsing: Vec<_> = all_args.iter().take(arg_index).enumerate().map(|(j, prev_arg)| {
+        let prev_name = &prev_arg.name;
+        let prev_ty = get_effective_type(prev_arg);
+
+        quote! {
+            let #prev_name = context.tokens.get(#j + 1)
+                .and_then(|s| s.parse::<#prev_ty>().ok());
+        }
+    }).collect();
+
+    let prev_arg_names: Vec<_> = all_args.iter().take(arg_index).map(|a| &a.name).collect();
+    let prev_arg_refs: Vec<_> = prev_arg_names.iter().map(|name| {
+        quote! { &#name }
+    }).collect();
+
+    quote! {
+        #arg_index => {
+            eprintln!("DEBUG: Matched arg_index {}, calling custom completer", #arg_index);
+            #(#prev_args_parsing)*
+
+            eprintln!("DEBUG: Parsed previous args: {:?}", vec![#(#prev_arg_names.as_ref().map(|v| format!("{:?}", v))),*]);
+            if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
+                eprintln!("DEBUG: All required args present, calling {} with partial='{}'", stringify!(#completer_method), partial);
+                let result = target.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
+                    .map_err(|e| ::commands::CompletionError::Custom(e.to_string()));
+                eprintln!("DEBUG: Completer returned {} completions", result.as_ref().map(|v| v.len()).unwrap_or(0));
+                result
+            } else {
+                eprintln!("DEBUG: Missing required previous args");
+                Ok(vec![])
+            }
+        }
+    }
+}
+
 /// Generate the command wrapper struct and implementations
 fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     let self_type = &info.self_type;
@@ -117,33 +240,9 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
         method_name.to_string().to_pascal_case()
     );
 
-    // Generate argument parsing code
-    let parse_args = info.args.iter().enumerate().map(|(i, arg)| {
-        let arg_name = &arg.name;
-
-        if arg.is_optional {
-            // For Option<T>, use the inner type
-            if let Some(ref inner_ty) = arg.inner_ty {
-                quote! {
-                    let #arg_name = args.parse_optional::<#inner_ty>(#i)
-                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
-                }
-            } else {
-                // Fallback if we couldn't extract inner type
-                let arg_ty = &arg.ty;
-                quote! {
-                    let #arg_name: #arg_ty = args.parse_optional(#i)
-                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
-                }
-            }
-        } else {
-            let arg_ty = &arg.ty;
-            quote! {
-                let #arg_name = args.parse::<#arg_ty>(#i)
-                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
-            }
-        }
-    });
+    // Generate argument parsing code using DRY helper
+    let parse_args = info.args.iter().enumerate()
+        .map(|(i, arg)| generate_arg_parse(arg, i));
 
     // Generate argument names for method call
     let arg_names: Vec<_> = info.args.iter().map(|arg| &arg.name).collect();
@@ -151,134 +250,49 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     // Generate result conversion based on return type
     let result_conversion = generate_result_conversion(&info.return_type);
 
-    // Generate completion routing for enum-based arguments (no target needed)
-    let enum_completion_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
+    // Generate completion routing for enum-based arguments using DRY helper
+    let enum_completion_arms = info.args.iter().enumerate()
+        .filter_map(|(i, arg)| generate_enum_completion_arm(i, arg, &info.completers));
+
+    // Generate arg_index calculation (DRY)
+    let arg_index_calc = generate_arg_index_calc();
+
+    // Generate custom completer arms (if any)
+    let completion_with_target_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
         let arg_name_str = arg.name.to_string();
-
-        // Skip arguments with custom completers (they need target access)
-        if info.completers.contains_key(&arg_name_str) {
-            return None;
-        }
-
-        // Use inner type for Option<T>, otherwise use the type itself
-        let completion_ty = if arg.is_optional {
-            arg.inner_ty.as_ref()?
-        } else {
-            &arg.ty
-        };
-
-        // Skip non-completable built-in types
-        if is_builtin_type(completion_ty) {
-            return None;
-        }
-
-        // Generate completion for completable types (enums with #[completable])
-        Some(quote! {
-            #i => {
-                let dummy_value = <#completion_ty as ::std::default::Default>::default();
-                dummy_value.complete(partial, context).await
-            }
-        })
+        let completer_method = info.completers.get(&arg_name_str)?;
+        Some(generate_custom_completion_arm(i, arg, &info.args, completer_method))
     });
 
-    let num_args = info.args.len();
-    let has_custom_completers = !info.completers.is_empty();
-
-    // Generate complete_with_target override if there are custom completers
-    let complete_with_target_impl = if has_custom_completers {
-        // Find completion arms that use custom completers (need target access)
-        let completion_with_target_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
-            let arg_name_str = arg.name.to_string();
-
-            if let Some(completer_method) = info.completers.get(&arg_name_str) {
-                let prev_args_parsing: Vec<_> = info.args.iter().take(i).enumerate().map(|(j, prev_arg)| {
-                    let prev_name = &prev_arg.name;
-                    let prev_ty = if prev_arg.is_optional {
-                        prev_arg.inner_ty.as_ref().unwrap_or(&prev_arg.ty)
-                    } else {
-                        &prev_arg.ty
-                    };
-
-                    quote! {
-                        let #prev_name = context.tokens.get(#j + 1)
-                            .and_then(|s| s.parse::<#prev_ty>().ok());
-                    }
-                }).collect();
-
-                let prev_arg_names: Vec<_> = info.args.iter().take(i).map(|a| &a.name).collect();
-                let prev_arg_refs: Vec<_> = prev_arg_names.iter().map(|name| {
-                    quote! { &#name }
-                }).collect();
-
-                Some(quote! {
-                    #i => {
-                        #(#prev_args_parsing)*
-
-                        if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
-                            target.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
-                                .map_err(|e| ::commands::CompletionError::Custom(e.to_string()))
-                        } else {
-                            Ok(vec![])
-                        }
-                    }
-                })
-            } else {
-                None
-            }
-        });
-
-        quote! {
-            async fn complete_with_target(
-                &self,
-                target: &#self_type,
-                partial: &str,
-                context: &::commands::CompletionContext,
-            ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
-                // Determine which argument we're completing
-                // If input ends with whitespace, we're starting a new argument
-                // Otherwise, we're completing the last token
-                let arg_index = if context.input.ends_with(char::is_whitespace) {
-                    // Starting new argument: tokens.len() - 1 (skip command name)
-                    context.tokens.len().saturating_sub(1)
-                } else {
-                    // Completing last token: tokens.len() - 2 (skip command + partial)
-                    context.tokens.len().saturating_sub(2)
-                };
-
-                match arg_index {
-                    #(#completion_with_target_arms)*
-                    _ => self.complete(partial, context).await
-                }
-            }
-        }
-    } else {
-        quote! {}
-    };
-
     quote! {
-        // Zero-sized command struct (no state!)
+        // Zero-sized command struct (no state!) - private, users don't need to know about it
         #[derive(Default)]
-        pub struct #wrapper_name;
+        #[doc(hidden)]
+        pub(crate) struct #wrapper_name;
 
         #[::commands::async_trait::async_trait]
-        impl ::commands::AsyncCompleter for #wrapper_name {
-            type Metadata = ();
-
+        impl ::commands::AsyncCompleter<#self_type> for #wrapper_name {
             async fn complete(
                 &self,
-                partial: &str,
-                context: &::commands::CompletionContext,
-            ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
-                // Base completion without target (only for enums)
-                let arg_index = if context.input.ends_with(char::is_whitespace) {
-                    context.tokens.len().saturating_sub(1)
+                _full_args: &str,
+                context: &::commands::CompletionContext<#self_type>,
+            ) -> ::std::result::Result<Vec<::commands::Completion>, ::commands::CompletionError> {
+                #arg_index_calc
+
+                // Target is available via context.target
+                let target = context.target;
+
+                // Extract the actual partial word being completed
+                let partial = if context.input.ends_with(char::is_whitespace) {
+                    ""  // Completing a new word
                 } else {
-                    context.tokens.len().saturating_sub(2)
+                    // Get the last token
+                    context.tokens.last().map(|s| s.as_str()).unwrap_or("")
                 };
 
-                // Only use enum-based completions here (no target access)
                 match arg_index {
                     #(#enum_completion_arms)*
+                    #(#completion_with_target_arms)*
                     _ => Ok(vec![])
                 }
             }
@@ -301,8 +315,6 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
                 #result_conversion
             }
 
-            #complete_with_target_impl
-
             fn metadata(&self) -> &::commands::CommandMetadata {
                 static METADATA: ::commands::CommandMetadata = ::commands::CommandMetadata {
                     name: #command_name,
@@ -310,11 +322,6 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
                 };
                 &METADATA
             }
-        }
-
-        /// Helper function to create the command (zero-sized, just returns the type)
-        pub fn #method_name() -> #wrapper_name {
-            #wrapper_name
         }
     }
 }
@@ -592,12 +599,11 @@ pub fn impl_command(input: ItemImpl) -> Result<TokenStream> {
         command_struct_names.push(struct_name);
     }
 
-    // Generate helper method to register all commands
-    let register_all_helper = quote! {
-        impl #self_type {
-            /// Register all commands for this type
-            pub fn register_all_commands(registry: &mut ::commands::CommandRegistry<Self>) {
-                #(registry.register_cmd::<#command_struct_names>();)*
+    // Generate Registrable trait impl
+    let registrable_impl = quote! {
+        impl ::commands::Registrable<#self_type> for #self_type {
+            fn register(registry: &mut ::commands::CommandRegistry<Self>) {
+                #(registry.register(#command_struct_names::default());)*
             }
         }
     };
@@ -607,7 +613,7 @@ pub fn impl_command(input: ItemImpl) -> Result<TokenStream> {
 
         #(#wrappers)*
 
-        #register_all_helper
+        #registrable_impl
     })
 }
 
