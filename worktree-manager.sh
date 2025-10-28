@@ -258,7 +258,76 @@ merge_worktree() {
     echo "================================================"
     echo ""
 
+    # Detect new submodules in the worktree
+    echo "→ Checking for new submodules in worktree..."
+    local WORKTREE_SUBMODULES=()
+    if [ -f "$WORKTREE_PATH/.gitmodules" ]; then
+        WORKTREE_SUBMODULES=($(cd "$WORKTREE_PATH" && git config --file .gitmodules --get-regexp path | awk '{print $2}' || true))
+    fi
+
+    local NEW_SUBMODULES=()
+    for wsub in "${WORKTREE_SUBMODULES[@]}"; do
+        local IS_NEW=true
+        for msub in "${SUBMODULES[@]}"; do
+            if [ "$wsub" == "$msub" ]; then
+                IS_NEW=false
+                break
+            fi
+        done
+        if [ "$IS_NEW" = true ]; then
+            NEW_SUBMODULES+=("$wsub")
+        fi
+    done
+
+    if [ ${#NEW_SUBMODULES[@]} -gt 0 ]; then
+        echo "  Found ${#NEW_SUBMODULES[@]} new submodule(s): ${NEW_SUBMODULES[*]}"
+
+        # Set up bare repos for new submodules
+        local GIT_REMOTES_DIR="$REPO_ROOT/.git-remotes"
+        mkdir -p "$GIT_REMOTES_DIR"
+
+        for new_sub in "${NEW_SUBMODULES[@]}"; do
+            echo "→ Setting up bare repo for new submodule: $new_sub"
+            local BARE_REPO_PATH="$GIT_REMOTES_DIR/${new_sub}.git"
+            local WORKTREE_SUBMODULE_PATH="$WORKTREE_PATH/$new_sub"
+
+            # Clone the submodule from worktree as a bare repo
+            if [ -d "$WORKTREE_SUBMODULE_PATH/.git" ]; then
+                git clone --bare "$WORKTREE_SUBMODULE_PATH" "$BARE_REPO_PATH"
+                echo "  ✓ Created bare repo at $BARE_REPO_PATH"
+
+                # Update the worktree's submodule to point to the bare repo
+                (
+                    cd "$WORKTREE_PATH"
+                    git config --file .gitmodules "submodule.$new_sub.url" "$BARE_REPO_PATH"
+                    git config "submodule.$new_sub.url" "$BARE_REPO_PATH"
+
+                    # Update the submodule's remote in the worktree
+                    cd "$WORKTREE_SUBMODULE_PATH"
+                    git remote set-url origin "$BARE_REPO_PATH"
+                    echo "  ✓ Updated worktree submodule '$new_sub' to use bare repo"
+                )
+
+                # Add the submodule to main repo's .gitmodules
+                echo "→ Adding submodule '$new_sub' to main repository..."
+                (
+                    cd "$REPO_ROOT"
+                    if [ ! -d "$new_sub" ]; then
+                        git -c protocol.file.allow=always submodule add "$BARE_REPO_PATH" "$new_sub"
+                        echo "  ✓ Submodule '$new_sub' added to main repository"
+                    fi
+                )
+            else
+                echo "  ⚠ Warning: $new_sub doesn't appear to be a valid git repository, skipping"
+            fi
+        done
+    else
+        echo "  No new submodules detected."
+    fi
+
     echo "→ Pushing submodule changes from worktree..."
+    # Update SUBMODULES array to include new ones
+    SUBMODULES=($(get_submodules))
     for sub in "${SUBMODULES[@]}"; do
         local SUBMODULE_PATH_IN_WORKTREE="$WORKTREE_PATH/$sub"
         if [ -d "$SUBMODULE_PATH_IN_WORKTREE" ]; then
@@ -270,20 +339,6 @@ merge_worktree() {
     done
     echo "  ✓ Submodule changes pushed."
 
-    echo "→ Pulling latest submodule changes into main repository..."
-    for sub in "${SUBMODULES[@]}"; do
-        if [ -d "$sub" ]; then
-            (
-                cd "$sub"
-                # Ensure we're on main branch
-                git checkout main 2>/dev/null || true
-                # Pull from the bare repo
-                git pull origin main
-            )
-        fi
-    done
-    echo "  ✓ Submodule changes pulled from bare repos."
-
     local ORIGINAL_BRANCH=$(git branch --show-current)
 
     if [ -n "$(git status --porcelain | grep -v 'worktree-manager.sh')" ]; then
@@ -291,7 +346,7 @@ merge_worktree() {
         echo "Please commit or stash them before merging."
         exit 1
     fi
-    
+
     echo "→ Checking out '$TARGET_BRANCH' in main repo"
     git checkout "$TARGET_BRANCH"
 
@@ -306,7 +361,21 @@ merge_worktree() {
         exit 1
     fi
     echo "  ✓ Merge successful"
-    
+
+    echo "→ Pulling latest submodule changes into main repository..."
+    for sub in "${SUBMODULES[@]}"; do
+        if [ -d "$REPO_ROOT/$sub" ]; then
+            (
+                cd "$REPO_ROOT/$sub"
+                # Ensure we're on main branch
+                git checkout main 2>/dev/null || true
+                # Pull from the bare repo
+                git pull origin main
+            )
+        fi
+    done
+    echo "  ✓ Submodule changes pulled from bare repos."
+
     echo "→ Syncing submodules to their new merged state..."
     if ! git submodule update --recursive; then
         echo "  ✗ FAILED to update submodules."
