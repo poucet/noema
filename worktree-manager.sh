@@ -258,57 +258,78 @@ merge_worktree() {
     echo "================================================"
     echo ""
 
-    # Detect new submodules in the worktree
-    echo "→ Checking for new submodules in worktree..."
-    local WORKTREE_SUBMODULES=()
-    if [ -f "$WORKTREE_PATH/.gitmodules" ]; then
-        WORKTREE_SUBMODULES=($(cd "$WORKTREE_PATH" && git config --file .gitmodules --get-regexp path | awk '{print $2}' || true))
-    fi
+    # Detect git repositories in the worktree (both registered submodules and unregistered)
+    echo "→ Scanning for git repositories in worktree..."
+    local GIT_REMOTES_DIR="$REPO_ROOT/.git-remotes"
+    mkdir -p "$GIT_REMOTES_DIR"
 
     local NEW_SUBMODULES=()
-    for wsub in "${WORKTREE_SUBMODULES[@]}"; do
-        local IS_NEW=true
+
+    # Find all .git directories in the worktree (but not the worktree's own .git)
+    while IFS= read -r -d '' git_dir; do
+        local repo_path=$(dirname "$git_dir")
+        local relative_path=${repo_path#$WORKTREE_PATH/}
+
+        # Skip if it's the main worktree's .git
+        if [ "$relative_path" = ".git" ] || [ "$git_dir" = "$WORKTREE_PATH/.git" ]; then
+            continue
+        fi
+
+        # Check if this submodule already exists in main repo
+        local is_new=true
         for msub in "${SUBMODULES[@]}"; do
-            if [ "$wsub" == "$msub" ]; then
-                IS_NEW=false
+            if [ "$relative_path" = "$msub" ]; then
+                is_new=false
                 break
             fi
         done
-        if [ "$IS_NEW" = true ]; then
-            NEW_SUBMODULES+=("$wsub")
+
+        if [ "$is_new" = true ]; then
+            NEW_SUBMODULES+=("$relative_path")
+            echo "  Found new git repository: $relative_path"
         fi
-    done
+    done < <(find "$WORKTREE_PATH" -mindepth 2 -maxdepth 2 -type d -name ".git" -print0 2>/dev/null || true)
 
     if [ ${#NEW_SUBMODULES[@]} -gt 0 ]; then
-        echo "  Found ${#NEW_SUBMODULES[@]} new submodule(s): ${NEW_SUBMODULES[*]}"
-
-        # Set up bare repos for new submodules
-        local GIT_REMOTES_DIR="$REPO_ROOT/.git-remotes"
-        mkdir -p "$GIT_REMOTES_DIR"
+        echo "→ Setting up ${#NEW_SUBMODULES[@]} new submodule(s)..."
 
         for new_sub in "${NEW_SUBMODULES[@]}"; do
-            echo "→ Setting up bare repo for new submodule: $new_sub"
+            echo "→ Processing new submodule: $new_sub"
             local BARE_REPO_PATH="$GIT_REMOTES_DIR/${new_sub}.git"
             local WORKTREE_SUBMODULE_PATH="$WORKTREE_PATH/$new_sub"
 
-            # Clone the submodule from worktree as a bare repo
+            # Clone as bare repo to .git-remotes
             if [ -d "$WORKTREE_SUBMODULE_PATH/.git" ]; then
                 git clone --bare "$WORKTREE_SUBMODULE_PATH" "$BARE_REPO_PATH"
                 echo "  ✓ Created bare repo at $BARE_REPO_PATH"
 
-                # Update the worktree's submodule to point to the bare repo
+                # Update the worktree's git repo to point to the bare repo as origin
                 (
-                    cd "$WORKTREE_PATH"
-                    git config --file .gitmodules "submodule.$new_sub.url" "$BARE_REPO_PATH"
-                    git config "submodule.$new_sub.url" "$BARE_REPO_PATH"
-
-                    # Update the submodule's remote in the worktree
                     cd "$WORKTREE_SUBMODULE_PATH"
-                    git remote set-url origin "$BARE_REPO_PATH"
-                    echo "  ✓ Updated worktree submodule '$new_sub' to use bare repo"
+                    if git remote | grep -q '^origin$'; then
+                        git remote set-url origin "$BARE_REPO_PATH"
+                    else
+                        git remote add origin "$BARE_REPO_PATH"
+                    fi
+                    echo "  ✓ Updated worktree repo '$new_sub' origin to bare repo"
                 )
 
-                # Add the submodule to main repo's .gitmodules
+                # Register in worktree's .gitmodules if not already there
+                (
+                    cd "$WORKTREE_PATH"
+                    if ! git config --file .gitmodules "submodule.$new_sub.path" >/dev/null 2>&1; then
+                        git config --file .gitmodules "submodule.$new_sub.path" "$new_sub"
+                        git config --file .gitmodules "submodule.$new_sub.url" "$BARE_REPO_PATH"
+                        git add .gitmodules
+                        echo "  ✓ Registered '$new_sub' in worktree's .gitmodules"
+                    else
+                        git config --file .gitmodules "submodule.$new_sub.url" "$BARE_REPO_PATH"
+                        git add .gitmodules
+                        echo "  ✓ Updated '$new_sub' URL in worktree's .gitmodules"
+                    fi
+                )
+
+                # Add the submodule to main repo
                 echo "→ Adding submodule '$new_sub' to main repository..."
                 (
                     cd "$REPO_ROOT"
@@ -322,7 +343,7 @@ merge_worktree() {
             fi
         done
     else
-        echo "  No new submodules detected."
+        echo "  No new git repositories detected."
     fi
 
     echo "→ Pushing submodule changes from worktree..."
