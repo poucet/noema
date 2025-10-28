@@ -214,3 +214,80 @@ async fn test_optional_arguments() {
     }
 }
 
+// Test standalone function commands (not methods)
+struct GlobalContext {
+    counter: i32,
+}
+
+#[tokio::test]
+async fn test_command_name_completion() {
+    let mut app = TestApp {
+        value: String::new(),
+    };
+
+    let mut registry = CommandRegistry::new();
+    registry.register(set_value());
+    registry.register(get_value());
+
+    // Test completing command names
+    let completions = registry.complete(&app, "/se", 3).await.unwrap();
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].value, "set");
+
+    // Test all commands
+    let completions = registry.complete(&app, "/", 1).await.unwrap();
+    assert_eq!(completions.len(), 2);
+    assert!(completions.iter().any(|c| c.value == "set"));
+    assert!(completions.iter().any(|c| c.value == "get"));
+}
+
+#[tokio::test]
+async fn test_second_argument_completion() {
+    let mut app = CompleterTestApp {
+        current_provider: None,
+    };
+
+    let cmd = configure();
+
+    // Completing first argument (provider) - should use enum completion
+    let ctx = commands::CompletionContext::new("/configure prov".to_string(), 15);
+    let completions = cmd.complete("prov", &ctx).await.unwrap();
+    assert_eq!(completions.len(), 2);
+    assert!(completions.iter().any(|c| c.value == "provider1"));
+
+    // Completing second argument (model_name) - should use custom completer
+    let ctx = commands::CompletionContext::new("/configure provider1 mod".to_string(), 22);
+    let completions = cmd.complete_with_target(&app, "mod", &ctx).await.unwrap();
+    assert_eq!(completions.len(), 2);
+    assert!(completions.iter().any(|c| c.value == "model1a"));
+    assert!(completions.iter().any(|c| c.value == "model1b"));
+}
+
+// TODO: Stateless function commands
+// For now, use commandable on a unit struct for global commands:
+
+struct Global;
+
+#[commandable]
+impl Global {
+    #[command(name = "version", help = "Show version")]
+    async fn show_version(&mut self) -> Result<String, anyhow::Error> {
+        Ok("Version 1.0.0".to_string())
+    }
+}
+
+#[tokio::test]
+async fn test_global_command_on_unit_struct() {
+    let mut global = Global;
+    let cmd = show_version();
+    let args = commands::ParsedArgs::new("");
+    let result = cmd.execute(&mut global, args).await.unwrap();
+
+    match result {
+        commands::CommandResult::Success(msg) => {
+            assert!(msg.contains("Version 1.0.0"));
+        }
+        _ => panic!("Expected Success"),
+    }
+}
+

@@ -51,12 +51,19 @@ impl<T> CommandRegistry<T> {
 
         // Try to parse command name
         if let Ok((cmd_name, args_str)) = parse_command_input(input) {
-            // Complete command arguments
+            // Check if command exists
             if let Some(command) = self.commands.get(cmd_name) {
+                // Complete command arguments
                 command.complete_with_target(target, args_str, &ctx).await
             } else {
-                // Unknown command, no completions
-                Ok(vec![])
+                // Unknown command - fall back to command name completion
+                let partial = input.trim_start_matches('/');
+                Ok(self
+                    .commands
+                    .keys()
+                    .filter(|name| name.starts_with(partial))
+                    .map(|name| Completion::simple(name.as_str()))
+                    .collect())
             }
         } else {
             // Complete command names

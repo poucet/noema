@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{
-    FnArg, ImplItem, ItemImpl, Pat, PatType, Result, ReturnType,
+    FnArg, ImplItem, ItemImpl, ItemFn, Pat, PatType, Result, ReturnType,
     Type, Ident, spanned::Spanned,
 };
 
@@ -234,10 +234,15 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
                 partial: &str,
                 context: &::commands::CompletionContext,
             ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
-                let arg_index = if context.tokens.len() > 1 {
-                    context.tokens.len() - 2
+                // Determine which argument we're completing
+                // If input ends with whitespace, we're starting a new argument
+                // Otherwise, we're completing the last token
+                let arg_index = if context.input.ends_with(char::is_whitespace) {
+                    // Starting new argument: tokens.len() - 1 (skip command name)
+                    context.tokens.len().saturating_sub(1)
                 } else {
-                    0
+                    // Completing last token: tokens.len() - 2 (skip command + partial)
+                    context.tokens.len().saturating_sub(2)
                 };
 
                 match arg_index {
@@ -264,10 +269,10 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
                 context: &::commands::CompletionContext,
             ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
                 // Base completion without target (only for enums)
-                let arg_index = if context.tokens.len() > 1 {
-                    context.tokens.len() - 2
+                let arg_index = if context.input.ends_with(char::is_whitespace) {
+                    context.tokens.len().saturating_sub(1)
                 } else {
-                    0
+                    context.tokens.len().saturating_sub(2)
                 };
 
                 // Only use enum-based completions here (no target access)
@@ -581,9 +586,183 @@ pub fn impl_command(input: ItemImpl) -> Result<TokenStream> {
 
 /// Implement the #[completer] macro
 pub fn impl_completer(input: ImplItem) -> Result<TokenStream> {
-    // TODO: Store completer metadata for use by #[command] macro
-    // For now, just return the original method
+    // This is a marker attribute for #[commandable] to detect
+    // Just return the original method unchanged
     Ok(quote! {
         #input
+    })
+}
+
+/// Implement #[command] for a free function
+pub fn impl_command_function(func: ItemFn) -> Result<TokenStream> {
+    // Extract command metadata from attributes
+    let mut command_name = None;
+    let mut help_text = String::new();
+
+    for attr in &func.attrs {
+        if attr.path().is_ident("command") {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("name") {
+                    let value = meta.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    command_name = Some(s.value());
+                } else if meta.path.is_ident("help") {
+                    let value = meta.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    help_text = s.value();
+                }
+                Ok(())
+            })?;
+        }
+    }
+
+    let command_name = command_name.ok_or_else(|| {
+        syn::Error::new(func.sig.ident.span(), "Missing command name attribute")
+    })?;
+
+    let func_name = &func.sig.ident;
+    let return_type = &func.sig.output;
+
+    // Parse arguments - first arg should be &mut T (the target type)
+    let mut args = Vec::new();
+    let mut target_type = None;
+
+    for (i, arg) in func.sig.inputs.iter().enumerate() {
+        if let FnArg::Typed(pat_type) = arg {
+            if i == 0 {
+                // First arg is the target (&mut T)
+                if let Type::Reference(type_ref) = &*pat_type.ty {
+                    if type_ref.mutability.is_some() {
+                        target_type = Some((*type_ref.elem).clone());
+                        continue;
+                    }
+                }
+                return Err(syn::Error::new(
+                    pat_type.span(),
+                    "First argument must be &mut T (the target type)"
+                ));
+            }
+            args.push(parse_arg_info(pat_type)?);
+        }
+    }
+
+    let target_type = target_type.ok_or_else(|| {
+        syn::Error::new(func.sig.span(), "Function must have &mut T as first parameter")
+    })?;
+
+    // Generate wrapper struct name
+    let wrapper_name = format_ident!("{}Command", func_name.to_string().to_pascal_case());
+
+    // Generate argument parsing
+    let parse_args = args.iter().enumerate().map(|(i, arg)| {
+        let arg_name = &arg.name;
+
+        if arg.is_optional {
+            if let Some(ref inner_ty) = arg.inner_ty {
+                quote! {
+                    let #arg_name = args.parse_optional::<#inner_ty>(#i)
+                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
+                }
+            } else {
+                let arg_ty = &arg.ty;
+                quote! {
+                    let #arg_name: #arg_ty = args.parse_optional(#i)
+                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
+                }
+            }
+        } else {
+            let arg_ty = &arg.ty;
+            quote! {
+                let #arg_name = args.parse::<#arg_ty>(#i)
+                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
+            }
+        }
+    });
+
+    let arg_names: Vec<_> = args.iter().map(|arg| &arg.name).collect();
+    let result_conversion = generate_result_conversion(return_type);
+
+    // Generate completion arms for enum args
+    let enum_completion_arms = args.iter().enumerate().filter_map(|(i, arg)| {
+        let completion_ty = if arg.is_optional {
+            arg.inner_ty.as_ref()?
+        } else {
+            &arg.ty
+        };
+
+        if is_builtin_type(completion_ty) {
+            return None;
+        }
+
+        Some(quote! {
+            #i => {
+                let dummy_value = <#completion_ty as ::std::default::Default>::default();
+                dummy_value.complete(partial, context).await
+            }
+        })
+    });
+
+    // Rename the original function to avoid conflict
+    let mut cleaned_func = func.clone();
+    cleaned_func.attrs.retain(|attr| !attr.path().is_ident("command"));
+    let original_func_name = format_ident!("__{}_impl", func_name);
+    cleaned_func.sig.ident = original_func_name.clone();
+
+    Ok(quote! {
+        // Keep original function with renamed internal name
+        #cleaned_func
+
+        pub struct #wrapper_name;
+
+        #[::commands::async_trait::async_trait]
+        impl ::commands::AsyncCompleter for #wrapper_name {
+            type Metadata = ();
+
+            async fn complete(
+                &self,
+                partial: &str,
+                context: &::commands::CompletionContext,
+            ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
+                let arg_index = if context.input.ends_with(char::is_whitespace) {
+                    context.tokens.len().saturating_sub(1)
+                } else {
+                    context.tokens.len().saturating_sub(2)
+                };
+
+                match arg_index {
+                    #(#enum_completion_arms)*
+                    _ => Ok(vec![])
+                }
+            }
+        }
+
+        #[::commands::async_trait::async_trait]
+        impl ::commands::Command<#target_type> for #wrapper_name {
+            async fn execute(
+                &self,
+                target: &mut #target_type,
+                args: ::commands::ParsedArgs,
+            ) -> ::std::result::Result<::commands::CommandResult, ::commands::CommandError> {
+                #(#parse_args)*
+
+                let result = #original_func_name(target, #(#arg_names),*).await;
+
+                #result_conversion
+            }
+
+            fn metadata(&self) -> &::commands::CommandMetadata {
+                static METADATA: ::commands::CommandMetadata = ::commands::CommandMetadata {
+                    name: #command_name,
+                    help: #help_text,
+                };
+                &METADATA
+            }
+        }
+
+        // Helper function to create the command (uses original function name)
+        // The original function is renamed to __<name>_impl
+        pub fn #func_name() -> #wrapper_name {
+            #wrapper_name
+        }
     })
 }

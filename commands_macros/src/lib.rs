@@ -7,7 +7,7 @@ mod completable;
 mod command;
 
 use completable::impl_completable;
-use command::{impl_command, impl_completer};
+use command::{impl_command, impl_command_function, impl_completer};
 
 /// Makes an enum automatically completable with case-insensitive matching
 ///
@@ -55,12 +55,20 @@ pub fn commandable(_args: TokenStream, input: TokenStream) -> TokenStream {
 
 /// Marks a single method or function as a command (for standalone commands)
 ///
-/// Note: When used inside an impl block, the impl block should use #[commandable] instead
+/// Can be used on:
+/// - Methods inside #[commandable] impl blocks (marker attribute)
+/// - Standalone free functions (generates Command implementation)
 #[proc_macro_attribute]
 pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
-    // For now, this is a marker attribute that #[commandable] looks for
-    // When used standalone, it would need different handling
-    // TODO: Support standalone #[command] on free functions
+    // Try to parse as ItemFn (free function)
+    if let Ok(func) = syn::parse::<syn::ItemFn>(input.clone()) {
+        match command::impl_command_function(func) {
+            Ok(tokens) => return tokens.into(),
+            Err(e) => return e.to_compile_error().into(),
+        }
+    }
+
+    // Otherwise, it's a marker attribute for methods inside #[commandable]
     input
 }
 
