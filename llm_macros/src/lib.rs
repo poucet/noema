@@ -233,24 +233,31 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Generate tool description from doc comments
     let tool_description = if !doc_attrs.is_empty() {
-        quote! {
-            Some({
-                let mut desc = String::new();
-                #(
-                    if let Some(doc) = #doc_attrs.meta.require_name_value().ok() {
-                        if let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) = &doc.value {
-                            let line = s.value().trim();
-                            if !line.is_empty() {
-                                if !desc.is_empty() {
-                                    desc.push(' ');
-                                }
-                                desc.push_str(line);
-                            }
+        let doc_strings: Vec<_> = doc_attrs
+            .iter()
+            .filter_map(|attr| {
+                if let Ok(name_value) = attr.meta.require_name_value() {
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(s),
+                        ..
+                    }) = &name_value.value
+                    {
+                        let value = s.value();
+                        let line = value.trim();
+                        if !line.is_empty() {
+                            return Some(line.to_string());
                         }
                     }
-                )*
-                desc
+                }
+                None
             })
+            .collect();
+
+        if doc_strings.is_empty() {
+            quote! { None }
+        } else {
+            let combined = doc_strings.join(" ");
+            quote! { Some(#combined.to_string()) }
         }
     } else {
         quote! { None }
