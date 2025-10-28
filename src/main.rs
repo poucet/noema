@@ -19,6 +19,8 @@ use ratatui::{
 };
 use std::io;
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
@@ -85,13 +87,29 @@ fn create_provider(provider_type: &ModelProviderType) -> GeneralModelProvider {
     }
 }
 
+enum MessageCommand {
+    SendMessage(String),
+}
+
+enum MessageResponse {
+    Error(String),
+    Chunk(String),
+    Complete,
+}
+
 struct App {
     input: Input,
-    conversation: Conversation,
+    conversation: Arc<Mutex<Conversation>>,
     current_provider: ModelProviderType,
     model_display_name: &'static str,
     status_message: Option<String>,
     is_streaming: bool,
+    thinking_frame: usize,
+    message_tx: mpsc::UnboundedSender<MessageCommand>,
+    message_rx: mpsc::UnboundedReceiver<MessageResponse>,
+    cmd_rx: Option<(mpsc::UnboundedReceiver<MessageCommand>, mpsc::UnboundedSender<MessageResponse>)>,
+    cached_history: Vec<llm::api::ChatMessage>,
+    current_response: String,
 }
 
 impl App {
@@ -106,6 +124,12 @@ impl App {
             Conversation::new(model)
         };
 
+        let conversation = Arc::new(Mutex::new(conversation));
+
+        // Create channels for background message processing
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let (resp_tx, resp_rx) = mpsc::unbounded_channel();
+
         Ok(App {
             input: Input::default(),
             conversation,
@@ -113,7 +137,21 @@ impl App {
             model_display_name,
             status_message: None,
             is_streaming: false,
+            thinking_frame: 0,
+            message_tx: cmd_tx,
+            message_rx: resp_rx,
+            cmd_rx: Some((cmd_rx, resp_tx)),
+            cached_history: Vec::new(),
+            current_response: String::new(),
         })
+    }
+
+    fn start(&mut self) {
+        let conversation = Arc::clone(&self.conversation);
+        let (cmd_rx, resp_tx) = self.cmd_rx.take().expect("start() called twice");
+
+        // Spawn background message processor
+        tokio::spawn(Self::message_processor(conversation, cmd_rx, resp_tx));
     }
 
     fn handle_command(&mut self, input: &str) -> Result<bool> {
@@ -128,8 +166,10 @@ impl App {
                 self.status_message = Some("Commands: /quit /clear /model <provider> /help".to_string());
             }
             "clear" => {
-                self.conversation.clear();
-                self.status_message = Some("Conversation cleared".to_string());
+                if let Ok(mut conv) = self.conversation.try_lock() {
+                    conv.clear();
+                    self.status_message = Some("Conversation cleared".to_string());
+                }
             }
             "model" => {
                 if parts.len() < 2 {
@@ -142,10 +182,12 @@ impl App {
 
                             match new_provider_instance.create_chat_model(new_model_id) {
                                 Some(new_model) => {
-                                    self.conversation.set_model(new_model);
-                                    self.current_provider = new_provider;
-                                    self.model_display_name = new_model_display;
-                                    self.status_message = Some(format!("Switched to {} • {}", self.current_provider, self.model_display_name));
+                                    if let Ok(mut conv) = self.conversation.try_lock() {
+                                        conv.set_model(new_model);
+                                        self.current_provider = new_provider;
+                                        self.model_display_name = new_model_display;
+                                        self.status_message = Some(format!("Switched to {} • {}", self.current_provider, self.model_display_name));
+                                    }
                                 }
                                 None => {
                                     self.status_message = Some(format!("Failed to create model for {}", new_provider));
@@ -166,16 +208,90 @@ impl App {
         Ok(true)
     }
 
-    async fn send_message(&mut self, message: String) -> Result<()> {
-        self.is_streaming = true;
-        let mut stream = self.conversation.send_stream(&message).await?;
-
-        while let Some(_chunk) = stream.next().await {
-            // Chunks are accumulated automatically
+    fn queue_message(&mut self, message: String) {
+        // Update cached history with user message immediately
+        if let Ok(conv) = self.conversation.try_lock() {
+            self.cached_history = conv.history().to_vec();
         }
+        self.cached_history.push(llm::api::ChatMessage::user(message.clone().into()));
 
-        self.is_streaming = false;
-        Ok(())
+        self.is_streaming = true;
+        self.thinking_frame = 0;
+        self.current_response.clear();
+        let _ = self.message_tx.send(MessageCommand::SendMessage(message));
+    }
+
+    fn get_thinking_indicator(&self) -> &'static str {
+        const BRAILLE_FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+        BRAILLE_FRAMES[self.thinking_frame % BRAILLE_FRAMES.len()]
+    }
+
+    fn advance_thinking_animation(&mut self) {
+        self.thinking_frame = self.thinking_frame.wrapping_add(1);
+    }
+
+    fn check_message_responses(&mut self) {
+        while let Ok(response) = self.message_rx.try_recv() {
+            match response {
+                MessageResponse::Chunk(chunk) => {
+                    // Accumulate chunks in current_response
+                    self.current_response.push_str(&chunk);
+                }
+                MessageResponse::Complete => {
+                    self.is_streaming = false;
+                    // Update cache from actual conversation
+                    if let Ok(conv) = self.conversation.try_lock() {
+                        self.cached_history = conv.history().to_vec();
+                    }
+                    self.current_response.clear();
+                }
+                MessageResponse::Error(err) => {
+                    self.is_streaming = false;
+                    self.status_message = Some(format!("Error: {}", err));
+                    self.current_response.clear();
+                }
+            }
+        }
+    }
+
+    async fn message_processor(
+        conversation: Arc<Mutex<Conversation>>,
+        mut cmd_rx: mpsc::UnboundedReceiver<MessageCommand>,
+        resp_tx: mpsc::UnboundedSender<MessageResponse>,
+    ) {
+        while let Some(cmd) = cmd_rx.recv().await {
+            match cmd {
+                MessageCommand::SendMessage(message) => {
+                    // Hold lock for entire operation (stream needs conversation reference)
+                    let mut conv = conversation.lock().await;
+                    match conv.send_stream(&message).await {
+                        Ok(mut stream) => {
+                            // Process stream and send chunks to UI immediately
+                            while let Some(chunk) = stream.next().await {
+                                // Send chunk notification to UI
+                                let chunk_text = chunk.payload.content.iter()
+                                    .filter_map(|c| {
+                                        if let llm::api::ContentBlock::Text { text } = c {
+                                            Some(text.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect::<String>();
+
+                                let _ = resp_tx.send(MessageResponse::Chunk(chunk_text));
+                            }
+                            // Stream is dropped here, which updates conversation history
+                            // Lock is released when conv goes out of scope
+                            let _ = resp_tx.send(MessageResponse::Complete);
+                        }
+                        Err(e) => {
+                            let _ = resp_tx.send(MessageResponse::Error(e.to_string()));
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -190,10 +306,16 @@ fn ui(f: &mut Frame, app: &App) {
         .split(f.area());
 
     // Render chat messages
-    let history = app.conversation.history();
-    let messages: Vec<ListItem> = history
-        .iter()
-        .map(|msg| {
+    // Use cached history if streaming, otherwise try to get fresh history
+    let history = if app.is_streaming {
+        app.cached_history.clone()
+    } else if let Ok(conversation) = app.conversation.try_lock() {
+        conversation.history().to_vec()
+    } else {
+        app.cached_history.clone()
+    };
+
+    let mut messages: Vec<ListItem> = history.iter().map(|msg| {
             let role = match msg.role {
                 llm::Role::User => "You",
                 llm::Role::Assistant => &app.model_display_name,
@@ -241,6 +363,24 @@ fn ui(f: &mut Frame, app: &App) {
         })
         .collect();
 
+    // Add current streaming response if active
+    if app.is_streaming && !app.current_response.is_empty() {
+        let content_lines: Vec<Line> = app.current_response
+            .lines()
+            .map(|line| Line::from(line.to_string()))
+            .collect();
+
+        let mut text: Text<'_> = Text::default();
+        text.lines.push(Line::from(Span::styled(
+            format!("[{}]", app.model_display_name),
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        )));
+        text.lines.extend(content_lines);
+        text.lines.push(Line::from("".to_string()));
+
+        messages.push(ListItem::new(text));
+    }
+
     let messages_list = List::new(messages)
         .block(Block::default().borders(Borders::ALL).title("Chat"));
 
@@ -254,12 +394,13 @@ fn ui(f: &mut Frame, app: &App) {
     f.render_widget(input_widget, chunks[1]);
 
     // Render status bar
+    let message_count = app.conversation.try_lock().map(|c| c.message_count()).unwrap_or(0);
     let status_text = if let Some(ref msg) = app.status_message {
         format!(" {} • {} | {} ", app.current_provider, app.model_display_name, msg)
     } else if app.is_streaming {
-        format!(" {} • {} | Streaming... ", app.current_provider, app.model_display_name)
+        format!(" {} • {} | {} Thinking... ", app.current_provider, app.model_display_name, app.get_thinking_indicator())
     } else {
-        format!(" {} • {} | {} messages ", app.current_provider, app.model_display_name, app.conversation.message_count())
+        format!(" {} • {} | {} messages ", app.current_provider, app.model_display_name, message_count)
     };
 
     let status_bar = Paragraph::new(status_text)
@@ -284,10 +425,19 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(ModelProviderType::Gemini, None)?;
+    app.start();
     let mut should_quit = false;
 
     while !should_quit {
         terminal.draw(|f| ui(f, &app))?;
+
+        // Check for message responses
+        app.check_message_responses();
+
+        // Advance thinking animation if streaming
+        if app.is_streaming {
+            app.advance_thinking_animation();
+        }
 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
@@ -315,10 +465,8 @@ async fn main() -> Result<()> {
                                         }
                                     }
                                 } else {
-                                    // Send regular message
-                                    if let Err(e) = app.send_message(input_text).await {
-                                        app.status_message = Some(format!("Error: {}", e));
-                                    }
+                                    // Queue message for background processing
+                                    app.queue_message(input_text);
                                 }
                             }
                         }
