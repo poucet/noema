@@ -62,10 +62,9 @@ where
 {
     async fn complete(
         &self,
-        partial: &str,
         context: &CompletionContext<U>,
     ) -> Result<Vec<Completion>, CompletionError> {
-        let cache_key = Self::cache_key(partial, context);
+        let cache_key = Self::cache_key(context.partial(), context);
 
         // Check cache
         {
@@ -78,7 +77,7 @@ where
         }
 
         // Cache miss or expired - fetch fresh
-        let completions = self.inner.complete(partial, context).await?;
+        let completions = self.inner.complete(context).await?;
 
         // Update cache
         {
@@ -106,32 +105,31 @@ mod tests {
     impl AsyncCompleter<()> for MockCompleter {
         async fn complete(
             &self,
-            partial: &str,
-            _context: &CompletionContext<()>,
+            context: &CompletionContext<()>,
         ) -> Result<Vec<Completion>, CompletionError> {
-            Ok(vec![Completion::simple(format!("completion-{}", partial))])
+            Ok(vec![Completion::simple(format!("completion-{}", context.partial()))])
         }
     }
 
     #[tokio::test]
     async fn test_caching() {
         let completer = CachedCompleter::new(MockCompleter, Duration::from_secs(1));
-        let ctx = CompletionContext::new("/test".to_string(), 5, &());
+        let ctx = CompletionContext::new("/test foo".to_string(), 9, &());
 
         // First call - should hit inner completer
-        let result1 = completer.complete("foo", &ctx).await.unwrap();
+        let result1 = completer.complete(&ctx).await.unwrap();
         assert_eq!(result1.len(), 1);
         assert_eq!(result1[0].value, "completion-foo");
 
         // Second call - should return cached result
-        let result2 = completer.complete("foo", &ctx).await.unwrap();
+        let result2 = completer.complete(&ctx).await.unwrap();
         assert_eq!(result2, result1);
 
         // Wait for TTL to expire
         tokio::time::sleep(Duration::from_millis(1100)).await;
 
         // Third call - should fetch fresh after expiry
-        let result3 = completer.complete("foo", &ctx).await.unwrap();
+        let result3 = completer.complete(&ctx).await.unwrap();
         assert_eq!(result3.len(), 1);
     }
 }

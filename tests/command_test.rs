@@ -31,19 +31,21 @@ impl TestApp {
 async fn test_completable_enum() {
     // Test case-insensitive completion
     let provider = TestProvider::Provider1;
-    let ctx = commands::CompletionContext::new("/test".to_string(), 0, &());
+    let ctx = commands::CompletionContext::new("/test prov".to_string(), 10, &());
 
-    let completions = provider.complete("prov", &ctx).await.unwrap();
+    let completions = provider.complete(&ctx).await.unwrap();
     assert_eq!(completions.len(), 2);
     assert!(completions.iter().any(|c| c.value == "provider1"));
     assert!(completions.iter().any(|c| c.value == "provider2"));
 
     // Test case-insensitive filtering
-    let completions = provider.complete("PROV", &ctx).await.unwrap();
+    let ctx2 = commands::CompletionContext::new("/test PROV".to_string(), 10, &());
+    let completions = provider.complete(&ctx2).await.unwrap();
     assert_eq!(completions.len(), 2);
 
     // Test specific match
-    let completions = provider.complete("provider1", &ctx).await.unwrap();
+    let ctx3 = commands::CompletionContext::new("/test provider1".to_string(), 15, &());
+    let completions = provider.complete(&ctx3).await.unwrap();
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].value, "provider1");
     assert_eq!(completions[0].description, Some("First provider".to_string()));

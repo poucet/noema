@@ -115,10 +115,9 @@ pub fn impl_completable(input: DeriveInput) -> Result<TokenStream> {
         impl ::commands::AsyncCompleter<()> for #enum_name {
             async fn complete(
                 &self,
-                partial: &str,
-                _context: &::commands::CompletionContext<()>,
+                context: &::commands::CompletionContext<()>,
             ) -> ::std::result::Result<Vec<::commands::Completion>, ::commands::CompletionError> {
-                let partial_lower = partial.to_lowercase();
+                let partial_lower = context.partial().to_lowercase();
                 let variants = vec![
                     #(#completion_entries),*
                 ];

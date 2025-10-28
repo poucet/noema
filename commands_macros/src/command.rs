@@ -138,13 +138,6 @@ fn generate_arg_parse(arg: &ArgInfo, index: usize) -> TokenStream {
     }
 }
 
-/// Generate arg_index calculation (uses context method)
-fn generate_arg_index_calc() -> TokenStream {
-    quote! {
-        let arg_index = context.arg_index();
-    }
-}
-
 /// Generate completion arm for enum-based completion
 fn generate_enum_completion_arm(
     arg_index: usize,
@@ -174,7 +167,7 @@ fn generate_enum_completion_arm(
                 context.tokens.input().len(),
                 &()
             );
-            dummy_value.complete(partial, &unit_ctx).await
+            dummy_value.complete(&unit_ctx).await
         }
     })
 }
@@ -244,9 +237,6 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     let enum_completion_arms = info.args.iter().enumerate()
         .filter_map(|(i, arg)| generate_enum_completion_arm(i, arg, &info.completers));
 
-    // Generate arg_index calculation (DRY)
-    let arg_index_calc = generate_arg_index_calc();
-
     // Generate custom completer arms (if any)
     let completion_with_target_arms = info.args.iter().enumerate().filter_map(|(i, arg)| {
         let arg_name_str = arg.name.to_string();
@@ -264,15 +254,10 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
         impl ::commands::AsyncCompleter<#self_type> for #wrapper_name {
             async fn complete(
                 &self,
-                _full_args: &str,
                 context: &::commands::CompletionContext<#self_type>,
             ) -> ::std::result::Result<Vec<::commands::Completion>, ::commands::CompletionError> {
-                #arg_index_calc
-
-                // Target is available via context.target
+                let arg_index = context.arg_index();
                 let target = context.target;
-
-                // Get the partial word being completed
                 let partial = context.partial();
 
                 match arg_index {

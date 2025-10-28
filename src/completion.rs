@@ -95,10 +95,10 @@ impl<'a, T> CompletionContext<'a, T> {
 /// Type parameter T is the target type (defaults to () for context-free completion)
 #[async_trait]
 pub trait AsyncCompleter<T = ()>: Send + Sync {
-    /// Generate completions for the given partial input with access to target
+    /// Generate completions from the completion context
+    /// Use context.partial() to get the word being completed
     async fn complete(
         &self,
-        partial: &str,
         context: &CompletionContext<T>,
     ) -> Result<Vec<Completion>, CompletionError>;
 }

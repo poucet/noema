@@ -55,9 +55,9 @@ impl<T> CommandRegistry<T> {
         let ctx = CompletionContext::new(input.to_string(), cursor, target);
 
         // Try to complete command arguments if we have a valid command
-        if let Ok((cmd_name, args_str)) = parse_command_input(input) {
+        if let Ok((cmd_name, _args_str)) = parse_command_input(input) {
             if let Some(command) = self.commands.get(cmd_name) {
-                return command.complete(args_str, &ctx).await;
+                return command.complete(&ctx).await;
             }
         }
 
