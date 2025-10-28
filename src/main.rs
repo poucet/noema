@@ -181,9 +181,31 @@ impl App {
                             } else {
                                 format!("/{}", common_prefix)
                             };
-                            self.input = Input::from(new_value);
-                            // Re-trigger completion with new input
-                            self.completion_state = CompletionState::Idle;
+                            let new_cursor = new_value.len();
+                            self.input = Input::from(new_value.clone());
+
+                            // Re-fetch completions with the new input to show remaining options
+                            match registry.complete(self, &new_value, new_cursor).await {
+                                Ok(new_completions) if new_completions.len() > 1 => {
+                                    // Still multiple options - show popup
+                                    self.completion_state = CompletionState::Showing {
+                                        completions: new_completions,
+                                        selected: 0,
+                                    };
+                                }
+                                Ok(new_completions) if new_completions.len() == 1 => {
+                                    // Only one option left - auto-accept
+                                    self.completion_state = CompletionState::Showing {
+                                        completions: new_completions,
+                                        selected: 0,
+                                    };
+                                    self.accept_completion();
+                                }
+                                _ => {
+                                    // No more completions or error
+                                    self.completion_state = CompletionState::Idle;
+                                }
+                            }
                             return;
                         }
 
