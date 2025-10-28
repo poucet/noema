@@ -346,9 +346,42 @@ merge_worktree() {
         echo "  No new git repositories detected."
     fi
 
-    echo "→ Pushing submodule changes from worktree..."
     # Update SUBMODULES array to include new ones
     SUBMODULES=($(get_submodules))
+
+    echo "→ Syncing worktree submodules with bare repos before pushing..."
+    for sub in "${SUBMODULES[@]}"; do
+        local SUBMODULE_PATH_IN_WORKTREE="$WORKTREE_PATH/$sub"
+        if [ -d "$SUBMODULE_PATH_IN_WORKTREE" ]; then
+            (
+                cd "$SUBMODULE_PATH_IN_WORKTREE"
+                local current_branch=$(git branch --show-current)
+
+                # Check if there are any local commits
+                if [ -n "$(git log origin/main..HEAD 2>/dev/null)" ]; then
+                    echo "  Syncing $sub: pulling and rebasing local changes..."
+
+                    # Fetch latest from bare repo
+                    git fetch origin
+
+                    # Rebase local changes on top of origin/main
+                    if ! git rebase origin/main; then
+                        echo "  ✗ REBASE CONFLICT in submodule '$sub'!"
+                        echo "  Please resolve conflicts in: $SUBMODULE_PATH_IN_WORKTREE"
+                        echo "  Then run: git rebase --continue"
+                        echo "  Or abort with: git rebase --abort"
+                        exit 1
+                    fi
+                else
+                    # No local commits, just pull
+                    git pull origin main --ff-only 2>/dev/null || true
+                fi
+            )
+        fi
+    done
+    echo "  ✓ Worktree submodules synced."
+
+    echo "→ Pushing submodule changes from worktree..."
     for sub in "${SUBMODULES[@]}"; do
         local SUBMODULE_PATH_IN_WORKTREE="$WORKTREE_PATH/$sub"
         if [ -d "$SUBMODULE_PATH_IN_WORKTREE" ]; then
