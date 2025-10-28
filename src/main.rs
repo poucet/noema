@@ -162,16 +162,8 @@ impl App {
         if let Some(ref registry) = self.command_registry {
             let cursor = input.len();
 
-            // DEBUG: Log what we're completing
-            eprintln!("DEBUG: Completing '{}' at cursor {}", input, cursor);
-
             match registry.complete(self, input, cursor).await {
                 Ok(completions) => {
-                    eprintln!("DEBUG: Got {} completions", completions.len());
-                    for c in &completions {
-                        eprintln!("  - {}: {:?}", c.value, c.description);
-                    }
-
                     if completions.len() == 1 {
                         // Only one completion - auto-accept it
                         self.completion_state = CompletionState::Showing {
@@ -180,6 +172,21 @@ impl App {
                         };
                         self.accept_completion();
                     } else if !completions.is_empty() {
+                        // Check if there's a common prefix to auto-fill
+                        if let Some(common_prefix) = Self::find_common_prefix(&completions) {
+                            // Auto-fill the common prefix
+                            let current = self.input.value();
+                            let new_value = if let Some(last_space) = current.rfind(char::is_whitespace) {
+                                format!("{} {}", &current[..=last_space].trim(), common_prefix)
+                            } else {
+                                format!("/{}", common_prefix)
+                            };
+                            self.input = Input::from(new_value);
+                            // Re-trigger completion with new input
+                            self.completion_state = CompletionState::Idle;
+                            return;
+                        }
+
                         // Multiple completions - show popup
                         self.completion_state = CompletionState::Showing {
                             completions,
@@ -189,8 +196,7 @@ impl App {
                         self.completion_state = CompletionState::Idle;
                     }
                 }
-                Err(e) => {
-                    eprintln!("DEBUG: Completion error: {}", e);
+                Err(_e) => {
                     self.completion_state = CompletionState::Idle;
                 }
             }
@@ -199,10 +205,57 @@ impl App {
         }
     }
 
-    /// Select next completion
+    /// Select next completion (Tab or Down arrow)
     fn next_completion(&mut self) {
         if let CompletionState::Showing { ref mut selected, ref completions } = self.completion_state {
             *selected = (*selected + 1) % completions.len();
+        }
+    }
+
+    /// Select previous completion (Up arrow)
+    fn prev_completion(&mut self) {
+        if let CompletionState::Showing { ref mut selected, ref completions } = self.completion_state {
+            *selected = if *selected == 0 {
+                completions.len() - 1
+            } else {
+                *selected - 1
+            };
+        }
+    }
+
+    /// Find common prefix among all completions
+    fn find_common_prefix(completions: &[commands::Completion]) -> Option<String> {
+        if completions.is_empty() {
+            return None;
+        }
+
+        let first = &completions[0].value;
+        let mut common_prefix = first.clone();
+
+        for completion in &completions[1..] {
+            let value = &completion.value;
+            let mut prefix_len = 0;
+
+            for (c1, c2) in common_prefix.chars().zip(value.chars()) {
+                if c1 == c2 {
+                    prefix_len += c1.len_utf8();
+                } else {
+                    break;
+                }
+            }
+
+            if prefix_len == 0 {
+                return None;
+            }
+
+            common_prefix.truncate(prefix_len);
+        }
+
+        if &common_prefix == first {
+            // All completions are the same - just return None
+            None
+        } else {
+            Some(common_prefix)
         }
     }
 
@@ -335,9 +388,17 @@ impl App {
         let provider_instance = create_provider(provider);
         let models = provider_instance.list_models().await?;
 
+        // Filter to only chat-capable models and match partial
         Ok(models
             .into_iter()
-            .filter(|m| m.to_lowercase().starts_with(&partial.to_lowercase()))
+            .filter(|m| {
+                // Only include models that support chat
+                if provider_instance.create_chat_model(m).is_none() {
+                    return false;
+                }
+                // Match partial input
+                m.to_lowercase().starts_with(&partial.to_lowercase())
+            })
             .map(|m| commands::Completion::simple(m))
             .collect())
     }
@@ -631,6 +692,22 @@ async fn main() -> Result<()> {
                                 app.next_completion();
                             } else {
                                 app.trigger_completion().await;
+                            }
+                        }
+                        (KeyCode::Down, _) => {
+                            // Navigate completions with arrow keys
+                            if matches!(app.completion_state, CompletionState::Showing { .. }) {
+                                app.next_completion();
+                            } else {
+                                app.input.handle_event(&Event::Key(key));
+                            }
+                        }
+                        (KeyCode::Up, _) => {
+                            // Navigate completions with arrow keys
+                            if matches!(app.completion_state, CompletionState::Showing { .. }) {
+                                app.prev_completion();
+                            } else {
+                                app.input.handle_event(&Event::Key(key));
                             }
                         }
                         (KeyCode::Esc, _) => {
