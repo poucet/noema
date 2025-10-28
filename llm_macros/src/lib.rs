@@ -1,510 +1,100 @@
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, FnArg, ItemFn, ItemImpl, Pat, PatType, ImplItem, Attribute};
 
+mod delegate_provider;
+mod tool;
+mod tool_methods;
+
+/// Delegates ModelProvider and ChatModel trait implementations to enum variants.
+///
+/// This macro generates boilerplate for enums that wrap different provider implementations,
+/// automatically delegating trait methods to the appropriate variant.
+///
+/// # Example
+///
+/// ```ignore
+/// #[delegate_provider_enum]
+/// pub enum MyProvider {
+///     Ollama(OllamaProvider),
+///     OpenAI(OpenAIProvider),
+/// }
+/// ```
 #[proc_macro_attribute]
-pub fn delegate_provider_enum(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
-    let enum_name = &input.ident;
-
-    let variants = match &input.data {
-        Data::Enum(data_enum) => &data_enum.variants,
-        _ => panic!("delegate_provider_enum only works on enums"),
-    };
-
-    // Extract variant names and their inner types
-    let variant_info: Vec<_> = variants
-        .iter()
-        .map(|variant| {
-            let variant_name = &variant.ident;
-            let inner_type = match &variant.fields {
-                Fields::Unnamed(fields) => {
-                    if fields.unnamed.len() != 1 {
-                        panic!("Each variant must have exactly one unnamed field");
-                    }
-                    &fields.unnamed[0].ty
-                }
-                _ => panic!("Each variant must have exactly one unnamed field"),
-            };
-            (variant_name, inner_type)
-        })
-        .collect();
-
-    // Generate the ChatModel enum name by replacing "Provider" with "ChatModel"
-    let model_enum_name = syn::Ident::new(
-        &enum_name.to_string().replace("Provider", "ChatModel"),
-        enum_name.span(),
-    );
-
-    // Generate ChatModel enum variants
-    let model_variants = variant_info.iter().map(|(variant_name, inner_type)| {
-        // Extract the ChatModel type from the provider type
-        // Assumes pattern like OllamaProvider -> OllamaChatModel
-        let inner_type_str = quote!(#inner_type).to_string();
-        let model_type_str = inner_type_str.replace("Provider", "ChatModel");
-        let model_type: syn::Type = syn::parse_str(&model_type_str)
-            .expect(&format!("Failed to parse model type: {}", model_type_str));
-
-        quote! {
-            #variant_name(#model_type)
-        }
-    });
-
-    // Generate match arms for list_models
-    let list_models_arms = variant_info.iter().map(|(variant_name, _)| {
-        quote! {
-            #enum_name::#variant_name(provider) => provider.list_models().await
-        }
-    });
-
-    // Generate match arms for create_chat_model
-    let create_chat_model_arms = variant_info.iter().map(|(variant_name, _)| {
-        quote! {
-            #enum_name::#variant_name(provider) => provider
-                .create_chat_model(model_name)
-                .map(#model_enum_name::#variant_name)
-        }
-    });
-
-    // Generate match arms for chat
-    let chat_arms = variant_info.iter().map(|(variant_name, _)| {
-        quote! {
-            #model_enum_name::#variant_name(model) => model.chat(request).await
-        }
-    });
-
-    // Generate match arms for stream_chat
-    let stream_chat_arms = variant_info.iter().map(|(variant_name, _)| {
-        quote! {
-            #model_enum_name::#variant_name(model) => model.stream_chat(request).await
-        }
-    });
-
-    let vis = &input.vis;
-    let attrs = &input.attrs;
-
-    // Re-emit the original enum variants
-    let original_variants = variant_info.iter().map(|(variant_name, inner_type)| {
-        quote! {
-            #variant_name(#inner_type)
-        }
-    });
-
-    let expanded = quote! {
-        #(#attrs)*
-        #vis enum #enum_name {
-            #(#original_variants),*
-        }
-
-        #vis enum #model_enum_name {
-            #(#model_variants),*
-        }
-
-        #[::async_trait::async_trait]
-        impl crate::ModelProvider for #enum_name {
-            type ModelType = #model_enum_name;
-
-            async fn list_models(&self) -> ::anyhow::Result<Vec<String>> {
-                match self {
-                    #(#list_models_arms),*
-                }
-            }
-
-            fn create_chat_model(&self, model_name: &str) -> Option<#model_enum_name> {
-                match self {
-                    #(#create_chat_model_arms),*
-                }
-            }
-        }
-
-        #[::async_trait::async_trait]
-        impl crate::ChatModel for #model_enum_name {
-            async fn chat(&self, request: &crate::ChatRequest) -> ::anyhow::Result<crate::ChatMessage> {
-                match self {
-                    #(#chat_arms),*
-                }
-            }
-
-            async fn stream_chat(&self, request: &crate::ChatRequest) -> ::anyhow::Result<crate::ChatStream> {
-                match self {
-                    #(#stream_chat_arms),*
-                }
-            }
-        }
-    };
-
-    TokenStream::from(expanded)
+pub fn delegate_provider_enum(attr: TokenStream, item: TokenStream) -> TokenStream {
+    delegate_provider::delegate_provider_enum_impl(attr, item)
 }
 
+/// Marks a function or method as a tool that can be called by LLMs.
+///
+/// For standalone functions, this generates an Args struct, tool definition, and call wrapper.
+/// For methods (functions with `&self`), this is a marker that works with `#[tool_methods]`.
+///
+/// # Example - Standalone Function
+///
+/// ```ignore
+/// #[tool]
+/// fn add_numbers(a: i32, b: i32) -> i32 {
+///     a + b
+/// }
+///
+/// // Generates:
+/// // - AddNumbersArgs struct
+/// // - AddNumbersArgs::tool_def() method
+/// // - AddNumbersArgs::call() wrapper
+/// ```
+///
+/// # Example - Method (with `#[tool_methods]`)
+///
+/// ```ignore
+/// #[tool_methods]
+/// impl Calculator {
+///     #[tool]
+///     fn add(&self, amount: i32) -> i32 {
+///         self.base + amount
+///     }
+/// }
+/// ```
 #[proc_macro_attribute]
-pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as ItemFn);
-
-    // Check if this is a method (has &self parameter)
-    // If so, pass it through as a no-op (without the #[tool] attribute)
-    // The #[tool_methods] macro will handle methods by looking for the original #[tool] attribute
-    let has_self = input.sig.inputs.iter().any(|arg| matches!(arg, FnArg::Receiver(_)));
-
-    if has_self {
-        // This is a method - just pass through unchanged WITHOUT re-emitting #[tool]
-        // This makes rust-analyzer happy and #[tool_methods] will see the original attribute
-        return quote::quote! {
-            #input
-        }.into();
-    }
-
-    let fn_name = &input.sig.ident;
-    let fn_vis = &input.vis;
-    let fn_block = &input.block;
-    let fn_attrs = &input.attrs;
-    let fn_asyncness = &input.sig.asyncness;
-    let fn_output = &input.sig.output;
-
-    // Extract function documentation from attributes
-    let doc_attrs: Vec<_> = fn_attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident("doc"))
-        .collect();
-
-    // Generate struct name: function_name -> FunctionNameArgs
-    let struct_name = syn::Ident::new(
-        &format!(
-            "{}Args",
-            fn_name
-                .to_string()
-                .split('_')
-                .map(|s| {
-                    let mut c = s.chars();
-                    match c.next() {
-                        None => String::new(),
-                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                    }
-                })
-                .collect::<String>()
-        ),
-        fn_name.span(),
-    );
-
-    // Extract function parameters
-    let mut params = Vec::new();
-    let mut param_names = Vec::new();
-    let mut param_types = Vec::new();
-
-    for arg in &input.sig.inputs {
-        match arg {
-            FnArg::Receiver(_) => {
-                // Already checked above
-            }
-            FnArg::Typed(PatType { pat, ty, attrs, .. }) => {
-                if let Pat::Ident(pat_ident) = pat.as_ref() {
-                    let param_name = &pat_ident.ident;
-                    param_names.push(param_name.clone());
-                    param_types.push(ty.clone());
-                    params.push((param_name.clone(), ty.clone(), attrs.clone()));
-                }
-            }
-        }
-    }
-
-    // Generate the struct fields with their attributes
-    let struct_fields = params.iter().map(|(name, ty, attrs)| {
-        quote! {
-            #(#attrs)*
-            pub #name: #ty
-        }
-    });
-
-    // Determine if wrapper should be async
-    let wrapper_async = if fn_asyncness.is_some() {
-        quote! { async }
-    } else {
-        quote! {}
-    };
-
-    let wrapper_await = if fn_asyncness.is_some() {
-        quote! { .await }
-    } else {
-        quote! {}
-    };
-
-    // Generate the tool name from the function name
-    let tool_name = fn_name.to_string();
-
-    // Generate tool description from doc comments
-    let tool_description = if !doc_attrs.is_empty() {
-        let doc_strings: Vec<_> = doc_attrs
-            .iter()
-            .filter_map(|attr| {
-                if let Ok(name_value) = attr.meta.require_name_value() {
-                    if let syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(s),
-                        ..
-                    }) = &name_value.value
-                    {
-                        let value = s.value();
-                        let line = value.trim();
-                        if !line.is_empty() {
-                            return Some(line.to_string());
-                        }
-                    }
-                }
-                None
-            })
-            .collect();
-
-        if doc_strings.is_empty() {
-            quote! { None }
-        } else {
-            let combined = doc_strings.join(" ");
-            quote! { Some(#combined.to_string()) }
-        }
-    } else {
-        quote! { None }
-    };
-
-    // For standalone functions, generate Args struct and wrapper
-    let expanded = quote! {
-        #(#fn_attrs)*
-        #fn_vis #fn_asyncness fn #fn_name(#(#param_names: #param_types),*) #fn_output #fn_block
-
-        #[derive(::serde::Deserialize, ::serde::Serialize, ::schemars::JsonSchema)]
-        pub struct #struct_name {
-            #(#struct_fields),*
-        }
-
-        impl #struct_name {
-            pub fn tool_def() -> ::llm::ToolDefinition {
-                use ::schemars::schema_for;
-                let schema = schema_for!(#struct_name);
-                ::llm::ToolDefinition {
-                    name: #tool_name.to_string(),
-                    description: #tool_description,
-                    input_schema: schema,
-                }
-            }
-
-            pub #wrapper_async fn call(args_json: ::serde_json::Value) -> ::anyhow::Result<String> {
-                let args: #struct_name = ::serde_json::from_value(args_json)?;
-                let result = #fn_name(#(args.#param_names),*) #wrapper_await;
-                Ok(::serde_json::to_string(&result)?)
-            }
-        }
-    };
-
-    TokenStream::from(expanded)
+pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
+    tool::tool_impl(attr, item)
 }
 
-
+/// Processes an impl block to convert `#[tool]`-marked methods into callable tools.
+///
+/// This macro scans an impl block for methods marked with `#[tool]`, generates
+/// Args structs for each at module level, and creates tool definitions and wrappers.
+///
+/// # Example
+///
+/// ```ignore
+/// use llm_macros::{tool, tool_methods};
+///
+/// struct Calculator {
+///     base: i32,
+/// }
+///
+/// #[tool_methods]
+/// impl Calculator {
+///     fn new(base: i32) -> Self {
+///         Self { base }
+///     }
+///
+///     #[tool]
+///     fn add(&self, amount: i32) -> i32 {
+///         self.base + amount
+///     }
+///
+///     #[tool]
+///     async fn async_compute(&self, x: i32) -> i32 {
+///         self.base + x
+///     }
+/// }
+///
+/// // Generates for each #[tool] method:
+/// // - MethodNameArgs struct
+/// // - MethodNameArgs::method_name_tool_def()
+/// // - MethodNameArgs::method_name_wrapper(&self, instance: &Calculator, args_json)
+/// ```
 #[proc_macro_attribute]
-pub fn tool_methods(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Early return on parse error to help rust-analyzer
-    let input = match syn::parse::<ItemImpl>(item.clone()) {
-        Ok(input) => input,
-        Err(_) => return item, // Pass through on error
-    };
-
-    let self_ty = &input.self_ty;
-
-    let mut methods_to_process = Vec::new();
-    let mut other_items = Vec::new();
-
-    // Separate methods from other items
-    // Look for methods marked with #[tool] attribute
-    for item in input.items {
-        if let ImplItem::Fn(method) = item {
-            // Check if this method has the #[tool] attribute
-            let has_tool_attr = method.attrs.iter().any(|attr| {
-                attr.path().is_ident("tool")
-            });
-
-            if has_tool_attr {
-                methods_to_process.push(method);
-            } else {
-                other_items.push(ImplItem::Fn(method));
-            }
-        } else {
-            other_items.push(item);
-        }
-    }
-
-    // Generate Args structs and their impls
-    let mut generated_structs = Vec::new();
-    let mut cleaned_methods = Vec::new();
-
-    for mut method in methods_to_process {
-        // Remove the #[tool] attribute from the method
-        method.attrs.retain(|attr| !attr.path().is_ident("tool"));
-
-        let fn_name = &method.sig.ident;
-        let fn_attrs = &method.attrs;
-        let fn_asyncness = &method.sig.asyncness;
-        let fn_output = &method.sig.output;
-        let fn_block = &method.block;
-
-        // Extract function documentation from attributes
-        let doc_attrs: Vec<_> = fn_attrs
-            .iter()
-            .filter(|attr| attr.path().is_ident("doc"))
-            .collect();
-
-        // Generate struct name: function_name -> FunctionNameArgs
-        let struct_name = syn::Ident::new(
-            &format!(
-                "{}Args",
-                fn_name
-                    .to_string()
-                    .split('_')
-                    .map(|s| {
-                        let mut c = s.chars();
-                        match c.next() {
-                            None => String::new(),
-                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                        }
-                    })
-                    .collect::<String>()
-            ),
-            fn_name.span(),
-        );
-
-        // Extract function parameters (excluding self)
-        let mut params = Vec::new();
-        let mut param_names = Vec::new();
-        let mut param_types = Vec::new();
-
-        for arg in &method.sig.inputs {
-            match arg {
-                FnArg::Receiver(_) => {
-                    // Skip self parameter
-                }
-                FnArg::Typed(PatType { pat, ty, attrs, .. }) => {
-                    if let Pat::Ident(pat_ident) = pat.as_ref() {
-                        let param_name = &pat_ident.ident;
-                        param_names.push(param_name.clone());
-                        param_types.push(ty.clone());
-                        params.push((param_name.clone(), ty.clone(), attrs.clone()));
-                    }
-                }
-            }
-        }
-
-        // Generate the struct fields with their attributes
-        let struct_fields = params.iter().map(|(name, ty, attrs)| {
-            quote! {
-                #(#attrs)*
-                pub #name: #ty
-            }
-        });
-
-        // Generate the wrapper function name
-        let wrapper_name = syn::Ident::new(&format!("{}_wrapper", fn_name), fn_name.span());
-
-        // Generate the call to the original function
-        let fn_call = quote! {
-            instance.#fn_name(#(args.#param_names),*)
-        };
-
-        // Determine if wrapper should be async
-        let wrapper_async = if fn_asyncness.is_some() {
-            quote! { async }
-        } else {
-            quote! {}
-        };
-
-        let wrapper_await = if fn_asyncness.is_some() {
-            quote! { .await }
-        } else {
-            quote! {}
-        };
-
-        // Generate the tool name from the function name
-        let tool_name = fn_name.to_string();
-
-        // Generate tool description from doc comments
-        let tool_description = if !doc_attrs.is_empty() {
-            let doc_strings: Vec<_> = doc_attrs
-                .iter()
-                .filter_map(|attr| {
-                    if let Ok(name_value) = attr.meta.require_name_value() {
-                        if let syn::Expr::Lit(syn::ExprLit {
-                            lit: syn::Lit::Str(s),
-                            ..
-                        }) = &name_value.value
-                        {
-                            let value = s.value();
-                            let line = value.trim();
-                            if !line.is_empty() {
-                                return Some(line.to_string());
-                            }
-                        }
-                    }
-                    None
-                })
-                .collect();
-
-            if doc_strings.is_empty() {
-                quote! { None }
-            } else {
-                let combined = doc_strings.join(" ");
-                quote! { Some(#combined.to_string()) }
-            }
-        } else {
-            quote! { None }
-        };
-
-        // Generate method to get tool definition
-        let tool_def_method_name = syn::Ident::new(&format!("{}_tool_def", fn_name), fn_name.span());
-
-        // Generate the Args struct and its impl
-        let struct_def = quote! {
-            #[derive(::serde::Deserialize, ::serde::Serialize, ::schemars::JsonSchema)]
-            pub struct #struct_name {
-                #(#struct_fields),*
-            }
-
-            impl #struct_name {
-                pub fn #tool_def_method_name() -> ::llm::ToolDefinition {
-                    use ::schemars::schema_for;
-                    let schema = schema_for!(#struct_name);
-                    ::llm::ToolDefinition {
-                        name: #tool_name.to_string(),
-                        description: #tool_description,
-                        input_schema: schema,
-                    }
-                }
-
-                pub #wrapper_async fn #wrapper_name(&self, instance: &#self_ty, args_json: ::serde_json::Value) -> ::anyhow::Result<String> {
-                    let args: #struct_name = ::serde_json::from_value(args_json)?;
-                    let result = #fn_call #wrapper_await;
-                    Ok(::serde_json::to_string(&result)?)
-                }
-            }
-        };
-
-        generated_structs.push(struct_def);
-
-        // Create the cleaned method (without #[tool] attribute)
-        let cleaned_method = quote! {
-            #(#fn_attrs)*
-            #fn_asyncness fn #fn_name(&self, #(#param_names: #param_types),*) #fn_output #fn_block
-        };
-
-        cleaned_methods.push(cleaned_method);
-    }
-
-    // Reconstruct the impl block
-    let impl_generics = &input.generics;
-    let where_clause = &input.generics.where_clause;
-
-    let expanded = quote! {
-        // Generate all Args structs at module level
-        #(#generated_structs)*
-
-        // Generate the impl block with cleaned methods
-        impl #impl_generics #self_ty #where_clause {
-            #(#cleaned_methods)*
-            #(#other_items)*
-        }
-    };
-
-    TokenStream::from(expanded)
+pub fn tool_methods(attr: TokenStream, item: TokenStream) -> TokenStream {
+    tool_methods::tool_methods_impl(attr, item)
 }
