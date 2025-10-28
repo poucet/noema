@@ -39,24 +39,20 @@ impl ParsedArgs {
     pub fn parse<T>(&self, index: usize) -> Result<T, ParseError>
     where
         T: FromStr,
-        T::Err: std::error::Error + Send + Sync + 'static,
+        T::Err: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
     {
         let value = self
             .get(index)
             .ok_or(ParseError::MissingArg(index))?;
 
-        value.parse().map_err(|e| ParseError::InvalidType {
-            position: index,
-            expected: std::any::type_name::<T>().to_string(),
-            source: Box::new(e),
-        })
+        value.parse().map_err(|e| ParseError::Custom(format!("Failed to parse argument at position {}: {}", index, e)))
     }
 
     /// Try to parse optional arg at position
     pub fn parse_optional<T>(&self, index: usize) -> Result<Option<T>, ParseError>
     where
         T: FromStr,
-        T::Err: std::error::Error + Send + Sync + 'static,
+        T::Err: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
     {
         match self.get(index) {
             Some(_) => self.parse(index).map(Some),
