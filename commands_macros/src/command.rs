@@ -170,8 +170,8 @@ fn generate_enum_completion_arm(
             let dummy_value = <#completion_ty as ::std::default::Default>::default();
             // Enum completions use () as target - create unit context
             let unit_ctx = ::commands::CompletionContext::new(
-                context.input.clone(),
-                context.cursor,
+                context.tokens.input().to_string(),
+                context.tokens.input().len(),
                 &()
             );
             dummy_value.complete(partial, &unit_ctx).await

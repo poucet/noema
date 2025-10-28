@@ -1,18 +1,26 @@
 /// Parsed tokens with methods for consumption
 #[derive(Clone, Debug)]
 pub struct TokenStream {
+    /// Original input string
+    input: String,
+
+    /// Cursor position in input
+    cursor: usize,
+
+    /// Parsed tokens
     tokens: Vec<String>,
 }
 
 impl TokenStream {
     /// Create TokenStream with simple whitespace tokenization (for completion)
-    pub fn new(input: &str) -> Self {
+    pub fn new(input: String, cursor: usize) -> Self {
         let tokens = input.split_whitespace().map(String::from).collect();
-        Self { tokens }
+        Self { input, cursor, tokens }
     }
 
     /// Create TokenStream respecting quotes (for command argument parsing)
-    pub fn from_quoted(input: &str) -> Self {
+    pub fn from_quoted(input: impl Into<String>) -> Self {
+        let input = input.into();
         let mut tokens = Vec::new();
         let mut current = String::new();
         let mut in_quotes = false;
@@ -45,7 +53,7 @@ impl TokenStream {
             tokens.push(current);
         }
 
-        Self { tokens }
+        Self { input, cursor: 0, tokens }
     }
 
     /// Get token at index
@@ -71,5 +79,28 @@ impl TokenStream {
     /// Parse token at index as type T
     pub fn parse<T: std::str::FromStr>(&self, index: usize) -> Option<T> {
         self.get(index).and_then(|s| s.parse().ok())
+    }
+
+    /// Calculate which argument index is being completed
+    pub fn arg_index(&self) -> usize {
+        if self.input.ends_with(char::is_whitespace) {
+            self.tokens.len().saturating_sub(1)
+        } else {
+            self.tokens.len().saturating_sub(2)
+        }
+    }
+
+    /// Get the partial word being completed
+    pub fn partial(&self) -> &str {
+        if self.input.ends_with(char::is_whitespace) {
+            ""  // Completing a new word
+        } else {
+            self.last().unwrap_or("")
+        }
+    }
+
+    /// Get the original input string
+    pub fn input(&self) -> &str {
+        &self.input
     }
 }

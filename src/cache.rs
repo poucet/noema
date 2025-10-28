@@ -50,7 +50,7 @@ where
 
     /// Create cache key from partial input and context
     fn cache_key<V>(partial: &str, context: &CompletionContext<V>) -> String {
-        format!("{}:{}", context.input, partial)
+        format!("{}:{}", context.input(), partial)
     }
 }
 

@@ -57,13 +57,7 @@ impl<M> Completion<M> {
 
 /// Context provided to completers during completion
 pub struct CompletionContext<'a, T> {
-    /// Full input string
-    pub input: String,
-
-    /// Cursor position in input
-    pub cursor: usize,
-
-    /// Parsed tokens
+    /// Parsed token stream (contains input, cursor, and tokens)
     pub tokens: TokenStream,
 
     /// Reference to the target for context-aware completion
@@ -73,32 +67,27 @@ pub struct CompletionContext<'a, T> {
 impl<'a, T> CompletionContext<'a, T> {
     /// Create a new completion context
     pub fn new(input: String, cursor: usize, target: &'a T) -> Self {
-        let tokens = TokenStream::new(&input);
+        let tokens = TokenStream::new(input, cursor);
 
         Self {
-            input,
-            cursor,
             tokens,
             target,
         }
     }
 
-    /// Calculate which argument index is being completed
+    /// Calculate which argument index is being completed (delegates to TokenStream)
     pub fn arg_index(&self) -> usize {
-        if self.input.ends_with(char::is_whitespace) {
-            self.tokens.len().saturating_sub(1)
-        } else {
-            self.tokens.len().saturating_sub(2)
-        }
+        self.tokens.arg_index()
     }
 
-    /// Get the partial word being completed
+    /// Get the partial word being completed (delegates to TokenStream)
     pub fn partial(&self) -> &str {
-        if self.input.ends_with(char::is_whitespace) {
-            ""  // Completing a new word
-        } else {
-            self.tokens.last().unwrap_or("")
-        }
+        self.tokens.partial()
+    }
+
+    /// Get the input string (delegates to TokenStream)
+    pub fn input(&self) -> &str {
+        self.tokens.input()
     }
 }
 

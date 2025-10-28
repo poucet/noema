@@ -54,32 +54,21 @@ impl<T> CommandRegistry<T> {
     ) -> Result<Vec<Completion>, CompletionError> {
         let ctx = CompletionContext::new(input.to_string(), cursor, target);
 
-        // Try to parse command name
+        // Try to complete command arguments if we have a valid command
         if let Ok((cmd_name, args_str)) = parse_command_input(input) {
-            // Check if command exists
             if let Some(command) = self.commands.get(cmd_name) {
-                // Complete command arguments - target is in context
-                command.complete(args_str, &ctx).await
-            } else {
-                // Unknown command - fall back to command name completion
-                let partial = input.trim_start_matches('/');
-                Ok(self
-                    .commands
-                    .keys()
-                    .filter(|name| name.starts_with(partial))
-                    .map(|name| Completion::simple(name.as_str()))
-                    .collect())
+                return command.complete(args_str, &ctx).await;
             }
-        } else {
-            // Complete command names
-            let partial = input.trim_start_matches('/');
-            Ok(self
-                .commands
-                .keys()
-                .filter(|name| name.starts_with(partial))
-                .map(|name| Completion::simple(name.as_str()))
-                .collect())
         }
+
+        // Fall through: complete command names
+        let partial = input.trim_start_matches('/');
+        Ok(self
+            .commands
+            .keys()
+            .filter(|name| name.starts_with(partial))
+            .map(|name| Completion::simple(name.as_str()))
+            .collect())
     }
 
     /// Get list of all registered command names
