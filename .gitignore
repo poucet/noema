@@ -1,7 +1,2 @@
 .DS_Store
 target/
-*.code-workspace
-.git-remotes
-.git-worktrees
-.vscode
-.claude*.log
