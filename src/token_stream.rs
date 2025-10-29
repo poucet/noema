@@ -133,6 +133,18 @@ impl TokenStream {
     pub fn cursor(&self) -> usize {
         self.input.len()
     }
+
+    /// Parse command name from input (expects leading slash)
+    /// Returns None if input doesn't start with '/' or has no command name
+    pub fn command_name(&self) -> Option<&str> {
+        let trimmed = self.input.trim();
+        if !trimmed.starts_with('/') {
+            return None;
+        }
+
+        // Get first token and strip the leading slash
+        self.get(0).and_then(|token| token.strip_prefix('/'))
+    }
 }
 
 #[cfg(test)]
@@ -288,5 +300,23 @@ mod tests {
         assert_eq!(ts.len(), 3); // ["command", "arg1", "arg2"]
         assert_eq!(ts.arg_index(), 2); // completing arg index 2 (3rd arg)
         assert_eq!(ts.partial(), ""); // empty partial for new word
+    }
+
+    #[test]
+    fn test_command_name() {
+        let ts = TokenStream::new("/help".to_string());
+        assert_eq!(ts.command_name(), Some("help"));
+
+        let ts2 = TokenStream::new("/model gemini".to_string());
+        assert_eq!(ts2.command_name(), Some("model"));
+
+        let ts3 = TokenStream::new("not a command".to_string());
+        assert_eq!(ts3.command_name(), None);
+
+        let ts4 = TokenStream::new("".to_string());
+        assert_eq!(ts4.command_name(), None);
+
+        let ts5 = TokenStream::new("/".to_string());
+        assert_eq!(ts5.command_name(), Some(""));
     }
 }

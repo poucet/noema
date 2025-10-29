@@ -4,7 +4,6 @@ use crate::command::{Command, CommandResult};
 use crate::completion::Completion;
 use crate::context::{Context, ContextMut};
 use crate::error::{CommandError, CompletionError};
-use crate::token_stream::TokenStream;
 
 /// Trait for types that can register themselves with a CommandRegistry
 pub trait Registrable<R> {
@@ -33,28 +32,27 @@ impl<T> CommandRegistry<T> {
         self.commands.insert(name, Box::new(command));
     }
 
-    /// Execute a command from input string on the target
-    pub async fn execute(&self, target: &mut T, input: &str) -> Result<CommandResult, CommandError> {
-        let (cmd_name, args_str) = parse_command_input(input)?;
+    /// Execute a command with mutable context
+    pub async fn execute<'a>(&self, context: ContextMut<'a, T>) -> Result<CommandResult, CommandError> {
+        let cmd_name = context.stream().command_name()
+            .ok_or_else(|| CommandError::InvalidArgs("Commands must start with /".to_string()))?;
 
         let command = self
             .commands
             .get(cmd_name)
             .ok_or_else(|| CommandError::UnknownCommand(cmd_name.to_string()))?;
 
-        let tokens = TokenStream::from_quoted(args_str);
-        let ctx = ContextMut::new(tokens, target);
-        command.execute(ctx).await
+        command.execute(context).await
     }
 
     /// Get completions for the current input with access to target
-    pub async fn complete(
-        &self, ctx: &Context<'_, T>,
+    pub async fn complete<'a>(
+        &self, ctx: &Context<'a, T>,
     ) -> Result<Vec<Completion>, CompletionError> {
         // Try to complete command arguments if we have a valid command
-        if let Ok((cmd_name, _args_str)) = parse_command_input(ctx.stream().input()) {
+        if let Some(cmd_name) = ctx.stream().command_name() {
             if let Some(command) = self.commands.get(cmd_name) {
-                return command.complete(&ctx).await;
+                return command.complete(ctx).await;
             }
         }
 
@@ -82,52 +80,5 @@ impl<T> CommandRegistry<T> {
 impl<T> Default for CommandRegistry<T> {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Parse command input into (command_name, arguments)
-fn parse_command_input(input: &str) -> Result<(&str, &str), CommandError> {
-    let input = input.trim();
-
-    if !input.starts_with('/') {
-        return Err(CommandError::InvalidArgs(
-            "Commands must start with /".to_string(),
-        ));
-    }
-
-    let without_slash = &input[1..];
-
-    if let Some(space_pos) = without_slash.find(char::is_whitespace) {
-        let cmd_name = &without_slash[..space_pos];
-        let args = without_slash[space_pos..].trim_start();
-        Ok((cmd_name, args))
-    } else {
-        // No args
-        Ok((without_slash, ""))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_command_input() {
-        assert_eq!(
-            parse_command_input("/help").unwrap(),
-            ("help", "")
-        );
-
-        assert_eq!(
-            parse_command_input("/model gemini").unwrap(),
-            ("model", "gemini")
-        );
-
-        assert_eq!(
-            parse_command_input("/model gemini gemini-2.0-flash").unwrap(),
-            ("model", "gemini gemini-2.0-flash")
-        );
-
-        assert!(parse_command_input("not a command").is_err());
     }
 }
