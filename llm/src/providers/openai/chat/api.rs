@@ -203,17 +203,51 @@ pub struct ChatCompletionChunk {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ModelCapabilities {
+    pub fine_tune: Option<bool>,
+    pub inference: Option<bool>,
+    pub completion: Option<bool>,
+    pub chat_completion: Option<bool>,
+    pub embeddings: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Model {
     pub id: String,
     pub object: String,
     pub created: u64,
     pub owned_by: String,
+    // Azure OpenAI provides a capabilities field
+    pub capabilities: Option<ModelCapabilities>,
 }
 
 impl From<Model> for crate::ModelDefinition {
     fn from(model: Model) -> Self {
-        // All OpenAI models support text/chat
-        crate::ModelDefinition::text_model(model.id)
+        let mut capabilities = Vec::new();
+
+        // Check if Azure OpenAI capabilities field is present
+        if let Some(caps) = &model.capabilities {
+            if caps.chat_completion == Some(true) || caps.completion == Some(true) {
+                capabilities.push(crate::ModelCapability::Text);
+            }
+            if caps.embeddings == Some(true) {
+                capabilities.push(crate::ModelCapability::Embedding);
+            }
+            // Note: Azure capabilities doesn't have explicit vision field
+            // Vision support is not indicated in the capabilities object
+        } else {
+            // Standard OpenAI API doesn't provide capability fields
+            // This is a limitation of the OpenAI API - there's no explicit capability metadata
+            // All we can do is assume text capability as default
+            capabilities.push(crate::ModelCapability::Text);
+        }
+
+        // Fallback: if no capabilities determined, assume text
+        if capabilities.is_empty() {
+            capabilities.push(crate::ModelCapability::Text);
+        }
+
+        crate::ModelDefinition::new(model.id, capabilities)
     }
 }
 
