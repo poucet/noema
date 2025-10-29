@@ -57,7 +57,7 @@ impl<T> CommandRegistry<T> {
         }
 
         // Fall through: complete command names
-        let partial = ctx.stream().input().trim_start_matches('/');
+        let partial = ctx.stream().partial().trim_start_matches('/');
         Ok(self
             .commands
             .keys()
