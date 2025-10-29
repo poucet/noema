@@ -60,15 +60,15 @@ impl<M> Completion<M> {
 pub trait Completable: Send + Sync {
     /// Return all possible completions for this type
     fn completions() -> Vec<Completion>;
+}
 
-    /// Filter completions by partial match (case-insensitive)
-    fn complete_partial(partial: &str) -> Vec<Completion> {
-        let partial_lower = partial.to_lowercase();
-        Self::completions()
-            .into_iter()
-            .filter(|c| c.value.starts_with(&partial_lower))
-            .collect()
-    }
+/// Filter completions by partial match (case-insensitive)
+pub fn filter_completions(completions: Vec<Completion>, partial: &str) -> Vec<Completion> {
+    let partial_lower = partial.to_lowercase();
+    completions
+        .into_iter()
+        .filter(|c| c.value.starts_with(&partial_lower))
+        .collect()
 }
 
 /// Trait for types that can provide async completions
@@ -90,6 +90,6 @@ impl<C: Completable> AsyncCompleter<()> for C {
         &self,
         context: &Context<'a, ()>,
     ) -> Result<Vec<Completion>, CompletionError> {
-        Ok(C::complete_partial(context.stream().partial()))
+        Ok(filter_completions(C::completions(), context.stream().partial()))
     }
 }

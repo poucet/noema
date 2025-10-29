@@ -7,7 +7,7 @@ pub mod cache;
 pub mod token_stream;
 
 // Re-export main types
-pub use completion::{AsyncCompleter, Completable, Completion};
+pub use completion::{AsyncCompleter, Completable, Completion, filter_completions};
 pub use context::{Context, ContextMut};
 pub use command::{Command, CommandMetadata, CommandResult};
 pub use error::{CommandError, CompletionError, ParseError};

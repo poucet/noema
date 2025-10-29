@@ -183,8 +183,9 @@ fn generate_enum_completion_arm(
 
     Some(quote! {
         #arg_index => {
-            // Use Completable helper to filter by partial match
-            Ok(<#completion_ty as ::commands::Completable>::complete_partial(
+            // Use utility function to filter completions by partial match
+            Ok(::commands::filter_completions(
+                <#completion_ty as ::commands::Completable>::completions(),
                 context.stream().partial()
             ))
         }
