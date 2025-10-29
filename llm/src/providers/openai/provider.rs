@@ -41,9 +41,9 @@ impl OpenAIProvider {
 impl ModelProvider for OpenAIProvider {
     type ModelType = OpenAIChatModel;
 
-    async fn list_models(&self) -> anyhow::Result<Vec<String>> {
+    async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         let response: ListModelsResponse = self.client.get(self.models_url()).await?;
-        Ok(response.data.into_iter().map(|m| m.id).collect())
+        Ok(response.data.into_iter().map(|m| m.into()).collect())
     }
 
     fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {

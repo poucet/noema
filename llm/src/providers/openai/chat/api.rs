@@ -210,6 +210,13 @@ pub struct Model {
     pub owned_by: String,
 }
 
+impl From<Model> for crate::ModelDefinition {
+    fn from(model: Model) -> Self {
+        // All OpenAI models support text/chat
+        crate::ModelDefinition::text_model(model.id)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ListModelsResponse {
     pub object: String,

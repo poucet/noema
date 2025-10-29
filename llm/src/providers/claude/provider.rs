@@ -15,6 +15,13 @@ struct ModelInfo {
     id: String,
 }
 
+impl From<ModelInfo> for crate::ModelDefinition {
+    fn from(model: ModelInfo) -> Self {
+        // All Claude models support text/chat
+        crate::ModelDefinition::text_model(model.id)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ListModelsResponse {
     data: Vec<ModelInfo>,
@@ -52,11 +59,11 @@ impl ClaudeProvider {
 impl ModelProvider for ClaudeProvider {
     type ModelType = ClaudeChatModel;
 
-    async fn list_models(&self) -> anyhow::Result<Vec<String>> {
+    async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         // TODO: Add support for pagination.
         let url = format!("{}/models", self.base_url);
         let response: ListModelsResponse = self.client.get(&url).await?;
-        Ok(response.data.iter().map(|m| m.id.clone()).collect())
+        Ok(response.data.into_iter().map(|m| m.into()).collect())
     }
 
     fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {

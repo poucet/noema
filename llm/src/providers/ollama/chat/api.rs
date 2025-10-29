@@ -6,6 +6,13 @@ pub(crate) struct ModelDefinition {
     pub(crate) name: String,
 }
 
+impl From<ModelDefinition> for crate::ModelDefinition {
+    fn from(model: ModelDefinition) -> Self {
+        // All Ollama models support text/chat
+        crate::ModelDefinition::text_model(model.name)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ListModelsResponse {
     pub(crate) models: Vec<ModelDefinition>,

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use commands::{Context, ContextMut, Registrable, TokenStream};
+use commands::{CompletionHelper, CompletionResult, Registrable};
 use conversation::Conversation;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -109,7 +109,7 @@ struct App {
     cmd_rx: Option<(mpsc::UnboundedReceiver<MessageCommand>, mpsc::UnboundedSender<MessageResponse>)>,
     cached_history: Vec<llm::api::ChatMessage>,
     current_response: String,
-    command_registry: Option<commands::CommandRegistry<Self>>,
+    completion_helper: CompletionHelper<Self>,
     completion_state: CompletionState,
 }
 
@@ -144,96 +144,63 @@ impl App {
             cmd_rx: Some((cmd_rx, resp_tx)),
             cached_history: Vec::new(),
             current_response: String::new(),
-            command_registry: None,
+            completion_helper: Self::setup_commands(),
             completion_state: CompletionState::Idle,
         })
     }
 
     /// Trigger tab completion
     async fn trigger_completion(&mut self) {
-        let input = self.input.value();
-        if !input.starts_with('/') {
-            return;
-        }
+        let input_value = self.input.value().to_string();
 
-        // Set loading state
         self.completion_state = CompletionState::Loading;
 
-        if let Some(ref registry) = self.command_registry {
-            let ctx = Context::new(input, &*self);
-            match registry.complete(&ctx).await {
-                Ok(completions) => {
-                    if completions.len() == 1 {
-                        // Only one completion - auto-accept it
-                        self.completion_state = CompletionState::Showing {
-                            completions,
-                            selected: 0,
-                        };
-                        self.accept_completion();
-                    } else if !completions.is_empty() {
-                        // Check if there's a common prefix to auto-fill
-                        if let Some(common_prefix) = Self::find_common_prefix(&completions) {
-                            // Auto-fill the common prefix
-                            let current = self.input.value();
-                            let new_value = if let Some(last_space) = current.rfind(char::is_whitespace) {
-                                format!("{} {}", &current[..=last_space].trim(), common_prefix)
-                            } else {
-                                format!("/{}", common_prefix)
-                            };
-                            self.input = Input::from(new_value.clone());
+        let result = self.completion_helper.trigger_completion(&input_value, &*self).await;
 
-                            // Re-fetch completions with the new input to show remaining options
-                            let new_ctx = Context::new(&new_value, &*self);
-                            match registry.complete(&new_ctx).await {
-                                Ok(new_completions) if new_completions.len() > 1 => {
-                                    // Still multiple options - show popup
-                                    self.completion_state = CompletionState::Showing {
-                                        completions: new_completions,
-                                        selected: 0,
-                                    };
-                                }
-                                Ok(new_completions) if new_completions.len() == 1 => {
-                                    // Only one option left - auto-accept
-                                    self.completion_state = CompletionState::Showing {
-                                        completions: new_completions,
-                                        selected: 0,
-                                    };
-                                    self.accept_completion();
-                                }
-                                _ => {
-                                    // No more completions or error
-                                    self.completion_state = CompletionState::Idle;
-                                }
-                            }
-                            return;
-                        }
-
-                        // Multiple completions - show popup
-                        self.completion_state = CompletionState::Showing {
-                            completions,
-                            selected: 0,
-                        };
-                    } else {
-                        self.completion_state = CompletionState::Idle;
-                    }
-                }
-                Err(_e) => {
-                    self.completion_state = CompletionState::Idle;
-                }
+        match result {
+            CompletionResult::NoCompletions => {
+                self.completion_state = CompletionState::Idle;
             }
-        } else {
-            self.completion_state = CompletionState::Idle;
+            CompletionResult::Single(value) => {
+                // Auto-accept single completion
+                self.completion_state = CompletionState::Idle;
+                self.apply_completion_value(&value);
+            }
+            CompletionResult::AutoFilledPrefix { new_input, completions } => {
+                // Update input with auto-filled prefix and show remaining completions
+                self.input = Input::from(new_input);
+                self.completion_state = CompletionState::Showing {
+                    completions,
+                    selected: 0,
+                };
+            }
+            CompletionResult::Multiple(completions) => {
+                // Show completions popup
+                self.completion_state = CompletionState::Showing {
+                    completions,
+                    selected: 0,
+                };
+            }
         }
     }
 
-    /// Select next completion (Tab or Down arrow)
+    /// Handle tab key
+    async fn handle_tab(&mut self) {
+        if matches!(self.completion_state, CompletionState::Showing { .. }) {
+            self.next_completion();
+        } else {
+            self.trigger_completion().await;
+        }
+    }
+
+    /// Select next completion
     fn next_completion(&mut self) {
         if let CompletionState::Showing { ref mut selected, ref completions } = self.completion_state {
             *selected = (*selected + 1) % completions.len();
         }
     }
 
-    /// Select previous completion (Up arrow)
+    /// Select previous completion
     fn prev_completion(&mut self) {
         if let CompletionState::Showing { ref mut selected, ref completions } = self.completion_state {
             *selected = if *selected == 0 {
@@ -244,60 +211,56 @@ impl App {
         }
     }
 
-    /// Find common prefix among all completions
-    fn find_common_prefix(completions: &[commands::Completion]) -> Option<String> {
-        if completions.is_empty() {
-            return None;
-        }
-
-        let first = &completions[0].value;
-        let mut common_prefix = first.clone();
-
-        for completion in &completions[1..] {
-            let value = &completion.value;
-            let mut prefix_len = 0;
-
-            for (c1, c2) in common_prefix.chars().zip(value.chars()) {
-                if c1 == c2 {
-                    prefix_len += c1.len_utf8();
-                } else {
-                    break;
-                }
-            }
-
-            if prefix_len == 0 {
-                return None;
-            }
-
-            common_prefix.truncate(prefix_len);
-        }
-
-        if &common_prefix == first {
-            // All completions are the same - just return None
-            None
+    /// Handle down arrow
+    fn handle_down(&mut self) {
+        if matches!(self.completion_state, CompletionState::Showing { .. }) {
+            self.next_completion();
         } else {
-            Some(common_prefix)
+            self.input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::empty(),
+            )));
         }
     }
 
-    /// Accept current completion
-    fn accept_completion(&mut self) {
+    /// Handle up arrow
+    fn handle_up(&mut self) {
+        if matches!(self.completion_state, CompletionState::Showing { .. }) {
+            self.prev_completion();
+        } else {
+            self.input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Up,
+                crossterm::event::KeyModifiers::empty(),
+            )));
+        }
+    }
+
+    /// Handle enter key
+    fn handle_enter(&mut self) -> Option<String> {
         if let CompletionState::Showing { selected, ref completions } = self.completion_state {
             if let Some(completion) = completions.get(selected) {
-                // Replace the last partial word with the completion value + trailing space
-                let current = self.input.value();
-                let new_value = if let Some(last_space) = current.rfind(char::is_whitespace) {
-                    // Has spaces - replace last word
-                    format!("{} {} ", &current[..=last_space].trim(), completion.value)
-                } else {
-                    // No spaces - completing command name
-                    format!("/{} ", completion.value)
-                };
-                self.input = Input::from(new_value);
-                // Note: cursor moves to end automatically with Input::from()
+                let value = completion.value.clone();
+                self.completion_state = CompletionState::Idle;
+                self.apply_completion_value(&value);
             }
+            return None;
         }
-        self.completion_state = CompletionState::Idle;
+
+        // Not showing completions - return input for processing
+        let input_text = self.input.value().to_string();
+        self.input.reset();
+        Some(input_text)
+    }
+
+    /// Apply a completion value to the input
+    fn apply_completion_value(&mut self, value: &str) {
+        let current = self.input.value();
+        let new_value = if let Some(last_space) = current.rfind(char::is_whitespace) {
+            format!("{} {} ", &current[..=last_space].trim(), value)
+        } else {
+            format!("/{} ", value)
+        };
+        self.input = Input::from(new_value);
     }
 
     /// Cancel completion
@@ -306,10 +269,10 @@ impl App {
     }
 
     /// Setup commands for this app instance
-    fn setup_commands() -> commands::CommandRegistry<App> {
+    fn setup_commands() -> CompletionHelper<App> {
         let mut registry = commands::CommandRegistry::new();
         App::register(&mut registry);
-        registry
+        CompletionHelper::new(registry)
     }
 
     fn start(&mut self) {
@@ -322,20 +285,7 @@ impl App {
 
     /// Handle a command - returns false if should quit
     async fn handle_command(&mut self, input: &str) -> Result<bool, anyhow::Error> {
-        // Take registry temporarily to avoid borrow checker issues
-        let registry = self.command_registry.take();
-
-        let result = if let Some(reg) = registry.as_ref() {
-            let tokens = TokenStream::new(input.to_string());
-            let ctx = ContextMut::new(tokens, self);
-            reg.execute(ctx).await
-        } else {
-            self.status_message = Some("Command system not initialized".to_string());
-            return Ok(true);
-        };
-
-        // Put registry back
-        self.command_registry = registry;
+        let result = self.completion_helper.execute(input, self).await;
 
         match result {
             Ok(commands::CommandResult::Success(msg)) => {
@@ -411,18 +361,22 @@ impl App {
         let provider_instance = create_provider(provider);
         let models = provider_instance.list_models().await?;
 
-        // Filter to only chat-capable models and match partial
+        // Filter to only text-capable models and match partial
         Ok(models
             .into_iter()
             .filter(|m| {
-                // Only include models that support chat
-                if provider_instance.create_chat_model(m).is_none() {
+                // Only include models that support text/chat
+                if !m.has_capability(&llm::ModelCapability::Text) {
+                    return false;
+                }
+                // Only include models that can be created
+                if provider_instance.create_chat_model(&m.id).is_none() {
                     return false;
                 }
                 // Match partial input
-                m.to_lowercase().starts_with(&partial.to_lowercase())
+                m.id.to_lowercase().starts_with(&partial.to_lowercase())
             })
-            .map(|m| commands::Completion::simple(m))
+            .map(|m| commands::Completion::simple(m.id))
             .collect())
     }
 }
@@ -684,9 +638,8 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app and setup commands
+    // Create app and start
     let mut app = App::new(ModelProviderType::Gemini, None)?;
-    app.command_registry = Some(App::setup_commands());
     app.start();
 
     let mut should_quit = false;
@@ -710,39 +663,19 @@ async fn main() -> Result<()> {
                             should_quit = true;
                         }
                         (KeyCode::Tab, _) => {
-                            // Handle tab completion
-                            if matches!(app.completion_state, CompletionState::Showing { .. }) {
-                                app.next_completion();
-                            } else {
-                                app.trigger_completion().await;
-                            }
+                            app.handle_tab().await;
                         }
                         (KeyCode::Down, _) => {
-                            // Navigate completions with arrow keys
-                            if matches!(app.completion_state, CompletionState::Showing { .. }) {
-                                app.next_completion();
-                            } else {
-                                app.input.handle_event(&Event::Key(key));
-                            }
+                            app.handle_down();
                         }
                         (KeyCode::Up, _) => {
-                            // Navigate completions with arrow keys
-                            if matches!(app.completion_state, CompletionState::Showing { .. }) {
-                                app.prev_completion();
-                            } else {
-                                app.input.handle_event(&Event::Key(key));
-                            }
+                            app.handle_up();
                         }
                         (KeyCode::Esc, _) => {
                             app.cancel_completion();
                         }
                         (KeyCode::Enter, _) => {
-                            // If showing completions, accept selected one
-                            if matches!(app.completion_state, CompletionState::Showing { .. }) {
-                                app.accept_completion();
-                            } else {
-                                let input_text = app.input.value().to_string();
-                                app.input.reset();
+                            if let Some(input_text) = app.handle_enter() {
                                 app.status_message = None;
 
                                 if !input_text.is_empty() {

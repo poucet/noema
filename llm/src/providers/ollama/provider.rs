@@ -26,10 +26,10 @@ impl OllamaProvider {
 impl ModelProvider for OllamaProvider {
     type ModelType = OllamaChatModel;
 
-    async fn list_models(&self) -> anyhow::Result<Vec<String>> {
+    async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         let url = format!("{}/api/tags", self.base_url);
         let response: ListModelsResponse = self.client.get(&url).await?;
-        Ok(response.models.iter().map(|m| m.name.clone()).collect())
+        Ok(response.models.into_iter().map(|m| m.into()).collect())
     }
 
     fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
