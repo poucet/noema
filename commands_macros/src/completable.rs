@@ -90,17 +90,8 @@ pub fn impl_completable(input: DeriveInput) -> Result<TokenStream> {
         }
     });
 
-    // Get first variant for Default impl
-    let first_variant = &variant_infos[0].name;
-
     Ok(quote! {
         #input
-
-        impl ::std::default::Default for #enum_name {
-            fn default() -> Self {
-                #enum_name::#first_variant
-            }
-        }
 
         impl ::std::str::FromStr for #enum_name {
             type Err = String;

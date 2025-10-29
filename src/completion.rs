@@ -76,7 +76,7 @@ pub trait AsyncCompleter<T = ()>: Send + Sync {
 
 /// Blanket implementation: any Completable type automatically gets AsyncCompleter
 #[async_trait]
-impl<C: Completable + Default> AsyncCompleter<()> for C {
+impl<C: Completable> AsyncCompleter<()> for C {
     async fn complete<'a>(
         &self,
         context: &Context<'a, ()>,

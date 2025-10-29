@@ -183,13 +183,12 @@ fn generate_enum_completion_arm(
 
     Some(quote! {
         #arg_index => {
-            let dummy_value = <#completion_ty as ::std::default::Default>::default();
-            // Enum completions use () as target - create unit context
-            let unit_ctx = ::commands::Context::new(
-                context.stream().input(),
-                &()
-            );
-            dummy_value.complete(&unit_ctx).await
+            // Use Completable::completions() directly and filter by partial match
+            let partial_lower = context.stream().partial().to_lowercase();
+            Ok(<#completion_ty as ::commands::Completable>::completions()
+                .into_iter()
+                .filter(|c| c.value.starts_with(&partial_lower))
+                .collect())
         }
     })
 }
