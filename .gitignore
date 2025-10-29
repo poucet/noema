@@ -4,4 +4,4 @@ target/
 .git-remotes
 .git-worktrees
 .vscode
-.claude
+.claude*.log
