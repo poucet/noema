@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::context::Context;
 use crate::error::CompletionError;
-use crate::token_stream::TokenStream;
 
 /// A completion suggestion with optional typed metadata
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -55,50 +55,14 @@ impl<M> Completion<M> {
     }
 }
 
-/// Context provided to completers during completion
-pub struct CompletionContext<'a, T> {
-    /// Parsed token stream (contains input, cursor, and tokens)
-    pub tokens: TokenStream,
-
-    /// Reference to the target for context-aware completion
-    pub target: &'a T,
-}
-
-impl<'a, T> CompletionContext<'a, T> {
-    /// Create a new completion context
-    pub fn new(input: String, cursor: usize, target: &'a T) -> Self {
-        let tokens = TokenStream::new(input, cursor);
-
-        Self {
-            tokens,
-            target,
-        }
-    }
-
-    /// Calculate which argument index is being completed (delegates to TokenStream)
-    pub fn arg_index(&self) -> usize {
-        self.tokens.arg_index()
-    }
-
-    /// Get the partial word being completed (delegates to TokenStream)
-    pub fn partial(&self) -> &str {
-        self.tokens.partial()
-    }
-
-    /// Get the input string (delegates to TokenStream)
-    pub fn input(&self) -> &str {
-        self.tokens.input()
-    }
-}
-
 /// Trait for types that can provide async completions
 /// Type parameter T is the target type (defaults to () for context-free completion)
 #[async_trait]
 pub trait AsyncCompleter<T = ()>: Send + Sync {
     /// Generate completions from the completion context
     /// Use context.partial() to get the word being completed
-    async fn complete(
+    async fn complete<'a>(
         &self,
-        context: &CompletionContext<T>,
+        context: &Context<'a, T>,
     ) -> Result<Vec<Completion>, CompletionError>;
 }

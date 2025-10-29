@@ -162,9 +162,8 @@ fn generate_enum_completion_arm(
         #arg_index => {
             let dummy_value = <#completion_ty as ::std::default::Default>::default();
             // Enum completions use () as target - create unit context
-            let unit_ctx = ::commands::CompletionContext::new(
-                context.tokens.input().to_string(),
-                context.tokens.input().len(),
+            let unit_ctx = ::commands::Context::new(
+                context.stream().input(),
                 &()
             );
             dummy_value.complete(&unit_ctx).await
@@ -252,13 +251,13 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
 
         #[::commands::async_trait::async_trait]
         impl ::commands::AsyncCompleter<#self_type> for #wrapper_name {
-            async fn complete(
+            async fn complete<'a>(
                 &self,
-                context: &::commands::CompletionContext<#self_type>,
+                context: &::commands::context::Context<'a, #self_type>,
             ) -> ::std::result::Result<Vec<::commands::Completion>, ::commands::CompletionError> {
-                let arg_index = context.arg_index();
+                let arg_index = context.stream().arg_index();
                 let target = context.target;
-                let partial = context.partial();
+                let partial = context.stream().partial();
 
                 match arg_index {
                     #(#enum_completion_arms)*
@@ -270,15 +269,17 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
 
         #[::commands::async_trait::async_trait]
         impl ::commands::Command<#self_type> for #wrapper_name {
-            async fn execute(
+            async fn execute<'a>(
                 &self,
-                target: &mut #self_type,
-                args: ::commands::token_stream::TokenStream,
+                mut context: ::commands::ContextMut<'a, #self_type>,
             ) -> ::std::result::Result<::commands::CommandResult, ::commands::CommandError> {
+                let args = &context.tokens;
+
                 // Parse arguments
                 #(#parse_args)*
 
                 // Call user method
+                let target = &mut context.target;
                 let result = target.#method_name(#(#arg_names),*).await;
 
                 // Convert result to CommandResult
@@ -722,14 +723,9 @@ pub fn impl_command_function(func: ItemFn) -> Result<TokenStream> {
 
             async fn complete(
                 &self,
-                partial: &str,
-                context: &::commands::CompletionContext,
+                context: &::commands::Context<()>,
             ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
-                let arg_index = if context.input.ends_with(char::is_whitespace) {
-                    context.tokens.len().saturating_sub(1)
-                } else {
-                    context.tokens.len().saturating_sub(2)
-                };
+                let arg_index = context.stream().arg_index();
 
                 match arg_index {
                     #(#enum_completion_arms)*

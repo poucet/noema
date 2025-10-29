@@ -1,4 +1,4 @@
-use commands::{commandable, completable, AsyncCompleter, Command, CommandRegistry, Registrable};
+use commands::{AsyncCompleter, CommandRegistry, Registrable, commandable, completable};
 
 #[completable]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +31,7 @@ impl TestApp {
 async fn test_completable_enum() {
     // Test case-insensitive completion
     let provider = TestProvider::Provider1;
-    let ctx = commands::CompletionContext::new("/test prov".to_string(), 10, &());
+    let ctx = commands::Context::new("/test prov", &());
 
     let completions = provider.complete(&ctx).await.unwrap();
     assert_eq!(completions.len(), 2);
@@ -39,12 +39,12 @@ async fn test_completable_enum() {
     assert!(completions.iter().any(|c| c.value == "provider2"));
 
     // Test case-insensitive filtering
-    let ctx2 = commands::CompletionContext::new("/test PROV".to_string(), 10, &());
+    let ctx2 = commands::Context::new("/test PROV", &());
     let completions = provider.complete(&ctx2).await.unwrap();
     assert_eq!(completions.len(), 2);
 
     // Test specific match
-    let ctx3 = commands::CompletionContext::new("/test provider1".to_string(), 15, &());
+    let ctx3 = commands::Context::new("/test provider1", &());
     let completions = provider.complete(&ctx3).await.unwrap();
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].value, "provider1");
@@ -113,7 +113,7 @@ async fn test_automatic_completion() {
     TestApp::register(&mut registry);
 
     // Test completing the provider argument
-    let completions = registry.complete(&app, "/set prov", 9).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/set prov", &app)).await.unwrap();
 
     // Should get completions from TestProvider enum automatically
     assert_eq!(completions.len(), 2);
@@ -121,11 +121,11 @@ async fn test_automatic_completion() {
     assert!(completions.iter().any(|c| c.value == "provider2"));
 
     // Test case-insensitive
-    let completions = registry.complete(&app, "/set PROV", 9).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/set PROV", &app)).await.unwrap();
     assert_eq!(completions.len(), 2);
 
     // Test specific match
-    let completions = registry.complete(&app, "/set provider1", 14).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/set provider1", &app)).await.unwrap();
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].value, "provider1");
     assert_eq!(completions[0].description, Some("First provider".to_string()));
@@ -179,7 +179,7 @@ async fn test_custom_completer_with_context() {
     CompleterTestApp::register(&mut registry);
 
     // Test that custom completer receives parsed provider argument
-    let completions = registry.complete(&app, "/configure provider1 mod", 24).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/configure provider1 mod", &app)).await.unwrap();
 
     // Should get Provider1's models
     assert_eq!(completions.len(), 2);
@@ -228,12 +228,12 @@ async fn test_command_name_completion() {
     TestApp::register(&mut registry);
 
     // Test completing command names
-    let completions = registry.complete(&app, "/se", 3).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/se", &app)).await.unwrap();
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].value, "set");
 
     // Test all commands
-    let completions = registry.complete(&app, "/", 1).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/", &app)).await.unwrap();
     assert_eq!(completions.len(), 2);
     assert!(completions.iter().any(|c| c.value == "set"));
     assert!(completions.iter().any(|c| c.value == "get"));
@@ -250,12 +250,12 @@ async fn test_second_argument_completion() {
     CompleterTestApp::register(&mut registry);
 
     // Completing first argument (provider) - should use enum completion
-    let completions = registry.complete(&app, "/configure prov", 15).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/configure prov", &app)).await.unwrap();
     assert_eq!(completions.len(), 2);
     assert!(completions.iter().any(|c| c.value == "provider1"));
 
     // Completing second argument (model_name) - should use custom completer
-    let completions = registry.complete(&app, "/configure provider1 mod", 24).await.unwrap();
+    let completions = registry.complete(&commands::Context::new("/configure provider1 mod", &app)).await.unwrap();
     assert_eq!(completions.len(), 2);
     assert!(completions.iter().any(|c| c.value == "model1a"));
     assert!(completions.iter().any(|c| c.value == "model1b"));

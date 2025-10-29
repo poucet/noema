@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::command::{Command, CommandResult};
-use crate::completion::{Completion, CompletionContext};
+use crate::completion::Completion;
+use crate::context::{Context, ContextMut};
 use crate::error::{CommandError, CompletionError};
 use crate::token_stream::TokenStream;
 
@@ -41,28 +42,24 @@ impl<T> CommandRegistry<T> {
             .get(cmd_name)
             .ok_or_else(|| CommandError::UnknownCommand(cmd_name.to_string()))?;
 
-        let args = TokenStream::from_quoted(args_str);
-        command.execute(target, args).await
+        let tokens = TokenStream::from_quoted(args_str);
+        let ctx = ContextMut::new(tokens, target);
+        command.execute(ctx).await
     }
 
     /// Get completions for the current input with access to target
     pub async fn complete(
-        &self,
-        target: &T,
-        input: &str,
-        cursor: usize,
+        &self, ctx: &Context<'_, T>,
     ) -> Result<Vec<Completion>, CompletionError> {
-        let ctx = CompletionContext::new(input.to_string(), cursor, target);
-
         // Try to complete command arguments if we have a valid command
-        if let Ok((cmd_name, _args_str)) = parse_command_input(input) {
+        if let Ok((cmd_name, _args_str)) = parse_command_input(ctx.stream().input()) {
             if let Some(command) = self.commands.get(cmd_name) {
                 return command.complete(&ctx).await;
             }
         }
 
         // Fall through: complete command names
-        let partial = input.trim_start_matches('/');
+        let partial = ctx.stream().input().trim_start_matches('/');
         Ok(self
             .commands
             .keys()

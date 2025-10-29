@@ -4,18 +4,15 @@ pub struct TokenStream {
     /// Original input string
     input: String,
 
-    /// Cursor position in input
-    cursor: usize,
-
     /// Parsed tokens
     tokens: Vec<String>,
 }
 
 impl TokenStream {
     /// Create TokenStream with simple whitespace tokenization (for completion)
-    pub fn new(input: String, cursor: usize) -> Self {
+    pub fn new(input: String) -> Self {
         let tokens = input.split_whitespace().map(String::from).collect();
-        Self { input, cursor, tokens }
+        Self { input, tokens }
     }
 
     /// Create TokenStream respecting quotes (for command argument parsing)
@@ -53,7 +50,7 @@ impl TokenStream {
             tokens.push(current);
         }
 
-        Self { input, cursor: 0, tokens }
+        Self { input, tokens }
     }
 
     /// Get token at index
@@ -134,7 +131,7 @@ impl TokenStream {
 
     /// Get the cursor position
     pub fn cursor(&self) -> usize {
-        self.cursor
+        self.input.len()
     }
 }
 
@@ -144,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_new_simple_whitespace() {
-        let ts = TokenStream::new("foo bar baz".to_string(), 11);
+        let ts = TokenStream::new("foo bar baz".to_string());
         assert_eq!(ts.len(), 3);
         assert_eq!(ts.get(0), Some("foo"));
         assert_eq!(ts.get(1), Some("bar"));
@@ -156,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_new_multiple_spaces() {
-        let ts = TokenStream::new("foo    bar".to_string(), 10);
+        let ts = TokenStream::new("foo    bar".to_string());
         assert_eq!(ts.len(), 2);
         assert_eq!(ts.get(0), Some("foo"));
         assert_eq!(ts.get(1), Some("bar"));
@@ -164,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_new_empty() {
-        let ts = TokenStream::new("".to_string(), 0);
+        let ts = TokenStream::new("".to_string());
         assert_eq!(ts.len(), 0);
         assert!(ts.is_empty());
         assert_eq!(ts.last(), None);
@@ -206,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_parse_type_conversion() {
-        let ts = TokenStream::new("42 3.14 true".to_string(), 12);
+        let ts = TokenStream::new("42 3.14 true".to_string());
         assert_eq!(ts.parse::<i32>(0), Some(42));
         assert_eq!(ts.parse::<f64>(1), Some(3.14));
         assert_eq!(ts.parse::<bool>(2), Some(true));
@@ -214,20 +211,20 @@ mod tests {
 
     #[test]
     fn test_parse_invalid_type() {
-        let ts = TokenStream::new("not_a_number".to_string(), 12);
+        let ts = TokenStream::new("not_a_number".to_string());
         assert_eq!(ts.parse::<i32>(0), None);
     }
 
     #[test]
     fn test_parse_out_of_bounds() {
-        let ts = TokenStream::new("foo".to_string(), 3);
+        let ts = TokenStream::new("foo".to_string());
         assert_eq!(ts.parse::<String>(5), None);
     }
 
     #[test]
     fn test_arg_index_with_trailing_space() {
         // "/model gemini " - cursor after space, completing new arg
-        let ts = TokenStream::new("/model gemini ".to_string(), 14);
+        let ts = TokenStream::new("/model gemini ".to_string());
         assert_eq!(ts.len(), 2); // ["model", "gemini"]
         assert_eq!(ts.arg_index(), 1); // tokens.len() - 1 = 2 - 1 = 1
     }
@@ -235,7 +232,7 @@ mod tests {
     #[test]
     fn test_arg_index_without_trailing_space() {
         // "/model gem" - cursor in middle of word, completing current arg
-        let ts = TokenStream::new("/model gem".to_string(), 10);
+        let ts = TokenStream::new("/model gem".to_string());
         assert_eq!(ts.len(), 2); // ["model", "gem"]
         assert_eq!(ts.arg_index(), 0); // tokens.len() - 2 = 2 - 2 = 0
     }
@@ -243,7 +240,7 @@ mod tests {
     #[test]
     fn test_arg_index_single_token() {
         // "/mod" - completing command name
-        let ts = TokenStream::new("/mod".to_string(), 4);
+        let ts = TokenStream::new("/mod".to_string());
         assert_eq!(ts.len(), 1); // ["mod"]
         assert_eq!(ts.arg_index(), 0); // saturating_sub prevents underflow
     }
@@ -251,34 +248,34 @@ mod tests {
     #[test]
     fn test_partial_with_trailing_space() {
         // "/model gemini " - completing new word
-        let ts = TokenStream::new("/model gemini ".to_string(), 14);
+        let ts = TokenStream::new("/model gemini ".to_string());
         assert_eq!(ts.partial(), "");
     }
 
     #[test]
     fn test_partial_without_trailing_space() {
         // "/model gem" - completing "gem"
-        let ts = TokenStream::new("/model gem".to_string(), 10);
+        let ts = TokenStream::new("/model gem".to_string());
         assert_eq!(ts.partial(), "gem");
     }
 
     #[test]
     fn test_partial_single_token() {
         // "/mod" - completing "/mod" (slash is included in token)
-        let ts = TokenStream::new("/mod".to_string(), 4);
+        let ts = TokenStream::new("/mod".to_string());
         assert_eq!(ts.partial(), "/mod");
     }
 
     #[test]
     fn test_partial_empty_input() {
-        let ts = TokenStream::new("".to_string(), 0);
+        let ts = TokenStream::new("".to_string());
         assert_eq!(ts.partial(), "");
     }
 
     #[test]
     fn test_arg_index_and_partial_together() {
         // Test the common case: "/command arg1 arg2 par"
-        let ts = TokenStream::new("/command arg1 arg2 par".to_string(), 22);
+        let ts = TokenStream::new("/command arg1 arg2 par".to_string());
         assert_eq!(ts.len(), 4); // ["command", "arg1", "arg2", "par"]
         assert_eq!(ts.arg_index(), 2); // completing arg index 2 (3rd arg)
         assert_eq!(ts.partial(), "par");
@@ -287,7 +284,7 @@ mod tests {
     #[test]
     fn test_arg_index_with_space_after_complete_word() {
         // "/command arg1 arg2 " - ready for next arg
-        let ts = TokenStream::new("/command arg1 arg2 ".to_string(), 19);
+        let ts = TokenStream::new("/command arg1 arg2 ".to_string());
         assert_eq!(ts.len(), 3); // ["command", "arg1", "arg2"]
         assert_eq!(ts.arg_index(), 2); // completing arg index 2 (3rd arg)
         assert_eq!(ts.partial(), ""); // empty partial for new word

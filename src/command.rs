@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
+use crate::context::ContextMut;
 use crate::error::CommandError;
-use crate::token_stream::TokenStream;
 
 /// Result of executing a command
 #[derive(Debug, Clone)]
@@ -27,8 +27,8 @@ pub struct CommandMetadata {
 /// Type parameter T is the target type the command operates on (defaults to () for stateless commands)
 #[async_trait]
 pub trait Command<T = ()>: crate::completion::AsyncCompleter<T> {
-    /// Execute the command with parsed arguments on the target
-    async fn execute(&self, target: &mut T, args: TokenStream) -> Result<CommandResult, CommandError>;
+    /// Execute the command with mutable context
+    async fn execute<'a>(&self, context: ContextMut<'a, T>) -> Result<CommandResult, CommandError>;
 
     /// Get command metadata
     fn metadata(&self) -> &CommandMetadata;

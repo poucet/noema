@@ -29,7 +29,7 @@ async fn test_enum_completion() {
 
     let provider = Simple::One;
     // Context with "o" as the partial being completed
-    let ctx = commands::CompletionContext::new("/test o".to_string(), 7, &());
+    let ctx = commands::Context::new("/test o", &());
 
     // Test completion
     let completions = provider.complete(&ctx).await.unwrap();
@@ -38,12 +38,12 @@ async fn test_enum_completion() {
     assert_eq!(completions[0].description, Some("First option".to_string()));
 
     // Test case-insensitive - need new context with "ON" as partial
-    let ctx2 = commands::CompletionContext::new("/test ON".to_string(), 8, &());
+    let ctx2 = commands::Context::new("/test ON", &());
     let completions = provider.complete(&ctx2).await.unwrap();
     assert_eq!(completions.len(), 1);
 
     // Test all - empty partial
-    let ctx3 = commands::CompletionContext::new("/test ".to_string(), 6, &());
+    let ctx3 = commands::Context::new("/test ", &());
     let completions = provider.complete(&ctx3).await.unwrap();
     assert_eq!(completions.len(), 2);
 }

@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 
-use crate::completion::{AsyncCompleter, Completion, CompletionContext};
+use crate::TokenStream;
+use crate::completion::{AsyncCompleter, Completion};
+use crate::context::Context;
 use crate::error::CompletionError;
 
 /// Wrapper that adds caching to any AsyncCompleter
@@ -49,8 +51,8 @@ where
     }
 
     /// Create cache key from partial input and context
-    fn cache_key<V>(partial: &str, context: &CompletionContext<V>) -> String {
-        format!("{}:{}", context.input(), partial)
+    fn cache_key(stream: &TokenStream) -> String {
+        format!("{}:{}", stream.input(), stream.partial())
     }
 }
 
@@ -60,11 +62,11 @@ where
     T: AsyncCompleter<U>,
     U: Send + Sync,
 {
-    async fn complete(
+    async fn complete<'a>(
         &self,
-        context: &CompletionContext<U>,
+        context: &Context<'a, U>,
     ) -> Result<Vec<Completion>, CompletionError> {
-        let cache_key = Self::cache_key(context.partial(), context);
+        let cache_key = Self::cache_key(&context.stream());
 
         // Check cache
         {
@@ -103,18 +105,18 @@ mod tests {
 
     #[async_trait]
     impl AsyncCompleter<()> for MockCompleter {
-        async fn complete(
+        async fn complete<'a>(
             &self,
-            context: &CompletionContext<()>,
+            context: &Context<'a, ()>,
         ) -> Result<Vec<Completion>, CompletionError> {
-            Ok(vec![Completion::simple(format!("completion-{}", context.partial()))])
+            Ok(vec![Completion::simple(format!("completion-{}", context.stream().partial()))])
         }
     }
 
     #[tokio::test]
     async fn test_caching() {
         let completer = CachedCompleter::new(MockCompleter, Duration::from_secs(1));
-        let ctx = CompletionContext::new("/test foo".to_string(), 9, &());
+        let ctx = Context::new("/test foo", &());
 
         // First call - should hit inner completer
         let result1 = completer.complete(&ctx).await.unwrap();

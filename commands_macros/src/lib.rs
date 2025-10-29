@@ -1,5 +1,4 @@
 use proc_macro::TokenStream;
-use quote::format_ident;
 use syn::{
     parse_macro_input, DeriveInput, ImplItem, ItemImpl,
 };
@@ -65,7 +64,7 @@ pub fn commandable(_args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
     // Try to parse as ItemFn (free function)
     if let Ok(func) = syn::parse::<syn::ItemFn>(input.clone()) {
-        match command::impl_command_function(func) {
+        match impl_command_function(func) {
             Ok(tokens) => return tokens.into(),
             Err(e) => return e.to_compile_error().into(),
         }
