@@ -1,5 +1,5 @@
 use anyhow::Result;
-use commands::Registrable;
+use commands::{Context, ContextMut, Registrable, TokenStream};
 use conversation::Conversation;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -160,9 +160,8 @@ impl App {
         self.completion_state = CompletionState::Loading;
 
         if let Some(ref registry) = self.command_registry {
-            let cursor = input.len();
-
-            match registry.complete(self, input, cursor).await {
+            let ctx = Context::new(input, &*self);
+            match registry.complete(&ctx).await {
                 Ok(completions) => {
                     if completions.len() == 1 {
                         // Only one completion - auto-accept it
@@ -181,11 +180,11 @@ impl App {
                             } else {
                                 format!("/{}", common_prefix)
                             };
-                            let new_cursor = new_value.len();
                             self.input = Input::from(new_value.clone());
 
                             // Re-fetch completions with the new input to show remaining options
-                            match registry.complete(self, &new_value, new_cursor).await {
+                            let new_ctx = Context::new(&new_value, &*self);
+                            match registry.complete(&new_ctx).await {
                                 Ok(new_completions) if new_completions.len() > 1 => {
                                     // Still multiple options - show popup
                                     self.completion_state = CompletionState::Showing {
@@ -327,7 +326,9 @@ impl App {
         let registry = self.command_registry.take();
 
         let result = if let Some(reg) = registry.as_ref() {
-            reg.execute(self, input).await
+            let tokens = TokenStream::new(input.to_string());
+            let ctx = ContextMut::new(tokens, self);
+            reg.execute(ctx).await
         } else {
             self.status_message = Some("Command system not initialized".to_string());
             return Ok(true);
