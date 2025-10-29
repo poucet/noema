@@ -1,6 +1,32 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, Result};
+use syn::{Data, DeriveInput, Fields, Result, Ident};
+
+/// Information about an enum variant for completion
+struct VariantInfo {
+    name: Ident,
+    value: String,      // lowercase version for matching
+    label: String,      // original name for display
+    description: Option<String>,
+}
+
+/// Extract description from doc comment attributes
+fn extract_doc_comment(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter()
+        .find_map(|attr| {
+            if attr.path().is_ident("doc") {
+                if let syn::Meta::NameValue(meta) = &attr.meta {
+                    if let syn::Expr::Lit(expr_lit) = &meta.value {
+                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
+                            let doc_str = lit_str.value().trim().to_string();
+                            return if doc_str.is_empty() { None } else { Some(doc_str) };
+                        }
+                    }
+                }
+            }
+            None
+        })
+}
 
 pub fn impl_completable(input: DeriveInput) -> Result<TokenStream> {
     let enum_name = &input.ident;
@@ -14,82 +40,58 @@ pub fn impl_completable(input: DeriveInput) -> Result<TokenStream> {
         }
     };
 
-    // Extract variant information
-    let mut variant_names = Vec::new();
-    let mut variant_values = Vec::new();
-    let mut variant_labels = Vec::new();
-    let mut variant_descriptions = Vec::new();
-
-    for variant in variants {
-        if !matches!(variant.fields, Fields::Unit) {
-            return Err(syn::Error::new_spanned(
-                variant,
-                "#[completable] only supports unit variants",
-            ));
-        }
-
-        let variant_name = &variant.ident;
-        variant_names.push(variant_name);
-
-        // Convert to lowercase for value
-        let value = variant_name.to_string().to_lowercase();
-        variant_values.push(value.clone());
-
-        // Default label is the variant name as-is
-        let label = variant_name.to_string();
-        variant_labels.push(label);
-
-        // Extract description from doc comments
-        let mut description = None;
-        for attr in &variant.attrs {
-            if attr.path().is_ident("doc") {
-                if let syn::Meta::NameValue(meta) = &attr.meta {
-                    if let syn::Expr::Lit(expr_lit) = &meta.value {
-                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                            let doc_str = lit_str.value().trim().to_string();
-                            if !doc_str.is_empty() {
-                                description = Some(doc_str);
-                                break; // Use first doc comment
-                            }
-                        }
-                    }
-                }
+    // Process all variants in a single pass
+    let variant_infos: Result<Vec<_>> = variants.iter()
+        .map(|variant| {
+            if !matches!(variant.fields, Fields::Unit) {
+                return Err(syn::Error::new_spanned(
+                    variant,
+                    "#[completable] only supports unit variants",
+                ));
             }
-        }
-        variant_descriptions.push(description);
-    }
 
-    // Generate FromStr impl
-    let from_str_arms = variant_names.iter().zip(&variant_values).map(|(name, value)| {
+            let name = variant.ident.clone();
+            let name_str = name.to_string();
+
+            Ok(VariantInfo {
+                name,
+                value: name_str.to_lowercase(),
+                label: name_str,
+                description: extract_doc_comment(&variant.attrs),
+            })
+        })
+        .collect();
+    let variant_infos = variant_infos?;
+
+    // Generate FromStr match arms
+    let from_str_arms = variant_infos.iter().map(|info| {
+        let name = &info.name;
+        let value = &info.value;
         quote! {
             #value => Ok(#enum_name::#name),
         }
     });
 
     // Generate completion entries
-    let completion_entries = variant_values
-        .iter()
-        .zip(&variant_labels)
-        .zip(&variant_descriptions)
-        .map(|((value, label), desc)| {
-            let desc_opt = if let Some(d) = desc {
-                quote! { Some(#d.to_string()) }
-            } else {
-                quote! { None }
-            };
+    let completion_entries = variant_infos.iter().map(|info| {
+        let value = &info.value;
+        let label = &info.label;
+        let desc_opt = info.description.as_ref()
+            .map(|d| quote! { Some(#d.to_string()) })
+            .unwrap_or_else(|| quote! { None });
 
-            quote! {
-                ::commands::Completion {
-                    value: #value.to_string(),
-                    label: Some(#label.to_string()),
-                    description: #desc_opt,
-                    metadata: None,
-                }
+        quote! {
+            ::commands::Completion {
+                value: #value.to_string(),
+                label: Some(#label.to_string()),
+                description: #desc_opt,
+                metadata: None,
             }
-        });
+        }
+    });
 
     // Get first variant for Default impl
-    let first_variant = &variant_names[0];
+    let first_variant = &variant_infos[0].name;
 
     Ok(quote! {
         #input
