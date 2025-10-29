@@ -4,6 +4,7 @@ use crate::command::{Command, CommandResult};
 use crate::completion::Completion;
 use crate::context::{Context, ContextMut};
 use crate::error::{CommandError, CompletionError};
+use crate::token_stream::TokenStream;
 
 /// Trait for types that can register themselves with a CommandRegistry
 pub trait Registrable<R> {
@@ -33,7 +34,7 @@ impl<T> CommandRegistry<T> {
     }
 
     /// Execute a command with mutable context
-    pub async fn execute<'a>(&self, context: ContextMut<'a, T>) -> Result<CommandResult, CommandError> {
+    pub async fn execute<'a>(&self, mut context: ContextMut<'a, T>) -> Result<CommandResult, CommandError> {
         let cmd_name = context.stream().command_name()
             .ok_or_else(|| CommandError::InvalidArgs("Commands must start with /".to_string()))?;
 
@@ -42,6 +43,11 @@ impl<T> CommandRegistry<T> {
             .get(cmd_name)
             .ok_or_else(|| CommandError::UnknownCommand(cmd_name.to_string()))?;
 
+        // Extract just the arguments and create a new TokenStream with quoted parsing
+        let args_str = context.stream().args_string();
+        let args_tokens = TokenStream::from_quoted(args_str);
+        context.tokens = args_tokens;
+
         command.execute(context).await
     }
 
@@ -49,15 +55,16 @@ impl<T> CommandRegistry<T> {
     pub async fn complete<'a>(
         &self, ctx: &Context<'a, T>,
     ) -> Result<Vec<Completion>, CompletionError> {
+        let command_name = ctx.stream().command_name();
         // Try to complete command arguments if we have a valid command
-        if let Some(cmd_name) = ctx.stream().command_name() {
+        if let Some(cmd_name) = command_name {
             if let Some(command) = self.commands.get(cmd_name) {
                 return command.complete(ctx).await;
             }
         }
 
         // Fall through: complete command names
-        let partial = ctx.stream().partial().trim_start_matches('/');
+        let partial = command_name.unwrap_or("");
         Ok(self
             .commands
             .keys()

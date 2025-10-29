@@ -1,4 +1,4 @@
-use commands::{AsyncCompleter, CommandRegistry, Registrable, commandable, completable};
+use commands::{AsyncCompleter, CommandRegistry, ContextMut, Registrable, TokenStream, commandable, completable};
 
 #[completable]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,7 +61,8 @@ async fn test_command_execution() {
     let mut registry = CommandRegistry::new();
     TestApp::register(&mut registry);
 
-    let result = registry.execute(&mut app, "/set provider1").await.unwrap();
+    let ctx = ContextMut::new(TokenStream::new("/set provider1".to_string()), &mut app);
+    let result = registry.execute(ctx).await.unwrap();
 
     match result {
         commands::CommandResult::Success(msg) => {
@@ -84,7 +85,8 @@ async fn test_command_registry() {
     TestApp::register(&mut registry);
 
     // Execute set command
-    let result = registry.execute(&mut app, "/set provider2").await.unwrap();
+    let ctx = ContextMut::new(TokenStream::new("/set provider2".to_string()), &mut app);
+    let result = registry.execute(ctx).await.unwrap();
     match result {
         commands::CommandResult::Success(msg) => {
             assert!(msg.contains("Provider2"));
@@ -93,7 +95,8 @@ async fn test_command_registry() {
     }
 
     // Execute get command
-    let result = registry.execute(&mut app, "/get").await.unwrap();
+    let ctx = ContextMut::new(TokenStream::new("/get".to_string()), &mut app);
+    let result = registry.execute(ctx).await.unwrap();
     match result {
         commands::CommandResult::Success(value) => {
             assert_eq!(value, "Provider2");
@@ -198,7 +201,8 @@ async fn test_optional_arguments() {
     CompleterTestApp::register(&mut registry);
 
     // Test with just provider (no model)
-    let result = registry.execute(&mut app, "/configure provider1").await.unwrap();
+    let ctx = ContextMut::new(TokenStream::new("/configure provider1".to_string()), &mut app);
+    let result = registry.execute(ctx).await.unwrap();
     match result {
         commands::CommandResult::Success(msg) => {
             assert!(msg.contains("Provider1"));
@@ -208,7 +212,8 @@ async fn test_optional_arguments() {
     }
 
     // Test with provider and model
-    let result = registry.execute(&mut app, "/configure provider2 model2a").await.unwrap();
+    let ctx = ContextMut::new(TokenStream::new("/configure provider2 model2a".to_string()), &mut app);
+    let result = registry.execute(ctx).await.unwrap();
     match result {
         commands::CommandResult::Success(msg) => {
             assert!(msg.contains("Provider2"));
@@ -282,7 +287,8 @@ async fn test_global_command_on_unit_struct() {
     let mut registry = CommandRegistry::new();
     Global::register(&mut registry);
 
-    let result = registry.execute(&mut global, "/version").await.unwrap();
+    let ctx = ContextMut::new(TokenStream::new("/version".to_string()), &mut global);
+    let result = registry.execute(ctx).await.unwrap();
 
     match result {
         commands::CommandResult::Success(msg) => {
@@ -309,6 +315,7 @@ async fn test_register_all_commands_helper() {
     assert!(registry.command_names().contains(&"get"));
 
     // Verify they work
-    let result = registry.execute(&mut app, "/set provider1").await.unwrap();
+    let ctx = ContextMut::new(TokenStream::new("/set provider1".to_string()), &mut app);
+    let result = registry.execute(ctx).await.unwrap();
     assert!(matches!(result, commands::CommandResult::Success(_)));
 }

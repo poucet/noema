@@ -145,6 +145,20 @@ impl TokenStream {
         // Get first token and strip the leading slash
         self.get(0).and_then(|token| token.strip_prefix('/'))
     }
+
+    /// Extract the arguments portion after the command name
+    /// For "/command arg1 arg2", returns "arg1 arg2"
+    pub fn args_string(&self) -> &str {
+        let input = self.input.trim();
+
+        // Find first whitespace after command name
+        if let Some(space_pos) = input.find(char::is_whitespace) {
+            input[space_pos..].trim_start()
+        } else {
+            // No arguments
+            ""
+        }
+    }
 }
 
 #[cfg(test)]
@@ -318,5 +332,20 @@ mod tests {
 
         let ts5 = TokenStream::new("/".to_string());
         assert_eq!(ts5.command_name(), Some(""));
+    }
+
+    #[test]
+    fn test_args_string() {
+        let ts = TokenStream::new("/help".to_string());
+        assert_eq!(ts.args_string(), "");
+
+        let ts2 = TokenStream::new("/set provider1".to_string());
+        assert_eq!(ts2.args_string(), "provider1");
+
+        let ts3 = TokenStream::new("/configure provider1 model1".to_string());
+        assert_eq!(ts3.args_string(), "provider1 model1");
+
+        let ts4 = TokenStream::new("/cmd   arg1   arg2".to_string());
+        assert_eq!(ts4.args_string(), "arg1   arg2");
     }
 }
