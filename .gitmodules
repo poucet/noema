@@ -1,6 +1,3 @@
-[submodule "conversation"]
-	path = conversation
-	url = /Users/simplychris/projects/simply/noema/.git-remotes/conversation.git
 [submodule "tui"]
 	path = tui
 	url = /Users/simplychris/projects/simply/noema/.git-remotes/tui.git
