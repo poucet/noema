@@ -55,6 +55,13 @@ impl<M> Completion<M> {
     }
 }
 
+/// Simple trait for types that can provide a static list of completions
+/// This is typically auto-derived for enums via #[completable]
+pub trait Completable: Send + Sync {
+    /// Return all possible completions for this type
+    fn completions() -> Vec<Completion>;
+}
+
 /// Trait for types that can provide async completions
 /// Type parameter T is the target type (defaults to () for context-free completion)
 #[async_trait]
@@ -65,4 +72,19 @@ pub trait AsyncCompleter<T = ()>: Send + Sync {
         &self,
         context: &Context<'a, T>,
     ) -> Result<Vec<Completion>, CompletionError>;
+}
+
+/// Blanket implementation: any Completable type automatically gets AsyncCompleter
+#[async_trait]
+impl<C: Completable + Default> AsyncCompleter<()> for C {
+    async fn complete<'a>(
+        &self,
+        context: &Context<'a, ()>,
+    ) -> Result<Vec<Completion>, CompletionError> {
+        let partial_lower = context.stream().partial().to_lowercase();
+        Ok(C::completions()
+            .into_iter()
+            .filter(|c| c.value.starts_with(&partial_lower))
+            .collect())
+    }
 }

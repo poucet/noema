@@ -72,7 +72,7 @@ pub fn impl_completable(input: DeriveInput) -> Result<TokenStream> {
         }
     });
 
-    // Generate completion entries
+    // Generate completion entries for Completable::completions()
     let completion_entries = variant_infos.iter().map(|info| {
         let value = &info.value;
         let label = &info.label;
@@ -113,21 +113,11 @@ pub fn impl_completable(input: DeriveInput) -> Result<TokenStream> {
             }
         }
 
-        #[::commands::async_trait::async_trait]
-        impl ::commands::AsyncCompleter<()> for #enum_name {
-            async fn complete<'a>(
-                &self,
-                context: &::commands::Context<'a, ()>,
-            ) -> ::std::result::Result<Vec<::commands::Completion>, ::commands::CompletionError> {
-                let partial_lower = context.stream().partial().to_lowercase();
-                let variants = vec![
+        impl ::commands::Completable for #enum_name {
+            fn completions() -> Vec<::commands::Completion> {
+                vec![
                     #(#completion_entries),*
-                ];
-
-                Ok(variants
-                    .into_iter()
-                    .filter(|c| c.value.starts_with(&partial_lower))
-                    .collect())
+                ]
             }
         }
     })
