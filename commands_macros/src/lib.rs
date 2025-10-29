@@ -8,7 +8,7 @@ mod command;
 mod register;
 
 use completable::impl_completable;
-use command::{impl_command, impl_command_function, impl_completer};
+use command::{impl_command, impl_completer};
 use register::impl_register_commands;
 
 /// Makes an enum automatically completable with case-insensitive matching
@@ -55,22 +55,14 @@ pub fn commandable(_args: TokenStream, input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Marks a single method or function as a command (for standalone commands)
+/// Marks a method as a command inside #[commandable] impl blocks
 ///
-/// Can be used on:
-/// - Methods inside #[commandable] impl blocks (marker attribute)
-/// - Standalone free functions (generates Command implementation)
+/// This is a marker attribute that is processed by #[commandable].
+/// It should only be used on methods inside impl blocks annotated with #[commandable].
 #[proc_macro_attribute]
 pub fn command(_args: TokenStream, input: TokenStream) -> TokenStream {
-    // Try to parse as ItemFn (free function)
-    if let Ok(func) = syn::parse::<syn::ItemFn>(input.clone()) {
-        match impl_command_function(func) {
-            Ok(tokens) => return tokens.into(),
-            Err(e) => return e.to_compile_error().into(),
-        }
-    }
-
-    // Otherwise, it's a marker attribute for methods inside #[commandable]
+    // This is just a marker attribute for methods inside #[commandable] impl blocks
+    // The actual processing is done by the #[commandable] macro
     input
 }
 

@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{
-    FnArg, ImplItem, ItemImpl, ItemFn, Pat, PatType, Result, ReturnType,
+    FnArg, ImplItem, ItemImpl, Pat, PatType, Result, ReturnType,
     Type, Ident, spanned::Spanned,
 };
 
@@ -25,40 +25,42 @@ struct ArgInfo {
     inner_ty: Option<Type>,
 }
 
-/// Parse command attributes to extract name and help text
-fn parse_command_attrs(impl_block: &ItemImpl) -> Result<Vec<(String, String)>> {
-    let mut commands = Vec::new();
+/// Parse #[command(name = "...", help = "...")] attributes
+fn parse_command_attribute(attrs: &[syn::Attribute]) -> Result<Option<(String, String)>> {
+    let mut command_name = None;
+    let mut help_text = String::new();
 
-    for item in &impl_block.items {
-        if let ImplItem::Fn(method) = item {
-            let mut command_name = None;
-            let mut help_text = String::new();
-
-            for attr in &method.attrs {
-                if attr.path().is_ident("command") {
-                    // Parse #[command(name = "...", help = "...")]
-                    attr.parse_nested_meta(|meta| {
-                        if meta.path.is_ident("name") {
-                            let value = meta.value()?;
-                            let s: syn::LitStr = value.parse()?;
-                            command_name = Some(s.value());
-                        } else if meta.path.is_ident("help") {
-                            let value = meta.value()?;
-                            let s: syn::LitStr = value.parse()?;
-                            help_text = s.value();
-                        }
-                        Ok(())
-                    })?;
+    for attr in attrs {
+        if attr.path().is_ident("command") {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("name") {
+                    let value = meta.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    command_name = Some(s.value());
+                } else if meta.path.is_ident("help") {
+                    let value = meta.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    help_text = s.value();
                 }
-            }
-
-            if let Some(name) = command_name {
-                commands.push((name, help_text));
-            }
+                Ok(())
+            })?;
         }
     }
 
-    Ok(commands)
+    Ok(command_name.map(|name| (name, help_text)))
+}
+
+/// Parse command attributes to extract name and help text from all methods
+fn parse_command_attrs(impl_block: &ItemImpl) -> Result<Vec<(String, String)>> {
+    impl_block.items.iter()
+        .filter_map(|item| {
+            if let ImplItem::Fn(method) = item {
+                parse_command_attribute(&method.attrs).transpose()
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Parse argument information from PatType
@@ -215,12 +217,8 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
     let command_name = &info.command_name;
     let help_text = &info.help_text;
 
-    // Generate wrapper struct name (e.g., AppSetModelCommand)
-    let wrapper_name = format_ident!(
-        "{}{}Command",
-        self_type.to_token_stream().to_string().replace(" ", ""),
-        method_name.to_string().to_pascal_case()
-    );
+    // Generate wrapper struct name using DRY helper
+    let wrapper_name = generate_wrapper_name(self_type, method_name);
 
     // Generate argument parsing code using DRY helper
     let parse_args = info.args.iter().enumerate()
@@ -242,6 +240,9 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
         let completer_method = info.completers.get(&arg_name_str)?;
         Some(generate_custom_completion_arm(i, arg, &info.args, completer_method))
     });
+
+    // Generate metadata method using DRY helper
+    let metadata_impl = generate_metadata_impl(command_name, help_text);
 
     quote! {
         // Zero-sized command struct (no state!) - private, users don't need to know about it
@@ -286,13 +287,7 @@ fn generate_command_wrapper(info: &CommandInfo) -> TokenStream {
                 #result_conversion
             }
 
-            fn metadata(&self) -> &::commands::CommandMetadata {
-                static METADATA: ::commands::CommandMetadata = ::commands::CommandMetadata {
-                    name: #command_name,
-                    help: #help_text,
-                };
-                &METADATA
-            }
+            #metadata_impl
         }
     }
 }
@@ -341,50 +336,42 @@ fn generate_result_conversion(return_type: &ReturnType) -> TokenStream {
     }
 }
 
+/// Helper to check type properties - consolidates type introspection logic
+fn check_type_path<F>(ty: &Type, checker: F) -> bool
+where
+    F: FnOnce(&syn::PathSegment) -> bool,
+{
+    matches!(ty, Type::Path(type_path) if type_path.path.segments.last().map(checker).unwrap_or(false))
+}
+
 /// Check if a type is a built-in type that doesn't support completion
 fn is_builtin_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            let ident_str = segment.ident.to_string();
-            matches!(
-                ident_str.as_str(),
-                "String" | "str" | "i8" | "i16" | "i32" | "i64" | "i128" |
-                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "isize" |
-                "f32" | "f64" | "bool" | "char"
-            )
-        } else {
-            false
-        }
-    } else {
-        false
-    }
+    check_type_path(ty, |segment| {
+        matches!(
+            segment.ident.to_string().as_str(),
+            "String" | "str" | "i8" | "i16" | "i32" | "i64" | "i128" |
+            "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "isize" |
+            "f32" | "f64" | "bool" | "char"
+        )
+    })
 }
 
 /// Check if a type is Result<(), E>
 fn is_result_unit_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            if segment.ident == "Result" {
-                // Check if the first type argument is ()
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if let Some(syn::GenericArgument::Type(Type::Tuple(tuple))) = args.args.first() {
-                        return tuple.elems.is_empty(); // () is an empty tuple
-                    }
-                }
-            }
-        }
-    }
-    false
+    check_type_path(ty, |segment| {
+        segment.ident == "Result" && matches!(
+            &segment.arguments,
+            syn::PathArguments::AngleBracketed(args) if matches!(
+                args.args.first(),
+                Some(syn::GenericArgument::Type(Type::Tuple(tuple))) if tuple.elems.is_empty()
+            )
+        )
+    })
 }
 
 /// Check if a type is Result<T, E>
 fn is_result_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            return segment.ident == "Result";
-        }
-    }
-    false
+    check_type_path(ty, |segment| segment.ident == "Result")
 }
 
 /// Convert snake_case to PascalCase
@@ -409,6 +396,28 @@ impl ToPascalCase for String {
 impl ToPascalCase for str {
     fn to_pascal_case(&self) -> String {
         self.to_string().to_pascal_case()
+    }
+}
+
+/// Generate wrapper struct name from self type and method name
+fn generate_wrapper_name(self_type: &Type, method_name: &Ident) -> Ident {
+    format_ident!(
+        "{}{}Command",
+        self_type.to_token_stream().to_string().replace(" ", ""),
+        method_name.to_string().to_pascal_case()
+    )
+}
+
+/// Generate metadata() method implementation
+fn generate_metadata_impl(command_name: &str, help_text: &str) -> TokenStream {
+    quote! {
+        fn metadata(&self) -> &::commands::CommandMetadata {
+            static METADATA: ::commands::CommandMetadata = ::commands::CommandMetadata {
+                name: #command_name,
+                help: #help_text,
+            };
+            &METADATA
+        }
     }
 }
 
@@ -464,17 +473,14 @@ fn extract_command_info_by_name(
     let method_name = method.sig.ident.clone();
     let return_type = method.sig.output.clone();
 
-    // Parse arguments (skip self)
-    let mut args = Vec::new();
-    for arg in &method.sig.inputs {
-        match arg {
-            FnArg::Receiver(_) => continue, // Skip self
-            FnArg::Typed(pat_type) => {
-                let arg_info = parse_arg_info(pat_type)?;
-                args.push(arg_info);
-            }
-        }
-    }
+    // Parse arguments (skip self) using filter_map for cleaner code
+    let args: Result<Vec<_>> = method.sig.inputs.iter()
+        .filter_map(|arg| match arg {
+            FnArg::Receiver(_) => None,
+            FnArg::Typed(pat_type) => Some(parse_arg_info(pat_type)),
+        })
+        .collect();
+    let args = args?;
 
     // Find completer methods for this command
     let completers = find_completers_for_command(impl_block, command_name)?;
@@ -560,13 +566,8 @@ pub fn impl_command(input: ItemImpl) -> Result<TokenStream> {
         let wrapper = generate_command_wrapper(&info);
         wrappers.push(wrapper);
 
-        // Store struct name for registration helper
-        let method_name = &info.method_name;
-        let struct_name = format_ident!(
-            "{}{}Command",
-            self_type.to_token_stream().to_string().replace(" ", ""),
-            method_name.to_string().to_pascal_case()
-        );
+        // Store struct name for registration helper using DRY helper
+        let struct_name = generate_wrapper_name(self_type, &info.method_name);
         command_struct_names.push(struct_name);
     }
 
@@ -594,170 +595,5 @@ pub fn impl_completer(input: ImplItem) -> Result<TokenStream> {
     // Just return the original method unchanged
     Ok(quote! {
         #input
-    })
-}
-
-/// Implement #[command] for a free function
-pub fn impl_command_function(func: ItemFn) -> Result<TokenStream> {
-    // Extract command metadata from attributes
-    let mut command_name = None;
-    let mut help_text = String::new();
-
-    for attr in &func.attrs {
-        if attr.path().is_ident("command") {
-            attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("name") {
-                    let value = meta.value()?;
-                    let s: syn::LitStr = value.parse()?;
-                    command_name = Some(s.value());
-                } else if meta.path.is_ident("help") {
-                    let value = meta.value()?;
-                    let s: syn::LitStr = value.parse()?;
-                    help_text = s.value();
-                }
-                Ok(())
-            })?;
-        }
-    }
-
-    let command_name = command_name.ok_or_else(|| {
-        syn::Error::new(func.sig.ident.span(), "Missing command name attribute")
-    })?;
-
-    let func_name = &func.sig.ident;
-    let return_type = &func.sig.output;
-
-    // Parse arguments - first arg should be &mut T (the target type)
-    let mut args = Vec::new();
-    let mut target_type = None;
-
-    for (i, arg) in func.sig.inputs.iter().enumerate() {
-        if let FnArg::Typed(pat_type) = arg {
-            if i == 0 {
-                // First arg is the target (&mut T)
-                if let Type::Reference(type_ref) = &*pat_type.ty {
-                    if type_ref.mutability.is_some() {
-                        target_type = Some((*type_ref.elem).clone());
-                        continue;
-                    }
-                }
-                return Err(syn::Error::new(
-                    pat_type.span(),
-                    "First argument must be &mut T (the target type)"
-                ));
-            }
-            args.push(parse_arg_info(pat_type)?);
-        }
-    }
-
-    let target_type = target_type.ok_or_else(|| {
-        syn::Error::new(func.sig.span(), "Function must have &mut T as first parameter")
-    })?;
-
-    // Generate wrapper struct name
-    let wrapper_name = format_ident!("{}Command", func_name.to_string().to_pascal_case());
-
-    // Generate argument parsing
-    let parse_args = args.iter().enumerate().map(|(i, arg)| {
-        let arg_name = &arg.name;
-
-        if arg.is_optional {
-            if let Some(ref inner_ty) = arg.inner_ty {
-                quote! {
-                    let #arg_name = args.parse_optional::<#inner_ty>(#i)
-                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
-                }
-            } else {
-                let arg_ty = &arg.ty;
-                quote! {
-                    let #arg_name: #arg_ty = args.parse_optional(#i)
-                        .map_err(|e| ::commands::CommandError::ParseError(e))?;
-                }
-            }
-        } else {
-            let arg_ty = &arg.ty;
-            quote! {
-                let #arg_name = args.parse::<#arg_ty>(#i)
-                    .map_err(|e| ::commands::CommandError::ParseError(e))?;
-            }
-        }
-    });
-
-    let arg_names: Vec<_> = args.iter().map(|arg| &arg.name).collect();
-    let result_conversion = generate_result_conversion(return_type);
-
-    // Generate completion arms for enum args
-    let enum_completion_arms = args.iter().enumerate().filter_map(|(i, arg)| {
-        let completion_ty = if arg.is_optional {
-            arg.inner_ty.as_ref()?
-        } else {
-            &arg.ty
-        };
-
-        if is_builtin_type(completion_ty) {
-            return None;
-        }
-
-        Some(quote! {
-            #i => {
-                let dummy_value = <#completion_ty as ::std::default::Default>::default();
-                dummy_value.complete(partial, context).await
-            }
-        })
-    });
-
-    // Keep the original function as-is, just strip the attribute
-    let mut cleaned_func = func.clone();
-    cleaned_func.attrs.retain(|attr| !attr.path().is_ident("command"));
-
-    Ok(quote! {
-        // Keep original function unchanged
-        #cleaned_func
-
-        // Generate command wrapper struct
-        pub struct #wrapper_name;
-
-        #[::commands::async_trait::async_trait]
-        impl ::commands::AsyncCompleter for #wrapper_name {
-            type Metadata = ();
-
-            async fn complete(
-                &self,
-                context: &::commands::Context<()>,
-            ) -> ::std::result::Result<Vec<::commands::Completion<()>>, ::commands::CompletionError> {
-                let arg_index = context.stream().arg_index();
-
-                match arg_index {
-                    #(#enum_completion_arms)*
-                    _ => Ok(vec![])
-                }
-            }
-        }
-
-        #[::commands::async_trait::async_trait]
-        impl ::commands::Command<#target_type> for #wrapper_name {
-            async fn execute(
-                &self,
-                target: &mut #target_type,
-                args: ::commands::ParsedArgs,
-            ) -> ::std::result::Result<::commands::CommandResult, ::commands::CommandError> {
-                #(#parse_args)*
-
-                let result = #func_name(target, #(#arg_names),*).await;
-
-                #result_conversion
-            }
-
-            fn metadata(&self) -> &::commands::CommandMetadata {
-                static METADATA: ::commands::CommandMetadata = ::commands::CommandMetadata {
-                    name: #command_name,
-                    help: #help_text,
-                };
-                &METADATA
-            }
-        }
-
-        // Note: To get the command struct, use the wrapper struct name directly
-        // or use the command!() macro helper (to be implemented)
     })
 }
