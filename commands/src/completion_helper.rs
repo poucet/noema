@@ -1,44 +1,35 @@
-use crate::{CommandRegistry, Completion, Context, TokenStream, ContextMut, CommandResult, CommandError};
+use crate::{CommandRegistry, Completion, Context};
 
 /// Result of triggering completion
 pub enum CompletionResult {
-    /// No completions available
-    NoCompletions,
-    /// Single completion that should be auto-accepted
-    Single(String),
+    /// Completions available - may be empty, single, or multiple
+    Completions(Vec<Completion>),
     /// Common prefix was auto-filled, input should be updated to this value, with remaining completions
     AutoFilledPrefix { new_input: String, completions: Vec<Completion> },
-    /// Multiple completions available (no common prefix)
-    Multiple(Vec<Completion>),
 }
 
 /// Helper class that wraps CommandRegistry and provides completion logic
-pub struct CompletionHelper<T> {
-    registry: CommandRegistry<T>,
+pub struct CompletionHelper<'a, T> {
+    registry: &'a CommandRegistry<T>,
 }
 
-impl<T> CompletionHelper<T> {
+impl<'a, T> CompletionHelper<'a, T> {
     /// Create a new completion helper with the given registry
-    pub fn new(registry: CommandRegistry<T>) -> Self {
+    pub fn new(registry: &'a CommandRegistry<T>) -> Self {
         Self { registry }
     }
 
     /// Trigger completion for the current input and return result
     pub async fn trigger_completion(&self, input: &str, target: &T) -> CompletionResult {
         if !input.starts_with('/') {
-            return CompletionResult::NoCompletions;
+            return CompletionResult::Completions(vec![]);
         }
 
         let ctx = Context::new(input, target);
         match self.registry.complete(&ctx).await {
             Ok(completions) => {
-                if completions.is_empty() {
-                    CompletionResult::NoCompletions
-                } else if completions.len() == 1 {
-                    // Only one completion - return for auto-accept
-                    CompletionResult::Single(completions[0].value.clone())
-                } else {
-                    // Multiple completions - check for common prefix
+                // Check for common prefix to auto-fill (only if multiple completions)
+                if completions.len() > 1 {
                     if let Some(prefix) = Self::find_common_prefix(&completions) {
                         // Build the new input with the common prefix
                         let new_input = if let Some(last_space) = input.rfind(char::is_whitespace) {
@@ -47,24 +38,27 @@ impl<T> CompletionHelper<T> {
                             format!("/{}", prefix)
                         };
 
-                        // We already have the completions - they're all valid for this prefix
-                        // Just check if they all match the prefix exactly (single option)
-                        if completions.len() == 1 || completions.iter().all(|c| c.value == prefix) {
-                            CompletionResult::Single(prefix)
+                        // Check if all completions match the prefix exactly (would be single after fill)
+                        if completions.iter().all(|c| c.value == prefix) {
+                            // All match the prefix exactly - just return as single completion
+                            CompletionResult::Completions(completions)
                         } else {
-                            // Still multiple options - return prefix and completions
+                            // Still multiple options after prefix fill
                             CompletionResult::AutoFilledPrefix {
                                 new_input,
                                 completions,
                             }
                         }
                     } else {
-                        // No common prefix - return completions
-                        CompletionResult::Multiple(completions)
+                        // No common prefix - return completions as-is
+                        CompletionResult::Completions(completions)
                     }
+                } else {
+                    // 0 or 1 completions - return as-is
+                    CompletionResult::Completions(completions)
                 }
             }
-            Err(_) => CompletionResult::NoCompletions,
+            Err(_) => CompletionResult::Completions(vec![]),
         }
     }
 
@@ -102,16 +96,5 @@ impl<T> CompletionHelper<T> {
         } else {
             Some(common_prefix)
         }
-    }
-
-    /// Execute a command
-    pub async fn execute(
-        &self,
-        input: &str,
-        target: &mut T,
-    ) -> Result<CommandResult, CommandError> {
-        let tokens = TokenStream::new(input.to_string());
-        let ctx = ContextMut::new(tokens, target);
-        self.registry.execute(ctx).await
     }
 }
