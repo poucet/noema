@@ -25,6 +25,27 @@ struct ArgInfo {
     inner_ty: Option<Type>,
 }
 
+/// Generic helper to parse attributes with a key-value pair
+fn parse_attribute_value(attrs: &[syn::Attribute], attr_name: &str, key: &str) -> Result<Option<String>> {
+    for attr in attrs {
+        if attr.path().is_ident(attr_name) {
+            let mut value = None;
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident(key) {
+                    let val = meta.value()?;
+                    let s: syn::LitStr = val.parse()?;
+                    value = Some(s.value());
+                }
+                Ok(())
+            })?;
+            if value.is_some() {
+                return Ok(value);
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Parse #[command(name = "...", help = "...")] attributes
 fn parse_command_attribute(attrs: &[syn::Attribute]) -> Result<Option<(String, String)>> {
     let mut command_name = None;
@@ -301,36 +322,34 @@ fn generate_result_conversion(return_type: &ReturnType) -> TokenStream {
                 Ok(::commands::CommandResult::Success(String::new()))
             }
         }
-        ReturnType::Type(_, ty) => {
-            // Check if it's Result<T, E>
-            if is_result_type(ty) {
-                // Check if the Ok type is () by looking at the type
-                let is_unit_result = is_result_unit_type(ty);
+        ReturnType::Type(_, ty) if is_result_type(ty) => {
+            // Result<T, E> - need error handling
+            let error_arm = quote! {
+                Err(e) => Err(::commands::CommandError::ExecutionError(e.to_string()))
+            };
 
-                if is_unit_result {
-                    quote! {
-                        match result {
-                            Ok(()) => Ok(::commands::CommandResult::Success(String::new())),
-                            Err(e) => Err(::commands::CommandError::ExecutionError(e.to_string())),
-                        }
-                    }
-                } else {
-                    quote! {
-                        match result {
-                            Ok(msg) => {
-                                let message = format!("{}", msg);
-                                Ok(::commands::CommandResult::Success(message))
-                            }
-                            Err(e) => Err(::commands::CommandError::ExecutionError(e.to_string())),
-                        }
+            if is_result_unit_type(ty) {
+                // Result<(), E>
+                quote! {
+                    match result {
+                        Ok(()) => Ok(::commands::CommandResult::Success(String::new())),
+                        #error_arm
                     }
                 }
             } else {
-                // Direct return type
+                // Result<T, E> where T != ()
                 quote! {
-                    let message = format!("{}", result);
-                    Ok(::commands::CommandResult::Success(message))
+                    match result {
+                        Ok(msg) => Ok(::commands::CommandResult::Success(format!("{}", msg))),
+                        #error_arm
+                    }
                 }
+            }
+        }
+        ReturnType::Type(_, _) => {
+            // Direct return type - infallible
+            quote! {
+                Ok(::commands::CommandResult::Success(format!("{}", result)))
             }
         }
     }
@@ -421,30 +440,17 @@ fn generate_metadata_impl(command_name: &str, help_text: &str) -> TokenStream {
     }
 }
 
-/// Extract command information for a specific command by name
-fn extract_command_info_by_name(
-    impl_block: &ItemImpl,
+/// Find a method with matching #[command(name = "...")] attribute
+fn find_command_method<'a>(
+    impl_block: &'a ItemImpl,
     command_name: &str,
-    help_text: &str,
-) -> Result<CommandInfo> {
-    let self_type = if let Type::Path(type_path) = &*impl_block.self_ty {
-        Type::Path(type_path.clone())
-    } else {
-        return Err(syn::Error::new(
-            impl_block.self_ty.span(),
-            "Expected a simple type path",
-        ));
-    };
-
-    // Find the specific command method by name attribute
-    let method = impl_block
-        .items
-        .iter()
+) -> Result<&'a syn::ImplItemFn> {
+    impl_block.items.iter()
         .find_map(|item| {
             if let ImplItem::Fn(method) = item {
+                // Check if this method has matching command name
                 for attr in &method.attrs {
                     if attr.path().is_ident("command") {
-                        // Check if this command has the matching name
                         let mut matches = false;
                         let _ = attr.parse_nested_meta(|meta| {
                             if meta.path.is_ident("name") {
@@ -467,8 +473,30 @@ fn extract_command_info_by_name(
             None
         })
         .ok_or_else(|| {
-            syn::Error::new(impl_block.span(), format!("No method with #[command(name = \"{}\")] found", command_name))
-        })?;
+            syn::Error::new(
+                impl_block.span(),
+                format!("No method with #[command(name = \"{}\")] found", command_name)
+            )
+        })
+}
+
+/// Extract command information for a specific command by name
+fn extract_command_info_by_name(
+    impl_block: &ItemImpl,
+    command_name: &str,
+    help_text: &str,
+) -> Result<CommandInfo> {
+    let self_type = if let Type::Path(type_path) = &*impl_block.self_ty {
+        Type::Path(type_path.clone())
+    } else {
+        return Err(syn::Error::new(
+            impl_block.self_ty.span(),
+            "Expected a simple type path",
+        ));
+    };
+
+    // Find the specific command method by name attribute using helper
+    let method = find_command_method(impl_block, command_name)?;
 
     let method_name = method.sig.ident.clone();
     let return_type = method.sig.output.clone();
@@ -501,32 +529,17 @@ fn find_completers_for_command(
     impl_block: &ItemImpl,
     _command_name: &str,
 ) -> Result<std::collections::HashMap<String, Ident>> {
-    let mut completers = std::collections::HashMap::new();
-
-    for item in &impl_block.items {
-        if let ImplItem::Fn(method) = item {
-            for attr in &method.attrs {
-                if attr.path().is_ident("completer") {
-                    // Parse #[completer(arg = "arg_name")]
-                    let mut arg_name = None;
-                    attr.parse_nested_meta(|meta| {
-                        if meta.path.is_ident("arg") {
-                            let value = meta.value()?;
-                            let s: syn::LitStr = value.parse()?;
-                            arg_name = Some(s.value());
-                        }
-                        Ok(())
-                    })?;
-
-                    if let Some(arg) = arg_name {
-                        completers.insert(arg, method.sig.ident.clone());
-                    }
-                }
+    impl_block.items.iter()
+        .filter_map(|item| {
+            if let ImplItem::Fn(method) = item {
+                // Parse #[completer(arg = "arg_name")]
+                let arg_name = parse_attribute_value(&method.attrs, "completer", "arg").ok()??;
+                Some(Ok((arg_name, method.sig.ident.clone())))
+            } else {
+                None
             }
-        }
-    }
-
-    Ok(completers)
+        })
+        .collect()
 }
 
 /// Strip #[command] and #[completer] attributes from impl block
