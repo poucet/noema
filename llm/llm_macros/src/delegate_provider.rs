@@ -103,7 +103,7 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
         impl crate::ModelProvider for #enum_name {
             type ModelType = #model_enum_name;
 
-            async fn list_models(&self) -> ::anyhow::Result<Vec<String>> {
+            async fn list_models(&self) -> ::anyhow::Result<Vec<crate::ModelDefinition>> {
                 match self {
                     #(#list_models_arms),*
                 }

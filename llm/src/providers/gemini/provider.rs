@@ -30,10 +30,10 @@ impl GeminiProvider {
 impl ModelProvider for GeminiProvider {
     type ModelType = GeminiChatModel;
 
-    async fn list_models(&self) -> anyhow::Result<Vec<String>> {
+    async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         let url = format!("{}/models", self.base_url);
         let response: ListModelsResponse = self.client.get(&url).await?;
-        Ok(response.models.iter().map(|m| m.name.clone()).collect())
+        Ok(response.models.into_iter().map(|m| m.into()).collect())
     }
 
     fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {

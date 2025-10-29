@@ -28,6 +28,14 @@ pub(crate) struct ModelDefinition {
     // supportedGenerationMethods
 }
 
+impl From<ModelDefinition> for crate::ModelDefinition {
+    fn from(model: ModelDefinition) -> Self {
+        // All Gemini models support text/chat
+        // TODO: Could check supportedGenerationMethods to determine capabilities more accurately
+        crate::ModelDefinition::text_model(model.name)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ListModelsResponse {
