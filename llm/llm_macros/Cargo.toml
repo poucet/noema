@@ -1,0 +1,20 @@
+[package]
+name = "llm_macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+schemars = "0.8"
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio-test = "0.4"
+anyhow = "1.0"
+llm = { path = ".." }
