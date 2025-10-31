@@ -1,5 +1,5 @@
 use anyhow::Result;
-use commands::{CompletionHelper, CompletionResult, Registrable};
+use commands::{CommandHandler, CompletionResult};
 use conversation::Conversation;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -106,15 +106,15 @@ struct App {
     thinking_frame: usize,
     message_tx: mpsc::UnboundedSender<MessageCommand>,
     message_rx: mpsc::UnboundedReceiver<MessageResponse>,
-    cmd_rx: Option<(mpsc::UnboundedReceiver<MessageCommand>, mpsc::UnboundedSender<MessageResponse>)>,
+    cmd_rx: Option<(mpsc::UnboundedReceiver<MessageCommand>, mpsc::UnboundedSender<MessageResponse>)>
+    ,
     cached_history: Vec<llm::api::ChatMessage>,
     current_response: String,
 }
 
 /// Wrapper that owns App and CommandRegistry to avoid borrow checker issues
 struct AppWithCommands {
-    app: App,
-    registry: commands::CommandRegistry<App>,
+    command_handler: CommandHandler<App>,
     completion_state: CompletionState,
 }
 
@@ -175,27 +175,24 @@ impl App {
 impl AppWithCommands {
     fn new(provider: ModelProviderType, system_message: Option<String>) -> Result<Self> {
         let app = App::new(provider, system_message)?;
-        let mut registry = commands::CommandRegistry::new();
-        App::register(&mut registry);
+        let command_handler = CommandHandler::new(app);
 
         Ok(Self {
-            app,
-            registry,
+            command_handler,
             completion_state: CompletionState::Idle,
         })
     }
 
     fn start(&mut self) {
-        self.app.start();
+        self.command_handler.target_mut().start();
     }
 
     /// Trigger tab completion using the registry
     async fn trigger_completion(&mut self) {
-        let input_value = self.app.input.value().to_string();
+        let input_value = self.command_handler.target().input.value().to_string();
         self.completion_state = CompletionState::Loading;
 
-        let helper = CompletionHelper::new(&self.registry);
-        let result = helper.trigger_completion(&input_value, &self.app).await;
+        let result = self.command_handler.trigger_completion(&input_value).await;
 
         match result {
             CompletionResult::Completions(completions) => {
@@ -205,7 +202,7 @@ impl AppWithCommands {
                     }
                     1 => {
                         self.completion_state = CompletionState::Idle;
-                        self.app.apply_completion_value(&completions[0].value);
+                        self.command_handler.target_mut().apply_completion_value(&completions[0].value);
                     }
                     _ => {
                         self.completion_state = CompletionState::Showing {
@@ -216,7 +213,7 @@ impl AppWithCommands {
                 }
             }
             CompletionResult::AutoFilledPrefix { new_input, completions } => {
-                self.app.input = Input::from(new_input);
+                self.command_handler.target_mut().input = Input::from(new_input);
                 self.completion_state = CompletionState::Showing {
                     completions,
                     selected: 0,
@@ -227,20 +224,18 @@ impl AppWithCommands {
 
     /// Handle a command - returns false if should quit
     async fn handle_command(&mut self, input: &str) -> Result<bool> {
-        let tokens = commands::TokenStream::new(input.to_string());
-        let ctx = commands::ContextMut::new(tokens, &mut self.app);
-        let result = self.registry.execute(ctx).await;
+        let result = self.command_handler.execute_command(input).await;
 
         match result {
             Ok(commands::CommandResult::Success(msg)) => {
                 if !msg.is_empty() {
-                    self.app.status_message = Some(msg);
+                    self.command_handler.target_mut().status_message = Some(msg);
                 }
                 Ok(true)
             }
             Ok(commands::CommandResult::Exit) => Ok(false),
             Err(e) => {
-                self.app.status_message = Some(format!("Error: {}", e));
+                self.command_handler.target_mut().status_message = Some(format!("Error: {}", e));
                 Ok(true)
             }
         }
@@ -278,13 +273,13 @@ impl AppWithCommands {
             }
             (KeyCode::Enter, _) => {
                 if let Some(input_text) = self.handle_enter() {
-                    self.app.status_message = None;
+                    self.command_handler.target_mut().status_message = None;
 
                     if !input_text.is_empty() {
                         if input_text.starts_with('/') {
                             self.handle_command(&input_text).await
                         } else {
-                            self.app.queue_message(input_text);
+                            self.command_handler.target_mut().queue_message(input_text);
                             Ok(true)
                         }
                     } else {
@@ -296,7 +291,7 @@ impl AppWithCommands {
             }
             _ => {
                 self.cancel_completion();
-                self.app.input.handle_event(&Event::Key(key));
+                self.command_handler.target_mut().input.handle_event(&Event::Key(key));
                 Ok(true)
             }
         }
@@ -325,7 +320,7 @@ impl AppWithCommands {
         if matches!(self.completion_state, CompletionState::Showing { .. }) {
             self.next_completion();
         } else {
-            self.app.input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
+            self.command_handler.target_mut().input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
                 crossterm::event::KeyCode::Down,
                 crossterm::event::KeyModifiers::empty(),
             )));
@@ -337,7 +332,7 @@ impl AppWithCommands {
         if matches!(self.completion_state, CompletionState::Showing { .. }) {
             self.prev_completion();
         } else {
-            self.app.input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
+            self.command_handler.target_mut().input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
                 crossterm::event::KeyCode::Up,
                 crossterm::event::KeyModifiers::empty(),
             )));
@@ -350,14 +345,14 @@ impl AppWithCommands {
             if let Some(completion) = completions.get(selected) {
                 let value = completion.value.clone();
                 self.completion_state = CompletionState::Idle;
-                self.app.apply_completion_value(&value);
+                self.command_handler.target_mut().apply_completion_value(&value);
             }
             return None;
         }
 
         // Not showing completions - return input for processing
-        let input_text = self.app.input.value().to_string();
-        self.app.input.reset();
+        let input_text = self.command_handler.target_mut().input.value().to_string();
+        self.command_handler.target_mut().input.reset();
         Some(input_text)
     }
 
@@ -536,7 +531,7 @@ impl App {
 }
 
 fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
-    let app = &app_with_commands.app;
+    let app = app_with_commands.command_handler.target();
     let completion_state = &app_with_commands.completion_state;
 
     let chunks = Layout::default()
@@ -716,9 +711,9 @@ async fn main() -> Result<()> {
         terminal.draw(|f| ui(f, &app))?;
 
         // Update app state
-        app.app.check_message_responses();
-        if app.app.is_streaming {
-            app.app.advance_thinking_animation();
+        app.command_handler.target_mut().check_message_responses();
+        if app.command_handler.target_mut().is_streaming {
+            app.command_handler.target_mut().advance_thinking_animation();
         }
 
         // Handle input
