@@ -2,14 +2,63 @@ use crate::{ChatRequest, api::Role};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ModelDetails {
+    pub(crate) format: Option<String>,
+    pub(crate) family: Option<String>,
+    pub(crate) families: Option<Vec<String>>,
+    pub(crate) parameter_size: Option<String>,
+    pub(crate) quantization_level: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct ModelDefinition {
     pub(crate) name: String,
+    pub(crate) details: Option<ModelDetails>,
 }
 
 impl From<ModelDefinition> for crate::ModelDefinition {
     fn from(model: ModelDefinition) -> Self {
-        // All Ollama models support text/chat
-        crate::ModelDefinition::text_model(model.name)
+        let mut capabilities = Vec::new();
+        let mut is_embedding = false;
+        let mut has_vision = false;
+
+        // Check details.families for model capabilities
+        if let Some(details) = &model.details {
+            if let Some(families) = &details.families {
+                // Check for vision capability: models with CLIP in families support vision
+                if families.iter().any(|f| f.eq_ignore_ascii_case("clip")) {
+                    has_vision = true;
+                }
+
+                // Check for embedding models: typically don't have standard text generation families
+                // Embedding models often have specific family markers
+                if families.len() == 1
+                    && families
+                        .iter()
+                        .any(|f| f.to_lowercase().contains("embed"))
+                {
+                    is_embedding = true;
+                }
+            }
+        }
+
+        // Determine capabilities based on analysis
+        if is_embedding {
+            capabilities.push(crate::ModelCapability::Embedding);
+        } else {
+            // Default to text capability for non-embedding models
+            capabilities.push(crate::ModelCapability::Text);
+            if has_vision {
+                capabilities.push(crate::ModelCapability::Image);
+            }
+        }
+
+        // Fallback: if we couldn't determine anything, assume text
+        if capabilities.is_empty() {
+            capabilities.push(crate::ModelCapability::Text);
+        }
+
+        crate::ModelDefinition::new(model.name, capabilities)
     }
 }
 

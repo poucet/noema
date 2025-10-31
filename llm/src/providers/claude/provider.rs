@@ -17,8 +17,18 @@ struct ModelInfo {
 
 impl From<ModelInfo> for crate::ModelDefinition {
     fn from(model: ModelInfo) -> Self {
-        // All Claude models support text/chat
-        crate::ModelDefinition::text_model(model.id)
+        // Note: The Anthropic API does not provide capability metadata in the /v1/models response.
+        // The API only returns: id, display_name, type, and created_at.
+        // Therefore, we can only assume all Claude models support text/chat generation.
+        //
+        // Limitation: We cannot programmatically detect:
+        // - Vision capabilities (all Claude 3+ models support vision, but this isn't indicated in the API)
+        // - Embedding capabilities (Anthropic doesn't offer embedding models)
+        //
+        // All Claude models support text/chat as their primary capability.
+        let capabilities = vec![crate::ModelCapability::Text];
+
+        crate::ModelDefinition::new(model.id, capabilities)
     }
 }
 

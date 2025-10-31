@@ -20,19 +20,50 @@ pub(crate) struct ModelDefinition {
     pub(crate) output_token_limit: Option<u32>,
 
     pub(crate) thinking: Option<bool>,
+
+    pub(crate) supported_generation_methods: Option<Vec<String>>,
     //TODO:
     // temperature
     // maxTemperature
     // topP
     // topK
-    // supportedGenerationMethods
 }
 
 impl From<ModelDefinition> for crate::ModelDefinition {
     fn from(model: ModelDefinition) -> Self {
-        // All Gemini models support text/chat
-        // TODO: Could check supportedGenerationMethods to determine capabilities more accurately
-        crate::ModelDefinition::text_model(model.name)
+        let mut capabilities = Vec::new();
+
+        if let Some(methods) = &model.supported_generation_methods {
+            for method in methods {
+                match method.as_str() {
+                    "generateContent" => {
+                        if !capabilities.contains(&crate::ModelCapability::Text) {
+                            capabilities.push(crate::ModelCapability::Text);
+                        }
+                        // Note: Gemini models with generateContent support multimodal input (text + images)
+                        // but this is not explicitly indicated in supportedGenerationMethods.
+                        // Image capability refers to vision/multimodal input support, which is inherent
+                        // to generateContent models in Gemini.
+                        if !capabilities.contains(&crate::ModelCapability::Image) {
+                            capabilities.push(crate::ModelCapability::Image);
+                        }
+                    }
+                    "embedContent" => {
+                        if !capabilities.contains(&crate::ModelCapability::Embedding) {
+                            capabilities.push(crate::ModelCapability::Embedding);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Fallback: if no supported methods found, assume text generation
+        if capabilities.is_empty() {
+            capabilities.push(crate::ModelCapability::Text);
+        }
+
+        crate::ModelDefinition::new(model.name, capabilities)
     }
 }
 
