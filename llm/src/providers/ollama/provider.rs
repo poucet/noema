@@ -1,8 +1,9 @@
 use super::chat::api::ListModelsResponse;
 use super::chat::model::OllamaChatModel;
-use crate::ModelProvider;
+use crate::{ChatModel, ModelProvider};
 use crate::client::Client;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 pub struct OllamaProvider {
     client: Client,
@@ -24,19 +25,17 @@ impl OllamaProvider {
 
 #[async_trait]
 impl ModelProvider for OllamaProvider {
-    type ModelType = OllamaChatModel;
-
     async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         let url = format!("{}/api/tags", self.base_url);
         let response: ListModelsResponse = self.client.get(&url).await?;
         Ok(response.models.into_iter().map(|m| m.into()).collect())
     }
 
-    fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
-        Some(OllamaChatModel::new(
+    fn create_chat_model(&self, model_name: &str) -> Option<Arc<dyn ChatModel + Send + Sync>> {
+        Some(Arc::new(OllamaChatModel::new(
             self.client.clone(),
             self.base_url.clone(),
             model_name.to_string(),
-        ))
+        )))
     }
 }

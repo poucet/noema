@@ -201,16 +201,28 @@ pub struct ChatRequest {
 }
 
 impl ChatRequest {
-    pub fn new(messages: Vec<ChatMessage>) -> Self {
+    /// Create a new chat request from an iterator of message references
+    ///
+    /// This accepts any iterator that yields `&ChatMessage`, avoiding unnecessary clones:
+    /// - `&[ChatMessage]` - slice
+    /// - `Vec<&ChatMessage>` - vector of references
+    /// - `context.iter()` - iterator from ConversationContext
+    ///
+    /// Messages are cloned only once when constructing the request.
+    pub fn new<'a>(messages: impl IntoIterator<Item = &'a ChatMessage>) -> Self {
         ChatRequest {
-            messages,
+            messages: messages.into_iter().cloned().collect(),
             tools: None,
         }
     }
 
-    pub fn with_tools(messages: Vec<ChatMessage>, tools: Vec<ToolDefinition>) -> Self {
+    /// Create a chat request with tool definitions
+    pub fn with_tools<'a>(
+        messages: impl IntoIterator<Item = &'a ChatMessage>,
+        tools: Vec<ToolDefinition>,
+    ) -> Self {
         ChatRequest {
-            messages,
+            messages: messages.into_iter().cloned().collect(),
             tools: Some(tools),
         }
     }
@@ -321,7 +333,7 @@ mod tests {
     #[test]
     fn test_chat_request_new() {
         let messages = vec![ChatMessage::user(ChatPayload::text("Hello"))];
-        let request = ChatRequest::new(messages);
+        let request = ChatRequest::new(&messages);
 
         assert_eq!(request.messages.len(), 1);
         assert!(request.tools.is_none());
@@ -338,7 +350,7 @@ mod tests {
             input_schema: schema,
         };
 
-        let request = ChatRequest::with_tools(messages, vec![tool]);
+        let request = ChatRequest::with_tools(&messages, vec![tool]);
 
         assert_eq!(request.messages.len(), 1);
         assert!(request.tools.is_some());

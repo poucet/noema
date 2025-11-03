@@ -1,14 +1,14 @@
 use anyhow::Result;
 use commands::{CommandHandler, CompletionResult};
 use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
-use conversation::Conversation;
+use noema_core::{Session, SimpleAgent};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use llm::ModelProvider;
+use llm::{ChatMessage, ChatModel, ModelProvider};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -75,7 +75,8 @@ enum CompletionState {
 
 struct App {
     input: Input,
-    conversation: Arc<Mutex<Conversation>>,
+    session: Arc<Mutex<Session>>,
+    model: Arc<dyn ChatModel + Send + Sync>,
     current_provider: ModelProviderType,
     model_display_name: &'static str,
     status_message: Option<String>,
@@ -102,13 +103,11 @@ impl App {
         let provider_instance = create_provider(&config_provider, &provider_urls);
         let model = provider_instance.create_chat_model(model_id).unwrap();
 
-        let conversation = if let Some(sys_msg) = system_message {
-            Conversation::with_system_message(model, sys_msg)
+        let session = if let Some(sys_msg) = system_message {
+            Session::with_system_message(sys_msg)
         } else {
-            Conversation::new(model)
+            Session::new()
         };
-
-        let conversation = Arc::new(Mutex::new(conversation));
 
         // Create channels for background message processing
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -116,7 +115,8 @@ impl App {
 
         Ok(App {
             input: Input::default(),
-            conversation,
+            session: Arc::new(Mutex::new(session)),
+            model,
             current_provider: provider,
             model_display_name,
             status_message: None,
@@ -143,11 +143,12 @@ impl App {
     }
 
     fn start(&mut self) {
-        let conversation = Arc::clone(&self.conversation);
+        let session = Arc::clone(&self.session);
+        let model = Arc::clone(&self.model);
         let (cmd_rx, resp_tx) = self.cmd_rx.take().expect("start() called twice");
 
         // Spawn background message processor
-        tokio::spawn(Self::message_processor(conversation, cmd_rx, resp_tx));
+        tokio::spawn(Self::message_processor(session, model, cmd_rx, resp_tx));
     }
 }
 
@@ -351,8 +352,8 @@ impl App {
 
     #[command(name = "clear", help = "Clear conversation history")]
     async fn cmd_clear(&mut self) -> Result<String, anyhow::Error> {
-        if let Ok(mut conv) = self.conversation.try_lock() {
-            conv.clear();
+        if let Ok(mut session) = self.session.try_lock() {
+            session.clear();
             self.cached_history.clear();
             Ok("Conversation cleared".to_string())
         } else {
@@ -381,13 +382,13 @@ impl App {
         let model = provider_instance.create_chat_model(model_id)
             .ok_or_else(|| anyhow::anyhow!("Model '{}' not found for provider {:?}", model_id, provider))?;
 
-        if let Ok(mut conv) = self.conversation.try_lock() {
-            conv.set_model(model);
+        if self.is_streaming {
+            Err(anyhow::anyhow!("Cannot switch model while streaming"))
+        } else {
+            self.model = model;
             self.current_provider = provider;
             self.model_display_name = model_display_name;
             Ok(format!("Switched to {} • {}", self.current_provider, model_id))
-        } else {
-            Err(anyhow::anyhow!("Cannot switch model while streaming"))
         }
     }
 
@@ -426,10 +427,10 @@ impl App {
 impl App {
     fn queue_message(&mut self, message: String) {
         // Update cached history with user message immediately
-        if let Ok(conv) = self.conversation.try_lock() {
-            self.cached_history = conv.history().to_vec();
+        if let Ok(session) = self.session.try_lock() {
+            self.cached_history = session.messages().to_vec();
         }
-        self.cached_history.push(llm::api::ChatMessage::user(message.clone().into()));
+        self.cached_history.push(ChatMessage::user(message.clone().into()));
 
         self.is_streaming = true;
         self.thinking_frame = 0;
@@ -455,9 +456,9 @@ impl App {
                 }
                 MessageResponse::Complete => {
                     self.is_streaming = false;
-                    // Update cache from actual conversation
-                    if let Ok(conv) = self.conversation.try_lock() {
-                        self.cached_history = conv.history().to_vec();
+                    // Update cache from actual session
+                    if let Ok(session) = self.session.try_lock() {
+                        self.cached_history = session.messages().to_vec();
                     }
                     self.current_response.clear();
                 }
@@ -471,34 +472,34 @@ impl App {
     }
 
     async fn message_processor(
-        conversation: Arc<Mutex<Conversation>>,
+        session: Arc<Mutex<Session>>,
+        model: Arc<dyn ChatModel + Send + Sync>,
         mut cmd_rx: mpsc::UnboundedReceiver<MessageCommand>,
         resp_tx: mpsc::UnboundedSender<MessageResponse>,
     ) {
+        let agent = SimpleAgent::new();
+
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 MessageCommand::SendMessage(message) => {
-                    // Hold lock for entire operation (stream needs conversation reference)
-                    let mut conv = conversation.lock().await;
-                    match conv.send_stream(&message).await {
-                        Ok(mut stream) => {
-                            // Process stream and send chunks to UI immediately
-                            while let Some(chunk) = stream.next().await {
-                                // Send chunk notification to UI
-                                let chunk_text = chunk.payload.content.iter()
-                                    .filter_map(|c| {
-                                        if let llm::api::ContentBlock::Text { text } = c {
-                                            Some(text.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect::<String>();
+                    // Lock session to start streaming
+                    let mut sess = session.lock().await;
 
+                    match sess.send_stream(&agent, model.clone(), message).await {
+                        Ok((mut stream, mut tx)) => {
+                            // Process stream and send chunks to UI immediately
+                            while let Some(msg) = stream.next().await {
+                                // Send chunk notification to UI
+                                let chunk_text = msg.get_text();
                                 let _ = resp_tx.send(MessageResponse::Chunk(chunk_text));
+
+                                // Add to transaction
+                                tx.add(msg);
                             }
-                            // Stream is dropped here, which updates conversation history
-                            // Lock is released when conv goes out of scope
+
+                            // Commit transaction
+                            sess.commit(tx);
+
                             let _ = resp_tx.send(MessageResponse::Complete);
                         }
                         Err(e) => {
@@ -528,8 +529,8 @@ fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
     // Use cached history if streaming, otherwise try to get fresh history
     let history = if app.is_streaming {
         app.cached_history.clone()
-    } else if let Ok(conversation) = app.conversation.try_lock() {
-        conversation.history().to_vec()
+    } else if let Ok(session) = app.session.try_lock() {
+        session.messages().to_vec()
     } else {
         app.cached_history.clone()
     };
@@ -613,7 +614,7 @@ fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
     f.render_widget(input_widget, chunks[1]);
 
     // Render status bar
-    let message_count = app.conversation.try_lock().map(|c| c.message_count()).unwrap_or(0);
+    let message_count = app.session.try_lock().map(|s| s.len()).unwrap_or(0);
     let status_text = if let Some(ref msg) = app.status_message {
         format!(" {} • {} | {} ", app.current_provider, app.model_display_name, msg)
     } else if matches!(completion_state, CompletionState::Loading) {

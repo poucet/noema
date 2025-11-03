@@ -8,7 +8,7 @@ anyhow = "1.0.100"
 clap = { version = "4.5.49", features = ["env"] }
 clap_derive = "4.5.49"
 config = { path = "../config" }
-conversation = { path = "../conversation" }
+noema-core = { path = "../noema-core" }
 futures = "0.3.31"
 llm = { path = "../llm" }
 tokio = { version = "1.47.1", features = ["full"] }

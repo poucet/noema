@@ -1,7 +1,8 @@
 use crate::client::Client;
-use crate::ModelProvider;
+use crate::{ChatModel, ModelProvider};
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use std::sync::Arc;
 
 use super::chat::api::ListModelsResponse;
 use super::chat::OpenAIChatModel;
@@ -48,18 +49,16 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl ModelProvider for OpenAIProvider {
-    type ModelType = OpenAIChatModel;
-
     async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         let response: ListModelsResponse = self.client.get(self.models_url()).await?;
         Ok(response.data.into_iter().map(|m| m.into()).collect())
     }
 
-    fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
-        Some(OpenAIChatModel::new(
+    fn create_chat_model(&self, model_name: &str) -> Option<Arc<dyn ChatModel + Send + Sync>> {
+        Some(Arc::new(OpenAIChatModel::new(
             self.client.clone(),
             self.base_url.clone(),
             model_name.to_string(),
-        ))
+        )))
     }
 }

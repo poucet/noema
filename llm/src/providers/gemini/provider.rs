@@ -1,9 +1,10 @@
 use super::chat::api::ListModelsResponse;
 use super::chat::model::GeminiChatModel;
-use crate::ModelProvider;
+use crate::{ChatModel, ModelProvider};
 use crate::client::Client;
 use async_trait::async_trait;
 use reqwest::header;
+use std::sync::Arc;
 
 pub struct GeminiProvider {
     client: Client,
@@ -37,19 +38,17 @@ impl GeminiProvider {
 
 #[async_trait]
 impl ModelProvider for GeminiProvider {
-    type ModelType = GeminiChatModel;
-
     async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         let url = format!("{}/models", self.base_url);
         let response: ListModelsResponse = self.client.get(&url).await?;
         Ok(response.models.into_iter().map(|m| m.into()).collect())
     }
 
-    fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
-        Some(GeminiChatModel::new(
+    fn create_chat_model(&self, model_name: &str) -> Option<Arc<dyn ChatModel + Send + Sync>> {
+        Some(Arc::new(GeminiChatModel::new(
             self.client.clone(),
             self.base_url.clone(),
             model_name.to_string(),
-        ))
+        )))
     }
 }

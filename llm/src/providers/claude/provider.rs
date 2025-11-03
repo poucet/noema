@@ -1,9 +1,10 @@
 use super::chat::model::ClaudeChatModel;
-use crate::ModelProvider;
+use crate::{ChatModel, ModelProvider};
 use crate::client::Client;
 use async_trait::async_trait;
 use reqwest::header;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct ModelInfo {
@@ -76,8 +77,6 @@ impl ClaudeProvider {
 
 #[async_trait]
 impl ModelProvider for ClaudeProvider {
-    type ModelType = ClaudeChatModel;
-
     async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
         // TODO: Add support for pagination.
         let url = format!("{}/models", self.base_url);
@@ -85,11 +84,11 @@ impl ModelProvider for ClaudeProvider {
         Ok(response.data.into_iter().map(|m| m.into()).collect())
     }
 
-    fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType> {
-        Some(ClaudeChatModel::new(
+    fn create_chat_model(&self, model_name: &str) -> Option<Arc<dyn ChatModel + Send + Sync>> {
+        Some(Arc::new(ClaudeChatModel::new(
             self.client.clone(),
             self.base_url.clone(),
             model_name.to_string(),
-        ))
+        )))
     }
 }

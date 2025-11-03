@@ -1,5 +1,4 @@
-
 [workspace]
 resolver = "3"
-members = ["cli", "commands", "config", "conversation", "llm", "tui"]
+members = ["cli", "commands", "config", "noema-core", "llm", "tui"]
 default-members = ["tui"]

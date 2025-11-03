@@ -1,8 +1,11 @@
 use clap::Parser;
+use std::sync::Arc;
+
 use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
-use conversation::Conversation;
+use noema_core::{Session, SimpleAgent};
 use futures::StreamExt;
 use llm::ModelProvider;
+use llm::{ChatModel};
 
 use clap_derive::{Parser, ValueEnum};
 use std::io::{self, BufRead, Write};
@@ -91,7 +94,8 @@ struct Args {
 
 // Application state
 struct AppState {
-    conversation: Conversation,
+    session: Session,
+    model: Arc<dyn ChatModel + Send + Sync>,
     current_provider: ModelProviderType,
     model_display_name: &'static str,
     mode: Mode,
@@ -102,7 +106,7 @@ async fn call_model_regular(
     model: &dyn llm::ChatModel,
     messages: Vec<llm::ChatMessage>,
 ) -> anyhow::Result<()> {
-    let request = llm::ChatRequest::new(messages);
+    let request = llm::ChatRequest::new(messages.iter());
     let response = model.chat(&request).await?;
     println!("Response: {:}", response.get_text());
     Ok(())
@@ -112,7 +116,7 @@ async fn call_model_streaming(
     model: &impl llm::ChatModel,
     messages: Vec<llm::ChatMessage>,
 ) -> anyhow::Result<()> {
-    let request = llm::ChatRequest::new(messages);
+    let request = llm::ChatRequest::new(messages.iter());
     let mut stream = model.stream_chat(&request).await?;
     print!("Response: ");
     while let Some(chunk) = stream.next().await {
@@ -122,18 +126,38 @@ async fn call_model_streaming(
     Ok(())
 }
 
-async fn chat_regular(conversation: &mut Conversation, message: &str) -> anyhow::Result<()> {
-    let response = conversation.send(message).await?;
-    println!("{}", response.get_text());
+async fn chat_regular(
+    session: &mut Session,
+    model: Arc<dyn ChatModel + Send + Sync>,
+    message: &str
+) -> anyhow::Result<()> {
+    let agent = SimpleAgent::new();
+    let messages = session.send(&agent, model, message).await?;
+
+    // Print assistant responses
+    for msg in messages {
+        if msg.role == llm::api::Role::Assistant {
+            println!("{}", msg.get_text());
+        }
+    }
     Ok(())
 }
 
-async fn chat_streaming(conversation: &mut Conversation, message: &str) -> anyhow::Result<()> {
-    let mut stream = conversation.send_stream(message).await?;
-    while let Some(chunk) = stream.next().await {
-        print!("{}", chunk.payload.get_text());
+async fn chat_streaming(
+    session: &mut Session,
+    model: Arc<dyn ChatModel + Send + Sync>,
+    message: &str
+) -> anyhow::Result<()> {
+    let agent = SimpleAgent::new();
+    let (mut stream, mut tx) = session.send_stream(&agent, model, message).await?;
+
+    while let Some(msg) = stream.next().await {
+        print!("{}", msg.get_text());
         io::stdout().flush()?;
+        tx.add(msg);
     }
+
+    session.commit(tx);
     println!();
     Ok(())
 }
@@ -222,7 +246,7 @@ mod commands {
                     CommandResult::Continue
                 }
                 Command::Clear => {
-                    state.conversation.clear();
+                    state.session.clear();
                     println!("Conversation history cleared.");
                     println!();
                     CommandResult::Continue
@@ -234,7 +258,7 @@ mod commands {
 
                     match new_provider_instance.create_chat_model(new_model_id) {
                         Some(new_model) => {
-                            state.conversation.set_model(new_model);
+                            state.model = new_model;
                             state.current_provider = new_provider;
                             state.model_display_name = new_model_display;
                             println!("Switched to {} • {}", state.current_provider, state.model_display_name);
@@ -284,14 +308,15 @@ async fn main() {
     let provider = create_provider(&config_provider, &provider_urls);
     let model = provider.create_chat_model(model_id).unwrap();
 
-    let conversation = if let Some(system_msg) = args.system_message {
-        Conversation::with_system_message(model, system_msg)
+    let session = if let Some(system_msg) = args.system_message {
+        Session::with_system_message(system_msg)
     } else {
-        Conversation::new(model)
+        Session::new()
     };
 
     let mut state = AppState {
-        conversation,
+        session,
+        model,
         current_provider: args.model.clone(),
         model_display_name,
         mode: args.mode,
@@ -348,8 +373,8 @@ async fn main() {
 
         // Regular message
         let result = match state.mode {
-            Mode::Chat => chat_regular(&mut state.conversation, input).await,
-            Mode::Stream => chat_streaming(&mut state.conversation, input).await,
+            Mode::Chat => chat_regular(&mut state.session, state.model.clone(), input).await,
+            Mode::Stream => chat_streaming(&mut state.session, state.model.clone(), input).await,
         };
 
         if let Err(e) = result {
@@ -359,5 +384,19 @@ async fn main() {
         println!();
     }
 
-    println!("Conversation had {} messages", state.conversation.message_count());
+
+    println!("Conversation had {} messages", state.session.len());
+    let model_name = match args.model {
+        ModelProviderType::Ollama => "gemma3n:latest",
+        ModelProviderType::Gemini => "models/gemini-2.5-flash",
+        ModelProviderType::Claude => "claude-sonnet-4-5-20250929",
+        ModelProviderType::OpenAI => "gpt-4o-mini",
+    };
+
+    let model = provider.create_chat_model(model_name).unwrap();
+    let messages = vec![llm::ChatMessage::user(llm::ChatPayload::text("Hello, how are you?".to_string()))];
+    match args.mode {
+        Mode::Chat => call_model_regular(&model, messages).await.unwrap(),
+        Mode::Stream => call_model_streaming(&model, messages).await.unwrap(),
+    }
 }

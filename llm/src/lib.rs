@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use futures::stream::Stream;
 use std::pin::Pin;
+use std::sync::Arc;
 
 pub mod api;
 mod client;
@@ -48,12 +49,23 @@ pub trait ChatModel {
     async fn stream_chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatStream>;
 }
 
+// Blanket implementation for Arc<dyn ChatModel> to make it easier to work with
+#[async_trait]
+impl ChatModel for Arc<dyn ChatModel + Send + Sync> {
+    async fn chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatMessage> {
+        (**self).chat(messages).await
+    }
+
+    async fn stream_chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatStream> {
+        (**self).stream_chat(messages).await
+    }
+}
+
 #[async_trait]
 pub trait ModelProvider {
-    type ModelType: ChatModel;
-    // List available models from the provider with their capabilities.
+    /// List available models from the provider with their capabilities
     async fn list_models(&self) -> anyhow::Result<Vec<ModelDefinition>>;
 
-    // Get a specific model by name.
-    fn create_chat_model(&self, model_name: &str) -> Option<Self::ModelType>;
+    /// Create a chat model by name, returned as Arc for sharing across threads
+    fn create_chat_model(&self, model_name: &str) -> Option<Arc<dyn ChatModel + Send + Sync>>;
 }
