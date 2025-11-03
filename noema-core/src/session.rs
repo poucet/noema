@@ -31,30 +31,13 @@ impl ConversationContext for SimpleContext {
     fn len(&self) -> usize {
         self.messages.len()
     }
-}
 
-/// Context that combines committed messages with a transaction
-pub struct TransactionContext<'a> {
-    committed: &'a [ChatMessage],
-    transaction: &'a Transaction,
-}
-
-impl<'a> TransactionContext<'a> {
-    pub fn new(committed: &'a [ChatMessage], transaction: &'a Transaction) -> Self {
-        Self {
-            committed,
-            transaction,
-        }
-    }
-}
-
-impl<'a> ConversationContext for TransactionContext<'a> {
-    fn iter(&self) -> impl Iterator<Item = &ChatMessage> {
-        self.committed.iter().chain(self.transaction.pending().iter())
+    fn add(&mut self, message: ChatMessage) {
+        self.messages.push(message);
     }
 
-    fn len(&self) -> usize {
-        self.committed.len() + self.transaction.len()
+    fn extend(&mut self, messages: impl IntoIterator<Item = ChatMessage>) {
+        self.messages.extend(messages);
     }
 }
 
@@ -115,12 +98,7 @@ impl Session {
 
     /// Begin a new transaction
     pub fn begin(&self) -> Transaction {
-        Transaction::new()
-    }
-
-    /// Create a context that includes both committed and pending messages
-    pub fn transaction_context<'a>(&'a self, transaction: &'a Transaction) -> TransactionContext<'a> {
-        TransactionContext::new(&self.history, transaction)
+        Transaction::new(self.history.clone())
     }
 
     /// Execute agent within a transaction (doesn't commit)
@@ -129,89 +107,81 @@ impl Session {
         transaction: &mut Transaction,
         agent: &impl Agent,
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<Vec<ChatMessage>> {
-        let context = self.transaction_context(transaction);
-        let messages = agent.execute(&context, model).await?;
-        transaction.extend(messages.clone());
-        Ok(messages)
+    ) -> anyhow::Result<()> {
+        agent.execute(transaction, model).await
     }
 
     /// Commit a transaction to the session
-    pub fn commit(&mut self, transaction: Transaction) {
+    ///
+    /// This is async to support backend stores that require async I/O.
+    /// For in-memory sessions, this is essentially a no-op but still async
+    /// to maintain a consistent interface.
+    pub async fn commit(&mut self, transaction: Transaction) -> anyhow::Result<()> {
         let messages = transaction.commit();
         self.history.extend(messages);
+        Ok(())
     }
 
     /// Send a user message and execute agent (auto-commit)
     ///
     /// This is a convenience method that:
-    /// 1. Adds user message to transaction
-    /// 2. Creates context with pending message
-    /// 3. Executes agent
+    /// 1. Creates transaction with current history
+    /// 2. Adds user message to transaction
+    /// 3. Executes agent (which adds messages to transaction)
     /// 4. Commits all messages
     ///
     /// # Example
     ///
     /// ```ignore
-    /// let messages = session.send(&SimpleAgent, model, "Hello".into()).await?;
+    /// session.send(&SimpleAgent, model, "Hello".into()).await?;
     /// ```
     pub async fn send(
         &mut self,
         agent: &impl Agent,
         model: Arc<dyn ChatModel + Send + Sync>,
         input: impl Into<ChatPayload>,
-    ) -> anyhow::Result<Vec<ChatMessage>> {
+    ) -> anyhow::Result<()> {
         let mut tx = self.begin();
 
         // Add user message
         tx.add(ChatMessage::user(input.into()));
 
-        // Execute agent
+        // Execute agent (adds messages to transaction)
         self.execute_in_transaction(&mut tx, agent, model).await?;
 
-        // Get all messages before committing
-        let all_messages = tx.pending().to_vec();
-
         // Commit
-        self.commit(tx);
+        self.commit(tx).await?;
 
-        Ok(all_messages)
+        Ok(())
     }
 
     /// Send with streaming
     ///
-    /// Returns (stream, transaction) - caller must commit the transaction after consuming the stream.
+    /// Returns a transaction - caller must commit after agent completes.
+    /// The agent's execute_stream adds messages to the transaction as they're produced.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// let (mut stream, mut tx) = session.send_stream(&agent, model, "Hello".into()).await?;
-    ///
-    /// while let Some(msg) = stream.next().await {
-    ///     println!("{}", msg.get_text());
-    ///     tx.add(msg);
-    /// }
-    ///
-    /// session.commit(tx);
+    /// let mut tx = session.send_stream(&agent, model, "Hello".into()).await?;
+    /// // Agent has already executed and added messages to tx
+    /// session.commit(tx).await?;
     /// ```
     pub async fn send_stream(
         &mut self,
         agent: &impl Agent,
         model: Arc<dyn ChatModel + Send + Sync>,
         input: impl Into<ChatPayload>,
-    ) -> anyhow::Result<(impl Stream<Item = ChatMessage>, Transaction)> {
+    ) -> anyhow::Result<Transaction> {
         let mut tx = self.begin();
 
         // Add user message
         tx.add(ChatMessage::user(input.into()));
 
-        // Create context
-        let context = self.transaction_context(&tx);
+        // Execute agent with streaming (adds messages to transaction)
+        agent.execute_stream(&mut tx, model).await?;
 
-        // Execute stream
-        let stream = agent.execute_stream(&context, model).await?;
-
-        Ok((stream, tx))
+        Ok(tx)
     }
 
     /// Clear all history
@@ -264,23 +234,26 @@ mod tests {
     impl Agent for TestAgent {
         async fn execute(
             &self,
-            _context: &(impl ConversationContext + Sync),
+            context: &mut (impl ConversationContext + Send),
             model: Arc<dyn ChatModel + Send + Sync>,
-        ) -> anyhow::Result<Vec<ChatMessage>> {
+        ) -> anyhow::Result<()> {
             let request = ChatRequest::new(&[]);
             let response = model.chat(&request).await?;
-            Ok(vec![response])
+            context.add(response);
+            Ok(())
         }
 
         async fn execute_stream(
             &self,
-            _context: &(impl ConversationContext + Sync),
+            context: &mut (impl ConversationContext + Send),
             model: Arc<dyn ChatModel + Send + Sync>,
-        ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ChatMessage> + Send>>> {
+        ) -> anyhow::Result<()> {
             let request = ChatRequest::new(&[]);
-            let stream = model.stream_chat(&request).await?;
-            let msg_stream = stream.map(|chunk| ChatMessage::from(chunk));
-            Ok(Box::pin(msg_stream))
+            let mut stream = model.stream_chat(&request).await?;
+            while let Some(chunk) = stream.next().await {
+                context.add(ChatMessage::from(chunk));
+            }
+            Ok(())
         }
     }
 
@@ -289,10 +262,9 @@ mod tests {
         let mut session = Session::new();
         let model = Arc::new(MockModel);
 
-        let messages = session.send(&TestAgent, model, "Hello").await.unwrap();
+        session.send(&TestAgent, model, "Hello").await.unwrap();
 
         // Should have user message + agent response
-        assert_eq!(messages.len(), 2);
         assert_eq!(session.len(), 2);
     }
 
@@ -304,12 +276,13 @@ mod tests {
         let mut tx = session.begin();
         tx.add(ChatMessage::user("Hello".into()));
 
-        let messages = session.execute_in_transaction(&mut tx, &TestAgent, model).await.unwrap();
+        session.execute_in_transaction(&mut tx, &TestAgent, model).await.unwrap();
 
-        assert_eq!(messages.len(), 1); // Just the agent response
+        // Transaction has committed history + user + agent response
+        assert_eq!(tx.len(), 2); // user + agent
         assert_eq!(session.len(), 0); // Not committed yet
 
-        session.commit(tx);
+        session.commit(tx).await.unwrap();
         assert_eq!(session.len(), 2); // Now committed
     }
 

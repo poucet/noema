@@ -132,12 +132,12 @@ async fn chat_regular(
     message: &str
 ) -> anyhow::Result<()> {
     let agent = SimpleAgent::new();
-    let messages = session.send(&agent, model, message).await?;
+    session.send(&agent, model, message).await?;
 
-    // Print assistant responses
-    for msg in messages {
-        if msg.role == llm::api::Role::Assistant {
-            println!("{}", msg.get_text());
+    // Print the last assistant response (just added)
+    if let Some(last_msg) = session.messages().last() {
+        if last_msg.role == llm::api::Role::Assistant {
+            println!("{}", last_msg.get_text());
         }
     }
     Ok(())
@@ -149,15 +149,17 @@ async fn chat_streaming(
     message: &str
 ) -> anyhow::Result<()> {
     let agent = SimpleAgent::new();
-    let (mut stream, mut tx) = session.send_stream(&agent, model, message).await?;
+    let tx = session.send_stream(&agent, model, message).await?;
 
-    while let Some(msg) = stream.next().await {
-        print!("{}", msg.get_text());
-        io::stdout().flush()?;
-        tx.add(msg);
+    // Print all assistant messages from the transaction
+    for msg in tx.pending() {
+        if msg.role == llm::api::Role::Assistant {
+            print!("{}", msg.get_text());
+            io::stdout().flush()?;
+        }
     }
 
-    session.commit(tx);
+    session.commit(tx).await?;
     println!();
     Ok(())
 }

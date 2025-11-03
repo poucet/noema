@@ -21,5 +21,5 @@ pub mod transaction;
 pub use agent::Agent;
 pub use agents::{SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
-pub use session::{Session, SimpleContext, TransactionContext};
+pub use session::{Session, SimpleContext};
 pub use transaction::Transaction;

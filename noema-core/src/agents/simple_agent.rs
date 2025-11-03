@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 /// Simple single-turn agent
 ///
-/// Makes one call to the model and returns the response.
+/// Makes one call to the model and adds the response to the context.
 /// This is the most basic agent - just forwards the context to the model.
 ///
 /// # Example
@@ -19,8 +19,8 @@ use std::sync::Arc;
 /// use noema_core::{SimpleAgent, Agent};
 ///
 /// let agent = SimpleAgent::new();
-/// let messages = agent.execute(&context, &model).await?;
-/// assert_eq!(messages.len(), 1); // One assistant response
+/// agent.execute(&mut context, model).await?;
+/// // Context now contains the assistant response
 /// ```
 pub struct SimpleAgent;
 
@@ -41,27 +41,31 @@ impl Default for SimpleAgent {
 impl Agent for SimpleAgent {
     async fn execute(
         &self,
-        context: &(impl ConversationContext + Sync),
+        context: &mut (impl ConversationContext + Send),
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<Vec<ChatMessage>> {
+    ) -> anyhow::Result<()> {
         let request = ChatRequest::new(context.iter());
         let response = model.chat(&request).await?;
 
-        Ok(vec![response])
+        context.add(response);
+        Ok(())
     }
 
     async fn execute_stream(
         &self,
-        context: &(impl ConversationContext + Sync),
+        context: &mut (impl ConversationContext + Send),
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ChatMessage> + Send>>> {
+    ) -> anyhow::Result<()> {
         let request = ChatRequest::new(context.iter());
-        let stream = model.stream_chat(&request).await?;
+        let mut stream = model.stream_chat(&request).await?;
 
-        // Convert ChatChunk stream to ChatMessage stream
-        let message_stream = stream.map(|chunk| ChatMessage::from(chunk));
+        // Stream chunks and add each as a message to context
+        while let Some(chunk) = stream.next().await {
+            let message = ChatMessage::from(chunk);
+            context.add(message);
+        }
 
-        Ok(Box::pin(message_stream))
+        Ok(())
     }
 }
 
@@ -99,6 +103,14 @@ mod tests {
         fn len(&self) -> usize {
             self.messages.len()
         }
+
+        fn add(&mut self, message: ChatMessage) {
+            self.messages.push(message);
+        }
+
+        fn extend(&mut self, messages: impl IntoIterator<Item = ChatMessage>) {
+            self.messages.extend(messages);
+        }
     }
 
     #[tokio::test]
@@ -107,38 +119,31 @@ mod tests {
             response: "Hello!".to_string(),
         });
 
-        let context = MockContext {
+        let mut context = MockContext {
             messages: vec![ChatMessage::user(ChatPayload::text("Hi"))],
         };
 
         let agent = SimpleAgent::new();
-        let messages = agent.execute(&context, model).await.unwrap();
+        agent.execute(&mut context, model).await.unwrap();
 
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].get_text(), "Hello!");
+        assert_eq!(context.len(), 2); // User + assistant
+        assert_eq!(context.messages[1].get_text(), "Hello!");
     }
 
     #[tokio::test]
     async fn test_simple_agent_stream() {
-        use futures::StreamExt;
-
         let model = Arc::new(MockModel {
             response: "Hello!".to_string(),
         });
 
-        let context = MockContext {
+        let mut context = MockContext {
             messages: vec![ChatMessage::user(ChatPayload::text("Hi"))],
         };
 
         let agent = SimpleAgent::new();
-        let mut stream = agent.execute_stream(&context, model).await.unwrap();
+        agent.execute_stream(&mut context, model).await.unwrap();
 
-        let mut messages = Vec::new();
-        while let Some(msg) = stream.next().await {
-            messages.push(msg);
-        }
-
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].get_text(), "Hello!");
+        assert_eq!(context.len(), 2); // User + assistant chunk
+        assert_eq!(context.messages[1].get_text(), "Hello!");
     }
 }

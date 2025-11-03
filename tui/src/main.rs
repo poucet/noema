@@ -486,21 +486,23 @@ impl App {
                     let mut sess = session.lock().await;
 
                     match sess.send_stream(&agent, model.clone(), message).await {
-                        Ok((mut stream, mut tx)) => {
-                            // Process stream and send chunks to UI immediately
-                            while let Some(msg) = stream.next().await {
-                                // Send chunk notification to UI
+                        Ok(tx) => {
+                            // Agent has already executed and added messages to transaction
+                            // Send all pending messages to UI
+                            for msg in tx.pending() {
                                 let chunk_text = msg.get_text();
                                 let _ = resp_tx.send(MessageResponse::Chunk(chunk_text));
-
-                                // Add to transaction
-                                tx.add(msg);
                             }
 
                             // Commit transaction
-                            sess.commit(tx);
-
-                            let _ = resp_tx.send(MessageResponse::Complete);
+                            match sess.commit(tx).await {
+                                Ok(_) => {
+                                    let _ = resp_tx.send(MessageResponse::Complete);
+                                }
+                                Err(e) => {
+                                    let _ = resp_tx.send(MessageResponse::Error(format!("Commit failed: {}", e)));
+                                }
+                            }
                         }
                         Err(e) => {
                             let _ = resp_tx.send(MessageResponse::Error(e.to_string()));

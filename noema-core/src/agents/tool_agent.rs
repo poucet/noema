@@ -62,32 +62,28 @@ impl ToolAgent {
 impl Agent for ToolAgent {
     async fn execute(
         &self,
-        context: &(impl ConversationContext + Sync),
+        context: &mut (impl ConversationContext + Send),
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<Vec<ChatMessage>> {
-        let mut all_messages = Vec::new();
-        let mut working_context: Vec<ChatMessage> = context.iter().cloned().collect();
-
+    ) -> anyhow::Result<()> {
         for iteration in 0..self.max_iterations {
             // Make request with tools
             let request = ChatRequest::with_tools(
-                working_context.iter(),
+                context.iter(),
                 self.tools.get_all_definitions(),
             );
 
             let response = model.chat(&request).await?;
             let tool_calls = response.get_tool_calls();
 
-            // Add response to working context and output
-            working_context.push(response.clone());
-            all_messages.push(response.clone());
+            // Add response to context
+            context.add(response.clone());
 
             // If no tool calls, we're done
             if tool_calls.is_empty() {
                 break;
             }
 
-            // Execute all tool calls
+            // Execute all tool calls and add results to context
             for tool_call in tool_calls {
                 let result = self.tools
                     .call(&tool_call.name, tool_call.arguments.clone())
@@ -98,8 +94,7 @@ impl Agent for ToolAgent {
                     ChatPayload::tool_result(tool_call.id.clone(), result)
                 );
 
-                working_context.push(result_msg.clone());
-                all_messages.push(result_msg);
+                context.add(result_msg);
             }
 
             // Check if we've hit max iterations
@@ -111,86 +106,68 @@ impl Agent for ToolAgent {
             }
         }
 
-        Ok(all_messages)
+        Ok(())
     }
 
     async fn execute_stream(
         &self,
-        context: &(impl ConversationContext + Sync),
+        context: &mut (impl ConversationContext + Send),
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ChatMessage> + Send>>> {
+    ) -> anyhow::Result<()> {
         use futures::StreamExt;
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        for iteration in 0..self.max_iterations {
+            let request = ChatRequest::with_tools(
+                context.iter(),
+                self.tools.get_all_definitions(),
+            );
 
-        let tools = self.tools.clone();
-        let max_iterations = self.max_iterations;
-        let mut working_context: Vec<ChatMessage> = context.iter().cloned().collect();
+            // Stream the response
+            let mut stream = model.stream_chat(&request).await?;
 
-        // Now we can spawn because we own the model (Arc)
-        tokio::spawn(async move {
-            for iteration in 0..max_iterations {
-                let request = ChatRequest::with_tools(
-                    working_context.iter(),
-                    tools.get_all_definitions(),
+            // Accumulate chunks into final message while adding to context
+            let mut accumulated = ChatMessage::default();
+
+            while let Some(chunk) = stream.next().await {
+                // Add chunk as message for real-time updates
+                let chunk_msg = ChatMessage::from(chunk.clone());
+                context.add(chunk_msg);
+
+                // Accumulate for tool call detection
+                accumulated.payload.content.extend(chunk.payload.content);
+                accumulated.role = chunk.role;
+            }
+
+            let tool_calls = accumulated.get_tool_calls();
+
+            // If no tool calls, we're done
+            if tool_calls.is_empty() {
+                break;
+            }
+
+            // Execute tools and add results to context
+            for tool_call in tool_calls {
+                let result = self.tools
+                    .call(&tool_call.name, tool_call.arguments.clone())
+                    .await
+                    .unwrap_or_else(|e| format!("Error: {}", e));
+
+                let result_msg = ChatMessage::user(
+                    ChatPayload::tool_result(tool_call.id.clone(), result)
                 );
 
-                // Stream the response
-                let stream = match model.stream_chat(&request).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::error!("Error streaming chat: {}", e);
-                        break;
-                    }
-                };
-
-                // Accumulate chunks into final message
-                let mut accumulated = ChatMessage::default();
-                tokio::pin!(stream);
-
-                while let Some(chunk) = stream.next().await {
-                    // Send chunk as message for real-time updates
-                    let chunk_msg = ChatMessage::from(chunk.clone());
-                    let _ = tx.send(chunk_msg);
-
-                    // Accumulate for tool call detection
-                    accumulated.payload.content.extend(chunk.payload.content);
-                    accumulated.role = chunk.role;
-                }
-
-                let tool_calls = accumulated.get_tool_calls();
-                working_context.push(accumulated.clone());
-
-                // If no tool calls, we're done
-                if tool_calls.is_empty() {
-                    break;
-                }
-
-                // Execute tools and send results
-                for tool_call in tool_calls {
-                    let result = tools
-                        .call(&tool_call.name, tool_call.arguments.clone())
-                        .await
-                        .unwrap_or_else(|e| format!("Error: {}", e));
-
-                    let result_msg = ChatMessage::user(
-                        ChatPayload::tool_result(tool_call.id.clone(), result)
-                    );
-
-                    working_context.push(result_msg.clone());
-                    let _ = tx.send(result_msg);
-                }
-
-                if iteration == max_iterations - 1 {
-                    tracing::warn!(
-                        "ToolAgent reached max iterations ({}), stopping",
-                        max_iterations
-                    );
-                }
+                context.add(result_msg);
             }
-        });
 
-        Ok(Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx)))
+            if iteration == self.max_iterations - 1 {
+                tracing::warn!(
+                    "ToolAgent reached max iterations ({}), stopping",
+                    self.max_iterations
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -249,6 +226,14 @@ mod tests {
         fn len(&self) -> usize {
             self.messages.len()
         }
+
+        fn add(&mut self, message: ChatMessage) {
+            self.messages.push(message);
+        }
+
+        fn extend(&mut self, messages: impl IntoIterator<Item = ChatMessage>) {
+            self.messages.extend(messages);
+        }
     }
 
     async fn mock_tool(_args: serde_json::Value) -> anyhow::Result<String> {
@@ -270,23 +255,24 @@ mod tests {
             call_count: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
 
-        let context = MockContext {
+        let mut context = MockContext {
             messages: vec![ChatMessage::user(ChatPayload::text("Hi"))],
         };
 
         let agent = ToolAgent::new(Arc::new(tools), 5);
-        let messages = agent.execute(&context, Arc::new(model)).await.unwrap();
+        agent.execute(&mut context, Arc::new(model)).await.unwrap();
 
-        // Should have: assistant with tool call, tool result, final assistant response
-        assert!(messages.len() >= 3);
+        // Should have: user + assistant with tool call + tool result + final assistant response
+        assert!(context.len() >= 4);
 
-        // First message should have tool calls
-        assert!(!messages[0].get_tool_calls().is_empty());
+        // Check that we have tool calls and results
+        let has_tool_call = context.messages.iter().any(|m| !m.get_tool_calls().is_empty());
+        let has_tool_result = context.messages.iter().any(|m| !m.get_tool_results().is_empty());
 
-        // Second message should be tool result
-        assert!(!messages[1].get_tool_results().is_empty());
+        assert!(has_tool_call);
+        assert!(has_tool_result);
 
         // Last message should be final response
-        assert_eq!(messages.last().unwrap().get_text(), "Done!");
+        assert_eq!(context.messages.last().unwrap().get_text(), "Done!");
     }
 }

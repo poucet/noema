@@ -1,25 +1,24 @@
 //! Conversation context abstractions
 //!
-//! `ConversationContext` provides a read-only view of conversation history.
-//! Different implementations can provide filtering, windowing, etc.
+//! `ConversationContext` provides access to conversation history and allows
+//! adding new messages during agent execution.
 //!
-//! Note: This trait is intentionally synchronous and requires all messages
-//! to be immediately available. For lazy-loading from storage, load messages
-//! before creating the context (at the session layer).
+//! Note: This trait is intentionally synchronous for reading. Writing (adding
+//! messages) is also synchronous, but committing the context may be async.
 
 use llm::ChatMessage;
 
-/// Read-only view of conversation messages
+/// Access to conversation messages with mutation support
 ///
-/// This trait provides synchronous access to conversation history.
-/// All messages must be immediately available (in-memory).
+/// This trait provides synchronous access to conversation history and allows
+/// agents to add new messages during execution. All messages must be
+/// immediately available (in-memory) for reading.
 ///
 /// # Design Note
 ///
-/// This trait is intentionally simple and synchronous:
-/// - No async (keeps trait simple, easier to implement)
-/// - No caching/mutation (true read-only)
-/// - No lazy loading (load at session layer before creating context)
+/// - Reading is synchronous (keeps iteration simple)
+/// - Adding messages is synchronous (buffered in memory)
+/// - Committing may be async (handled at session layer)
 ///
 /// For large conversations, consider:
 /// - Loading only recent messages before creating context
@@ -37,9 +36,6 @@ pub trait ConversationContext {
     /// for msg in context.iter() {
     ///     println!("{}: {}", msg.role, msg.get_text());
     /// }
-    ///
-    /// // Or collect to Vec if needed:
-    /// let messages: Vec<ChatMessage> = context.iter().cloned().collect();
     /// ```
     fn iter(&self) -> impl Iterator<Item = &ChatMessage>;
 
@@ -49,5 +45,18 @@ pub trait ConversationContext {
     /// Check if context is empty
     fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Add a message to the context
+    ///
+    /// This adds the message to the context's buffer. Whether it's immediately
+    /// committed to storage depends on the implementation.
+    fn add(&mut self, message: ChatMessage);
+
+    /// Add multiple messages to the context
+    fn extend(&mut self, messages: impl IntoIterator<Item = ChatMessage>) {
+        for message in messages {
+            self.add(message);
+        }
     }
 }
