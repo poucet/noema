@@ -12,12 +12,20 @@ pub struct OpenAIProvider {
     base_url: String,
 }
 
+const API_VERSION: &str = "v1";
+
 impl OpenAIProvider {
     pub fn default(api_key: &str) -> Self {
-        Self::new("https://api.openai.com/v1", api_key)
+        Self::with_base_url("https://api.openai.com", api_key)
     }
 
+    /// Create a provider with a custom base URL (e.g., for proxying).
+    /// The API version path (/v1) is automatically appended.
     pub fn new(base_url: &str, api_key: &str) -> Self {
+        Self::with_base_url(base_url, api_key)
+    }
+
+    fn with_base_url(base_url: &str, api_key: &str) -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
@@ -26,9 +34,10 @@ impl OpenAIProvider {
                 .expect("Invalid API key format"),
         );
 
+        let base_url = base_url.trim_end_matches('/');
         OpenAIProvider {
             client: Client::with_headers(headers),
-            base_url: base_url.to_string(),
+            base_url: format!("{}/{}", base_url, API_VERSION),
         }
     }
 

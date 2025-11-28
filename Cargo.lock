@@ -234,9 +234,8 @@ dependencies = [
  "anyhow",
  "clap",
  "clap_derive",
+ "config",
  "conversation",
- "directories",
- "dotenv",
  "futures",
  "llm",
  "tokio",
@@ -284,6 +283,15 @@ dependencies = [
  "rustversion",
  "ryu",
  "static_assertions",
+]
+
+[[package]]
+name = "config"
+version = "0.1.0"
+dependencies = [
+ "directories",
+ "dotenv",
+ "llm",
 ]
 
 [[package]]
@@ -2034,10 +2042,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "commands",
+ "config",
  "conversation",
  "crossterm",
- "directories",
- "dotenv",
  "futures",
  "llm",
  "ratatui 0.29.0",

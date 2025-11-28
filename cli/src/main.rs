@@ -1,26 +1,14 @@
 use clap::Parser;
+use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
 use conversation::Conversation;
 use futures::StreamExt;
-use llm::providers::{ClaudeProvider, GeminiProvider, GeneralModelProvider, OllamaProvider, OpenAIProvider};
 use llm::ModelProvider;
 
 use clap_derive::{Parser, ValueEnum};
-use dotenv;
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
-
-fn get_api_key(key: &str) -> String {
-    let home_dir = if let Some(home) = directories::UserDirs::new() {
-        home.home_dir().to_path_buf()
-    } else {
-        panic!("Could not determine home directory");
-    };
-    let env_path = home_dir.join(".env");
-    dotenv::from_path(env_path).ok();
-    std::env::var(key).expect(&format!("{:} must be set in .env file", key))
-}
 
 #[derive(Clone, ValueEnum, Debug, PartialEq, Eq)]
 #[clap(rename_all = "lowercase")]
@@ -51,6 +39,17 @@ impl FromStr for ModelProviderType {
     }
 }
 
+impl From<&ModelProviderType> for config::ModelProviderType {
+    fn from(p: &ModelProviderType) -> Self {
+        match p {
+            ModelProviderType::Ollama => config::ModelProviderType::Ollama,
+            ModelProviderType::Gemini => config::ModelProviderType::Gemini,
+            ModelProviderType::Claude => config::ModelProviderType::Claude,
+            ModelProviderType::OpenAI => config::ModelProviderType::OpenAI,
+        }
+    }
+}
+
 #[derive(Copy, Clone, ValueEnum, Debug, PartialEq, Eq)]
 #[clap(rename_all = "lowercase")]
 enum Mode {
@@ -72,6 +71,22 @@ struct Args {
 
     #[arg(long, short)]
     tracing: bool,
+
+    /// Custom base URL for OpenAI API (e.g., for proxy or compatible services)
+    #[arg(long, env = "OPENAI_BASE_URL")]
+    openai_url: Option<String>,
+
+    /// Custom base URL for Claude/Anthropic API (e.g., for proxy)
+    #[arg(long, env = "CLAUDE_BASE_URL")]
+    claude_url: Option<String>,
+
+    /// Custom base URL for Gemini API (e.g., for proxy)
+    #[arg(long, env = "GEMINI_BASE_URL")]
+    gemini_url: Option<String>,
+
+    /// Custom base URL for Ollama API
+    #[arg(long, env = "OLLAMA_BASE_URL")]
+    ollama_url: Option<String>,
 }
 
 // Application state
@@ -80,30 +95,7 @@ struct AppState {
     current_provider: ModelProviderType,
     model_display_name: &'static str,
     mode: Mode,
-}
-
-fn get_model_info(provider_type: &ModelProviderType) -> (&'static str, &'static str) {
-    match provider_type {
-        ModelProviderType::Ollama => ("gemma3n:latest", "gemma3n:latest"),
-        ModelProviderType::Gemini => ("models/gemini-2.5-flash", "gemini-2.5-flash"),
-        ModelProviderType::Claude => ("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"),
-        ModelProviderType::OpenAI => ("gpt-4o-mini", "gpt-4o-mini"),
-    }
-}
-
-fn create_provider(provider_type: &ModelProviderType) -> GeneralModelProvider {
-    match provider_type {
-        ModelProviderType::Ollama => GeneralModelProvider::Ollama(OllamaProvider::default()),
-        ModelProviderType::Gemini => {
-            GeneralModelProvider::Gemini(GeminiProvider::default(&get_api_key("GEMINI_API_KEY")))
-        }
-        ModelProviderType::Claude => {
-            GeneralModelProvider::Claude(ClaudeProvider::default(&get_api_key("CLAUDE_API_KEY")))
-        }
-        ModelProviderType::OpenAI => {
-            GeneralModelProvider::OpenAI(OpenAIProvider::default(&get_api_key("OPENAI_API_KEY")))
-        }
-    }
+    provider_urls: ProviderUrls,
 }
 
 async fn call_model_regular(
@@ -236,8 +228,9 @@ mod commands {
                     CommandResult::Continue
                 }
                 Command::SetModel(new_provider) => {
-                    let (new_model_id, new_model_display) = get_model_info(&new_provider);
-                    let new_provider_instance = create_provider(&new_provider);
+                    let config_provider: config::ModelProviderType = (&new_provider).into();
+                    let (new_model_id, new_model_display) = get_model_info(&config_provider);
+                    let new_provider_instance = create_provider(&config_provider, &state.provider_urls);
 
                     match new_provider_instance.create_chat_model(new_model_id) {
                         Some(new_model) => {
@@ -270,12 +263,25 @@ mod commands {
 
 #[tokio::main]
 async fn main() {
+    load_env_file();
     let args = Args::parse();
 
     setup_tracing(args.tracing);
 
-    let (model_id, model_display_name) = get_model_info(&args.model);
-    let provider = create_provider(&args.model);
+    let provider_urls = ProviderUrls {
+        openai: args.openai_url,
+        claude: args.claude_url,
+        gemini: args.gemini_url,
+        ollama: args.ollama_url,
+    };
+
+    if args.tracing {
+        eprintln!("DEBUG: Provider URLs: {:?}", provider_urls);
+    }
+
+    let config_provider: config::ModelProviderType = (&args.model).into();
+    let (model_id, model_display_name) = get_model_info(&config_provider);
+    let provider = create_provider(&config_provider, &provider_urls);
     let model = provider.create_chat_model(model_id).unwrap();
 
     let conversation = if let Some(system_msg) = args.system_message {
@@ -289,6 +295,7 @@ async fn main() {
         current_provider: args.model.clone(),
         model_display_name,
         mode: args.mode,
+        provider_urls,
     };
 
     println!();
@@ -353,17 +360,4 @@ async fn main() {
     }
 
     println!("Conversation had {} messages", state.conversation.message_count());
-    let model_name = match args.model {
-        ModelProviderType::Ollama => "gemma3n:latest",
-        ModelProviderType::Gemini => "models/gemini-2.5-flash",
-        ModelProviderType::Claude => "claude-sonnet-4-5-20250929",
-        ModelProviderType::OpenAI => "gpt-4o-mini",
-    };
-
-    let model = provider.create_chat_model(model_name).unwrap();
-    let messages = vec![llm::ChatMessage::user(llm::ChatPayload::text("Hello, how are you?".to_string()))];
-    match args.mode {
-        Mode::Chat => call_model_regular(&model, messages).await.unwrap(),
-        Mode::Stream => call_model_streaming(&model, messages).await.unwrap(),
-    }
 }

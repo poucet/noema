@@ -10,18 +10,27 @@ pub struct GeminiProvider {
     base_url: String,
 }
 
+const API_VERSION: &str = "v1beta";
+
 impl GeminiProvider {
     pub fn default(api_key: &str) -> Self {
-        Self::new("https://generativelanguage.googleapis.com/v1beta", api_key)
+        Self::with_base_url("https://generativelanguage.googleapis.com", api_key)
     }
 
+    /// Create a provider with a custom base URL (e.g., for proxying).
+    /// The API version path (/v1beta) is automatically appended.
     pub fn new(base_url: &str, api_key: &str) -> Self {
+        Self::with_base_url(base_url, api_key)
+    }
+
+    fn with_base_url(base_url: &str, api_key: &str) -> Self {
         let mut headers = header::HeaderMap::new();
         headers.insert("Content-Type", "application/json".parse().unwrap());
         headers.insert("x-goog-api-key", api_key.parse().unwrap());
+        let base_url = base_url.trim_end_matches('/');
         GeminiProvider {
             client: Client::with_headers(headers),
-            base_url: base_url.to_string(),
+            base_url: format!("{}/{}", base_url, API_VERSION),
         }
     }
 }

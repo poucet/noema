@@ -48,19 +48,28 @@ pub struct ClaudeProvider {
     base_url: String,
 }
 
+const API_VERSION: &str = "v1";
+
 impl ClaudeProvider {
     pub fn default(api_key: &str) -> Self {
-        Self::new("https://api.anthropic.com/v1", api_key)
+        Self::with_base_url("https://api.anthropic.com", api_key)
     }
 
+    /// Create a provider with a custom base URL (e.g., for proxying).
+    /// The API version path (/v1) is automatically appended.
     pub fn new(base_url: &str, api_key: &str) -> Self {
+        Self::with_base_url(base_url, api_key)
+    }
+
+    fn with_base_url(base_url: &str, api_key: &str) -> Self {
         let mut headers = header::HeaderMap::new();
         headers.insert("content-type", "application/json".parse().unwrap());
         headers.insert("x-api-key", api_key.parse().unwrap());
         headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
+        let base_url = base_url.trim_end_matches('/');
         ClaudeProvider {
             client: Client::with_headers(headers),
-            base_url: base_url.to_string(),
+            base_url: format!("{}/{}", base_url, API_VERSION),
         }
     }
 }
