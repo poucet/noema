@@ -815,14 +815,31 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
                         format!("[Tool result: {}]", result.tool_call_id),
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
                     )));
-                    // Show text content from tool results
-                    let text = result.get_text();
-                    if !text.is_empty() {
-                        for line in text.lines() {
-                            all_lines.push(Line::from(Span::styled(
-                                line.to_string(),
-                                Style::default().fg(Color::DarkGray),
-                            )));
+                    // Show each content item from tool results
+                    for content in &result.content {
+                        match content {
+                            llm::ToolResultContent::Text { text } => {
+                                for line in text.lines() {
+                                    all_lines.push(Line::from(Span::styled(
+                                        line.to_string(),
+                                        Style::default().fg(Color::DarkGray),
+                                    )));
+                                }
+                            }
+                            llm::ToolResultContent::Image { mime_type, data } => {
+                                let size_kb = data.len() / 1024;
+                                all_lines.push(Line::from(Span::styled(
+                                    format!("  [Image: {} ~{}KB]", mime_type, size_kb),
+                                    Style::default().fg(Color::Magenta).add_modifier(Modifier::ITALIC),
+                                )));
+                            }
+                            llm::ToolResultContent::Audio { mime_type, data } => {
+                                let size_kb = data.len() / 1024;
+                                all_lines.push(Line::from(Span::styled(
+                                    format!("  [Audio: {} ~{}KB]", mime_type, size_kb),
+                                    Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC),
+                                )));
+                            }
                         }
                     }
                 }
