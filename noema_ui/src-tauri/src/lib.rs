@@ -1372,7 +1372,12 @@ async fn handle_deep_link(app: &AppHandle, urls: Vec<url::Url>) {
         eprintln!("Deep link received: {}", url);
 
         // Check if this is an OAuth callback
-        if url.scheme() == "noema" && url.path() == "/oauth/callback" {
+        // Note: In noema://oauth/callback, "oauth" is the host and "/callback" is the path
+        let is_oauth_callback = url.scheme() == "noema"
+            && url.host_str() == Some("oauth")
+            && url.path() == "/callback";
+
+        if is_oauth_callback {
             // Extract the code and state from query params
             let code = url.query_pairs()
                 .find(|(key, _)| key == "code")
@@ -1382,15 +1387,13 @@ async fn handle_deep_link(app: &AppHandle, urls: Vec<url::Url>) {
                 .find(|(key, _)| key == "state")
                 .map(|(_, value)| value.to_string());
 
-            eprintln!("OAuth callback - code: {:?}, state: {:?}", code.is_some(), state_param);
-
-            if let (Some(auth_code), Some(oauth_state)) = (code, state_param) {
+            if let (Some(auth_code), Some(oauth_state)) = (code.as_ref(), state_param.as_ref()) {
                 let app_state = app.state::<AppState>();
 
                 // Look up server ID from state parameter
                 let server_id = {
                     let mut pending_states = app_state.pending_oauth_states.lock().await;
-                    let server_id = pending_states.remove(&oauth_state);
+                    let server_id = pending_states.remove(oauth_state);
 
                     // Update persisted state
                     if server_id.is_some() {
