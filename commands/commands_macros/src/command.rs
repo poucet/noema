@@ -25,21 +25,27 @@ struct ArgInfo {
     inner_ty: Option<Type>,
 }
 
-/// Generic helper to parse attributes with a key-value pair
-fn parse_attribute_value(attrs: &[syn::Attribute], attr_name: &str, key: &str) -> Result<Option<String>> {
+/// Parse completer attribute to extract both command and arg names
+/// Returns (command_name, arg_name) - command_name is optional for backwards compatibility
+fn parse_completer_attribute(attrs: &[syn::Attribute]) -> Result<Option<(Option<String>, String)>> {
     for attr in attrs {
-        if attr.path().is_ident(attr_name) {
-            let mut value = None;
+        if attr.path().is_ident("completer") {
+            let mut command_name = None;
+            let mut arg_name = None;
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident(key) {
+                if meta.path.is_ident("command") {
                     let val = meta.value()?;
                     let s: syn::LitStr = val.parse()?;
-                    value = Some(s.value());
+                    command_name = Some(s.value());
+                } else if meta.path.is_ident("arg") {
+                    let val = meta.value()?;
+                    let s: syn::LitStr = val.parse()?;
+                    arg_name = Some(s.value());
                 }
                 Ok(())
             })?;
-            if value.is_some() {
-                return Ok(value);
+            if let Some(arg) = arg_name {
+                return Ok(Some((command_name, arg)));
             }
         }
     }
@@ -211,19 +217,30 @@ fn generate_custom_completion_arm(
     }).collect();
 
     let prev_arg_names: Vec<_> = all_args.iter().take(arg_index).map(|a| &a.name).collect();
-    let prev_arg_refs: Vec<_> = prev_arg_names.iter().map(|name| {
-        quote! { &#name }
-    }).collect();
 
-    quote! {
-        #arg_index => {
-            #(#prev_args_parsing)*
-
-            if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
-                target.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
+    // Handle zero previous arguments case separately to avoid trailing comma issue
+    if prev_arg_names.is_empty() {
+        quote! {
+            #arg_index => {
+                target.#completer_method(partial).await
                     .map_err(|e| ::commands::CompletionError::Custom(e.to_string()))
-            } else {
-                Ok(vec![])
+            }
+        }
+    } else {
+        let prev_arg_refs: Vec<_> = prev_arg_names.iter().map(|name| {
+            quote! { &#name }
+        }).collect();
+
+        quote! {
+            #arg_index => {
+                #(#prev_args_parsing)*
+
+                if vec![#(#prev_arg_names.is_some()),*].iter().all(|&x| x) {
+                    target.#completer_method(#(#prev_arg_refs.unwrap()),*, partial).await
+                        .map_err(|e| ::commands::CompletionError::Custom(e.to_string()))
+                } else {
+                    Ok(vec![])
+                }
             }
         }
     }
@@ -522,17 +539,30 @@ fn extract_command_info_by_name(
     })
 }
 
-/// Find completer methods in the impl block
+/// Find completer methods in the impl block for a specific command
+/// Supports both:
+/// - #[completer(command = "cmd", arg = "arg_name")] - command-specific completer
+/// - #[completer(arg = "arg_name")] - global completer (backwards compatible, matches any command)
 fn find_completers_for_command(
     impl_block: &ItemImpl,
-    _command_name: &str,
+    command_name: &str,
 ) -> Result<std::collections::HashMap<String, Ident>> {
     impl_block.items.iter()
         .filter_map(|item| {
             if let ImplItem::Fn(method) = item {
-                // Parse #[completer(arg = "arg_name")]
-                let arg_name = parse_attribute_value(&method.attrs, "completer", "arg").ok()??;
-                Some(Ok((arg_name, method.sig.ident.clone())))
+                // Parse #[completer(command = "...", arg = "arg_name")]
+                let (completer_cmd, arg_name) = parse_completer_attribute(&method.attrs).ok()??;
+
+                // Include this completer if:
+                // 1. It has no command specified (global/backwards compatible), or
+                // 2. Its command matches the one we're looking for
+                let matches = completer_cmd.as_ref().map_or(true, |cmd| cmd == command_name);
+
+                if matches {
+                    Some(Ok((arg_name, method.sig.ident.clone())))
+                } else {
+                    None
+                }
             } else {
                 None
             }

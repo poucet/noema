@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1.0"
 commands = { path = "../commands" }
 config = { path = "../config" }
-noema-core = { path = "../noema-core" }
+noema-core = { path = "../noema-core", features = ["sqlite"] }
 crossterm = "0.28"
 directories = "6.0.0"
 dotenv = "0.15.0"

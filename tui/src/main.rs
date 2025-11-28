@@ -9,7 +9,7 @@ use crossterm::{
 };
 use llm::{ContentBlock, ModelProvider};
 use noema_audio::{VoiceAgent, VoiceCoordinator};
-use noema_core::{ChatEngine, EngineEvent, McpRegistry, MemorySession, ServerConfig, SessionStore};
+use noema_core::{ChatEngine, EngineEvent, McpRegistry, ServerConfig, SessionStore, SqliteSession, SqliteStore};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -107,6 +107,20 @@ enum McpSubcommand {
     Connect,
 }
 
+/// Conversation subcommands for /conversation command
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[commands::completable]
+enum ConversationSubcommand {
+    /// Start a new conversation
+    New,
+    /// List saved conversations
+    List,
+    /// Load a previous conversation
+    Load,
+    /// Delete a conversation
+    Delete,
+}
+
 enum CompletionState {
     Idle,
     Loading,
@@ -184,7 +198,9 @@ impl InputHistory {
 
 struct App {
     input: Input,
-    engine: ChatEngine<MemorySession>,
+    engine: ChatEngine<SqliteSession>,
+    store: SqliteStore,
+    current_conversation_id: String,
     current_provider: ModelProviderType,
     status_message: Option<String>,
     is_streaming: bool,
@@ -210,11 +226,26 @@ impl App {
         let provider_instance = create_provider(&config_provider, &provider_urls);
         let model = provider_instance.create_chat_model(model_id).unwrap();
 
-        let session = if let Some(sys_msg) = system_message {
-            MemorySession::with_system_message(sys_msg)
-        } else {
-            MemorySession::new()
-        };
+        // Create SQLite store in user data directory
+        let db_path = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("noema")
+            .join("conversations.db");
+
+        // Ensure parent directory exists
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let store = SqliteStore::open(&db_path)?;
+        let mut session = store.create_conversation()?;
+        let conversation_id = session.conversation_id().to_string();
+
+        // Add system message if provided
+        if let Some(sys_msg) = system_message {
+            use llm::{ChatMessage, ChatPayload};
+            session.messages_mut().push(ChatMessage::system(ChatPayload::text(sys_msg)));
+        }
 
         let mcp_registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
 
@@ -223,6 +254,8 @@ impl App {
         Ok(App {
             input: Input::default(),
             engine,
+            store,
+            current_conversation_id: conversation_id,
             current_provider: provider,
             status_message: None,
             is_streaming: false,
@@ -233,6 +266,21 @@ impl App {
             whisper_model_path,
             scroll_offset: 0,
         })
+    }
+
+    /// Create a new engine with the given session, preserving current model
+    fn switch_session(&mut self, session: SqliteSession) {
+        let conversation_id = session.conversation_id().to_string();
+        let config_provider: config::ModelProviderType = (&self.current_provider).into();
+        let (model_id, model_display_name) = get_model_info(&config_provider);
+        let provider_instance = create_provider(&config_provider, &self.provider_urls);
+        let model = provider_instance.create_chat_model(model_id).unwrap();
+
+        let mcp_registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
+
+        self.engine = ChatEngine::new(session, model, model_display_name.to_string(), mcp_registry);
+        self.current_conversation_id = conversation_id;
+        self.scroll_offset = 0;
     }
 
     /// Apply a completion value to the input
@@ -449,7 +497,14 @@ impl AppWithCommands {
 impl App {
     #[command(name = "help", help = "Show available commands")]
     async fn cmd_help(&mut self) -> Result<String, anyhow::Error> {
-        Ok("Available commands:\n  /help - Show this help\n  /clear - Clear conversation\n  /model <provider> - Switch model provider\n  /mcp <subcommand> - Manage MCP servers\n  /voice - Toggle voice input mode\n  /quit - Exit".to_string())
+        Ok("Available commands:
+  /help - Show this help
+  /clear - Clear conversation history
+  /conversation <subcommand> - Manage conversations (new, list, load, delete)
+  /model <provider> - Switch model provider
+  /mcp <subcommand> - Manage MCP servers
+  /voice - Toggle voice input mode
+  /quit - Exit".to_string())
     }
 
     #[command(name = "clear", help = "Clear conversation history")]
@@ -640,6 +695,118 @@ impl App {
                     Err(anyhow::anyhow!("Failed to initialize voice ({}): {}", self.whisper_model_path.display(), e))
                 }
             }
+        }
+    }
+
+    #[command(name = "conversation", help = "Manage conversations (new, list, load, delete)")]
+    async fn cmd_conversation(
+        &mut self,
+        subcommand: ConversationSubcommand,
+        id: Option<String>,
+    ) -> Result<String, anyhow::Error> {
+        match subcommand {
+            ConversationSubcommand::New => {
+                if self.is_streaming {
+                    return Err(anyhow::anyhow!("Cannot start new conversation while streaming"));
+                }
+                let session = self.store.create_conversation()?;
+                let conv_id = session.conversation_id().to_string();
+                self.switch_session(session);
+                Ok(format!("Started new conversation {}", &conv_id[..8]))
+            }
+            ConversationSubcommand::List => {
+                let conversations = self.store.list_conversations()?;
+                if conversations.is_empty() {
+                    Ok("No saved conversations.".to_string())
+                } else {
+                    let mut output = String::from("Saved conversations:\n");
+                    for conv_id in conversations {
+                        let marker = if conv_id == self.current_conversation_id { " *" } else { "" };
+                        let short_id = if conv_id.len() > 8 { &conv_id[..8] } else { &conv_id };
+                        output.push_str(&format!("  {}{}\n", short_id, marker));
+                    }
+                    output.push_str("\nUse /conversation load <id> to load");
+                    Ok(output)
+                }
+            }
+            ConversationSubcommand::Load => {
+                let conversation_id = id.ok_or_else(|| anyhow::anyhow!("Usage: /conversation load <id>"))?;
+                if self.is_streaming {
+                    return Err(anyhow::anyhow!("Cannot load conversation while streaming"));
+                }
+
+                let conversations = self.store.list_conversations()?;
+                let matching: Vec<_> = conversations
+                    .iter()
+                    .filter(|cid| cid.starts_with(&conversation_id))
+                    .collect();
+
+                let full_id = match matching.len() {
+                    0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
+                    1 => matching[0].clone(),
+                    _ => return Err(anyhow::anyhow!("Ambiguous ID '{}', matches: {}", conversation_id, matching.len())),
+                };
+
+                let session = self.store.open_conversation(&full_id)?;
+                let msg_count = session.len();
+                self.switch_session(session);
+                Ok(format!("Loaded conversation {} ({} messages)", &full_id[..8], msg_count))
+            }
+            ConversationSubcommand::Delete => {
+                let conversation_id = id.ok_or_else(|| anyhow::anyhow!("Usage: /conversation delete <id>"))?;
+
+                let conversations = self.store.list_conversations()?;
+                let matching: Vec<_> = conversations
+                    .iter()
+                    .filter(|cid| cid.starts_with(&conversation_id))
+                    .collect();
+
+                let full_id = match matching.len() {
+                    0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
+                    1 => matching[0].clone(),
+                    _ => return Err(anyhow::anyhow!("Ambiguous ID '{}', matches: {}", conversation_id, matching.len())),
+                };
+
+                if full_id == self.current_conversation_id {
+                    return Err(anyhow::anyhow!("Cannot delete the current conversation. Use /conversation new first."));
+                }
+
+                self.store.delete_conversation(&full_id)?;
+                Ok(format!("Deleted conversation {}", &full_id[..8]))
+            }
+        }
+    }
+
+    #[completer(command = "conversation", arg = "id")]
+    async fn complete_conversation_id(
+        &self,
+        subcommand: &ConversationSubcommand,
+        partial: &str,
+    ) -> Result<Vec<commands::Completion>, anyhow::Error> {
+        match subcommand {
+            ConversationSubcommand::Load => {
+                let conversations = self.store.list_conversations()?;
+                Ok(conversations
+                    .into_iter()
+                    .filter(|id| id.starts_with(partial))
+                    .map(|id| {
+                        let short = if id.len() > 8 { id[..8].to_string() } else { id.clone() };
+                        commands::Completion::simple(short)
+                    })
+                    .collect())
+            }
+            ConversationSubcommand::Delete => {
+                let conversations = self.store.list_conversations()?;
+                Ok(conversations
+                    .into_iter()
+                    .filter(|id| id.starts_with(partial) && *id != self.current_conversation_id)
+                    .map(|id| {
+                        let short = if id.len() > 8 { id[..8].to_string() } else { id.clone() };
+                        commands::Completion::simple(short)
+                    })
+                    .collect())
+            }
+            _ => Ok(vec![]), // new and list don't need id completion
         }
     }
 }

@@ -69,20 +69,15 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Create a new conversation and return its session
+    /// Create a new conversation session (lazy - not persisted until first message)
     pub fn create_conversation(&self) -> Result<SqliteSession> {
         let id = Uuid::new_v4().to_string();
-        {
-            let conn = self.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO conversations (id) VALUES (?1)",
-                params![&id],
-            )?;
-        }
+        // Don't insert into DB yet - will be done on first commit
         Ok(SqliteSession {
             conn: self.conn.clone(),
             conversation_id: id,
             cache: Vec::new(),
+            persisted: false,
         })
     }
 
@@ -135,6 +130,7 @@ impl SqliteStore {
             conn: self.conn.clone(),
             conversation_id: conversation_id.to_string(),
             cache: messages,
+            persisted: true, // Already exists in DB
         })
     }
 
@@ -249,6 +245,8 @@ pub struct SqliteSession {
     conversation_id: String,
     /// In-memory cache of messages (kept in sync with DB)
     cache: Vec<ChatMessage>,
+    /// Whether this conversation has been persisted to the database
+    persisted: bool,
 }
 
 impl SqliteSession {
@@ -307,7 +305,22 @@ impl SessionStore for SqliteSession {
         let start_position = self.cache.len();
         let messages = transaction.commit();
 
-        // Write to database
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        // Create conversation in DB on first commit (lazy creation)
+        if !self.persisted {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO conversations (id) VALUES (?1)",
+                params![&self.conversation_id],
+            )?;
+            drop(conn);
+            self.persisted = true;
+        }
+
+        // Write messages to database
         self.write_messages(&messages, start_position)?;
 
         // Update cache
@@ -381,8 +394,22 @@ mod tests {
     async fn test_sqlite_list_conversations() {
         let store = SqliteStore::in_memory().unwrap();
 
+        // Empty conversations should not be listed (lazy creation)
         store.create_conversation().unwrap();
         store.create_conversation().unwrap();
+        let ids = store.list_conversations().unwrap();
+        assert_eq!(ids.len(), 0);
+
+        // Conversations with messages should be listed
+        let mut session1 = store.create_conversation().unwrap();
+        let mut tx = session1.begin();
+        tx.add(ChatMessage::user("Hello".into()));
+        session1.commit(tx).await.unwrap();
+
+        let mut session2 = store.create_conversation().unwrap();
+        let mut tx = session2.begin();
+        tx.add(ChatMessage::user("World".into()));
+        session2.commit(tx).await.unwrap();
 
         let ids = store.list_conversations().unwrap();
         assert_eq!(ids.len(), 2);

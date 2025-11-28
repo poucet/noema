@@ -1,4 +1,4 @@
-use crate::{Agent, McpAgent, McpRegistry, McpToolRegistry, SessionStore, StorageTransaction};
+use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry, SessionStore, StorageTransaction};
 use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -90,15 +90,13 @@ where
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 EngineCommand::SendMessage(message) => {
-                    // 1. Lock Session and add user message immediately
-                    // This allows UI to read the updated history while agent is running
+                    // 1. Begin transaction and add user message to it
                     let mut tx = {
-                        let mut sess = session.lock().await;
-                        // Manually add user message to session
-                        sess.messages_mut()
-                            .push(ChatMessage::user(ChatPayload::text(&message)));
-                        // Begin transaction (this clones the history including the new user message)
-                        sess.begin()
+                        let sess = session.lock().await;
+                        let mut tx = sess.begin();
+                        // Add user message to transaction (will be written to DB on commit)
+                        tx.add(ChatMessage::user(ChatPayload::text(&message)));
+                        tx
                     };
 
                     // 2. Run Agent (streaming) WITHOUT holding Session lock
