@@ -14,7 +14,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
@@ -22,6 +22,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+#[cfg(not(debug_assertions))]
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tui_input::backend::crossterm::EventHandler;
@@ -145,6 +146,8 @@ struct App {
     voice_agent: Option<VoiceAgent>,
     is_listening: bool,
     whisper_model_path: PathBuf,
+    // Queue for voice transcriptions received while streaming
+    pending_voice_messages: Vec<String>,
 }
 
 /// Wrapper that owns App and CommandRegistry to avoid borrow checker issues
@@ -193,6 +196,7 @@ impl App {
             voice_agent: None,
             is_listening: false,
             whisper_model_path,
+            pending_voice_messages: Vec::new(),
         })
     }
 
@@ -325,6 +329,7 @@ impl AppWithCommands {
                         if input_text.starts_with('/') {
                             self.handle_command(&input_text).await
                         } else {
+
                             self.command_handler.target_mut().queue_message(input_text);
                             Ok(true)
                         }
@@ -584,20 +589,26 @@ impl App {
     async fn cmd_voice(&mut self) -> Result<String, anyhow::Error> {
         if self.voice_agent.is_some() {
             // Disable voice mode - dropping voice_agent stops the audio stream
+            tracing::info!("Disabling voice mode");
             self.voice_agent = None;
             self.is_listening = false;
             Ok("Voice mode disabled".to_string())
         } else {
             // Enable voice mode
+            tracing::info!("Enabling voice mode with model: {}", self.whisper_model_path.display());
             match VoiceAgent::new(&self.whisper_model_path) {
                 Ok(voice_agent) => {
                     let model_name = self.whisper_model_path.file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("unknown");
                     self.voice_agent = Some(voice_agent);
+                    tracing::info!("Voice mode enabled successfully");
                     Ok(format!("Voice mode enabled ({}) - speak to send messages", model_name))
                 }
-                Err(e) => Err(anyhow::anyhow!("Failed to initialize voice ({}): {}", self.whisper_model_path.display(), e)),
+                Err(e) => {
+                    tracing::error!("Failed to initialize voice: {}", e);
+                    Err(anyhow::anyhow!("Failed to initialize voice ({}): {}", self.whisper_model_path.display(), e))
+                }
             }
         }
     }
@@ -638,10 +649,24 @@ impl App {
                 MessageResponse::Complete => {
                     self.is_streaming = false;
                     // Update cache from actual session
-                    if let Ok(session) = self.session.try_lock() {
-                        self.cached_history = session.messages().to_vec();
+                    match self.session.try_lock() {
+                        Ok(session) => {
+                            let msg_count = session.messages().len();
+                            tracing::info!("Updated cached_history with {} messages", msg_count);
+                            self.cached_history = session.messages().to_vec();
+                        }
+                        Err(_) => {
+                            tracing::warn!("Failed to lock session for history update");
+                        }
                     }
                     self.current_response.clear();
+
+                    // Process any queued voice messages
+                    if !self.pending_voice_messages.is_empty() {
+                        let next_msg = self.pending_voice_messages.remove(0);
+                        tracing::info!("Processing queued voice message: {:?} ({} remaining)", next_msg, self.pending_voice_messages.len());
+                        self.queue_message(next_msg);
+                    }
                 }
                 MessageResponse::Error(err) => {
                     self.is_streaming = false;
@@ -663,19 +688,28 @@ impl App {
         for event in events {
             match event {
                 VoiceEvent::ListeningStarted => {
+                    tracing::debug!("TUI: Voice listening started");
                     self.is_listening = true;
                 }
                 VoiceEvent::Transcription(text) => {
+                    tracing::info!("TUI: Received transcription: {:?}, is_streaming={}", text, self.is_streaming);
                     self.is_listening = false;
-                    // Send transcription as a message
                     if !text.trim().is_empty() {
-                        self.queue_message(text);
+                        if self.is_streaming {
+                            // Queue for later - don't drop voice input while waiting for response
+                            tracing::info!("TUI: Buffering transcription while streaming");
+                            self.pending_voice_messages.push(text);
+                        } else {
+                            // Send transcription as a message immediately
+                            self.queue_message(text);
+                        }
                     }
                 }
                 VoiceEvent::Response(_) => {
                     // Handled by message processor
                 }
                 VoiceEvent::Error(err) => {
+                    tracing::error!("TUI: Voice error: {}", err);
                     self.is_listening = false;
                     self.status_message = Some(format!("Voice error: {}", err));
                 }
@@ -704,15 +738,20 @@ impl App {
                         Ok(tx) => {
                             // Agent has already executed and added messages to transaction
                             // Send all pending messages to UI
-                            for msg in tx.pending() {
+                            let pending = tx.pending();
+                            for (i, msg) in pending.iter().enumerate() {
                                 let chunk_text = msg.get_text();
-                                let _ = resp_tx.send(MessageResponse::Chunk(chunk_text));
+                                if let Err(e) = resp_tx.send(MessageResponse::Chunk(chunk_text)) {
+                                    tracing::error!("message_processor: failed to send chunk: {}", e);
+                                }
                             }
 
                             // Commit transaction
                             match sess.commit(tx).await {
                                 Ok(_) => {
-                                    let _ = resp_tx.send(MessageResponse::Complete);
+                                    if let Err(e) = resp_tx.send(MessageResponse::Complete) {
+                                        tracing::error!("message_processor: failed to send Complete: {}", e);
+                                    }
                                 }
                                 Err(e) => {
                                     let _ = resp_tx.send(MessageResponse::Error(format!("Commit failed: {}", e)));
@@ -729,7 +768,7 @@ impl App {
     }
 }
 
-fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
+fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
     let app = app_with_commands.command_handler.target();
     let completion_state = &app_with_commands.completion_state;
 
@@ -752,76 +791,79 @@ fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
         app.cached_history.clone()
     };
 
-    let mut messages: Vec<ListItem> = history.iter().map(|msg| {
-            let role = match msg.role {
-                llm::Role::User => "You",
-                llm::Role::Assistant => &app.model_display_name,
-                llm::Role::System => "System",
+    // Build all lines for the chat content
+    let mut all_lines: Vec<Line> = Vec::new();
+
+    for msg in history.iter() {
+        let role = match msg.role {
+            llm::Role::User => "You",
+            llm::Role::Assistant => app.model_display_name,
+            llm::Role::System => "System",
+        };
+
+        let style = match msg.role {
+            llm::Role::User => Style::default().fg(Color::Cyan),
+            llm::Role::Assistant => Style::default().fg(Color::Green),
+            llm::Role::System => Style::default().fg(Color::Yellow),
+        };
+
+        // Add role header
+        all_lines.push(Line::from(Span::styled(
+            format!("[{}]", role),
+            style.add_modifier(Modifier::BOLD),
+        )));
+
+        // Add content lines with basic markdown styling
+        for line in msg.get_text().lines() {
+            let styled_line = if line.starts_with("```") {
+                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::DarkGray)))
+            } else if line.starts_with("# ") {
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ))
+            } else if line.starts_with("## ") {
+                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Yellow)))
+            } else if line.starts_with("- ") || line.starts_with("* ") {
+                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Cyan)))
+            } else if line.starts_with('`') && line.ends_with('`') {
+                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Magenta)))
+            } else {
+                Line::from(line.to_string())
             };
+            all_lines.push(styled_line);
+        }
 
-            let style = match msg.role {
-                llm::Role::User => Style::default().fg(Color::Cyan),
-                llm::Role::Assistant => Style::default().fg(Color::Green),
-                llm::Role::System => Style::default().fg(Color::Yellow),
-            };
-
-            // Parse markdown and render
-            let content_lines: Vec<Line> = msg.get_text()
-                .lines()
-                .map(|line| {
-                    if line.starts_with("```") {
-                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::DarkGray)))
-                    } else if line.starts_with("# ") {
-                        Line::from(Span::styled(
-                            line.to_string(),
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                        ))
-                    } else if line.starts_with("## ") {
-                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Yellow)))
-                    } else if line.starts_with("- ") || line.starts_with("* ") {
-                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Cyan)))
-                    } else if line.starts_with("`") && line.ends_with("`") {
-                        Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Magenta)))
-                    } else {
-                        Line::from(line.to_string())
-                    }
-                })
-                .collect();
-
-            let mut text: Text<'_> = Text::default();
-            text.lines.push(Line::from(Span::styled(
-                format!("[{}]", role),
-                style.add_modifier(Modifier::BOLD),
-            )));
-            text.lines.extend(content_lines);
-            text.lines.push(Line::from("".to_string()));
-
-            ListItem::new(text)
-        })
-        .collect();
+        // Add blank line between messages
+        all_lines.push(Line::from(""));
+    }
 
     // Add current streaming response if active
     if app.is_streaming && !app.current_response.is_empty() {
-        let content_lines: Vec<Line> = app.current_response
-            .lines()
-            .map(|line| Line::from(line.to_string()))
-            .collect();
-
-        let mut text: Text<'_> = Text::default();
-        text.lines.push(Line::from(Span::styled(
+        all_lines.push(Line::from(Span::styled(
             format!("[{}]", app.model_display_name),
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         )));
-        text.lines.extend(content_lines);
-        text.lines.push(Line::from("".to_string()));
-
-        messages.push(ListItem::new(text));
+        for line in app.current_response.lines() {
+            all_lines.push(Line::from(line.to_string()));
+        }
+        all_lines.push(Line::from(""));
     }
 
-    let messages_list = List::new(messages)
-        .block(Block::default().borders(Borders::ALL).title("Chat"));
+    // Calculate scroll position
+    // scroll_offset=0 means auto-scroll to bottom, higher values scroll up
+    let total_lines = all_lines.len();
+    let visible_height = chunks[0].height.saturating_sub(2) as usize; // -2 for borders
+    let max_scroll = total_lines.saturating_sub(visible_height);
 
-    f.render_widget(messages_list, chunks[0]);
+    // Calculate actual scroll: start from bottom, then apply manual offset
+    let effective_scroll = max_scroll.saturating_sub(0);
+
+    let chat_content = Paragraph::new(all_lines)
+        .block(Block::default().borders(Borders::ALL).title("Chat"))
+        .scroll((effective_scroll as u16, 0));
+
+    f.render_widget(chat_content, chunks[0]);
 
     // Render input box
     let input_widget = Paragraph::new(app.input.value())
@@ -833,9 +875,9 @@ fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
     // Render status bar
     let message_count = app.session.try_lock().map(|s| s.len()).unwrap_or(0);
     let voice_indicator = if app.is_listening {
-        " | Listening..."
+        " | 🎤 Listening..."
     } else if app.voice_agent.is_some() {
-        " | Voice ON"
+        " | 🎙️ Voice"
     } else {
         ""
     };
@@ -904,14 +946,28 @@ async fn main() -> Result<()> {
     let whisper_model_path = args.get_whisper_model_path();
 
     // Setup file-based logging
-    let log_dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("noema")
-        .join("logs");
-    std::fs::create_dir_all(&log_dir)?;
+    // In dev mode, use local ./noema.log that gets recreated on each run
+    // In release mode, use Application Support directory with daily rotation
+    #[cfg(debug_assertions)]
+    let log_file = {
+        let path = PathBuf::from("./noema.log");
+        // Truncate existing log file
+        let _ = std::fs::remove_file(&path);
+        std::fs::File::create(&path)?
+    };
+    #[cfg(debug_assertions)]
+    let (non_blocking, _guard) = tracing_appender::non_blocking(log_file);
 
-    let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "noema.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    #[cfg(not(debug_assertions))]
+    let (non_blocking, _guard) = {
+        let log_dir = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("noema")
+            .join("logs");
+        std::fs::create_dir_all(&log_dir)?;
+        let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "noema.log");
+        tracing_appender::non_blocking(file_appender)
+    };
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
@@ -938,7 +994,7 @@ async fn main() -> Result<()> {
 
     while !should_quit {
         // Render UI
-        terminal.draw(|f| ui(f, &app))?;
+        terminal.draw(|f| ui(f, &mut app))?;
 
         // Update app state
         app.command_handler.target_mut().check_message_responses();

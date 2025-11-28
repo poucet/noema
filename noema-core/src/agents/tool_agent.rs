@@ -174,6 +174,8 @@ mod tests {
     use super::*;
     use llm::{ChatPayload, ChatRequest, ChatChunk, ToolDefinition, ToolCall};
     use futures::stream;
+    use std::pin::Pin;
+    use futures::stream::Stream;
 
     struct MockToolModel {
         // Returns tool call on first call, plain response on second

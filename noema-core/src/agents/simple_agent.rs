@@ -73,6 +73,8 @@ mod tests {
     use super::*;
     use llm::{ChatPayload, ChatRequest, ChatChunk};
     use futures::stream;
+    use std::pin::Pin;
+    use futures::stream::Stream;
 
     struct MockModel {
         response: String,

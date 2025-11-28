@@ -210,7 +210,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use llm::{ChatRequest, ChatChunk};
-    use futures::stream::{self, StreamExt};
+    use futures::stream::{self, StreamExt, Stream};
     use std::pin::Pin;
 
     struct MockModel;

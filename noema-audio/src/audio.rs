@@ -13,6 +13,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
+use tracing::{debug, error, info, warn};
 
 /// Convert samples to f32 format
 fn convert_samples<T, F>(data: &[T], convert_fn: F) -> Vec<f32>
@@ -64,14 +65,18 @@ where
             let sender_guard = sender.lock().unwrap();
 
             if let Some(event) = vad_guard.process_samples(&f32_data) {
-                let _ = sender_guard.send(event);
+                if sender_guard.send(event).is_err() {
+                    // Channel closed - receiver dropped
+                    warn!("Audio stream: event channel closed, receiver dropped");
+                }
             }
         },
-        |err| eprintln!("Audio stream error: {}", err),
+        |err| error!("Audio stream error: {}", err),
         None,
     )?;
 
     stream.play()?;
+    info!("Audio stream started and playing");
     Ok(stream)
 }
 
@@ -277,6 +282,7 @@ impl StreamingAudioCapture {
             .unwrap_or_default();
 
         let thread = std::thread::spawn(move || {
+            info!("Audio capture thread started");
             // Re-acquire device in this thread
             let host = cpal::default_host();
             let device = if device_name.is_empty() {
@@ -372,7 +378,12 @@ impl StreamingAudioCapture {
 
             // Keep the stream alive until we receive a stop signal
             // The stream is owned by this thread and will be dropped when we exit
-            let _ = stop_rx.recv();
+            info!("Audio capture thread waiting for stop signal");
+            match stop_rx.recv() {
+                Ok(_) => info!("Audio capture thread received stop signal"),
+                Err(e) => warn!("Audio capture thread stop channel closed: {}", e),
+            }
+            info!("Audio capture thread exiting");
         });
 
         // Wait for the stream to be ready
@@ -432,6 +443,7 @@ impl VoiceActivityDetector {
         match self.current_state {
             VadState::Silence => {
                 if is_speech {
+                    debug!("VAD: Silence -> PossibleSpeech (energy: {:.4})", energy);
                     self.transition_to(VadState::PossibleSpeech, now);
                     self.accumulated_audio.clear();
                     self.accumulated_audio.extend_from_slice(samples);
@@ -442,9 +454,11 @@ impl VoiceActivityDetector {
                 self.accumulated_audio.extend_from_slice(samples);
 
                 if is_speech && elapsed.as_millis() >= self.speech_duration_ms as u128 {
+                    info!("VAD: PossibleSpeech -> Speech (confirmed speech start)");
                     self.transition_to(VadState::Speech, now);
                     Some(SpeechEvent::SpeechStart { timestamp: now })
                 } else if !is_speech {
+                    debug!("VAD: PossibleSpeech -> Silence (false positive)");
                     self.transition_to(VadState::Silence, now);
                     None
                 } else {
@@ -455,6 +469,7 @@ impl VoiceActivityDetector {
                 self.accumulated_audio.extend_from_slice(samples);
 
                 if !is_speech {
+                    debug!("VAD: Speech -> PossibleSilence");
                     self.transition_to(VadState::PossibleSilence, now);
                 }
                 Some(SpeechEvent::SpeechChunk(AudioSegment::new(
@@ -466,6 +481,7 @@ impl VoiceActivityDetector {
                 self.accumulated_audio.extend_from_slice(samples);
 
                 if is_speech {
+                    debug!("VAD: PossibleSilence -> Speech (speech resumed)");
                     self.transition_to(VadState::Speech, now);
                     Some(SpeechEvent::SpeechChunk(AudioSegment::new(
                         now,
@@ -477,6 +493,7 @@ impl VoiceActivityDetector {
                     self.accumulated_audio.clear();
 
                     let audio_data = resample_to_16khz(&raw_audio, self.sample_rate_hz);
+                    info!("VAD: PossibleSilence -> Silence (speech ended, {} samples)", audio_data.len());
 
                     Some(SpeechEvent::SpeechEnd(AudioSegment::new(now, audio_data)))
                 } else {

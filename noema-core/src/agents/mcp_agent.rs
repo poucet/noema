@@ -4,7 +4,7 @@ use crate::mcp::McpToolRegistry;
 use crate::Agent;
 use crate::ConversationContext;
 use async_trait::async_trait;
-use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest};
+use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest, ContentBlock};
 use std::sync::Arc;
 
 /// Agent that dynamically uses tools from connected MCP servers.
@@ -122,18 +122,36 @@ impl Agent for McpAgent {
             // Stream the response
             let mut stream = model.stream_chat(&request).await?;
 
-            // Accumulate chunks into final message while adding to context
-            let mut accumulated = ChatMessage::default();
+            // Accumulate chunks into a single message, merging text blocks
+            let mut accumulated_text = String::new();
+            let mut other_blocks: Vec<ContentBlock> = Vec::new();
+            let mut role = llm::api::Role::default();
 
             while let Some(chunk) = stream.next().await {
-                // Add chunk as message for real-time updates
-                let chunk_msg = ChatMessage::from(chunk.clone());
-                context.add(chunk_msg);
-
-                // Accumulate for tool call detection
-                accumulated.payload.content.extend(chunk.payload.content);
-                accumulated.role = chunk.role;
+                role = chunk.role;
+                for block in chunk.payload.content {
+                    match block {
+                        ContentBlock::Text { text } => {
+                            accumulated_text.push_str(&text);
+                        }
+                        other => {
+                            other_blocks.push(other);
+                        }
+                    }
+                }
             }
+
+            // Build the final message with merged text content
+            let mut content = Vec::new();
+            if !accumulated_text.is_empty() {
+                content.push(ContentBlock::Text { text: accumulated_text });
+            }
+            content.extend(other_blocks);
+
+            let accumulated = ChatMessage::new(role, ChatPayload::new(content));
+
+            // Add the complete accumulated message to context
+            context.add(accumulated.clone());
 
             let tool_calls = accumulated.get_tool_calls();
 

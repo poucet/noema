@@ -8,6 +8,7 @@ use crate::transcription::Transcriber;
 use anyhow::Result;
 use std::path::Path;
 use tokio::sync::mpsc;
+use tracing::{debug, error, info, warn};
 
 /// Events from the voice agent
 #[derive(Debug, Clone)]
@@ -48,10 +49,16 @@ impl VoiceAgent {
         let model_path = model_path.as_ref().to_string_lossy().to_string();
 
         std::thread::spawn(move || {
+            info!("Voice transcription thread started");
+
             // Create transcriber in background thread
             let transcriber = match Transcriber::new(&model_path) {
-                Ok(t) => t,
+                Ok(t) => {
+                    info!("Transcriber initialized successfully");
+                    t
+                }
                 Err(e) => {
+                    error!("Failed to initialize transcriber: {}", e);
                     let _ = event_tx.send(VoiceEvent::Error(format!(
                         "Failed to initialize transcriber: {}",
                         e
@@ -60,32 +67,49 @@ impl VoiceAgent {
                 }
             };
 
+            info!("Waiting for speech events...");
             for event in speech_rx {
                 match event {
                     SpeechEvent::SpeechStart { .. } => {
-                        let _ = event_tx.send(VoiceEvent::ListeningStarted);
+                        debug!("Speech started");
+                        if event_tx.send(VoiceEvent::ListeningStarted).is_err() {
+                            warn!("Failed to send ListeningStarted event - receiver dropped");
+                            break;
+                        }
                     }
                     SpeechEvent::SpeechChunk(_) => {
                         // Intermediate chunks - could be used for streaming transcription
                     }
                     SpeechEvent::SpeechEnd(segment) => {
+                        let duration_ms = segment.duration_ms();
+                        debug!("Speech ended, duration: {:.0}ms, samples: {}", duration_ms, segment.audio_data.len());
+
                         match transcriber.transcribe(&segment.audio_data) {
                             Ok(text) if !text.trim().is_empty() => {
-                                let _ = event_tx.send(VoiceEvent::Transcription(text));
+                                info!("Transcription: {:?}", text);
+                                if event_tx.send(VoiceEvent::Transcription(text)).is_err() {
+                                    warn!("Failed to send Transcription event - receiver dropped");
+                                    break;
+                                }
                             }
                             Ok(_) => {
-                                // Empty transcription, ignore
+                                debug!("Empty transcription, ignoring");
                             }
                             Err(e) => {
-                                let _ = event_tx.send(VoiceEvent::Error(format!(
+                                error!("Transcription failed: {}", e);
+                                if event_tx.send(VoiceEvent::Error(format!(
                                     "Transcription failed: {}",
                                     e
-                                )));
+                                ))).is_err() {
+                                    warn!("Failed to send Error event - receiver dropped");
+                                    break;
+                                }
                             }
                         }
                     }
                 }
             }
+            info!("Voice transcription thread exiting - speech_rx channel closed");
         });
 
         Ok(Self {
@@ -96,6 +120,13 @@ impl VoiceAgent {
 
     /// Try to receive a voice event without blocking
     pub fn try_recv(&mut self) -> Option<VoiceEvent> {
-        self.event_rx.as_mut()?.try_recv().ok()
+        match self.event_rx.as_mut()?.try_recv() {
+            Ok(event) => Some(event),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                warn!("VoiceAgent event channel disconnected");
+                None
+            }
+        }
     }
 }

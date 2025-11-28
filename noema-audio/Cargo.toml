@@ -10,4 +10,5 @@ cpal = "0.16.0"
 llm = { version = "0.1.0", path = "../llm" }
 noema-core = { version = "0.1.0", path = "../noema-core" }
 tokio = { version = "1.48.0", features = ["sync"] }
+tracing = "0.1.43"
 whisper-rs = "0.15.1"
