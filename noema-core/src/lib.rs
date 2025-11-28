@@ -4,6 +4,7 @@
 //! - **Traits**: `ConversationContext`, `Agent`, `Transaction`
 //! - **Implementations**: `SimpleAgent`, `ToolAgent`, `McpAgent`
 //! - **MCP Support**: `McpRegistry`, `McpToolRegistry` for Model Context Protocol
+//! - **Engine**: `ChatEngine` for managing chat sessions
 //!
 //! # Example
 //!
@@ -16,6 +17,7 @@
 pub mod agent;
 pub mod agents;
 pub mod context;
+pub mod engine;
 pub mod mcp;
 pub mod session;
 pub mod transaction;
@@ -23,6 +25,7 @@ pub mod transaction;
 pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
+pub use engine::{ChatEngine, EngineCommand, EngineEvent};
 pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 pub use session::{Session, SimpleContext};
 pub use transaction::Transaction;

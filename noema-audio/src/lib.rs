@@ -24,9 +24,11 @@
 //! ```
 
 pub mod audio;
+pub mod coordinator;
 pub mod transcription;
 pub mod voice_agent;
 
 pub use audio::{AudioCapture, AudioPlayback, AudioSegment, SpeechEvent, StreamingAudioCapture};
+pub use coordinator::VoiceCoordinator;
 pub use transcription::Transcriber;
 pub use voice_agent::{VoiceAgent, VoiceEvent};
