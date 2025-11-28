@@ -39,10 +39,6 @@ pub trait StorageTransaction: ConversationContext + Send {
 /// - `begin()` to start a transaction
 /// - `commit()` to persist a transaction
 /// - `clear()` to reset
-///
-/// Higher-level conveniences (send, send_stream, execute_in_transaction)
-/// are provided by the concrete implementations, since they involve
-/// generic Agent types that complicate the trait definition.
 #[async_trait]
 pub trait SessionStore: Send {
     /// The transaction type used by this session

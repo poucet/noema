@@ -29,4 +29,4 @@ pub use engine::{ChatEngine, EngineCommand, EngineEvent};
 pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 pub use storage::{MemorySession, MemoryTransaction, SessionStore, StorageTransaction};
 #[cfg(feature = "sqlite")]
-pub use storage::{SqliteSession, SqliteStore};
+pub use storage::{ConversationInfo, SqliteSession, SqliteStore};

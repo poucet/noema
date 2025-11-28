@@ -119,6 +119,8 @@ enum ConversationSubcommand {
     Load,
     /// Delete a conversation
     Delete,
+    /// Rename a conversation
+    Rename,
 }
 
 enum CompletionState {
@@ -500,7 +502,7 @@ impl App {
         Ok("Available commands:
   /help - Show this help
   /clear - Clear conversation history
-  /conversation <subcommand> - Manage conversations (new, list, load, delete)
+  /conversation <subcommand> - Manage conversations (new, list, load, delete, rename)
   /model <provider> - Switch model provider
   /mcp <subcommand> - Manage MCP servers
   /voice - Toggle voice input mode
@@ -698,11 +700,12 @@ impl App {
         }
     }
 
-    #[command(name = "conversation", help = "Manage conversations (new, list, load, delete)")]
+    #[command(name = "conversation", help = "Manage conversations (new, list, load, delete, rename)")]
     async fn cmd_conversation(
         &mut self,
         subcommand: ConversationSubcommand,
         id: Option<String>,
+        name: Option<String>,
     ) -> Result<String, anyhow::Error> {
         match subcommand {
             ConversationSubcommand::New => {
@@ -720,10 +723,11 @@ impl App {
                     Ok("No saved conversations.".to_string())
                 } else {
                     let mut output = String::from("Saved conversations:\n");
-                    for conv_id in conversations {
-                        let marker = if conv_id == self.current_conversation_id { " *" } else { "" };
-                        let short_id = if conv_id.len() > 8 { &conv_id[..8] } else { &conv_id };
-                        output.push_str(&format!("  {}{}\n", short_id, marker));
+                    for info in conversations {
+                        let marker = if info.id == self.current_conversation_id { " *" } else { "" };
+                        let short_id = if info.id.len() > 8 { &info.id[..8] } else { &info.id };
+                        let name_part = info.name.map(|n| format!(" \"{}\"", n)).unwrap_or_default();
+                        output.push_str(&format!("  {}{} ({} msgs){}\n", short_id, name_part, info.message_count, marker));
                     }
                     output.push_str("\nUse /conversation load <id> to load");
                     Ok(output)
@@ -738,12 +742,12 @@ impl App {
                 let conversations = self.store.list_conversations()?;
                 let matching: Vec<_> = conversations
                     .iter()
-                    .filter(|cid| cid.starts_with(&conversation_id))
+                    .filter(|info| info.id.starts_with(&conversation_id))
                     .collect();
 
                 let full_id = match matching.len() {
                     0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
-                    1 => matching[0].clone(),
+                    1 => matching[0].id.clone(),
                     _ => return Err(anyhow::anyhow!("Ambiguous ID '{}', matches: {}", conversation_id, matching.len())),
                 };
 
@@ -758,12 +762,12 @@ impl App {
                 let conversations = self.store.list_conversations()?;
                 let matching: Vec<_> = conversations
                     .iter()
-                    .filter(|cid| cid.starts_with(&conversation_id))
+                    .filter(|info| info.id.starts_with(&conversation_id))
                     .collect();
 
                 let full_id = match matching.len() {
                     0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
-                    1 => matching[0].clone(),
+                    1 => matching[0].id.clone(),
                     _ => return Err(anyhow::anyhow!("Ambiguous ID '{}', matches: {}", conversation_id, matching.len())),
                 };
 
@@ -773,6 +777,28 @@ impl App {
 
                 self.store.delete_conversation(&full_id)?;
                 Ok(format!("Deleted conversation {}", &full_id[..8]))
+            }
+            ConversationSubcommand::Rename => {
+                let conversation_id = id.ok_or_else(|| anyhow::anyhow!("Usage: /conversation rename <id> [name]"))?;
+
+                let conversations = self.store.list_conversations()?;
+                let matching: Vec<_> = conversations
+                    .iter()
+                    .filter(|info| info.id.starts_with(&conversation_id))
+                    .collect();
+
+                let full_id = match matching.len() {
+                    0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
+                    1 => matching[0].id.clone(),
+                    _ => return Err(anyhow::anyhow!("Ambiguous ID '{}', matches: {}", conversation_id, matching.len())),
+                };
+
+                self.store.rename_conversation(&full_id, name.as_deref())?;
+                let short_id = &full_id[..8.min(full_id.len())];
+                match name {
+                    Some(n) => Ok(format!("Renamed conversation {} to \"{}\"", short_id, n)),
+                    None => Ok(format!("Cleared name for conversation {}", short_id)),
+                }
             }
         }
     }
@@ -784,14 +810,16 @@ impl App {
         partial: &str,
     ) -> Result<Vec<commands::Completion>, anyhow::Error> {
         match subcommand {
-            ConversationSubcommand::Load => {
+            ConversationSubcommand::Load | ConversationSubcommand::Rename => {
                 let conversations = self.store.list_conversations()?;
                 Ok(conversations
                     .into_iter()
-                    .filter(|id| id.starts_with(partial))
-                    .map(|id| {
-                        let short = if id.len() > 8 { id[..8].to_string() } else { id.clone() };
-                        commands::Completion::simple(short)
+                    .filter(|info| info.id.starts_with(partial))
+                    .map(|info| {
+                        let short_id = if info.id.len() > 8 { info.id[..8].to_string() } else { info.id.clone() };
+                        let label = info.name.clone().unwrap_or_else(|| short_id.clone());
+                        let description = format!("{} msgs", info.message_count);
+                        commands::Completion::with_description(short_id, description).with_label(label)
                     })
                     .collect())
             }
@@ -799,10 +827,12 @@ impl App {
                 let conversations = self.store.list_conversations()?;
                 Ok(conversations
                     .into_iter()
-                    .filter(|id| id.starts_with(partial) && *id != self.current_conversation_id)
-                    .map(|id| {
-                        let short = if id.len() > 8 { id[..8].to_string() } else { id.clone() };
-                        commands::Completion::simple(short)
+                    .filter(|info| info.id.starts_with(partial) && info.id != self.current_conversation_id)
+                    .map(|info| {
+                        let short_id = if info.id.len() > 8 { info.id[..8].to_string() } else { info.id.clone() };
+                        let label = info.name.clone().unwrap_or_else(|| short_id.clone());
+                        let description = format!("{} msgs", info.message_count);
+                        commands::Completion::with_description(short_id, description).with_label(label)
                     })
                     .collect())
             }

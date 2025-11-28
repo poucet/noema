@@ -3,10 +3,9 @@
 //! This is the default storage backend - fast but not persistent.
 
 use super::traits::{SessionStore, StorageTransaction};
-use crate::{Agent, ConversationContext};
+use crate::ConversationContext;
 use async_trait::async_trait;
-use llm::{ChatMessage, ChatModel, ChatPayload};
-use std::sync::Arc;
+use llm::{ChatMessage, ChatPayload};
 
 /// In-memory transaction buffer
 pub struct MemoryTransaction {
@@ -104,46 +103,6 @@ impl MemorySession {
 impl Default for MemorySession {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// Convenience methods for working with agents
-impl MemorySession {
-    /// Execute agent within a transaction (doesn't commit)
-    pub async fn execute_in_transaction(
-        &self,
-        transaction: &mut MemoryTransaction,
-        agent: &impl Agent,
-        model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<()> {
-        agent.execute(transaction, model).await
-    }
-
-    /// Send a user message and execute agent (auto-commit)
-    pub async fn send(
-        &mut self,
-        agent: &impl Agent,
-        model: Arc<dyn ChatModel + Send + Sync>,
-        input: impl Into<ChatPayload>,
-    ) -> anyhow::Result<()> {
-        let mut tx = self.begin();
-        tx.add(ChatMessage::user(input.into()));
-        self.execute_in_transaction(&mut tx, agent, model).await?;
-        self.commit(tx).await?;
-        Ok(())
-    }
-
-    /// Send with streaming - returns transaction for caller to commit
-    pub async fn send_stream(
-        &mut self,
-        agent: &impl Agent,
-        model: Arc<dyn ChatModel + Send + Sync>,
-        input: impl Into<ChatPayload>,
-    ) -> anyhow::Result<MemoryTransaction> {
-        let mut tx = self.begin();
-        tx.add(ChatMessage::user(input.into()));
-        agent.execute_stream(&mut tx, model).await?;
-        Ok(tx)
     }
 }
 

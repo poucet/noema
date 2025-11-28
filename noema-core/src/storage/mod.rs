@@ -15,5 +15,5 @@ mod traits;
 
 pub use memory::{MemorySession, MemoryTransaction};
 #[cfg(feature = "sqlite")]
-pub use sqlite::{SqliteSession, SqliteStore};
+pub use sqlite::{ConversationInfo, SqliteSession, SqliteStore};
 pub use traits::{SessionStore, StorageTransaction};

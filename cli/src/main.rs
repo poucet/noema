@@ -2,10 +2,10 @@ use clap::Parser;
 use std::sync::Arc;
 
 use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
-use noema_core::{Session, SimpleAgent};
 use futures::StreamExt;
 use llm::ModelProvider;
-use llm::{ChatModel};
+use llm::ChatModel;
+use noema_core::{Agent, ConversationContext, MemorySession, SessionStore, SimpleAgent, StorageTransaction};
 
 use clap_derive::{Parser, ValueEnum};
 use std::io::{self, BufRead, Write};
@@ -94,7 +94,7 @@ struct Args {
 
 // Application state
 struct AppState {
-    session: Session,
+    session: MemorySession,
     model: Arc<dyn ChatModel + Send + Sync>,
     current_provider: ModelProviderType,
     model_display_name: &'static str,
@@ -127,29 +127,35 @@ async fn call_model_streaming(
 }
 
 async fn chat_regular(
-    session: &mut Session,
+    session: &mut MemorySession,
     model: Arc<dyn ChatModel + Send + Sync>,
     message: &str
 ) -> anyhow::Result<()> {
     let agent = SimpleAgent::new();
-    session.send(&agent, model, message).await?;
+    let mut tx = session.begin();
+    tx.add(llm::ChatMessage::user(llm::ChatPayload::text(message)));
+    agent.execute(&mut tx, model).await?;
 
-    // Print the last assistant response (just added)
-    if let Some(last_msg) = session.messages().last() {
-        if last_msg.role == llm::api::Role::Assistant {
-            println!("{}", last_msg.get_text());
+    // Print all assistant messages from the transaction
+    for msg in tx.pending() {
+        if msg.role == llm::api::Role::Assistant {
+            println!("{}", msg.get_text());
         }
     }
+
+    session.commit(tx).await?;
     Ok(())
 }
 
 async fn chat_streaming(
-    session: &mut Session,
+    session: &mut MemorySession,
     model: Arc<dyn ChatModel + Send + Sync>,
     message: &str
 ) -> anyhow::Result<()> {
     let agent = SimpleAgent::new();
-    let tx = session.send_stream(&agent, model, message).await?;
+    let mut tx = session.begin();
+    tx.add(llm::ChatMessage::user(llm::ChatPayload::text(message)));
+    agent.execute_stream(&mut tx, model).await?;
 
     // Print all assistant messages from the transaction
     for msg in tx.pending() {
@@ -248,7 +254,7 @@ mod commands {
                     CommandResult::Continue
                 }
                 Command::Clear => {
-                    state.session.clear();
+                    state.session.messages_mut().clear();
                     println!("Conversation history cleared.");
                     println!();
                     CommandResult::Continue
@@ -311,9 +317,9 @@ async fn main() {
     let model = provider.create_chat_model(model_id).unwrap();
 
     let session = if let Some(system_msg) = args.system_message {
-        Session::with_system_message(system_msg)
+        MemorySession::with_system_message(system_msg)
     } else {
-        Session::new()
+        MemorySession::new()
     };
 
     let mut state = AppState {

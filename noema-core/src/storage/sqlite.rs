@@ -12,6 +12,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+/// Information about a conversation for listing/display
+#[derive(Debug, Clone)]
+pub struct ConversationInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub message_count: usize,
+}
+
 /// Shared SQLite connection pool
 ///
 /// This is the main entry point for SQLite storage. Create one store
@@ -47,6 +55,7 @@ impl SqliteStore {
             r#"
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
+                name TEXT,
                 created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
             );
@@ -66,6 +75,21 @@ impl SqliteStore {
             "#,
         )
         .context("Failed to initialize database schema")?;
+
+        // Migration: add name column if it doesn't exist (for existing databases)
+        let has_name: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('conversations') WHERE name = 'name'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_name {
+            conn.execute("ALTER TABLE conversations ADD COLUMN name TEXT", [])
+                .ok();
+        }
+
         Ok(())
     }
 
@@ -134,15 +158,37 @@ impl SqliteStore {
         })
     }
 
-    /// List all conversation IDs
-    pub fn list_conversations(&self) -> Result<Vec<String>> {
+    /// List all conversations with their info
+    pub fn list_conversations(&self) -> Result<Vec<ConversationInfo>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id FROM conversations ORDER BY updated_at DESC")?;
-        let ids: Vec<String> = stmt
-            .query_map([], |row| row.get(0))?
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.name, COUNT(m.id) as msg_count
+             FROM conversations c
+             LEFT JOIN messages m ON m.conversation_id = c.id
+             GROUP BY c.id
+             ORDER BY c.updated_at DESC",
+        )?;
+        let infos: Vec<ConversationInfo> = stmt
+            .query_map([], |row| {
+                Ok(ConversationInfo {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    message_count: row.get(2)?,
+                })
+            })?
             .filter_map(|r| r.ok())
             .collect();
-        Ok(ids)
+        Ok(infos)
+    }
+
+    /// Rename a conversation
+    pub fn rename_conversation(&self, conversation_id: &str, name: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET name = ?1, updated_at = strftime('%s', 'now') WHERE id = ?2",
+            params![name, conversation_id],
+        )?;
+        Ok(())
     }
 
     /// Delete a conversation and all its messages
@@ -397,8 +443,8 @@ mod tests {
         // Empty conversations should not be listed (lazy creation)
         store.create_conversation().unwrap();
         store.create_conversation().unwrap();
-        let ids = store.list_conversations().unwrap();
-        assert_eq!(ids.len(), 0);
+        let infos = store.list_conversations().unwrap();
+        assert_eq!(infos.len(), 0);
 
         // Conversations with messages should be listed
         let mut session1 = store.create_conversation().unwrap();
@@ -411,8 +457,33 @@ mod tests {
         tx.add(ChatMessage::user("World".into()));
         session2.commit(tx).await.unwrap();
 
-        let ids = store.list_conversations().unwrap();
-        assert_eq!(ids.len(), 2);
+        let infos = store.list_conversations().unwrap();
+        assert_eq!(infos.len(), 2);
+        assert_eq!(infos[0].message_count, 1);
+        assert!(infos[0].name.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_rename_conversation() {
+        let store = SqliteStore::in_memory().unwrap();
+        let mut session = store.create_conversation().unwrap();
+        let id = session.conversation_id().to_string();
+
+        let mut tx = session.begin();
+        tx.add(ChatMessage::user("Hello".into()));
+        session.commit(tx).await.unwrap();
+
+        // Rename
+        store.rename_conversation(&id, Some("My Chat")).unwrap();
+
+        let infos = store.list_conversations().unwrap();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name.as_deref(), Some("My Chat"));
+
+        // Clear name
+        store.rename_conversation(&id, None).unwrap();
+        let infos = store.list_conversations().unwrap();
+        assert!(infos[0].name.is_none());
     }
 
     #[tokio::test]
@@ -427,8 +498,8 @@ mod tests {
 
         store.delete_conversation(&id).unwrap();
 
-        let ids = store.list_conversations().unwrap();
-        assert!(ids.is_empty());
+        let infos = store.list_conversations().unwrap();
+        assert!(infos.is_empty());
     }
 
     #[tokio::test]
