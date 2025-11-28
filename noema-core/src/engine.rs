@@ -2,6 +2,7 @@ use crate::{Agent, McpAgent, McpRegistry, McpToolRegistry, Session};
 use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
 
 pub enum EngineCommand {
     SendMessage(String),
@@ -27,6 +28,8 @@ pub struct ChatEngine {
     cmd_tx: mpsc::UnboundedSender<EngineCommand>,
     event_rx: mpsc::UnboundedReceiver<EngineEvent>,
     model_name: String,
+    #[allow(dead_code)]
+    processor_handle: JoinHandle<()>,
 }
 
 impl ChatEngine {
@@ -45,7 +48,7 @@ impl ChatEngine {
         let mcp_registry_clone = Arc::clone(&mcp_registry);
         let initial_model = Arc::clone(&model);
 
-        tokio::spawn(async move {
+        let processor_handle = tokio::spawn(async move {
             Self::processor_loop(
                 session_clone,
                 initial_model,
@@ -62,6 +65,7 @@ impl ChatEngine {
             cmd_tx,
             event_rx,
             model_name,
+            processor_handle,
         }
     }
 

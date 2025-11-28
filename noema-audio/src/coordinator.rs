@@ -4,6 +4,7 @@ pub struct VoiceCoordinator {
     agent: VoiceAgent,
     pending_messages: Vec<String>,
     is_listening: bool,
+    is_transcribing: bool,
 }
 
 impl VoiceCoordinator {
@@ -12,11 +13,16 @@ impl VoiceCoordinator {
             agent,
             pending_messages: Vec::new(),
             is_listening: false,
+            is_transcribing: false,
         }
     }
 
     pub fn is_listening(&self) -> bool {
         self.is_listening
+    }
+
+    pub fn is_transcribing(&self) -> bool {
+        self.is_transcribing
     }
 
     /// Poll for voice events and return messages to send.
@@ -30,9 +36,15 @@ impl VoiceCoordinator {
             match event {
                 VoiceEvent::ListeningStarted => {
                     self.is_listening = true;
+                    self.is_transcribing = false;
+                }
+                VoiceEvent::Transcribing => {
+                    self.is_listening = false;
+                    self.is_transcribing = true;
                 }
                 VoiceEvent::Transcription(text) => {
                     self.is_listening = false;
+                    self.is_transcribing = false;
                     if !text.trim().is_empty() {
                         if buffering {
                             self.pending_messages.push(text);
@@ -43,6 +55,7 @@ impl VoiceCoordinator {
                 }
                 VoiceEvent::Error(e) => {
                     self.is_listening = false;
+                    self.is_transcribing = false;
                     errors.push(e);
                 }
                 _ => {}

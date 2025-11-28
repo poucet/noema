@@ -773,7 +773,8 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
     let message_count = app.engine.get_session().try_lock().map(|s| s.len()).unwrap_or(0);
     
     let is_listening = app.voice_coordinator.as_ref().map(|v| v.is_listening()).unwrap_or(false);
-    
+    let is_transcribing = app.voice_coordinator.as_ref().map(|v| v.is_transcribing()).unwrap_or(false);
+
     let voice_indicator = if is_listening {
         " | 🎤 Listening..."
     } else if app.voice_coordinator.is_some() {
@@ -782,13 +783,15 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
         ""
     };
     let status_text = if let Some(ref msg) = app.status_message {
-        format!(" {} • {} | {}{} ", app.current_provider, app.engine.get_model_name(), msg, voice_indicator) 
+        format!(" {} • {} | {}{} ", app.current_provider, app.engine.get_model_name(), msg, voice_indicator)
     } else if completion_loading {
-        format!(" {} • {} | {} Loading completions...{} ", app.current_provider, app.engine.get_model_name(), app.get_thinking_indicator(), voice_indicator) 
+        format!(" {} • {} | {} Loading completions...{} ", app.current_provider, app.engine.get_model_name(), app.get_thinking_indicator(), voice_indicator)
+    } else if is_transcribing {
+        format!(" {} • {} | {} Transcribing...{} ", app.current_provider, app.engine.get_model_name(), app.get_thinking_indicator(), voice_indicator)
     } else if app.is_streaming {
-        format!(" {} • {} | {} Thinking...{} ", app.current_provider, app.engine.get_model_name(), app.get_thinking_indicator(), voice_indicator) 
+        format!(" {} • {} | {} Thinking...{} ", app.current_provider, app.engine.get_model_name(), app.get_thinking_indicator(), voice_indicator)
     } else {
-        format!(" {} • {} | {} messages{} ", app.current_provider, app.engine.get_model_name(), message_count, voice_indicator) 
+        format!(" {} • {} | {} messages{} ", app.current_provider, app.engine.get_model_name(), message_count, voice_indicator)
     };
 
     let status_bar = Paragraph::new(status_text)
@@ -901,8 +904,9 @@ async fn main() -> Result<()> {
         app.command_handler.target_mut().check_voice_events();
         
         let is_listening = app.command_handler.target().voice_coordinator.as_ref().map(|v| v.is_listening()).unwrap_or(false);
-        
-        if app.command_handler.target().is_streaming || is_listening {
+        let is_transcribing = app.command_handler.target().voice_coordinator.as_ref().map(|v| v.is_transcribing()).unwrap_or(false);
+
+        if app.command_handler.target().is_streaming || is_listening || is_transcribing {
             app.command_handler.target_mut().advance_thinking_animation();
         }
 
