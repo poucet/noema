@@ -4,7 +4,7 @@ use crate::mcp::McpToolRegistry;
 use crate::Agent;
 use crate::ConversationContext;
 use async_trait::async_trait;
-use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest, ContentBlock};
+use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest, ContentBlock, ToolResultContent};
 use std::sync::Arc;
 
 /// Agent that dynamically uses tools from connected MCP servers.
@@ -82,14 +82,14 @@ impl Agent for McpAgent {
 
             // Execute all tool calls and add results to context
             for tool_call in tool_calls {
-                let result = self
+                let result_content = self
                     .tools
                     .call(&tool_call.name, tool_call.arguments.clone())
                     .await
-                    .unwrap_or_else(|e| format!("Error: {}", e));
+                    .unwrap_or_else(|e| vec![ToolResultContent::text(format!("Error: {}", e))]);
 
                 let result_msg =
-                    ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result));
+                    ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result_content));
 
                 context.add(result_msg);
             }
@@ -162,14 +162,14 @@ impl Agent for McpAgent {
 
             // Execute tools and add results to context
             for tool_call in tool_calls {
-                let result = self
+                let result_content = self
                     .tools
                     .call(&tool_call.name, tool_call.arguments.clone())
                     .await
-                    .unwrap_or_else(|e| format!("Error: {}", e));
+                    .unwrap_or_else(|e| vec![ToolResultContent::text(format!("Error: {}", e))]);
 
                 let result_msg =
-                    ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result));
+                    ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result_content));
 
                 context.add(result_msg);
             }

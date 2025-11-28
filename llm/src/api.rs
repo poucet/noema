@@ -23,16 +23,62 @@ pub struct ToolCall {
     pub arguments: serde_json::Value,
 }
 
+/// Content within a tool result - can be text, images, audio, etc.
+/// This is a subset of ContentBlock without recursive tool calls.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolResultContent {
+    Text { text: String },
+    Image { data: String, mime_type: String },
+    Audio { data: String, mime_type: String },
+}
+
+impl ToolResultContent {
+    pub fn text(text: impl Into<String>) -> Self {
+        ToolResultContent::Text { text: text.into() }
+    }
+
+    pub fn image(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
+        ToolResultContent::Image {
+            data: data.into(),
+            mime_type: mime_type.into(),
+        }
+    }
+
+    pub fn audio(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
+        ToolResultContent::Audio {
+            data: data.into(),
+            mime_type: mime_type.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ToolResult {
     pub tool_call_id: String,
-    pub content: String,
+    pub content: Vec<ToolResultContent>,
+}
+
+impl ToolResult {
+    /// Get text content from this tool result, concatenated
+    pub fn get_text(&self) -> String {
+        self.content
+            .iter()
+            .filter_map(|c| match c {
+                ToolResultContent::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text { text: String },
+    Image { data: String, mime_type: String },
+    Audio { data: String, mime_type: String },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
 }
@@ -71,19 +117,43 @@ impl ChatPayload {
         }
     }
 
+    pub fn image(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
+        ChatPayload {
+            content: vec![ContentBlock::Image {
+                data: data.into(),
+                mime_type: mime_type.into(),
+            }],
+        }
+    }
+
+    pub fn audio(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
+        ChatPayload {
+            content: vec![ContentBlock::Audio {
+                data: data.into(),
+                mime_type: mime_type.into(),
+            }],
+        }
+    }
+
     pub fn with_tool_calls(text: String, tool_calls: Vec<ToolCall>) -> Self {
         let mut content = vec![ContentBlock::Text { text }];
         content.extend(tool_calls.into_iter().map(ContentBlock::ToolCall));
         ChatPayload { content }
     }
 
-    pub fn tool_result(tool_call_id: String, result: String) -> Self {
+    /// Create a tool result with multimodal content
+    pub fn tool_result(tool_call_id: String, result_content: Vec<ToolResultContent>) -> Self {
         ChatPayload {
             content: vec![ContentBlock::ToolResult(ToolResult {
                 tool_call_id,
-                content: result,
+                content: result_content,
             })],
         }
+    }
+
+    /// Create a simple text-only tool result (convenience method)
+    pub fn tool_result_text(tool_call_id: String, text: String) -> Self {
+        Self::tool_result(tool_call_id, vec![ToolResultContent::Text { text }])
     }
 
     pub fn get_text(&self) -> String {
@@ -95,6 +165,26 @@ impl ChatPayload {
             })
             .collect::<Vec<_>>()
             .join("")
+    }
+
+    pub fn get_images(&self) -> Vec<(&str, &str)> {
+        self.content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Image { data, mime_type } => Some((data.as_str(), mime_type.as_str())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn get_audio(&self) -> Vec<(&str, &str)> {
+        self.content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Audio { data, mime_type } => Some((data.as_str(), mime_type.as_str())),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn get_tool_calls(&self) -> Vec<&ToolCall> {
@@ -273,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_chat_payload_tool_result() {
-        let payload = ChatPayload::tool_result(
+        let payload = ChatPayload::tool_result_text(
             "call_123".to_string(),
             "Search results: ...".to_string(),
         );
@@ -281,7 +371,7 @@ mod tests {
         let results = payload.get_tool_results();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool_call_id, "call_123");
-        assert_eq!(results[0].content, "Search results: ...");
+        assert_eq!(results[0].get_text(), "Search results: ...");
     }
 
     #[test]
@@ -321,13 +411,13 @@ mod tests {
 
     #[test]
     fn test_chat_message_get_tool_results() {
-        let payload = ChatPayload::tool_result("call_789".to_string(), "42".to_string());
+        let payload = ChatPayload::tool_result_text("call_789".to_string(), "42".to_string());
         let msg = ChatMessage::user(payload);
 
         let results = msg.get_tool_results();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool_call_id, "call_789");
-        assert_eq!(results[0].content, "42");
+        assert_eq!(results[0].get_text(), "42");
     }
 
     #[test]
@@ -386,7 +476,9 @@ mod tests {
     fn test_tool_result_serialization() {
         let tool_result = ToolResult {
             tool_call_id: "call_xyz".to_string(),
-            content: "Result data".to_string(),
+            content: vec![ToolResultContent::Text {
+                text: "Result data".to_string(),
+            }],
         };
 
         let block = ContentBlock::ToolResult(tool_result);

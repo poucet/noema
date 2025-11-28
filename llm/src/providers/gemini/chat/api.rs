@@ -105,7 +105,13 @@ impl From<Role> for crate::api::Role {
     }
 }
 
-type Blob = serde_json::Value; // Placeholder for actual Blob type
+/// Gemini inline data for images/audio
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InlineData {
+    pub(crate) mime_type: String,
+    pub(crate) data: String, // base64-encoded
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct GeminiFunctionCall {
@@ -123,7 +129,7 @@ pub(crate) struct GeminiFunctionResponse {
 #[serde(rename_all = "camelCase")]
 pub(crate) enum PartType {
     Text(String),
-    Image(Blob),
+    InlineData(InlineData),
     FunctionCall(GeminiFunctionCall),
     FunctionResponse(GeminiFunctionResponse),
 }
@@ -153,9 +159,23 @@ impl From<&Part> for Option<crate::api::ContentBlock> {
     fn from(part: &Part) -> Self {
         match &part.data {
             PartType::Text(t) => Some(crate::api::ContentBlock::Text { text: t.clone() }),
-            PartType::Image(_) => Some(crate::api::ContentBlock::Text {
-                text: "[Image]".to_string(),
-            }),
+            PartType::InlineData(data) => {
+                // Determine if it's image or audio based on mime type
+                if data.mime_type.starts_with("image/") {
+                    Some(crate::api::ContentBlock::Image {
+                        data: data.data.clone(),
+                        mime_type: data.mime_type.clone(),
+                    })
+                } else if data.mime_type.starts_with("audio/") {
+                    Some(crate::api::ContentBlock::Audio {
+                        data: data.data.clone(),
+                        mime_type: data.mime_type.clone(),
+                    })
+                } else {
+                    // Unknown type, skip
+                    None
+                }
+            }
             PartType::FunctionCall(fc) => Some(crate::api::ContentBlock::ToolCall(
                 crate::api::ToolCall {
                     id: format!("gemini_{}", fc.name), // Gemini doesn't provide IDs
@@ -166,7 +186,9 @@ impl From<&Part> for Option<crate::api::ContentBlock> {
             PartType::FunctionResponse(fr) => Some(crate::api::ContentBlock::ToolResult(
                 crate::api::ToolResult {
                     tool_call_id: format!("gemini_{}", fr.name),
-                    content: serde_json::to_string(&fr.response).unwrap_or_default(),
+                    content: vec![crate::api::ToolResultContent::Text {
+                        text: serde_json::to_string(&fr.response).unwrap_or_default(),
+                    }],
                 },
             )),
         }
@@ -185,15 +207,34 @@ impl From<&crate::api::ContentBlock> for Part {
                 }),
                 extra: None,
             },
-            crate::api::ContentBlock::ToolResult(result) => Part {
+            crate::api::ContentBlock::ToolResult(result) => {
+                let text = result.get_text();
+                Part {
+                    thought: None,
+                    data: PartType::FunctionResponse(GeminiFunctionResponse {
+                        name: result.tool_call_id.clone(),
+                        response: serde_json::from_str(&text)
+                            .unwrap_or(serde_json::Value::String(text)),
+                    }),
+                    extra: None,
+                }
+            }
+            crate::api::ContentBlock::Image { data, mime_type } => Part {
                 thought: None,
-                data: PartType::FunctionResponse(GeminiFunctionResponse {
-                    name: result.tool_call_id.clone(),
-                    response: serde_json::from_str(&result.content)
-                        .unwrap_or(serde_json::Value::String(result.content.clone())),
+                data: PartType::InlineData(InlineData {
+                    mime_type: mime_type.clone(),
+                    data: data.clone(),
                 }),
                 extra: None,
             },
+            crate::api::ContentBlock::Audio { data, mime_type } => Part {
+                thought: None,
+                data: PartType::InlineData(InlineData {
+                    mime_type: mime_type.clone(),
+                    data: data.clone(),
+                }),
+                extra: None,
+            }
         }
     }
 }

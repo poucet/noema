@@ -89,7 +89,7 @@ impl Agent for ToolAgent {
                     .unwrap_or_else(|e| format!("Error: {}", e));
 
                 let result_msg = ChatMessage::user(
-                    ChatPayload::tool_result(tool_call.id.clone(), result)
+                    ChatPayload::tool_result_text(tool_call.id.clone(), result)
                 );
 
                 context.add(result_msg);
@@ -151,7 +151,7 @@ impl Agent for ToolAgent {
                     .unwrap_or_else(|e| format!("Error: {}", e));
 
                 let result_msg = ChatMessage::user(
-                    ChatPayload::tool_result(tool_call.id.clone(), result)
+                    ChatPayload::tool_result_text(tool_call.id.clone(), result)
                 );
 
                 context.add(result_msg);

@@ -1,8 +1,8 @@
 use crate::mcp::config::{McpConfig, ServerConfig};
 use anyhow::Result;
-use llm::ToolDefinition;
+use llm::{ToolDefinition, ToolResultContent};
 use rmcp::{
-    model::{CallToolRequestParam, Tool},
+    model::{CallToolRequestParam, RawContent, Tool},
     service::RunningService,
     transport::streamable_http_client::{
         StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
@@ -186,6 +186,41 @@ fn mcp_tool_to_definition(tool: &Tool) -> ToolDefinition {
     }
 }
 
+/// Convert MCP content to our ToolResultContent format
+fn mcp_content_to_tool_result(content: &RawContent) -> Option<ToolResultContent> {
+    match content {
+        RawContent::Text(text) => Some(ToolResultContent::text(&text.text)),
+        RawContent::Image(img) => Some(ToolResultContent::image(&img.data, &img.mime_type)),
+        RawContent::Audio(audio) => Some(ToolResultContent::audio(&audio.data, &audio.mime_type)),
+        RawContent::Resource(resource) => {
+            // Extract text from embedded resources
+            match &resource.resource {
+                rmcp::model::ResourceContents::TextResourceContents { text, .. } => {
+                    Some(ToolResultContent::text(text))
+                }
+                rmcp::model::ResourceContents::BlobResourceContents {
+                    blob, mime_type, ..
+                } => {
+                    // Try to determine if it's image or audio from mime type
+                    let mime = mime_type.as_deref().unwrap_or("application/octet-stream");
+                    if mime.starts_with("image/") {
+                        Some(ToolResultContent::image(blob, mime))
+                    } else if mime.starts_with("audio/") {
+                        Some(ToolResultContent::audio(blob, mime))
+                    } else {
+                        // Unknown blob type, skip
+                        None
+                    }
+                }
+            }
+        }
+        RawContent::ResourceLink(_) => {
+            // Resource links are references, not content - skip
+            None
+        }
+    }
+}
+
 /// A dynamic tool registry that wraps McpRegistry and queries it on each call.
 ///
 /// Unlike static tool registries, this struct dynamically reflects
@@ -216,7 +251,8 @@ impl McpToolRegistry {
     }
 
     /// Call a tool by name, routing to the appropriate MCP server.
-    pub async fn call(&self, name: &str, args: serde_json::Value) -> Result<String> {
+    /// Returns multimodal content (text, images, audio).
+    pub async fn call(&self, name: &str, args: serde_json::Value) -> Result<Vec<ToolResultContent>> {
         let registry = self.mcp_registry.lock().await;
 
         // Find which server has this tool
@@ -225,9 +261,14 @@ impl McpToolRegistry {
                 let arguments = args.as_object().cloned();
                 let result = server.call_tool(name.to_string(), arguments).await?;
 
-                // Serialize the full MCP result as JSON to preserve multimodal content
-                let output = serde_json::to_string(&result.content)?;
-                return Ok(output);
+                // Convert MCP content to our ToolResultContent format
+                let content = result
+                    .content
+                    .into_iter()
+                    .filter_map(|c| mcp_content_to_tool_result(&c.raw))
+                    .collect();
+
+                return Ok(content);
             }
         }
 

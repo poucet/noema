@@ -36,6 +36,19 @@ pub(crate) enum Citation {
     // TODO
 }
 
+/// Claude image source - base64 or URL
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum ImageSource {
+    Base64 {
+        media_type: String,
+        data: String,
+    },
+    Url {
+        url: String,
+    },
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Content {
@@ -44,6 +57,9 @@ pub(crate) enum Content {
 
         #[serde(skip_serializing_if = "Option::is_none")]
         citations: Option<Vec<Citation>>,
+    },
+    Image {
+        source: ImageSource,
     },
     ToolUse {
         id: String,
@@ -64,6 +80,21 @@ impl TryFrom<&Content> for crate::api::ContentBlock {
             Content::Text { citations: _, text } => {
                 Ok(crate::api::ContentBlock::Text { text: text.clone() })
             }
+            Content::Image { source } => match source {
+                ImageSource::Base64 { media_type, data } => {
+                    Ok(crate::api::ContentBlock::Image {
+                        data: data.clone(),
+                        mime_type: media_type.clone(),
+                    })
+                }
+                ImageSource::Url { url } => {
+                    // URL images aren't directly supported in our generic format
+                    // Return as text placeholder for now
+                    Ok(crate::api::ContentBlock::Text {
+                        text: format!("[Image URL: {}]", url),
+                    })
+                }
+            },
             Content::ToolUse { id, name, input } => {
                 Ok(crate::api::ContentBlock::ToolCall(crate::api::ToolCall {
                     id: id.clone(),
@@ -77,7 +108,9 @@ impl TryFrom<&Content> for crate::api::ContentBlock {
             } => Ok(crate::api::ContentBlock::ToolResult(
                 crate::api::ToolResult {
                     tool_call_id: tool_use_id.clone(),
-                    content: content.clone(),
+                    content: vec![crate::api::ToolResultContent::Text {
+                        text: content.clone(),
+                    }],
                 },
             )),
         }
@@ -119,8 +152,21 @@ impl From<&crate::api::ContentBlock> for Content {
             },
             crate::api::ContentBlock::ToolResult(result) => Content::ToolResult {
                 tool_use_id: result.tool_call_id.clone(),
-                content: result.content.clone(),
+                content: result.get_text(),
             },
+            crate::api::ContentBlock::Image { data, mime_type } => Content::Image {
+                source: ImageSource::Base64 {
+                    media_type: mime_type.clone(),
+                    data: data.clone(),
+                },
+            },
+            crate::api::ContentBlock::Audio { .. } => {
+                // Claude doesn't support audio in messages yet
+                Content::Text {
+                    citations: None,
+                    text: "[Audio]".to_string(),
+                }
+            }
         }
     }
 }

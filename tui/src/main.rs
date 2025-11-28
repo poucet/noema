@@ -7,7 +7,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use llm::ModelProvider;
+use llm::{ContentBlock, ModelProvider};
 use noema_audio::{VoiceAgent, VoiceCoordinator};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ServerConfig, Session};
 use ratatui::{
@@ -689,25 +689,71 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
             style.add_modifier(Modifier::BOLD),
         )));
 
-        // Add content lines with basic markdown styling
-        for line in msg.get_text().lines() {
-            let styled_line = if line.starts_with("```") {
-                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::DarkGray)))
-            } else if line.starts_with("# ") {
-                Line::from(Span::styled(
-                    line.to_string(),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                ))
-            } else if line.starts_with("## ") {
-                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Yellow)))
-            } else if line.starts_with("- ") || line.starts_with("* ") {
-                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Cyan)))
-            } else if line.starts_with('`') && line.ends_with('`') {
-                Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Magenta)))
-            } else {
-                Line::from(line.to_string())
-            };
-            all_lines.push(styled_line);
+        // Render each content block
+        for block in &msg.payload.content {
+            match block {
+                ContentBlock::Text { text } => {
+                    // Add content lines with basic markdown styling
+                    for line in text.lines() {
+                        let styled_line = if line.starts_with("```") {
+                            Line::from(Span::styled(line.to_string(), Style::default().fg(Color::DarkGray)))
+                        } else if line.starts_with("# ") {
+                            Line::from(Span::styled(
+                                line.to_string(),
+                                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                            ))
+                        } else if line.starts_with("## ") {
+                            Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Yellow)))
+                        } else if line.starts_with("- ") || line.starts_with("* ") {
+                            Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Cyan)))
+                        } else if line.starts_with('`') && line.ends_with('`') {
+                            Line::from(Span::styled(line.to_string(), Style::default().fg(Color::Magenta)))
+                        } else {
+                            Line::from(line.to_string())
+                        };
+                        all_lines.push(styled_line);
+                    }
+                }
+                ContentBlock::Image { mime_type, data } => {
+                    // Show image placeholder with size info
+                    let size_kb = data.len() / 1024;
+                    all_lines.push(Line::from(Span::styled(
+                        format!("[Image: {} ~{}KB]", mime_type, size_kb),
+                        Style::default().fg(Color::Magenta).add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                ContentBlock::Audio { mime_type, data } => {
+                    // Show audio placeholder with size info
+                    // TODO: Add audio playback via noema_audio
+                    let size_kb = data.len() / 1024;
+                    all_lines.push(Line::from(Span::styled(
+                        format!("[Audio: {} ~{}KB]", mime_type, size_kb),
+                        Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                ContentBlock::ToolCall(call) => {
+                    all_lines.push(Line::from(Span::styled(
+                        format!("[Tool call: {}]", call.name),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+                    )));
+                }
+                ContentBlock::ToolResult(result) => {
+                    all_lines.push(Line::from(Span::styled(
+                        format!("[Tool result: {}]", result.tool_call_id),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+                    )));
+                    // Show text content from tool results
+                    let text = result.get_text();
+                    if !text.is_empty() {
+                        for line in text.lines() {
+                            all_lines.push(Line::from(Span::styled(
+                                line.to_string(),
+                                Style::default().fg(Color::DarkGray),
+                            )));
+                        }
+                    }
+                }
+            }
         }
 
         // Add blank line between messages
