@@ -2042,9 +2042,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "commands",
- "config",
  "conversation",
  "crossterm",
+ "directories",
+ "dotenv",
  "futures",
  "llm",
  "ratatui 0.29.0",
