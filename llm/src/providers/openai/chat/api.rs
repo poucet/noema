@@ -84,10 +84,38 @@ impl From<&ChatMessage> for Message {
 
         if is_tool_result {
             // For tool results, we need to extract the tool_call_id
+            // OpenAI only supports text in tool results, so we concatenate text
+            // and add notes about any images/audio
             if let Some(crate::api::ContentBlock::ToolResult(result)) = msg.payload.content.first() {
+                let mut text_parts: Vec<String> = Vec::new();
+                let mut has_image = false;
+                let mut has_audio = false;
+
+                for content in &result.content {
+                    match content {
+                        crate::api::ToolResultContent::Text { text } => {
+                            text_parts.push(text.clone());
+                        }
+                        crate::api::ToolResultContent::Image { .. } => {
+                            has_image = true;
+                        }
+                        crate::api::ToolResultContent::Audio { .. } => {
+                            has_audio = true;
+                        }
+                    }
+                }
+
+                let mut result_text = text_parts.join("");
+                if has_image {
+                    result_text.push_str("\n[Image data included in result]");
+                }
+                if has_audio {
+                    result_text.push_str("\n[Audio data included in result]");
+                }
+
                 return Message {
                     role: msg.role,
-                    content: Some(MessageContent::Text(result.get_text())),
+                    content: Some(MessageContent::Text(result_text)),
                     tool_calls: None,
                     tool_call_id: Some(result.tool_call_id.clone()),
                 };

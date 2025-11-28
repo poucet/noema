@@ -49,6 +49,22 @@ pub(crate) enum ImageSource {
     },
 }
 
+/// Content block within a tool result (subset of Content types)
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum ToolResultContentBlock {
+    Text { text: String },
+    Image { source: ImageSource },
+}
+
+/// Tool result content - can be a string or array of content blocks
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub(crate) enum ToolResultContent {
+    Text(String),
+    Blocks(Vec<ToolResultContentBlock>),
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum Content {
@@ -68,7 +84,7 @@ pub(crate) enum Content {
     },
     ToolResult {
         tool_use_id: String,
-        content: String,
+        content: ToolResultContent,
     },
 }
 
@@ -105,14 +121,35 @@ impl TryFrom<&Content> for crate::api::ContentBlock {
             Content::ToolResult {
                 tool_use_id,
                 content,
-            } => Ok(crate::api::ContentBlock::ToolResult(
-                crate::api::ToolResult {
-                    tool_call_id: tool_use_id.clone(),
-                    content: vec![crate::api::ToolResultContent::Text {
-                        text: content.clone(),
-                    }],
-                },
-            )),
+            } => {
+                let result_content = match content {
+                    ToolResultContent::Text(text) => {
+                        vec![crate::api::ToolResultContent::Text { text: text.clone() }]
+                    }
+                    ToolResultContent::Blocks(blocks) => {
+                        blocks.iter().filter_map(|b| match b {
+                            ToolResultContentBlock::Text { text } => {
+                                Some(crate::api::ToolResultContent::Text { text: text.clone() })
+                            }
+                            ToolResultContentBlock::Image { source } => match source {
+                                ImageSource::Base64 { media_type, data } => {
+                                    Some(crate::api::ToolResultContent::Image {
+                                        data: data.clone(),
+                                        mime_type: media_type.clone(),
+                                    })
+                                }
+                                ImageSource::Url { .. } => None, // Skip URL images
+                            },
+                        }).collect()
+                    }
+                };
+                Ok(crate::api::ContentBlock::ToolResult(
+                    crate::api::ToolResult {
+                        tool_call_id: tool_use_id.clone(),
+                        content: result_content,
+                    },
+                ))
+            }
         }
     }
 }
@@ -150,10 +187,43 @@ impl From<&crate::api::ContentBlock> for Content {
                 name: call.name.clone(),
                 input: call.arguments.clone(),
             },
-            crate::api::ContentBlock::ToolResult(result) => Content::ToolResult {
-                tool_use_id: result.tool_call_id.clone(),
-                content: result.get_text(),
-            },
+            crate::api::ContentBlock::ToolResult(result) => {
+                // Convert multimodal tool result content to Claude format
+                let blocks: Vec<ToolResultContentBlock> = result.content.iter().filter_map(|c| {
+                    match c {
+                        crate::api::ToolResultContent::Text { text } => {
+                            Some(ToolResultContentBlock::Text { text: text.clone() })
+                        }
+                        crate::api::ToolResultContent::Image { data, mime_type } => {
+                            Some(ToolResultContentBlock::Image {
+                                source: ImageSource::Base64 {
+                                    media_type: mime_type.clone(),
+                                    data: data.clone(),
+                                },
+                            })
+                        }
+                        crate::api::ToolResultContent::Audio { .. } => {
+                            // Claude doesn't support audio in tool results yet
+                            None
+                        }
+                    }
+                }).collect();
+
+                Content::ToolResult {
+                    tool_use_id: result.tool_call_id.clone(),
+                    content: if blocks.is_empty() {
+                        ToolResultContent::Text(String::new())
+                    } else if blocks.len() == 1 {
+                        if let ToolResultContentBlock::Text { text } = &blocks[0] {
+                            ToolResultContent::Text(text.clone())
+                        } else {
+                            ToolResultContent::Blocks(blocks)
+                        }
+                    } else {
+                        ToolResultContent::Blocks(blocks)
+                    },
+                }
+            }
             crate::api::ContentBlock::Image { data, mime_type } => Content::Image {
                 source: ImageSource::Base64 {
                     media_type: mime_type.clone(),

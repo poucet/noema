@@ -195,47 +195,97 @@ impl From<&Part> for Option<crate::api::ContentBlock> {
     }
 }
 
-impl From<&crate::api::ContentBlock> for Part {
-    fn from(block: &crate::api::ContentBlock) -> Self {
-        match block {
-            crate::api::ContentBlock::Text { text } => Part::new_text(text.clone()),
-            crate::api::ContentBlock::ToolCall(call) => Part {
+/// Convert a ContentBlock to one or more Gemini Parts.
+/// Tool results with multimodal content become multiple parts:
+/// - functionResponse with text
+/// - inlineData for each image/audio
+fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
+    match block {
+        crate::api::ContentBlock::Text { text } => vec![Part::new_text(text.clone())],
+        crate::api::ContentBlock::ToolCall(call) => vec![Part {
+            thought: None,
+            data: PartType::FunctionCall(GeminiFunctionCall {
+                name: call.name.clone(),
+                args: call.arguments.clone(),
+            }),
+            extra: None,
+        }],
+        crate::api::ContentBlock::ToolResult(result) => {
+            let mut parts = Vec::new();
+
+            // First, add the functionResponse with text content
+            let text = result.get_text();
+            // Gemini requires function_response.response to be an object (Struct),
+            // not a plain string. Wrap non-object values in a result object.
+            let response = match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(v) if v.is_object() => v,
+                Ok(v) => serde_json::json!({ "result": v }),
+                Err(_) => serde_json::json!({ "result": text }),
+            };
+            parts.push(Part {
                 thought: None,
-                data: PartType::FunctionCall(GeminiFunctionCall {
-                    name: call.name.clone(),
-                    args: call.arguments.clone(),
+                data: PartType::FunctionResponse(GeminiFunctionResponse {
+                    name: result.tool_call_id.clone(),
+                    response,
                 }),
                 extra: None,
-            },
-            crate::api::ContentBlock::ToolResult(result) => {
-                let text = result.get_text();
-                Part {
-                    thought: None,
-                    data: PartType::FunctionResponse(GeminiFunctionResponse {
-                        name: result.tool_call_id.clone(),
-                        response: serde_json::from_str(&text)
-                            .unwrap_or(serde_json::Value::String(text)),
-                    }),
-                    extra: None,
+            });
+
+            // Then add any images/audio as separate inlineData parts
+            for content in &result.content {
+                match content {
+                    crate::api::ToolResultContent::Image { data, mime_type } => {
+                        parts.push(Part {
+                            thought: None,
+                            data: PartType::InlineData(InlineData {
+                                mime_type: mime_type.clone(),
+                                data: data.clone(),
+                            }),
+                            extra: None,
+                        });
+                    }
+                    crate::api::ToolResultContent::Audio { data, mime_type } => {
+                        parts.push(Part {
+                            thought: None,
+                            data: PartType::InlineData(InlineData {
+                                mime_type: mime_type.clone(),
+                                data: data.clone(),
+                            }),
+                            extra: None,
+                        });
+                    }
+                    crate::api::ToolResultContent::Text { .. } => {
+                        // Already included in functionResponse
+                    }
                 }
             }
-            crate::api::ContentBlock::Image { data, mime_type } => Part {
-                thought: None,
-                data: PartType::InlineData(InlineData {
-                    mime_type: mime_type.clone(),
-                    data: data.clone(),
-                }),
-                extra: None,
-            },
-            crate::api::ContentBlock::Audio { data, mime_type } => Part {
-                thought: None,
-                data: PartType::InlineData(InlineData {
-                    mime_type: mime_type.clone(),
-                    data: data.clone(),
-                }),
-                extra: None,
-            }
+
+            parts
         }
+        crate::api::ContentBlock::Image { data, mime_type } => vec![Part {
+            thought: None,
+            data: PartType::InlineData(InlineData {
+                mime_type: mime_type.clone(),
+                data: data.clone(),
+            }),
+            extra: None,
+        }],
+        crate::api::ContentBlock::Audio { data, mime_type } => vec![Part {
+            thought: None,
+            data: PartType::InlineData(InlineData {
+                mime_type: mime_type.clone(),
+                data: data.clone(),
+            }),
+            extra: None,
+        }],
+    }
+}
+
+impl From<&crate::api::ContentBlock> for Part {
+    fn from(block: &crate::api::ContentBlock) -> Self {
+        // For backwards compatibility, return the first part
+        // Use content_block_to_parts() directly when multiple parts are needed
+        content_block_to_parts(block).into_iter().next().unwrap()
     }
 }
 
@@ -290,7 +340,8 @@ impl FromWithRole<&crate::ChatPayload> for Content {
     fn from_with_role(payload: &crate::ChatPayload, role: crate::api::Role) -> Self {
         Content {
             role: role.try_into().expect("Invalid role"),
-            parts: payload.content.iter().map(|b| b.into()).collect(),
+            // Use flat_map to handle tool results with multimodal content (images/audio)
+            parts: payload.content.iter().flat_map(content_block_to_parts).collect(),
         }
     }
 }

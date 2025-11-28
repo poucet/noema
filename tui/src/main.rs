@@ -113,6 +113,75 @@ enum CompletionState {
     Showing { completions: Vec<commands::Completion>, selected: usize },
 }
 
+/// Input history for up/down arrow navigation
+struct InputHistory {
+    entries: Vec<String>,
+    position: Option<usize>,
+    draft: String,
+}
+
+impl InputHistory {
+    fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            position: None,
+            draft: String::new(),
+        }
+    }
+
+    /// Add an entry to history
+    fn push(&mut self, entry: String) {
+        if !entry.is_empty() && self.entries.last() != Some(&entry) {
+            self.entries.push(entry);
+        }
+        self.position = None;
+        self.draft.clear();
+    }
+
+    /// Navigate to previous entry (up arrow)
+    fn prev(&mut self, current_input: &str) -> Option<&str> {
+        if self.entries.is_empty() {
+            return None;
+        }
+
+        match self.position {
+            None => {
+                // Save current input as draft before navigating
+                self.draft = current_input.to_string();
+                self.position = Some(self.entries.len() - 1);
+            }
+            Some(pos) if pos > 0 => {
+                self.position = Some(pos - 1);
+            }
+            _ => return None,
+        }
+
+        self.position.map(|p| self.entries[p].as_str())
+    }
+
+    /// Navigate to next entry (down arrow)
+    fn next(&mut self) -> Option<&str> {
+        match self.position {
+            Some(pos) if pos + 1 < self.entries.len() => {
+                self.position = Some(pos + 1);
+                Some(&self.entries[pos + 1])
+            }
+            Some(_) => {
+                // Return to draft
+                self.position = None;
+                Some(&self.draft)
+            }
+            None => None,
+        }
+    }
+
+    /// Reset position (called when user types)
+    fn reset_position(&mut self) {
+        self.position = None;
+        self.draft.clear();
+    }
+}
+
 struct App {
     input: Input,
     engine: ChatEngine,
@@ -131,6 +200,7 @@ struct App {
 struct AppWithCommands {
     command_handler: CommandHandler<App>,
     completion_state: CompletionState,
+    history: InputHistory,
 }
 
 impl App {
@@ -189,6 +259,7 @@ impl AppWithCommands {
         Ok(Self {
             command_handler,
             completion_state: CompletionState::Idle,
+            history: InputHistory::new(),
         })
     }
 
@@ -300,6 +371,7 @@ impl AppWithCommands {
             }
             _ => {
                 self.cancel_completion();
+                self.history.reset_position();
                 self.command_handler.target_mut().input.handle_event(&Event::Key(key));
                 Ok(true)
             }
@@ -328,11 +400,8 @@ impl AppWithCommands {
     fn handle_down(&mut self) {
         if matches!(self.completion_state, CompletionState::Showing { .. }) {
             self.next_completion();
-        } else {
-            self.command_handler.target_mut().input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Down,
-                crossterm::event::KeyModifiers::empty(),
-            )));
+        } else if let Some(next) = self.history.next() {
+            self.command_handler.target_mut().input = Input::from(next.to_string());
         }
     }
 
@@ -341,10 +410,10 @@ impl AppWithCommands {
         if matches!(self.completion_state, CompletionState::Showing { .. }) {
             self.prev_completion();
         } else {
-            self.command_handler.target_mut().input.handle_event(&Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Up,
-                crossterm::event::KeyModifiers::empty(),
-            )));
+            let current_input = self.command_handler.target().input.value().to_string();
+            if let Some(prev) = self.history.prev(&current_input) {
+                self.command_handler.target_mut().input = Input::from(prev.to_string());
+            }
         }
     }
 
@@ -362,6 +431,10 @@ impl AppWithCommands {
         // Not showing completions - return input for processing
         let input_text = self.command_handler.target_mut().input.value().to_string();
         self.command_handler.target_mut().input.reset();
+
+        // Add to history
+        self.history.push(input_text.clone());
+
         Some(input_text)
     }
 
