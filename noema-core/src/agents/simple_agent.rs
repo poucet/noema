@@ -3,9 +3,8 @@
 use crate::Agent;
 use crate::ConversationContext;
 use async_trait::async_trait;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::StreamExt;
 use llm::{ChatMessage, ChatModel, ChatRequest};
-use std::pin::Pin;
 use std::sync::Arc;
 
 /// Simple single-turn agent

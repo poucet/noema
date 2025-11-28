@@ -3,9 +3,7 @@
 use crate::Agent;
 use crate::ConversationContext;
 use async_trait::async_trait;
-use futures::stream::Stream;
 use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest, ToolRegistry};
-use std::pin::Pin;
 use std::sync::Arc;
 
 /// Multi-turn agent with tool calling support
@@ -73,7 +71,7 @@ impl Agent for ToolAgent {
             );
 
             let response = model.chat(&request).await?;
-            let tool_calls = response.get_tool_calls();
+            let tool_calls: Vec<&llm::ToolCall> = response.get_tool_calls();
 
             // Add response to context
             context.add(response.clone());

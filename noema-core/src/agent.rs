@@ -1,7 +1,5 @@
 use async_trait::async_trait;
-use futures::stream::Stream;
-use llm::{ChatMessage, ChatModel};
-use std::pin::Pin;
+use llm::ChatModel;
 use std::sync::Arc;
 use crate::ConversationContext;
 

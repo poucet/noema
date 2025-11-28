@@ -1,14 +1,13 @@
 use anyhow::Result;
 use commands::{CommandHandler, CompletionResult};
 use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
-use noema_core::{Session, SimpleAgent};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures::StreamExt;
 use llm::{ChatMessage, ChatModel, ModelProvider};
+use noema_core::{McpAgent, McpRegistry, McpToolRegistry, ServerConfig, Session};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -57,6 +56,20 @@ impl From<&ModelProviderType> for config::ModelProviderType {
     }
 }
 
+/// MCP subcommands for /mcp command
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[commands::completable]
+enum McpSubcommand {
+    /// List configured MCP servers
+    List,
+    /// Add a new MCP server
+    Add,
+    /// Remove an MCP server
+    Remove,
+    /// Connect to an MCP server
+    Connect,
+}
+
 enum MessageCommand {
     SendMessage(String),
 }
@@ -88,6 +101,7 @@ struct App {
     cached_history: Vec<llm::api::ChatMessage>,
     current_response: String,
     provider_urls: ProviderUrls,
+    mcp_registry: Arc<Mutex<McpRegistry>>,
 }
 
 /// Wrapper that owns App and CommandRegistry to avoid borrow checker issues
@@ -113,6 +127,10 @@ impl App {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (resp_tx, resp_rx) = mpsc::unbounded_channel();
 
+        let mcp_registry = Arc::new(Mutex::new(
+            McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()))
+        ));
+
         Ok(App {
             input: Input::default(),
             session: Arc::new(Mutex::new(session)),
@@ -128,6 +146,7 @@ impl App {
             cached_history: Vec::new(),
             current_response: String::new(),
             provider_urls,
+            mcp_registry,
         })
     }
 
@@ -145,10 +164,11 @@ impl App {
     fn start(&mut self) {
         let session = Arc::clone(&self.session);
         let model = Arc::clone(&self.model);
+        let mcp_registry = Arc::clone(&self.mcp_registry);
         let (cmd_rx, resp_tx) = self.cmd_rx.take().expect("start() called twice");
 
         // Spawn background message processor
-        tokio::spawn(Self::message_processor(session, model, cmd_rx, resp_tx));
+        tokio::spawn(Self::message_processor(session, model, mcp_registry, cmd_rx, resp_tx));
     }
 }
 
@@ -347,7 +367,7 @@ impl AppWithCommands {
 impl App {
     #[command(name = "help", help = "Show available commands")]
     async fn cmd_help(&mut self) -> Result<String, anyhow::Error> {
-        Ok("Available commands:\n  /help - Show this help\n  /clear - Clear conversation\n  /model <provider> - Switch model provider\n  /quit - Exit".to_string())
+        Ok("Available commands:\n  /help - Show this help\n  /clear - Clear conversation\n  /model <provider> - Switch model provider\n  /mcp <subcommand> - Manage MCP servers\n  /quit - Exit".to_string())
     }
 
     #[command(name = "clear", help = "Clear conversation history")]
@@ -420,6 +440,99 @@ impl App {
             .map(|m| commands::Completion::simple(m.id))
             .collect())
     }
+
+    #[command(name = "mcp", help = "Manage MCP servers (list, add, remove, connect)")]
+    async fn cmd_mcp(
+        &mut self,
+        subcommand: McpSubcommand,
+        arg1: Option<String>,
+        arg2: Option<String>,
+    ) -> Result<String, anyhow::Error> {
+        let mut registry = self.mcp_registry.lock().await;
+        match subcommand {
+            McpSubcommand::List => {
+                let servers = registry.list_servers();
+                if servers.is_empty() {
+                    Ok("No MCP servers configured.\nUse /mcp add <id> <url> to add one.".to_string())
+                } else {
+                    let mut output = String::from("Configured MCP servers:\n");
+                    for (id, config) in servers {
+                        let status = if registry.is_connected(id) {
+                            "[connected]"
+                        } else {
+                            "[disconnected]"
+                        };
+                        output.push_str(&format!("  {} - {} {}\n", id, config.url, status));
+                    }
+                    Ok(output)
+                }
+            }
+            McpSubcommand::Add => {
+                let id = arg1.ok_or_else(|| anyhow::anyhow!("Usage: /mcp add <id> <url>"))?;
+                let url = arg2.ok_or_else(|| anyhow::anyhow!("Usage: /mcp add <id> <url>"))?;
+
+                let config = ServerConfig {
+                    name: id.clone(),
+                    url,
+                    auth_token: None,
+                };
+
+                registry.add_server(id.clone(), config);
+                registry.save_config()?;
+
+                Ok(format!("Added MCP server '{}'", id))
+            }
+            McpSubcommand::Remove => {
+                let id = arg1.ok_or_else(|| anyhow::anyhow!("Usage: /mcp remove <id>"))?;
+
+                match registry.remove_server(&id).await? {
+                    Some(_) => {
+                        registry.save_config()?;
+                        Ok(format!("Removed MCP server '{}'", id))
+                    }
+                    None => Err(anyhow::anyhow!("Server '{}' not found", id)),
+                }
+            }
+            McpSubcommand::Connect => {
+                let id = arg1.ok_or_else(|| anyhow::anyhow!("Usage: /mcp connect <id>"))?;
+
+                match registry.connect(&id).await {
+                    Ok(server) => {
+                        let tool_count = server.tools.len();
+                        let tool_names: Vec<String> = server.tools.iter().map(|t| t.name.to_string()).collect();
+                        Ok(format!(
+                            "Connected to '{}' with {} tools: {}",
+                            id,
+                            tool_count,
+                            tool_names.join(", ")
+                        ))
+                    }
+                    Err(e) => Err(anyhow::anyhow!("Failed to connect to '{}': {}", id, e)),
+                }
+            }
+        }
+    }
+
+    #[completer(arg = "arg1")]
+    async fn complete_mcp_arg1(
+        &self,
+        subcommand: &McpSubcommand,
+        partial: &str,
+    ) -> Result<Vec<commands::Completion>, anyhow::Error> {
+        let registry = self.mcp_registry.lock().await;
+        match subcommand {
+            McpSubcommand::Remove | McpSubcommand::Connect => {
+                // Complete with existing server IDs
+                Ok(registry
+                    .list_servers()
+                    .into_iter()
+                    .filter(|(id, _)| id.to_lowercase().starts_with(&partial.to_lowercase()))
+                    .map(|(id, cfg)| commands::Completion::with_description(id.to_string(), cfg.url.clone()))
+                    .collect())
+            }
+            _ => Ok(vec![]),
+        }
+    }
 }
 
 // Old handle_command removed - now using built-in App::handle_command
@@ -474,10 +587,13 @@ impl App {
     async fn message_processor(
         session: Arc<Mutex<Session>>,
         model: Arc<dyn ChatModel + Send + Sync>,
+        mcp_registry: Arc<Mutex<McpRegistry>>,
         mut cmd_rx: mpsc::UnboundedReceiver<MessageCommand>,
         resp_tx: mpsc::UnboundedSender<MessageResponse>,
     ) {
-        let agent = SimpleAgent::new();
+        // Create dynamic tool registry that queries MCP servers on each call
+        let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
+        let agent = McpAgent::new(Arc::new(tool_registry), 10);
 
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
@@ -719,3 +835,4 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+

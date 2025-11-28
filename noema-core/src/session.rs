@@ -4,7 +4,6 @@
 //! and commits automatically.
 
 use crate::{Agent, ConversationContext, Transaction};
-use futures::stream::Stream;
 use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 

@@ -2,7 +2,8 @@
 //!
 //! This crate provides:
 //! - **Traits**: `ConversationContext`, `Agent`, `Transaction`
-//! - **Implementations**: `SimpleAgent`, `ToolAgent`
+//! - **Implementations**: `SimpleAgent`, `ToolAgent`, `McpAgent`
+//! - **MCP Support**: `McpRegistry`, `McpToolRegistry` for Model Context Protocol
 //!
 //! # Example
 //!
@@ -15,11 +16,13 @@
 pub mod agent;
 pub mod agents;
 pub mod context;
+pub mod mcp;
 pub mod session;
 pub mod transaction;
 
 pub use agent::Agent;
-pub use agents::{SimpleAgent, ToolAgent};
+pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
+pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 pub use session::{Session, SimpleContext};
 pub use transaction::Transaction;
