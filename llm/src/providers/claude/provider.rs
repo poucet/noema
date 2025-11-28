@@ -29,7 +29,7 @@ impl From<ModelInfo> for crate::ModelDefinition {
         // All Claude models support text/chat as their primary capability.
         let capabilities = vec![crate::ModelCapability::Text];
 
-        crate::ModelDefinition::new(model.id, capabilities)
+        crate::ModelDefinition::with_display_name(model.id, model.display_name, capabilities)
     }
 }
 

@@ -63,7 +63,12 @@ impl From<ModelDefinition> for crate::ModelDefinition {
             capabilities.push(crate::ModelCapability::Text);
         }
 
-        crate::ModelDefinition::new(model.name, capabilities)
+        match model.display_name {
+            Some(display_name) => {
+                crate::ModelDefinition::with_display_name(model.name, display_name, capabilities)
+            }
+            None => crate::ModelDefinition::new(model.name, capabilities),
+        }
     }
 }
 

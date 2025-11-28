@@ -18,6 +18,10 @@ pub struct ConversationInfo {
     pub id: String,
     pub name: Option<String>,
     pub message_count: usize,
+    /// Unix timestamp when created
+    pub created_at: i64,
+    /// Unix timestamp when last updated
+    pub updated_at: i64,
 }
 
 /// Shared SQLite connection pool
@@ -162,7 +166,7 @@ impl SqliteStore {
     pub fn list_conversations(&self) -> Result<Vec<ConversationInfo>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.name, COUNT(m.id) as msg_count
+            "SELECT c.id, c.name, COUNT(m.id) as msg_count, c.created_at, c.updated_at
              FROM conversations c
              LEFT JOIN messages m ON m.conversation_id = c.id
              GROUP BY c.id
@@ -174,6 +178,8 @@ impl SqliteStore {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     message_count: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
                 })
             })?
             .filter_map(|r| r.ok())

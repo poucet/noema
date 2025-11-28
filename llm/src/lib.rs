@@ -22,6 +22,7 @@ pub enum ModelCapability {
 #[derive(Clone, Debug)]
 pub struct ModelDefinition {
     pub id: String,
+    pub display_name: Option<String>,
     pub capabilities: Vec<ModelCapability>,
 }
 
@@ -29,12 +30,30 @@ impl ModelDefinition {
     pub fn new(id: impl Into<String>, capabilities: Vec<ModelCapability>) -> Self {
         Self {
             id: id.into(),
+            display_name: None,
+            capabilities,
+        }
+    }
+
+    pub fn with_display_name(
+        id: impl Into<String>,
+        display_name: impl Into<String>,
+        capabilities: Vec<ModelCapability>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            display_name: Some(display_name.into()),
             capabilities,
         }
     }
 
     pub fn text_model(id: impl Into<String>) -> Self {
         Self::new(id, vec![ModelCapability::Text])
+    }
+
+    /// Get the display name, falling back to id if not set
+    pub fn name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.id)
     }
 
     pub fn has_capability(&self, capability: &ModelCapability) -> bool {
