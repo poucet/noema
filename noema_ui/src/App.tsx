@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { ModelSelector } from "./components/ModelSelector";
 import type { DisplayMessage, ModelInfo, ConversationInfo } from "./types";
 import * as tauri from "./tauri";
+import type { VoiceStatus } from "./tauri";
 
 function App() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -16,6 +17,8 @@ function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
+  const [voiceAvailable, setVoiceAvailable] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("disabled");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +50,9 @@ function App() {
         // Load models in background
         tauri.listModels().then(setModels).catch(console.error);
 
+        // Check if voice is available
+        tauri.isVoiceAvailable().then(setVoiceAvailable).catch(console.error);
+
         setIsInitialized(true);
       } catch (err) {
         setError(String(err));
@@ -60,7 +66,23 @@ function App() {
     const unlisteners: (() => void)[] = [];
 
     tauri.onUserMessage((msg) => {
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => {
+        // Avoid adding duplicate user messages (can happen with rapid voice input)
+        // Check if the last message is already this user message
+        if (prev.length > 0) {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg.role === "user" && msg.role === "user") {
+            const lastText = lastMsg.content.find((c) => "text" in c);
+            const newText = msg.content.find((c) => "text" in c);
+            if (lastText && newText && "text" in lastText && "text" in newText) {
+              if (lastText.text === newText.text) {
+                return prev; // Skip duplicate
+              }
+            }
+          }
+        }
+        return [...prev, msg];
+      });
       setIsLoading(true);
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -90,6 +112,20 @@ function App() {
       setMessages([]);
     }).then((unlisten) => unlisteners.push(unlisten));
 
+    // Voice events
+    tauri.onVoiceStatus((status) => {
+      setVoiceStatus(status);
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    tauri.onVoiceTranscription((text) => {
+      // Automatically send transcribed text as a message
+      handleSendMessage(text);
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    tauri.onVoiceError((err) => {
+      setError(`Voice error: ${err}`);
+    }).then((unlisten) => unlisteners.push(unlisten));
+
     return () => {
       unlisteners.forEach((unlisten) => unlisten());
     };
@@ -99,6 +135,15 @@ function App() {
     try {
       setError(null);
       await tauri.sendMessage(message);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleToggleVoice = async () => {
+    try {
+      setError(null);
+      await tauri.toggleVoice();
     } catch (err) {
       setError(String(err));
     }
@@ -128,6 +173,25 @@ function App() {
 
   const handleDeleteConversation = async (id: string) => {
     try {
+      const isCurrentConversation = id === currentConversationId;
+
+      if (isCurrentConversation) {
+        // If deleting current conversation, switch to another one first or create new
+        const otherConversation = conversations.find((c) => c.id !== id);
+        if (otherConversation) {
+          // Switch to another existing conversation
+          const msgs = await tauri.switchConversation(otherConversation.id);
+          setCurrentConversationId(otherConversation.id);
+          setMessages(msgs);
+        } else {
+          // No other conversations, create a new one
+          const newId = await tauri.newConversation();
+          setCurrentConversationId(newId);
+          setMessages([]);
+        }
+      }
+
+      // Now delete the conversation
       await tauri.deleteConversation(id);
       const convos = await tauri.listConversations();
       setConversations(convos);
@@ -154,13 +218,6 @@ function App() {
     }
   };
 
-  const handleClearHistory = async () => {
-    try {
-      await tauri.clearHistory();
-    } catch (err) {
-      setError(String(err));
-    }
-  };
 
   if (!isInitialized) {
     return (
@@ -196,7 +253,6 @@ function App() {
             models={models}
             currentModel={currentModel}
             onSelectModel={handleSelectModel}
-            onClearHistory={handleClearHistory}
           />
         </div>
 
@@ -256,7 +312,13 @@ function App() {
         </div>
 
         {/* Input area */}
-        <ChatInput onSend={handleSendMessage} disabled={isLoading} />
+        <ChatInput
+          onSend={handleSendMessage}
+          disabled={isLoading}
+          voiceAvailable={voiceAvailable}
+          voiceStatus={voiceStatus}
+          onToggleVoice={handleToggleVoice}
+        />
       </div>
     </div>
   );

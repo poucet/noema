@@ -2823,6 +2823,7 @@ dependencies = [
  "dirs",
  "futures",
  "llm",
+ "noema-audio",
  "noema-core",
  "serde",
  "serde_json",

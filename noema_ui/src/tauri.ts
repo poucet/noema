@@ -107,3 +107,37 @@ export function onModelChanged(
 export function onHistoryCleared(callback: () => void): Promise<UnlistenFn> {
   return listen<void>("history_cleared", () => callback());
 }
+
+// Voice commands
+export async function isVoiceAvailable(): Promise<boolean> {
+  return invoke<boolean>("is_voice_available");
+}
+
+export async function toggleVoice(): Promise<boolean> {
+  return invoke<boolean>("toggle_voice");
+}
+
+export async function getVoiceStatus(): Promise<string> {
+  return invoke<string>("get_voice_status");
+}
+
+// Voice events
+export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing";
+
+export function onVoiceStatus(
+  callback: (status: VoiceStatus) => void
+): Promise<UnlistenFn> {
+  return listen<VoiceStatus>("voice_status", (event) => callback(event.payload));
+}
+
+export function onVoiceTranscription(
+  callback: (text: string) => void
+): Promise<UnlistenFn> {
+  return listen<string>("voice_transcription", (event) => callback(event.payload));
+}
+
+export function onVoiceError(
+  callback: (error: string) => void
+): Promise<UnlistenFn> {
+  return listen<string>("voice_error", (event) => callback(event.payload));
+}

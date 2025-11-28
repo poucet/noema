@@ -2,6 +2,7 @@
 
 use config::{create_provider, get_model_info, ModelProviderType, ProviderUrls};
 use llm::{ChatMessage, ChatPayload, ContentBlock, ModelProvider, Role, ToolResultContent};
+use noema_audio::{VoiceAgent, VoiceCoordinator};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, SessionStore, SqliteSession, SqliteStore};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -187,6 +188,9 @@ pub struct AppState {
     current_conversation_id: Mutex<String>,
     model_name: Mutex<String>,
     provider_urls: Mutex<ProviderUrls>,
+    voice_coordinator: Mutex<Option<VoiceCoordinator>>,
+    voice_enabled: Mutex<bool>,
+    is_processing: Mutex<bool>,
 }
 
 impl AppState {
@@ -197,6 +201,9 @@ impl AppState {
             current_conversation_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
             provider_urls: Mutex::new(ProviderUrls::default()),
+            voice_coordinator: Mutex::new(None),
+            voice_enabled: Mutex::new(false),
+            is_processing: Mutex::new(false),
         }
     }
 }
@@ -213,7 +220,7 @@ impl Default for AppState {
 
 /// Initialize the application - sets up database and default model
 #[tauri::command]
-async fn init_app(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+async fn init_app(_app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     // Use the same database path as TUI: dirs::data_dir()/noema/conversations.db
     // On mobile, fall back to Tauri's app_data_dir
     #[cfg(not(target_os = "android"))]
@@ -304,6 +311,23 @@ async fn send_message(
     state: State<'_, AppState>,
     message: String,
 ) -> Result<(), String> {
+    // Check if already processing - if so, queue this message
+    {
+        let is_processing = *state.is_processing.lock().await;
+        if is_processing {
+            // Already processing, the message will be queued in the engine
+            // but we shouldn't spawn another polling task
+            let payload = ChatPayload::text(message);
+            let engine_guard = state.engine.lock().await;
+            let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+            engine.send_message(payload);
+            return Ok(());
+        }
+    }
+
+    // Mark as processing
+    *state.is_processing.lock().await = true;
+
     let payload = ChatPayload::text(message);
 
     // Emit user message immediately
@@ -354,10 +378,14 @@ async fn send_message(
                         }
                     };
                     let _ = app_handle.emit("message_complete", &messages);
+                    // Mark as no longer processing
+                    *state.is_processing.lock().await = false;
                     break;
                 }
                 Some(EngineEvent::Error(err)) => {
                     let _ = app_handle.emit("error", &err);
+                    // Mark as no longer processing
+                    *state.is_processing.lock().await = false;
                     break;
                 }
                 Some(EngineEvent::ModelChanged(name)) => {
@@ -621,6 +649,145 @@ async fn get_current_conversation_id(state: State<'_, AppState>) -> Result<Strin
 }
 
 // ============================================================================
+// Voice Commands
+// ============================================================================
+
+/// Check if voice is available (Whisper model exists)
+#[tauri::command]
+async fn is_voice_available() -> Result<bool, String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let model_path = data_dir.join("noema").join("models").join("ggml-base.en.bin");
+        Ok(model_path.exists())
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        Ok(false) // Voice not supported on mobile yet
+    }
+}
+
+/// Get the Whisper model path
+fn get_whisper_model_path() -> Option<std::path::PathBuf> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let data_dir = dirs::data_dir()?;
+        let model_path = data_dir.join("noema").join("models").join("ggml-base.en.bin");
+        if model_path.exists() {
+            Some(model_path)
+        } else {
+            None
+        }
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        None
+    }
+}
+
+/// Toggle voice input on/off
+#[tauri::command]
+async fn toggle_voice(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let mut voice_enabled = state.voice_enabled.lock().await;
+
+    if *voice_enabled {
+        // Disable voice
+        *state.voice_coordinator.lock().await = None;
+        *voice_enabled = false;
+        app.emit("voice_status", "disabled").ok();
+        Ok(false)
+    } else {
+        // Enable voice
+        let model_path = get_whisper_model_path()
+            .ok_or("Whisper model not found. Please download ggml-base.en.bin to ~/.local/share/noema/models/")?;
+
+        let agent = VoiceAgent::new(&model_path)
+            .map_err(|e| format!("Failed to start voice agent: {}", e))?;
+
+        let coordinator = VoiceCoordinator::new(agent);
+        *state.voice_coordinator.lock().await = Some(coordinator);
+        *voice_enabled = true;
+
+        // Start polling for voice events
+        let app_handle = app.clone();
+        tokio::spawn(async move {
+            let state = app_handle.state::<AppState>();
+            loop {
+                let voice_enabled = *state.voice_enabled.lock().await;
+                if !voice_enabled {
+                    break;
+                }
+
+                // Check if we're currently processing a message - if so, buffer voice input
+                let is_processing = *state.is_processing.lock().await;
+
+                let (messages, errors, is_listening, is_transcribing) = {
+                    let mut coordinator_guard = state.voice_coordinator.lock().await;
+                    if let Some(coordinator) = coordinator_guard.as_mut() {
+                        let is_listening = coordinator.is_listening();
+                        let is_transcribing = coordinator.is_transcribing();
+                        // Buffer messages while processing, release when not processing
+                        let (msgs, errs) = coordinator.process(is_processing);
+                        (msgs, errs, is_listening, is_transcribing)
+                    } else {
+                        break;
+                    }
+                };
+
+                // Emit status updates
+                if is_listening {
+                    app_handle.emit("voice_status", "listening").ok();
+                } else if is_transcribing {
+                    app_handle.emit("voice_status", "transcribing").ok();
+                } else {
+                    app_handle.emit("voice_status", "enabled").ok();
+                }
+
+                // Send transcribed messages as chat messages
+                for message in messages {
+                    app_handle.emit("voice_transcription", &message).ok();
+                }
+
+                // Report errors
+                for error in errors {
+                    app_handle.emit("voice_error", &error).ok();
+                }
+
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+        });
+
+        app.emit("voice_status", "enabled").ok();
+        Ok(true)
+    }
+}
+
+/// Get current voice status
+#[tauri::command]
+async fn get_voice_status(state: State<'_, AppState>) -> Result<String, String> {
+    let voice_enabled = *state.voice_enabled.lock().await;
+    if !voice_enabled {
+        return Ok("disabled".to_string());
+    }
+
+    let coordinator_guard = state.voice_coordinator.lock().await;
+    if let Some(coordinator) = coordinator_guard.as_ref() {
+        if coordinator.is_listening() {
+            Ok("listening".to_string())
+        } else if coordinator.is_transcribing() {
+            Ok("transcribing".to_string())
+        } else {
+            Ok("enabled".to_string())
+        }
+    } else {
+        Ok("disabled".to_string())
+    }
+}
+
+// ============================================================================
 // Application Entry Point
 // ============================================================================
 
@@ -644,6 +811,9 @@ pub fn run() {
             rename_conversation,
             get_model_name,
             get_current_conversation_id,
+            is_voice_available,
+            toggle_voice,
+            get_voice_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
