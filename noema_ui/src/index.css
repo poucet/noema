@@ -1,0 +1,44 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+/* Custom styles for chat app */
+@layer base {
+  html {
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  /* Markdown content styling */
+  .prose pre {
+    background-color: #1e1e1e;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    overflow-x: auto;
+  }
+
+  .prose code {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+  }
+
+  .prose pre code {
+    background-color: transparent;
+    padding: 0;
+  }
+
+  /* KaTeX styling */
+  .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.5rem 0;
+  }
+}

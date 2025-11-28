@@ -1,0 +1,109 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import type {
+  DisplayMessage,
+  ModelInfo,
+  ConversationInfo,
+} from "./types";
+
+// Tauri commands
+export async function initApp(): Promise<string> {
+  return invoke<string>("init_app");
+}
+
+export async function getMessages(): Promise<DisplayMessage[]> {
+  return invoke<DisplayMessage[]>("get_messages");
+}
+
+export async function sendMessage(message: string): Promise<void> {
+  return invoke<void>("send_message", { message });
+}
+
+export async function clearHistory(): Promise<void> {
+  return invoke<void>("clear_history");
+}
+
+export async function setModel(
+  modelId: string,
+  provider: string
+): Promise<string> {
+  return invoke<string>("set_model", { modelId, provider });
+}
+
+export async function listModels(): Promise<ModelInfo[]> {
+  return invoke<ModelInfo[]>("list_models");
+}
+
+export async function listConversations(): Promise<ConversationInfo[]> {
+  return invoke<ConversationInfo[]>("list_conversations");
+}
+
+export async function switchConversation(
+  conversationId: string
+): Promise<DisplayMessage[]> {
+  return invoke<DisplayMessage[]>("switch_conversation", { conversationId });
+}
+
+export async function newConversation(): Promise<string> {
+  return invoke<string>("new_conversation");
+}
+
+export async function deleteConversation(
+  conversationId: string
+): Promise<void> {
+  return invoke<void>("delete_conversation", { conversationId });
+}
+
+export async function renameConversation(
+  conversationId: string,
+  name: string
+): Promise<void> {
+  return invoke<void>("rename_conversation", { conversationId, name });
+}
+
+export async function getModelName(): Promise<string> {
+  return invoke<string>("get_model_name");
+}
+
+export async function getCurrentConversationId(): Promise<string> {
+  return invoke<string>("get_current_conversation_id");
+}
+
+// Event listeners
+export function onUserMessage(
+  callback: (message: DisplayMessage) => void
+): Promise<UnlistenFn> {
+  return listen<DisplayMessage>("user_message", (event) =>
+    callback(event.payload)
+  );
+}
+
+export function onStreamingMessage(
+  callback: (message: DisplayMessage) => void
+): Promise<UnlistenFn> {
+  return listen<DisplayMessage>("streaming_message", (event) =>
+    callback(event.payload)
+  );
+}
+
+export function onMessageComplete(
+  callback: (messages: DisplayMessage[]) => void
+): Promise<UnlistenFn> {
+  return listen<DisplayMessage[]>("message_complete", (event) =>
+    callback(event.payload)
+  );
+}
+
+export function onError(callback: (error: string) => void): Promise<UnlistenFn> {
+  return listen<string>("error", (event) => callback(event.payload));
+}
+
+export function onModelChanged(
+  callback: (name: string) => void
+): Promise<UnlistenFn> {
+  return listen<string>("model_changed", (event) => callback(event.payload));
+}
+
+export function onHistoryCleared(callback: () => void): Promise<UnlistenFn> {
+  return listen<void>("history_cleared", () => callback());
+}
