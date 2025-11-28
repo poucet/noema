@@ -16,3 +16,9 @@ llm = { path = "../llm" }
 ratatui = "0.29"
 tokio = { version = "1", features = ["full"] }
 tui-input = "0.10"
+noema-audio = { version = "0.1.0", path = "../noema-audio" }
+clap = { version = "4.5.53", features = ["derive"] }
+dirs = "6.0.0"
+tracing = "0.1.43"
+tracing-subscriber = "0.3.22"
+tracing-appender = "0.2.4"

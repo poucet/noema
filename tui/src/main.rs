@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::Parser;
 use commands::{CommandHandler, CompletionResult};
 use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
 use crossterm::{
@@ -7,6 +8,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use llm::{ChatMessage, ChatModel, ModelProvider};
+use noema_audio::{VoiceAgent, VoiceEvent};
 use noema_core::{McpAgent, McpRegistry, McpToolRegistry, ServerConfig, Session};
 use ratatui::{
     backend::CrosstermBackend,
@@ -17,10 +19,47 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
+
+#[derive(Parser, Debug)]
+#[command(name = "noema", about = "AI chat TUI with voice support")]
+struct Args {
+    /// Whisper model for voice transcription (tiny, base, small, medium, large)
+    #[arg(short = 'w', long, default_value = "base")]
+    whisper_model: String,
+
+    /// Custom path to whisper model file
+    #[arg(long)]
+    whisper_model_path: Option<PathBuf>,
+}
+
+impl Args {
+    fn get_whisper_model_path(&self) -> PathBuf {
+        if let Some(ref path) = self.whisper_model_path {
+            path.clone()
+        } else {
+            let model_name = match self.whisper_model.as_str() {
+                "tiny" => "ggml-tiny.en.bin",
+                "base" => "ggml-base.en.bin",
+                "small" => "ggml-small.en.bin",
+                "medium" => "ggml-medium.en.bin",
+                "large" => "ggml-large-v3.bin",
+                other => other, // Allow custom model names
+            };
+            dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("noema")
+                .join("models")
+                .join(model_name)
+        }
+    }
+}
 
 /// Local ModelProviderType with #[commands::completable] for tab completion.
 /// Converts to config::ModelProviderType for actual provider creation.
@@ -102,6 +141,10 @@ struct App {
     current_response: String,
     provider_urls: ProviderUrls,
     mcp_registry: Arc<Mutex<McpRegistry>>,
+    // Voice mode - voice_agent must be kept alive to maintain the audio stream
+    voice_agent: Option<VoiceAgent>,
+    is_listening: bool,
+    whisper_model_path: PathBuf,
 }
 
 /// Wrapper that owns App and CommandRegistry to avoid borrow checker issues
@@ -111,7 +154,7 @@ struct AppWithCommands {
 }
 
 impl App {
-    fn new(provider: ModelProviderType, system_message: Option<String>, provider_urls: ProviderUrls) -> Result<Self> {
+    fn new(provider: ModelProviderType, system_message: Option<String>, provider_urls: ProviderUrls, whisper_model_path: PathBuf) -> Result<Self> {
         let config_provider: config::ModelProviderType = (&provider).into();
         let (model_id, model_display_name) = get_model_info(&config_provider);
         let provider_instance = create_provider(&config_provider, &provider_urls);
@@ -147,6 +190,9 @@ impl App {
             current_response: String::new(),
             provider_urls,
             mcp_registry,
+            voice_agent: None,
+            is_listening: false,
+            whisper_model_path,
         })
     }
 
@@ -173,8 +219,8 @@ impl App {
 }
 
 impl AppWithCommands {
-    fn new(provider: ModelProviderType, system_message: Option<String>, provider_urls: ProviderUrls) -> Result<Self> {
-        let app = App::new(provider, system_message, provider_urls)?;
+    fn new(provider: ModelProviderType, system_message: Option<String>, provider_urls: ProviderUrls, whisper_model_path: PathBuf) -> Result<Self> {
+        let app = App::new(provider, system_message, provider_urls, whisper_model_path)?;
         let command_handler = CommandHandler::new(app);
 
         Ok(Self {
@@ -367,7 +413,7 @@ impl AppWithCommands {
 impl App {
     #[command(name = "help", help = "Show available commands")]
     async fn cmd_help(&mut self) -> Result<String, anyhow::Error> {
-        Ok("Available commands:\n  /help - Show this help\n  /clear - Clear conversation\n  /model <provider> - Switch model provider\n  /mcp <subcommand> - Manage MCP servers\n  /quit - Exit".to_string())
+        Ok("Available commands:\n  /help - Show this help\n  /clear - Clear conversation\n  /model <provider> - Switch model provider\n  /mcp <subcommand> - Manage MCP servers\n  /voice - Toggle voice input mode\n  /quit - Exit".to_string())
     }
 
     #[command(name = "clear", help = "Clear conversation history")]
@@ -533,6 +579,28 @@ impl App {
             _ => Ok(vec![]),
         }
     }
+
+    #[command(name = "voice", help = "Toggle voice input mode")]
+    async fn cmd_voice(&mut self) -> Result<String, anyhow::Error> {
+        if self.voice_agent.is_some() {
+            // Disable voice mode - dropping voice_agent stops the audio stream
+            self.voice_agent = None;
+            self.is_listening = false;
+            Ok("Voice mode disabled".to_string())
+        } else {
+            // Enable voice mode
+            match VoiceAgent::new(&self.whisper_model_path) {
+                Ok(voice_agent) => {
+                    let model_name = self.whisper_model_path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    self.voice_agent = Some(voice_agent);
+                    Ok(format!("Voice mode enabled ({}) - speak to send messages", model_name))
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to initialize voice ({}): {}", self.whisper_model_path.display(), e)),
+            }
+        }
+    }
 }
 
 // Old handle_command removed - now using built-in App::handle_command
@@ -579,6 +647,37 @@ impl App {
                     self.is_streaming = false;
                     self.status_message = Some(format!("Error: {}", err));
                     self.current_response.clear();
+                }
+            }
+        }
+    }
+
+    fn check_voice_events(&mut self) {
+        // Collect events first to avoid borrow issues with self
+        let events: Vec<VoiceEvent> = if let Some(ref mut voice_agent) = self.voice_agent {
+            std::iter::from_fn(|| voice_agent.try_recv()).collect()
+        } else {
+            return;
+        };
+
+        for event in events {
+            match event {
+                VoiceEvent::ListeningStarted => {
+                    self.is_listening = true;
+                }
+                VoiceEvent::Transcription(text) => {
+                    self.is_listening = false;
+                    // Send transcription as a message
+                    if !text.trim().is_empty() {
+                        self.queue_message(text);
+                    }
+                }
+                VoiceEvent::Response(_) => {
+                    // Handled by message processor
+                }
+                VoiceEvent::Error(err) => {
+                    self.is_listening = false;
+                    self.status_message = Some(format!("Voice error: {}", err));
                 }
             }
         }
@@ -733,14 +832,21 @@ fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
 
     // Render status bar
     let message_count = app.session.try_lock().map(|s| s.len()).unwrap_or(0);
-    let status_text = if let Some(ref msg) = app.status_message {
-        format!(" {} • {} | {} ", app.current_provider, app.model_display_name, msg)
-    } else if matches!(completion_state, CompletionState::Loading) {
-        format!(" {} • {} | {} Loading completions... ", app.current_provider, app.model_display_name, app.get_thinking_indicator())
-    } else if app.is_streaming {
-        format!(" {} • {} | {} Thinking... ", app.current_provider, app.model_display_name, app.get_thinking_indicator())
+    let voice_indicator = if app.is_listening {
+        " | Listening..."
+    } else if app.voice_agent.is_some() {
+        " | Voice ON"
     } else {
-        format!(" {} • {} | {} messages ", app.current_provider, app.model_display_name, message_count)
+        ""
+    };
+    let status_text = if let Some(ref msg) = app.status_message {
+        format!(" {} • {} | {}{} ", app.current_provider, app.model_display_name, msg, voice_indicator)
+    } else if matches!(completion_state, CompletionState::Loading) {
+        format!(" {} • {} | {} Loading completions...{} ", app.current_provider, app.model_display_name, app.get_thinking_indicator(), voice_indicator)
+    } else if app.is_streaming {
+        format!(" {} • {} | {} Thinking...{} ", app.current_provider, app.model_display_name, app.get_thinking_indicator(), voice_indicator)
+    } else {
+        format!(" {} • {} | {} messages{} ", app.current_provider, app.model_display_name, message_count, voice_indicator)
     };
 
     let status_bar = Paragraph::new(status_text)
@@ -793,6 +899,26 @@ fn ui(f: &mut Frame, app_with_commands: &AppWithCommands) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse command line arguments
+    let args = Args::parse();
+    let whisper_model_path = args.get_whisper_model_path();
+
+    // Setup file-based logging
+    let log_dir = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("noema")
+        .join("logs");
+    std::fs::create_dir_all(&log_dir)?;
+
+    let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "noema.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
+        .init();
+
+    tracing::info!("Starting noema TUI");
+
     // Load environment variables from .env files
     load_env_file();
     let provider_urls = ProviderUrls::from_env();
@@ -805,7 +931,7 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and start
-    let mut app = AppWithCommands::new(ModelProviderType::Gemini, None, provider_urls)?;
+    let mut app = AppWithCommands::new(ModelProviderType::Gemini, None, provider_urls, whisper_model_path)?;
     app.start();
 
     let mut should_quit = false;
@@ -816,7 +942,8 @@ async fn main() -> Result<()> {
 
         // Update app state
         app.command_handler.target_mut().check_message_responses();
-        if app.command_handler.target_mut().is_streaming {
+        app.command_handler.target_mut().check_voice_events();
+        if app.command_handler.target_mut().is_streaming || app.command_handler.target_mut().is_listening {
             app.command_handler.target_mut().advance_thinking_animation();
         }
 
