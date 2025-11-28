@@ -3,7 +3,7 @@ use clap::Parser;
 use commands::{CommandHandler, CompletionResult};
 use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -15,7 +15,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame, Terminal,
 };
 use std::io;
@@ -148,6 +148,8 @@ struct App {
     whisper_model_path: PathBuf,
     // Queue for voice transcriptions received while streaming
     pending_voice_messages: Vec<String>,
+    // Scroll offset for chat view (0 = auto-scroll to bottom)
+    scroll_offset: usize,
 }
 
 /// Wrapper that owns App and CommandRegistry to avoid borrow checker issues
@@ -197,6 +199,7 @@ impl App {
             is_listening: false,
             whisper_model_path,
             pending_voice_messages: Vec::new(),
+            scroll_offset: 0,
         })
     }
 
@@ -617,6 +620,14 @@ impl App {
 // Old handle_command removed - now using built-in App::handle_command
 
 impl App {
+    fn scroll_up(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_add(lines);
+    }
+
+    fn scroll_down(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
     fn queue_message(&mut self, message: String) {
         // Update cached history with user message immediately
         if let Ok(session) = self.session.try_lock() {
@@ -769,8 +780,15 @@ impl App {
 }
 
 fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
-    let app = app_with_commands.command_handler.target();
+    // Extract completion_state first (it's Copy-able via the enum)
     let completion_state = &app_with_commands.completion_state;
+    let completion_loading = matches!(completion_state, CompletionState::Loading);
+    let completion_data: Option<(Vec<commands::Completion>, usize)> = match completion_state {
+        CompletionState::Showing { completions, selected } => Some((completions.clone(), *selected)),
+        _ => None,
+    };
+
+    let app = app_with_commands.command_handler.target_mut();
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -851,19 +869,40 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
     }
 
     // Calculate scroll position
-    // scroll_offset=0 means auto-scroll to bottom, higher values scroll up
+    // scroll_offset=0 means auto-scroll to bottom, higher values scroll up from bottom
     let total_lines = all_lines.len();
     let visible_height = chunks[0].height.saturating_sub(2) as usize; // -2 for borders
     let max_scroll = total_lines.saturating_sub(visible_height);
 
-    // Calculate actual scroll: start from bottom, then apply manual offset
-    let effective_scroll = max_scroll.saturating_sub(0);
+    // Clamp scroll_offset to valid range
+    if app.scroll_offset > max_scroll {
+        app.scroll_offset = max_scroll;
+    }
+    let clamped_offset = app.scroll_offset;
+
+    // Calculate actual scroll: start from bottom, then apply manual offset (scrolling up)
+    let effective_scroll = max_scroll.saturating_sub(clamped_offset);
 
     let chat_content = Paragraph::new(all_lines)
         .block(Block::default().borders(Borders::ALL).title("Chat"))
         .scroll((effective_scroll as u16, 0));
 
     f.render_widget(chat_content, chunks[0]);
+
+    // Render scrollbar
+    if total_lines > visible_height {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"));
+
+        // ScrollbarState position is from top, so we use effective_scroll
+        let mut scrollbar_state = ScrollbarState::new(max_scroll)
+            .position(effective_scroll);
+
+        // Render scrollbar in the inner area (inside the border)
+        let scrollbar_area = chunks[0].inner(ratatui::layout::Margin { vertical: 1, horizontal: 0 });
+        f.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
 
     // Render input box
     let input_widget = Paragraph::new(app.input.value())
@@ -883,7 +922,7 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
     };
     let status_text = if let Some(ref msg) = app.status_message {
         format!(" {} • {} | {}{} ", app.current_provider, app.model_display_name, msg, voice_indicator)
-    } else if matches!(completion_state, CompletionState::Loading) {
+    } else if completion_loading {
         format!(" {} • {} | {} Loading completions...{} ", app.current_provider, app.model_display_name, app.get_thinking_indicator(), voice_indicator)
     } else if app.is_streaming {
         format!(" {} • {} | {} Thinking...{} ", app.current_provider, app.model_display_name, app.get_thinking_indicator(), voice_indicator)
@@ -897,7 +936,7 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
     f.render_widget(status_bar, chunks[2]);
 
     // Render completion popup if showing
-    if let CompletionState::Showing { completions, selected } = completion_state {
+    if let Some((completions, selected)) = completion_data {
         let completion_items: Vec<ListItem> = completions
             .iter()
             .enumerate()
@@ -906,7 +945,7 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
                 let desc = c.description.as_ref().map(|d| format!(" - {}", d)).unwrap_or_default();
                 let text = format!("{}{}", label, desc);
 
-                let style = if i == *selected {
+                let style = if i == selected {
                     Style::default().bg(Color::Blue).fg(Color::White)
                 } else {
                     Style::default()
@@ -982,7 +1021,7 @@ async fn main() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1005,15 +1044,29 @@ async fn main() -> Result<()> {
 
         // Handle input
         if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                should_quit = !app.handle_key_event(key).await?;
+            match event::read()? {
+                Event::Key(key) => {
+                    should_quit = !app.handle_key_event(key).await?;
+                }
+                Event::Mouse(mouse) => {
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => {
+                            app.command_handler.target_mut().scroll_up(3);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            app.command_handler.target_mut().scroll_down(3);
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
             }
         }
     }
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     Ok(())
