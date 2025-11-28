@@ -205,6 +205,8 @@ struct App {
     current_conversation_id: String,
     current_provider: ModelProviderType,
     status_message: Option<String>,
+    /// Multi-line command output (displayed in chat area)
+    command_output: Option<String>,
     is_streaming: bool,
     thinking_frame: usize,
     current_response: String,
@@ -260,6 +262,7 @@ impl App {
             current_conversation_id: conversation_id,
             current_provider: provider,
             status_message: None,
+            command_output: None,
             is_streaming: false,
             thinking_frame: 0,
             current_response: String::new(),
@@ -359,13 +362,22 @@ impl AppWithCommands {
         match result {
             Ok(commands::CommandResult::Success(msg)) => {
                 if !msg.is_empty() {
-                    self.command_handler.target_mut().status_message = Some(msg);
+                    // Multi-line output goes to command_output (displayed in chat area)
+                    // Single-line output goes to status_message (displayed in status bar)
+                    if msg.contains('\n') {
+                        self.command_handler.target_mut().command_output = Some(msg);
+                        self.command_handler.target_mut().status_message = None;
+                    } else {
+                        self.command_handler.target_mut().status_message = Some(msg);
+                        self.command_handler.target_mut().command_output = None;
+                    }
                 }
                 Ok(true)
             }
             Ok(commands::CommandResult::Exit) => Ok(false),
             Err(e) => {
                 self.command_handler.target_mut().status_message = Some(format!("Error: {}", e));
+                self.command_handler.target_mut().command_output = None;
                 Ok(true)
             }
         }
@@ -869,8 +881,9 @@ impl App {
     fn check_engine_events(&mut self) {
         while let Some(event) = self.engine.try_recv() {
             match event {
-                EngineEvent::Token(chunk) => {
-                    self.current_response.push_str(&chunk);
+                EngineEvent::Message(msg) => {
+                    // For TUI, just extract text content for streaming display
+                    self.current_response.push_str(&msg.get_text());
                 }
                 EngineEvent::MessageComplete => {
                     self.is_streaming = false;
@@ -1055,6 +1068,21 @@ fn ui(f: &mut Frame, app_with_commands: &mut AppWithCommands) {
         )));
         for line in app.current_response.lines() {
             all_lines.push(Line::from(line.to_string()));
+        }
+        all_lines.push(Line::from(""));
+    }
+
+    // Add command output if present
+    if let Some(ref output) = app.command_output {
+        all_lines.push(Line::from(Span::styled(
+            "[Command]",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )));
+        for line in output.lines() {
+            all_lines.push(Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(Color::White),
+            )));
         }
         all_lines.push(Line::from(""));
     }

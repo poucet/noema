@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
 pub enum EngineCommand {
-    SendMessage(String),
+    SendMessage(ChatPayload),
     SetModel {
         model: Arc<dyn ChatModel + Send + Sync>,
         name: String,
@@ -15,7 +15,8 @@ pub enum EngineCommand {
 
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
-    Token(String),
+    /// A message chunk (can contain text, images, audio, tool calls, etc.)
+    Message(ChatMessage),
     MessageComplete,
     Error(String),
     ModelChanged(String),
@@ -89,24 +90,23 @@ where
 
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
-                EngineCommand::SendMessage(message) => {
+                EngineCommand::SendMessage(payload) => {
                     // 1. Begin transaction and add user message to it
                     let mut tx = {
                         let sess = session.lock().await;
                         let mut tx = sess.begin();
                         // Add user message to transaction (will be written to DB on commit)
-                        tx.add(ChatMessage::user(ChatPayload::text(&message)));
+                        tx.add(ChatMessage::user(payload));
                         tx
                     };
 
                     // 2. Run Agent (streaming) WITHOUT holding Session lock
                     match agent.execute_stream(&mut tx, model.clone()).await {
                         Ok(_) => {
-                            // 3. Send pending messages as tokens to UI
+                            // 3. Send pending messages (full multimodal content) to UI
                             let pending = tx.pending();
                             for msg in pending.iter() {
-                                let text = msg.get_text();
-                                let _ = event_tx.send(EngineEvent::Token(text));
+                                let _ = event_tx.send(EngineEvent::Message(msg.clone()));
                             }
 
                             // 4. Commit transaction
@@ -139,8 +139,8 @@ where
         }
     }
 
-    pub fn send_message(&self, message: String) {
-        let _ = self.cmd_tx.send(EngineCommand::SendMessage(message));
+    pub fn send_message(&self, payload: impl Into<ChatPayload>) {
+        let _ = self.cmd_tx.send(EngineCommand::SendMessage(payload.into()));
     }
 
     pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>, name: String) {
