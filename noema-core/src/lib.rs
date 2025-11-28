@@ -1,10 +1,11 @@
 //! Core traits and implementations for the noema agent framework
 //!
 //! This crate provides:
-//! - **Traits**: `ConversationContext`, `Agent`, `Transaction`
+//! - **Traits**: `ConversationContext`, `Agent`, `StorageTransaction`
 //! - **Implementations**: `SimpleAgent`, `ToolAgent`, `McpAgent`
 //! - **MCP Support**: `McpRegistry`, `McpToolRegistry` for Model Context Protocol
 //! - **Engine**: `ChatEngine` for managing chat sessions
+//! - **Storage**: `SessionStore` trait with `MemorySession` and `SqliteSession` backends
 //!
 //! # Example
 //!
@@ -19,13 +20,13 @@ pub mod agents;
 pub mod context;
 pub mod engine;
 pub mod mcp;
-pub mod session;
-pub mod transaction;
+pub mod storage;
 
 pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
 pub use engine::{ChatEngine, EngineCommand, EngineEvent};
 pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
-pub use session::{Session, SimpleContext};
-pub use transaction::Transaction;
+pub use storage::{MemorySession, MemoryTransaction, SessionStore, StorageTransaction};
+#[cfg(feature = "sqlite")]
+pub use storage::{SqliteSession, SqliteStore};

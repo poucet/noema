@@ -9,7 +9,7 @@ use crossterm::{
 };
 use llm::{ContentBlock, ModelProvider};
 use noema_audio::{VoiceAgent, VoiceCoordinator};
-use noema_core::{ChatEngine, EngineEvent, McpRegistry, ServerConfig, Session};
+use noema_core::{ChatEngine, EngineEvent, McpRegistry, MemorySession, ServerConfig, SessionStore};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -184,7 +184,7 @@ impl InputHistory {
 
 struct App {
     input: Input,
-    engine: ChatEngine,
+    engine: ChatEngine<MemorySession>,
     current_provider: ModelProviderType,
     status_message: Option<String>,
     is_streaming: bool,
@@ -211,9 +211,9 @@ impl App {
         let model = provider_instance.create_chat_model(model_id).unwrap();
 
         let session = if let Some(sys_msg) = system_message {
-            Session::with_system_message(sys_msg)
+            MemorySession::with_system_message(sys_msg)
         } else {
-            Session::new()
+            MemorySession::new()
         };
 
         let mcp_registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
