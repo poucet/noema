@@ -6,9 +6,30 @@ use noema_audio::{VoiceAgent, VoiceCoordinator};
 use noema_core::{AuthMethod, ChatEngine, EngineEvent, McpRegistry, ServerConfig, SessionStore, SqliteSession, SqliteStore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tokio::sync::Mutex;
+
+// ============================================================================
+// Logging
+// ============================================================================
+
+/// Log a message to ~/Library/Logs/Noema/noema.log
+fn log_message(msg: &str) {
+    if let Some(log_dir) = dirs::home_dir().map(|h| h.join("Library/Logs/Noema")) {
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join("noema.log");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            let _ = writeln!(file, "[{}] {}", timestamp, msg);
+        }
+    }
+}
 
 // ============================================================================
 // Types for frontend communication
@@ -1216,7 +1237,7 @@ async fn start_mcp_oauth(
                 pending_states.insert(state_param.clone(), server_id.clone());
                 // Persist to disk so it survives app restart
                 if let Err(e) = save_pending_oauth_states(&pending_states) {
-                    eprintln!("Warning: Failed to persist OAuth state: {}", e);
+                    log_message(&format!("Warning: Failed to persist OAuth state: {}", e));
                 }
             }
 
@@ -1369,7 +1390,7 @@ async fn complete_mcp_oauth(
 /// Handle incoming deep link URLs (e.g., noema://oauth/callback?code=...&state=...)
 async fn handle_deep_link(app: &AppHandle, urls: Vec<url::Url>) {
     for url in urls {
-        eprintln!("Deep link received: {}", url);
+        log_message(&format!("Deep link received: {}", url));
 
         // Check if this is an OAuth callback
         // Note: In noema://oauth/callback, "oauth" is the host and "/callback" is the path
@@ -1398,37 +1419,37 @@ async fn handle_deep_link(app: &AppHandle, urls: Vec<url::Url>) {
                     // Update persisted state
                     if server_id.is_some() {
                         if let Err(e) = save_pending_oauth_states(&pending_states) {
-                            eprintln!("Warning: Failed to update persisted OAuth state: {}", e);
+                            log_message(&format!("Warning: Failed to update persisted OAuth state: {}", e));
                         }
                     }
 
                     server_id
                 };
 
-                eprintln!("Found server_id for state: {:?}", server_id);
+                log_message(&format!("Found server_id for state: {:?}", server_id));
 
                 if let Some(server_id) = server_id {
                     // Complete OAuth flow
                     match complete_oauth_internal(app, &server_id, &auth_code).await {
                         Ok(()) => {
-                            eprintln!("OAuth completed successfully for server: {}", server_id);
+                            log_message(&format!("OAuth completed successfully for server: {}", server_id));
                             // Emit success event to frontend
                             app.emit("oauth_complete", &server_id).ok();
                         }
                         Err(e) => {
-                            eprintln!("OAuth error: {}", e);
+                            log_message(&format!("OAuth error: {}", e));
                             // Emit error event to frontend
                             app.emit("oauth_error", &e).ok();
                         }
                     }
                 } else {
                     let err = format!("No pending OAuth flow found for state: {}", oauth_state);
-                    eprintln!("{}", err);
+                    log_message(&err);
                     app.emit("oauth_error", &err).ok();
                 }
-            } else if code.is_some() {
-                // Code without state - can't determine which server
-                app.emit("oauth_error", "OAuth callback missing state parameter").ok();
+            } else {
+                // Missing code or state - log but don't emit error (may be duplicate/incomplete callback)
+                log_message(&format!("Incomplete OAuth callback - code: {:?}, state: {:?}", code.is_some(), state_param.is_some()));
             }
         }
     }
@@ -1566,7 +1587,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // When a second instance is launched, this callback receives the args
             // Check if any arg is a deep link URL
-            eprintln!("Single instance callback, argv: {:?}", argv);
+            log_message(&format!("Single instance callback, argv: {:?}", argv));
             for arg in argv {
                 if arg.starts_with("noema://") {
                     if let Ok(url) = url::Url::parse(&arg) {
@@ -1588,7 +1609,7 @@ pub fn run() {
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 let urls = event.urls();
-                eprintln!("Deep link on_open_url, urls: {:?}", urls);
+                log_message(&format!("Deep link on_open_url, urls: {:?}", urls));
                 let handle = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     handle_deep_link(&handle, urls).await;
