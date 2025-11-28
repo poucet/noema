@@ -37,6 +37,18 @@ noema_build() {
     echo "  $REPO_ROOT/noema_ui/src-tauri/target/release/bundle/"
 }
 
+noema_install() {
+    local dmg_path="$REPO_ROOT/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
+
+    if [ ! -f "$dmg_path" ]; then
+        echo "Installer not found. Building first..."
+        noema_build
+    fi
+
+    echo "Opening Noema installer..."
+    open "$dmg_path"
+}
+
 noema_help() {
     cat <<EOF
 Noema CLI Helper
@@ -48,6 +60,7 @@ Commands:
   cli [options]       Run the CLI chat interface
   gui                 Run the Tauri GUI (React + web)
   build               Build release binaries
+  install             Open the macOS installer (.dmg)
   help                Show this help message
 
 TUI/CLI Options:
@@ -94,7 +107,7 @@ EOF
 
 # Export list of available commands (for meta-wrapper discovery)
 noema_commands() {
-    echo "tui cli gui build help"
+    echo "tui cli gui build install help"
 }
 
 # ============================================================================
@@ -134,7 +147,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
         complete)
             noema_complete "$@"
             ;;
-        tui|cli|gui|build|help)
+        tui|cli|gui|build|install|help)
             "noema_$cmd" "$@"
             ;;
         *)

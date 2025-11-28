@@ -3,6 +3,7 @@ import { MessageBubble } from "./components/MessageBubble";
 import { ChatInput } from "./components/ChatInput";
 import { Sidebar } from "./components/Sidebar";
 import { ModelSelector } from "./components/ModelSelector";
+import { McpSettings } from "./components/McpSettings";
 import type { DisplayMessage, ModelInfo, ConversationInfo } from "./types";
 import * as tauri from "./tauri";
 import type { VoiceStatus } from "./tauri";
@@ -19,6 +20,7 @@ function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [voiceAvailable, setVoiceAvailable] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("disabled");
+  const [showMcpSettings, setShowMcpSettings] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -240,7 +242,13 @@ function App() {
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
+        onOpenMcpSettings={() => setShowMcpSettings(true)}
       />
+
+      {/* MCP Settings Modal */}
+      {showMcpSettings && (
+        <McpSettings onClose={() => setShowMcpSettings(false)} />
+      )}
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">

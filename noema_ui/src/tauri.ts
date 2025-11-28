@@ -4,6 +4,9 @@ import type {
   DisplayMessage,
   ModelInfo,
   ConversationInfo,
+  McpServerInfo,
+  McpToolInfo,
+  AddMcpServerRequest,
 } from "./types";
 
 // Tauri commands
@@ -140,4 +143,54 @@ export function onVoiceError(
   callback: (error: string) => void
 ): Promise<UnlistenFn> {
   return listen<string>("voice_error", (event) => callback(event.payload));
+}
+
+// MCP Server commands
+export async function listMcpServers(): Promise<McpServerInfo[]> {
+  return invoke<McpServerInfo[]>("list_mcp_servers");
+}
+
+export async function addMcpServer(request: AddMcpServerRequest): Promise<void> {
+  return invoke<void>("add_mcp_server", { request });
+}
+
+export async function removeMcpServer(serverId: string): Promise<void> {
+  return invoke<void>("remove_mcp_server", { serverId });
+}
+
+export async function connectMcpServer(serverId: string): Promise<number> {
+  return invoke<number>("connect_mcp_server", { serverId });
+}
+
+export async function disconnectMcpServer(serverId: string): Promise<void> {
+  return invoke<void>("disconnect_mcp_server", { serverId });
+}
+
+export async function getMcpServerTools(serverId: string): Promise<McpToolInfo[]> {
+  return invoke<McpToolInfo[]>("get_mcp_server_tools", { serverId });
+}
+
+export async function testMcpServer(serverId: string): Promise<number> {
+  return invoke<number>("test_mcp_server", { serverId });
+}
+
+export async function startMcpOauth(serverId: string): Promise<string> {
+  return invoke<string>("start_mcp_oauth", { serverId });
+}
+
+export async function completeMcpOauth(serverId: string, code: string): Promise<void> {
+  return invoke<void>("complete_mcp_oauth", { serverId, code });
+}
+
+// OAuth events (from deep link handler)
+export function onOauthComplete(
+  callback: (serverId: string) => void
+): Promise<UnlistenFn> {
+  return listen<string>("oauth_complete", (event) => callback(event.payload));
+}
+
+export function onOauthError(
+  callback: (error: string) => void
+): Promise<UnlistenFn> {
+  return listen<string>("oauth_error", (event) => callback(event.payload));
 }

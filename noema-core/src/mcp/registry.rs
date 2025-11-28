@@ -113,10 +113,13 @@ impl McpRegistry {
 
     /// Connect to a server configuration
     async fn connect_to_server(config: &ServerConfig) -> Result<ConnectedServer> {
-        let transport = if let Some(ref token) = config.auth_token {
+        // Get bearer token from auth method (new) or legacy auth_token field
+        let bearer_token = config.auth.bearer_token().or(config.auth_token.as_deref());
+
+        let transport = if let Some(token) = bearer_token {
             let mut transport_config =
                 StreamableHttpClientTransportConfig::with_uri(Arc::from(config.url.as_str()));
-            transport_config = transport_config.auth_header(token.clone());
+            transport_config = transport_config.auth_header(token.to_string());
             StreamableHttpClientTransport::from_config(transport_config)
         } else {
             StreamableHttpClientTransport::from_uri(config.url.as_str())

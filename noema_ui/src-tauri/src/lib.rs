@@ -3,9 +3,11 @@
 use config::{create_provider, get_model_info, ModelProviderType, ProviderUrls};
 use llm::{ChatMessage, ChatPayload, ContentBlock, ModelProvider, Role, ToolResultContent};
 use noema_audio::{VoiceAgent, VoiceCoordinator};
-use noema_core::{ChatEngine, EngineEvent, McpRegistry, SessionStore, SqliteSession, SqliteStore};
+use noema_core::{AuthMethod, ChatEngine, EngineEvent, McpRegistry, ServerConfig, SessionStore, SqliteSession, SqliteStore};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tokio::sync::Mutex;
 
 // ============================================================================
@@ -65,6 +67,46 @@ pub enum DisplayToolResultContent {
 pub struct DisplayMessage {
     pub role: String,
     pub content: Vec<DisplayContent>,
+}
+
+// MCP server info for frontend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerInfo {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub auth_type: String,
+    pub is_connected: bool,
+    pub needs_oauth_login: bool,
+    pub tool_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolInfo {
+    pub name: String,
+    pub description: Option<String>,
+    pub server_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddMcpServerRequest {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub auth_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub use_well_known: bool,
 }
 
 impl DisplayMessage {
@@ -191,10 +233,15 @@ pub struct AppState {
     voice_coordinator: Mutex<Option<VoiceCoordinator>>,
     voice_enabled: Mutex<bool>,
     is_processing: Mutex<bool>,
+    /// Maps OAuth state parameter to server ID for pending OAuth flows
+    pending_oauth_states: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        // Load pending OAuth states from disk
+        let pending_states = load_pending_oauth_states().unwrap_or_default();
+
         Self {
             store: Mutex::new(None),
             engine: Mutex::new(None),
@@ -204,8 +251,31 @@ impl AppState {
             voice_coordinator: Mutex::new(None),
             voice_enabled: Mutex::new(false),
             is_processing: Mutex::new(false),
+            pending_oauth_states: Mutex::new(pending_states),
         }
     }
+}
+
+/// Get the path to the pending OAuth states file
+fn get_oauth_states_path() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|d| d.join("noema").join("pending_oauth.json"))
+}
+
+/// Load pending OAuth states from disk
+fn load_pending_oauth_states() -> Option<HashMap<String, String>> {
+    let path = get_oauth_states_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// Save pending OAuth states to disk
+fn save_pending_oauth_states(states: &HashMap<String, String>) -> Result<(), String> {
+    let path = get_oauth_states_path().ok_or("Could not determine data directory")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string(states).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
 impl Default for AppState {
@@ -788,6 +858,699 @@ async fn get_voice_status(state: State<'_, AppState>) -> Result<String, String> 
 }
 
 // ============================================================================
+// MCP Server Commands
+// ============================================================================
+
+/// List all configured MCP servers
+#[tauri::command]
+async fn list_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServerInfo>, String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let registry = mcp_registry.lock().await;
+
+    let mut servers = Vec::new();
+    for (id, config) in registry.list_servers() {
+        let is_connected = registry.is_connected(id);
+        let tool_count = if let Some(conn) = registry.get_connection(id) {
+            conn.tools.len()
+        } else {
+            0
+        };
+
+        let auth_type = match &config.auth {
+            AuthMethod::None => "none",
+            AuthMethod::Token { .. } => "token",
+            AuthMethod::OAuth { .. } => "oauth",
+        };
+
+        servers.push(McpServerInfo {
+            id: id.to_string(),
+            name: config.name.clone(),
+            url: config.url.clone(),
+            auth_type: auth_type.to_string(),
+            is_connected,
+            needs_oauth_login: config.auth.needs_oauth_login(),
+            tool_count,
+        });
+    }
+
+    Ok(servers)
+}
+
+/// Add a new MCP server configuration
+#[tauri::command]
+async fn add_mcp_server(
+    state: State<'_, AppState>,
+    request: AddMcpServerRequest,
+) -> Result<(), String> {
+    let auth = match request.auth_type.as_str() {
+        "token" => AuthMethod::Token {
+            token: request.token.ok_or("Token required for token auth")?,
+        },
+        "oauth" => {
+            // For OAuth, we'll discover endpoints via .well-known and use dynamic client registration
+            // or a default client ID. The client_id will be populated during the OAuth flow.
+            AuthMethod::OAuth {
+                client_id: request.client_id.unwrap_or_else(|| "noema".to_string()),
+                client_secret: request.client_secret,
+                authorization_url: None,
+                token_url: None,
+                scopes: request.scopes,
+                access_token: None,
+                refresh_token: None,
+                expires_at: None,
+            }
+        }
+        _ => AuthMethod::None,
+    };
+
+    let config = ServerConfig {
+        name: request.name,
+        url: request.url,
+        auth,
+        use_well_known: request.use_well_known,
+        auth_token: None,
+    };
+
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+    registry.add_server(request.id, config);
+    registry.save_config().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Remove an MCP server configuration
+#[tauri::command]
+async fn remove_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+    registry
+        .remove_server(&server_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    registry.save_config().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Connect to an MCP server
+#[tauri::command]
+async fn connect_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<usize, String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    let server = registry
+        .connect(&server_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(server.tools.len())
+}
+
+/// Disconnect from an MCP server
+#[tauri::command]
+async fn disconnect_mcp_server(
+    state: State<'_, AppState>,
+    server_id: String,
+) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+    registry
+        .disconnect(&server_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Get tools from a connected MCP server
+#[tauri::command]
+async fn get_mcp_server_tools(
+    state: State<'_, AppState>,
+    server_id: String,
+) -> Result<Vec<McpToolInfo>, String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let registry = mcp_registry.lock().await;
+
+    let server = registry
+        .get_connection(&server_id)
+        .ok_or("Server not connected")?;
+
+    let tools = server
+        .tools
+        .iter()
+        .map(|tool| McpToolInfo {
+            name: tool.name.to_string(),
+            description: tool.description.as_ref().map(|d| d.to_string()),
+            server_id: server_id.clone(),
+        })
+        .collect();
+
+    Ok(tools)
+}
+
+/// Test connection to an MCP server (connect and immediately disconnect)
+#[tauri::command]
+async fn test_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<usize, String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    // Connect to test
+    let server = registry
+        .connect(&server_id)
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    let tool_count = server.tools.len();
+
+    // Disconnect after test
+    registry
+        .disconnect(&server_id)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(tool_count)
+}
+
+/// Fetch .well-known OAuth configuration
+async fn fetch_well_known(base_url: &str) -> Result<serde_json::Value, String> {
+    let base = url::Url::parse(base_url).map_err(|e| format!("Invalid server URL: {}", e))?;
+    let well_known_url = base
+        .join("/.well-known/oauth-authorization-server")
+        .map_err(|e| format!("Failed to construct well-known URL: {}", e))?;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(well_known_url.as_str())
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch well-known config: {}", e))?;
+
+    resp.json()
+        .await
+        .map_err(|e| format!("Failed to parse well-known config: {}", e))
+}
+
+/// Perform dynamic client registration (RFC 7591)
+async fn register_oauth_client(
+    registration_endpoint: &str,
+    redirect_uri: &str,
+) -> Result<(String, Option<String>), String> {
+    let client = reqwest::Client::new();
+
+    let registration_request = serde_json::json!({
+        "client_name": "Noema",
+        "redirect_uris": [redirect_uri],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none"  // Public client
+    });
+
+    let resp = client
+        .post(registration_endpoint)
+        .json(&registration_request)
+        .send()
+        .await
+        .map_err(|e| format!("Client registration failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let error_text = resp.text().await.unwrap_or_default();
+        return Err(format!("Client registration failed: {}", error_text));
+    }
+
+    let registration_response: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse registration response: {}", e))?;
+
+    let client_id = registration_response["client_id"]
+        .as_str()
+        .ok_or("No client_id in registration response")?
+        .to_string();
+
+    let client_secret = registration_response["client_secret"].as_str().map(String::from);
+
+    Ok((client_id, client_secret))
+}
+
+/// Start OAuth flow for an MCP server (returns authorization URL)
+#[tauri::command]
+async fn start_mcp_oauth(
+    state: State<'_, AppState>,
+    server_id: String,
+) -> Result<String, String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    let config = registry
+        .config()
+        .get_server(&server_id)
+        .ok_or("Server not found")?
+        .clone();
+
+    match &config.auth {
+        AuthMethod::OAuth {
+            client_id,
+            client_secret,
+            authorization_url,
+            scopes,
+            ..
+        } => {
+            let redirect_uri = "noema://oauth/callback";
+
+            // Fetch .well-known config if needed
+            let well_known = if config.use_well_known {
+                Some(fetch_well_known(&config.url).await?)
+            } else {
+                None
+            };
+
+            // Get authorization URL
+            let auth_url = if let Some(url) = authorization_url {
+                url.clone()
+            } else if let Some(ref wk) = well_known {
+                wk["authorization_endpoint"]
+                    .as_str()
+                    .ok_or("No authorization_endpoint in well-known config")?
+                    .to_string()
+            } else {
+                return Err("OAuth requires authorization_url or use_well_known".to_string());
+            };
+
+            // Check if we need to register the client dynamically.
+            // We always re-register if client_id is "noema", empty, or if there's no access_token yet
+            // (which means a previous registration may have used a different redirect_uri).
+            let needs_registration = client_id == "noema" || client_id.is_empty();
+
+            let (final_client_id, _final_client_secret) = if needs_registration {
+                // Try dynamic client registration
+                if let Some(ref wk) = well_known {
+                    if let Some(reg_endpoint) = wk["registration_endpoint"].as_str() {
+                        let (new_id, new_secret) =
+                            register_oauth_client(reg_endpoint, redirect_uri).await?;
+
+                        // Update config with new client credentials
+                        let updated_auth = AuthMethod::OAuth {
+                            client_id: new_id.clone(),
+                            client_secret: new_secret.clone(),
+                            authorization_url: Some(auth_url.clone()),
+                            token_url: wk["token_endpoint"].as_str().map(String::from),
+                            scopes: scopes.clone(),
+                            access_token: None,
+                            refresh_token: None,
+                            expires_at: None,
+                        };
+
+                        let updated_config = ServerConfig {
+                            name: config.name.clone(),
+                            url: config.url.clone(),
+                            auth: updated_auth,
+                            use_well_known: config.use_well_known,
+                            auth_token: None,
+                        };
+
+                        registry.add_server(server_id.clone(), updated_config);
+                        registry.save_config().map_err(|e| e.to_string())?;
+
+                        (new_id, new_secret)
+                    } else {
+                        return Err("Server requires client registration but no registration_endpoint found. Please configure client_id manually.".to_string());
+                    }
+                } else {
+                    return Err("Cannot register client without .well-known discovery".to_string());
+                }
+            } else {
+                (client_id.clone(), client_secret.clone())
+            };
+
+            // Build authorization URL with state parameter that maps to server_id
+            let state_param = uuid::Uuid::new_v4().to_string();
+
+            // Store the state -> server_id mapping in memory and persist to disk
+            {
+                let mut pending_states = state.pending_oauth_states.lock().await;
+                pending_states.insert(state_param.clone(), server_id.clone());
+                // Persist to disk so it survives app restart
+                if let Err(e) = save_pending_oauth_states(&pending_states) {
+                    eprintln!("Warning: Failed to persist OAuth state: {}", e);
+                }
+            }
+
+            let scope_str = if scopes.is_empty() {
+                "openid".to_string()
+            } else {
+                scopes.join(" ")
+            };
+
+            let mut url = url::Url::parse(&auth_url)
+                .map_err(|e| format!("Invalid authorization URL: {}", e))?;
+
+            url.query_pairs_mut()
+                .append_pair("client_id", &final_client_id)
+                .append_pair("response_type", "code")
+                .append_pair("redirect_uri", redirect_uri)
+                .append_pair("state", &state_param)
+                .append_pair("scope", &scope_str);
+
+            Ok(url.to_string())
+        }
+        _ => Err("Server is not configured for OAuth".to_string()),
+    }
+}
+
+/// Complete OAuth flow with authorization code
+#[tauri::command]
+async fn complete_mcp_oauth(
+    state: State<'_, AppState>,
+    server_id: String,
+    code: String,
+) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    let config = registry
+        .config()
+        .get_server(&server_id)
+        .ok_or("Server not found")?
+        .clone();
+
+    match &config.auth {
+        AuthMethod::OAuth {
+            client_id,
+            client_secret,
+            token_url,
+            authorization_url,
+            scopes,
+            ..
+        } => {
+            // Get token URL
+            let tok_url = if let Some(url) = token_url {
+                url.clone()
+            } else if config.use_well_known {
+                let well_known = fetch_well_known(&config.url).await?;
+                well_known["token_endpoint"]
+                    .as_str()
+                    .ok_or("No token_endpoint in well-known config")?
+                    .to_string()
+            } else {
+                return Err("OAuth requires token_url or use_well_known".to_string());
+            };
+
+            // Use same redirect_uri as in start_mcp_oauth
+            let redirect_uri = "noema://oauth/callback";
+            let http_client = reqwest::Client::new();
+
+            let mut params = vec![
+                ("grant_type", "authorization_code"),
+                ("code", &code),
+                ("redirect_uri", redirect_uri),
+                ("client_id", client_id.as_str()),
+            ];
+
+            let client_secret_str;
+            if let Some(secret) = client_secret {
+                client_secret_str = secret.clone();
+                params.push(("client_secret", &client_secret_str));
+            }
+
+            let resp = http_client
+                .post(&tok_url)
+                .form(&params)
+                .send()
+                .await
+                .map_err(|e| format!("Token exchange failed: {}", e))?;
+
+            if !resp.status().is_success() {
+                let error_text = resp.text().await.unwrap_or_default();
+                return Err(format!("Token exchange failed: {}", error_text));
+            }
+
+            let token_response: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+            let access_token = token_response["access_token"]
+                .as_str()
+                .ok_or("No access_token in response")?
+                .to_string();
+
+            let refresh_token = token_response["refresh_token"].as_str().map(String::from);
+
+            let expires_in = token_response["expires_in"].as_i64();
+            let expires_at = expires_in.map(|exp| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64
+                    + exp
+            });
+
+            // Update the server config with tokens
+            let updated_auth = AuthMethod::OAuth {
+                client_id: client_id.clone(),
+                client_secret: client_secret.clone(),
+                authorization_url: authorization_url.clone(),
+                token_url: Some(tok_url),
+                scopes: scopes.clone(),
+                access_token: Some(access_token),
+                refresh_token,
+                expires_at,
+            };
+
+            let updated_config = ServerConfig {
+                name: config.name.clone(),
+                url: config.url.clone(),
+                auth: updated_auth,
+                use_well_known: config.use_well_known,
+                auth_token: None,
+            };
+
+            registry.add_server(server_id, updated_config);
+            registry.save_config().map_err(|e| e.to_string())?;
+
+            Ok(())
+        }
+        _ => Err("Server is not configured for OAuth".to_string()),
+    }
+}
+
+// ============================================================================
+// Deep Link Handler
+// ============================================================================
+
+/// Handle incoming deep link URLs (e.g., noema://oauth/callback?code=...&state=...)
+async fn handle_deep_link(app: &AppHandle, urls: Vec<url::Url>) {
+    for url in urls {
+        eprintln!("Deep link received: {}", url);
+
+        // Check if this is an OAuth callback
+        if url.scheme() == "noema" && url.path() == "/oauth/callback" {
+            // Extract the code and state from query params
+            let code = url.query_pairs()
+                .find(|(key, _)| key == "code")
+                .map(|(_, value)| value.to_string());
+
+            let state_param = url.query_pairs()
+                .find(|(key, _)| key == "state")
+                .map(|(_, value)| value.to_string());
+
+            eprintln!("OAuth callback - code: {:?}, state: {:?}", code.is_some(), state_param);
+
+            if let (Some(auth_code), Some(oauth_state)) = (code, state_param) {
+                let app_state = app.state::<AppState>();
+
+                // Look up server ID from state parameter
+                let server_id = {
+                    let mut pending_states = app_state.pending_oauth_states.lock().await;
+                    let server_id = pending_states.remove(&oauth_state);
+
+                    // Update persisted state
+                    if server_id.is_some() {
+                        if let Err(e) = save_pending_oauth_states(&pending_states) {
+                            eprintln!("Warning: Failed to update persisted OAuth state: {}", e);
+                        }
+                    }
+
+                    server_id
+                };
+
+                eprintln!("Found server_id for state: {:?}", server_id);
+
+                if let Some(server_id) = server_id {
+                    // Complete OAuth flow
+                    match complete_oauth_internal(app, &server_id, &auth_code).await {
+                        Ok(()) => {
+                            eprintln!("OAuth completed successfully for server: {}", server_id);
+                            // Emit success event to frontend
+                            app.emit("oauth_complete", &server_id).ok();
+                        }
+                        Err(e) => {
+                            eprintln!("OAuth error: {}", e);
+                            // Emit error event to frontend
+                            app.emit("oauth_error", &e).ok();
+                        }
+                    }
+                } else {
+                    let err = format!("No pending OAuth flow found for state: {}", oauth_state);
+                    eprintln!("{}", err);
+                    app.emit("oauth_error", &err).ok();
+                }
+            } else if code.is_some() {
+                // Code without state - can't determine which server
+                app.emit("oauth_error", "OAuth callback missing state parameter").ok();
+            }
+        }
+    }
+}
+
+/// Internal function to complete OAuth (shared by command and deep link handler)
+async fn complete_oauth_internal(
+    app: &AppHandle,
+    server_id: &str,
+    code: &str,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    let config = registry
+        .config()
+        .get_server(server_id)
+        .ok_or("Server not found")?
+        .clone();
+
+    match &config.auth {
+        AuthMethod::OAuth {
+            client_id,
+            client_secret,
+            token_url,
+            authorization_url,
+            scopes,
+            ..
+        } => {
+            // Get token URL
+            let tok_url = if let Some(url) = token_url {
+                url.clone()
+            } else if config.use_well_known {
+                let well_known = fetch_well_known(&config.url).await?;
+                well_known["token_endpoint"]
+                    .as_str()
+                    .ok_or("No token_endpoint in well-known config")?
+                    .to_string()
+            } else {
+                return Err("OAuth requires token_url or use_well_known".to_string());
+            };
+
+            let redirect_uri = "noema://oauth/callback";
+            let http_client = reqwest::Client::new();
+
+            let mut params = vec![
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("redirect_uri", redirect_uri),
+                ("client_id", client_id.as_str()),
+            ];
+
+            let client_secret_str;
+            if let Some(secret) = client_secret {
+                client_secret_str = secret.clone();
+                params.push(("client_secret", &client_secret_str));
+            }
+
+            let resp = http_client
+                .post(&tok_url)
+                .form(&params)
+                .send()
+                .await
+                .map_err(|e| format!("Token exchange failed: {}", e))?;
+
+            if !resp.status().is_success() {
+                let error_text = resp.text().await.unwrap_or_default();
+                return Err(format!("Token exchange failed: {}", error_text));
+            }
+
+            let token_response: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+            let access_token = token_response["access_token"]
+                .as_str()
+                .ok_or("No access_token in response")?
+                .to_string();
+
+            let refresh_token = token_response["refresh_token"].as_str().map(String::from);
+
+            let expires_in = token_response["expires_in"].as_i64();
+            let expires_at = expires_in.map(|exp| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64
+                    + exp
+            });
+
+            // Update the server config with tokens
+            let updated_auth = AuthMethod::OAuth {
+                client_id: client_id.clone(),
+                client_secret: client_secret.clone(),
+                authorization_url: authorization_url.clone(),
+                token_url: Some(tok_url),
+                scopes: scopes.clone(),
+                access_token: Some(access_token),
+                refresh_token,
+                expires_at,
+            };
+
+            let updated_config = ServerConfig {
+                name: config.name.clone(),
+                url: config.url.clone(),
+                auth: updated_auth,
+                use_well_known: config.use_well_known,
+                auth_token: None,
+            };
+
+            registry.add_server(server_id.to_string(), updated_config);
+            registry.save_config().map_err(|e| e.to_string())?;
+
+            Ok(())
+        }
+        _ => Err("Server is not configured for OAuth".to_string()),
+    }
+}
+
+// ============================================================================
 // Application Entry Point
 // ============================================================================
 
@@ -796,7 +1559,40 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // When a second instance is launched, this callback receives the args
+            // Check if any arg is a deep link URL
+            eprintln!("Single instance callback, argv: {:?}", argv);
+            for arg in argv {
+                if arg.starts_with("noema://") {
+                    if let Ok(url) = url::Url::parse(&arg) {
+                        let handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            handle_deep_link(&handle, vec![url]).await;
+                        });
+                    }
+                }
+            }
+            // Focus the existing window
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+        }))
         .manage(AppState::new())
+        .setup(|app| {
+            // Register deep link handler for when app is already running
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                let urls = event.urls();
+                eprintln!("Deep link on_open_url, urls: {:?}", urls);
+                let handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    handle_deep_link(&handle, urls).await;
+                });
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             init_app,
             get_messages,
@@ -814,6 +1610,16 @@ pub fn run() {
             is_voice_available,
             toggle_voice,
             get_voice_status,
+            // MCP server commands
+            list_mcp_servers,
+            add_mcp_server,
+            remove_mcp_server,
+            connect_mcp_server,
+            disconnect_mcp_server,
+            get_mcp_server_tools,
+            test_mcp_server,
+            start_mcp_oauth,
+            complete_mcp_oauth,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

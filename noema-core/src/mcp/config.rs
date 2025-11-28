@@ -2,6 +2,75 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Authentication method for an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// No authentication required
+    #[default]
+    None,
+    /// Static bearer token
+    Token {
+        token: String,
+    },
+    /// OAuth 2.0 authentication
+    OAuth {
+        /// OAuth client ID
+        client_id: String,
+        /// OAuth client secret (optional for public clients)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        client_secret: Option<String>,
+        /// Authorization endpoint URL (discovered via .well-known if not set)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        authorization_url: Option<String>,
+        /// Token endpoint URL (discovered via .well-known if not set)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        token_url: Option<String>,
+        /// Requested scopes
+        #[serde(default)]
+        scopes: Vec<String>,
+        /// Current access token (populated after OAuth flow)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        access_token: Option<String>,
+        /// Refresh token for obtaining new access tokens
+        #[serde(skip_serializing_if = "Option::is_none")]
+        refresh_token: Option<String>,
+        /// Token expiration timestamp (Unix epoch seconds)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expires_at: Option<i64>,
+    },
+}
+
+impl AuthMethod {
+    /// Get the current bearer token for authorization header
+    pub fn bearer_token(&self) -> Option<&str> {
+        match self {
+            AuthMethod::None => None,
+            AuthMethod::Token { token } => Some(token),
+            AuthMethod::OAuth { access_token, .. } => access_token.as_deref(),
+        }
+    }
+
+    /// Check if OAuth token is expired or about to expire (within 60 seconds)
+    pub fn is_token_expired(&self) -> bool {
+        match self {
+            AuthMethod::OAuth { expires_at: Some(expires), .. } => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                *expires <= now + 60
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if this auth method requires OAuth login
+    pub fn needs_oauth_login(&self) -> bool {
+        matches!(self, AuthMethod::OAuth { access_token: None, .. })
+    }
+}
+
 /// Configuration for a single MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -9,7 +78,13 @@ pub struct ServerConfig {
     pub name: String,
     /// HTTP endpoint URL for the streamable HTTP server
     pub url: String,
-    /// Optional authentication token
+    /// Authentication method
+    #[serde(default)]
+    pub auth: AuthMethod,
+    /// Whether to use .well-known discovery for OAuth endpoints
+    #[serde(default)]
+    pub use_well_known: bool,
+    /// Optional authentication token (legacy, prefer `auth` field)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
 }

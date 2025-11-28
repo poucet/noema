@@ -26,7 +26,7 @@ pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
 pub use engine::{ChatEngine, EngineCommand, EngineEvent};
-pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
+pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 pub use storage::{MemorySession, MemoryTransaction, SessionStore, StorageTransaction};
 #[cfg(feature = "sqlite")]
 pub use storage::{ConversationInfo, SqliteSession, SqliteStore};

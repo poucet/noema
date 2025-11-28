@@ -54,3 +54,34 @@ export function hasMedia(content: DisplayContent[]): boolean {
     (block) => "image" in block || "audio" in block
   );
 }
+
+// MCP Server types
+export type McpAuthType = "none" | "token" | "oauth";
+
+export interface McpServerInfo {
+  id: string;
+  name: string;
+  url: string;
+  authType: McpAuthType;
+  isConnected: boolean;
+  needsOauthLogin: boolean;
+  toolCount: number;
+}
+
+export interface McpToolInfo {
+  name: string;
+  description: string | null;
+  serverId: string;
+}
+
+export interface AddMcpServerRequest {
+  id: string;
+  name: string;
+  url: string;
+  authType: McpAuthType;
+  token?: string;
+  clientId?: string;
+  clientSecret?: string;
+  scopes?: string[];
+  useWellKnown?: boolean;
+}

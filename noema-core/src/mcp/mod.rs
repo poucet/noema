@@ -3,5 +3,5 @@
 mod config;
 mod registry;
 
-pub use config::{McpConfig, ServerConfig};
+pub use config::{AuthMethod, McpConfig, ServerConfig};
 pub use registry::{ConnectedServer, McpRegistry, McpToolRegistry};
