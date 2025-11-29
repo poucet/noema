@@ -13,23 +13,8 @@ pub async fn init_app(_app: AppHandle, state: State<'_, AppState>) -> Result<Str
     use noema_core::SqliteStore;
     use config::PathManager;
 
-    // Use the same database path as TUI: dirs::data_dir()/noema/conversations.db
-    // On mobile, fall back to Tauri's app_data_dir
-    #[cfg(not(target_os = "android"))]
+    // Use PathManager for DB path (handles both desktop and mobile if set_data_dir was called)
     let db_path = PathManager::db_path().ok_or("Failed to determine database path")?;
-
-    #[cfg(target_os = "android")]
-    let db_path = {
-        let app_dir = _app
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-        if !app_dir.exists() {
-            std::fs::create_dir_all(&app_dir)
-                .map_err(|e| format!("Failed to create app dir: {}", e))?;
-        }
-        app_dir.join("conversations.db")
-    };
 
     // Ensure directory exists
     if let Some(parent) = db_path.parent() {

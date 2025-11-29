@@ -99,7 +99,7 @@ pub struct McpConfig {
 impl McpConfig {
     /// Get the default config file path (~/.noema/mcp.toml)
     pub fn default_path() -> Option<PathBuf> {
-        directories::UserDirs::new().map(|dirs| dirs.home_dir().join(".noema").join("mcp.toml"))
+        config::PathManager::mcp_config_path()
     }
 
     /// Load configuration from the default path

@@ -22,23 +22,14 @@ pub async fn is_voice_available(app: AppHandle) -> Result<bool, String> {
 }
 
 /// Get the Whisper model path using AppHandle for proper mobile resolution
-fn get_whisper_model_path(app: &AppHandle) -> Option<PathBuf> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    return app.path().app_data_dir()
-        .ok()
-        .map(|dir| dir.join("models").join("ggml-base.en.bin"));
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        // Suppress unused variable warning for desktop builds where app is not used
-        let _ = app;
-        config::PathManager::whisper_model_path()
-    }
+fn get_whisper_model_path(_app: &AppHandle) -> Option<PathBuf> {
+    use config::PathManager;
+    PathManager::whisper_model_path()
 }
 
 /// Download the Whisper model
 #[tauri::command]
-pub async fn download_voice_model(app: AppHandle) -> Result<(), String> {
+pub async fn download_voice_model(app: AppHandle, url: String) -> Result<(), String> {
     let model_path = get_whisper_model_path(&app)
         .ok_or("Could not determine model path")?;
 
@@ -51,12 +42,11 @@ pub async fn download_voice_model(app: AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to create model directory: {}", e))?;
     }
 
-    let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
     log_message(&format!("Downloading model from {}", url));
     app.emit("download_progress", "starting").ok();
 
     let client = reqwest::Client::new();
-    let response = client.get(url).send().await
+    let response = client.get(&url).send().await
         .map_err(|e| format!("Failed to fetch model: {}", e))?;
 
     let total_size = response.content_length().unwrap_or(0);

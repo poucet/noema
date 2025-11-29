@@ -48,6 +48,14 @@ pub fn run() {
         }))
         .manage(AppState::new())
         .setup(|app| {
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                use tauri::Manager;
+                if let Ok(dir) = app.path().app_data_dir() {
+                    config::PathManager::set_data_dir(dir);
+                }
+            }
+
             // Register deep link handler for when app is already running
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
