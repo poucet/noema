@@ -207,3 +207,21 @@ export async function processAudioChunk(samples: number[]): Promise<void> {
 export async function stopVoiceSession(): Promise<string | null> {
   return invoke<string | null>("stop_voice_session");
 }
+
+// File commands
+export async function saveFile(
+  data: string,
+  filename: string,
+  mimeType: string
+): Promise<boolean> {
+  return invoke<boolean>("save_file", { data, filename, mimeType });
+}
+
+// Logging
+export async function logDebug(
+  level: string,
+  source: string,
+  message: string
+): Promise<void> {
+  return invoke<void>("log_debug", { level, source, message });
+}

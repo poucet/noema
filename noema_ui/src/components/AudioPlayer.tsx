@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback } from "react";
+import * as tauri from "../tauri";
+import { audioLog } from "../utils/log";
 
 interface AudioPlayerProps {
   data: string; // base64 encoded audio data
@@ -115,17 +117,24 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
     }
   }, [isPlaying, play, stopPlayback]);
 
-  const handleDownload = useCallback(() => {
-    const dataUrl = `data:${mimeType};base64,${data}`;
-    const link = document.createElement("a");
-    link.href = dataUrl;
+  const handleDownload = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
     // Generate filename from mime type
-    const extension = mimeType.split("/")[1] || "bin";
+    const safeMimeType = mimeType || "audio/wav";
+    const extension = safeMimeType.split("/")[1] || "bin";
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    link.download = `audio-${timestamp}.${extension}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const filename = `audio-${timestamp}.${extension}`;
+
+    audioLog.info("Download requested", { filename, mimeType: safeMimeType });
+
+    try {
+      const result = await tauri.saveFile(data, filename, safeMimeType);
+      audioLog.info("Download result", { result });
+    } catch (err) {
+      audioLog.error("Failed to save file", { err });
+    }
   }, [data, mimeType]);
 
   return (

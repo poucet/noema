@@ -31,6 +31,13 @@ fn log_message(msg: &str) {
     }
 }
 
+/// Frontend logging command - allows JS to write to the same log file
+#[tauri::command]
+fn log_debug(level: String, source: String, message: String) {
+    let formatted = format!("[{}] [{}] {}", level.to_uppercase(), source, message);
+    log_message(&formatted);
+}
+
 // ============================================================================
 // Types for frontend communication
 // ============================================================================
@@ -963,6 +970,67 @@ async fn stop_voice_session(
 }
 
 // ============================================================================
+// File Download Commands
+// ============================================================================
+
+/// Save binary data to a file using the system save dialog
+#[tauri::command]
+async fn save_file(
+    app: AppHandle,
+    data: String,       // base64 encoded data
+    filename: String,   // suggested filename
+    mime_type: String,  // mime type for file filter
+) -> Result<bool, String> {
+    use base64::Engine;
+    use tauri_plugin_dialog::DialogExt;
+
+    log_message(&format!("save_file called: filename={}, mime_type={}", filename, mime_type));
+
+    // Decode base64 data
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| {
+            log_message(&format!("Failed to decode base64: {}", e));
+            format!("Failed to decode data: {}", e)
+        })?;
+
+    log_message(&format!("Decoded {} bytes", bytes.len()));
+
+    // Determine file extension from mime type
+    let extension = mime_type.split('/').nth(1).unwrap_or("bin").to_string();
+
+    // Use a channel to get the result from the dialog callback
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    app.dialog()
+        .file()
+        .set_file_name(&filename)
+        .add_filter(&mime_type, &[&extension])
+        .save_file(move |file_path| {
+            let _ = tx.send(file_path);
+        });
+
+    let file_path = rx.await.map_err(|e| format!("Dialog error: {}", e))?;
+
+    log_message(&format!("Dialog returned: {:?}", file_path));
+
+    if let Some(path) = file_path {
+        let path_buf = path.as_path().ok_or("Invalid path")?;
+        log_message(&format!("Writing to: {:?}", path_buf));
+        std::fs::write(path_buf, &bytes)
+            .map_err(|e| {
+                log_message(&format!("Failed to write: {}", e));
+                format!("Failed to write file: {}", e)
+            })?;
+        log_message("File saved successfully");
+        Ok(true)
+    } else {
+        log_message("User cancelled");
+        Ok(false) // User cancelled
+    }
+}
+
+// ============================================================================
 // MCP Server Commands
 // ============================================================================
 
@@ -1695,6 +1763,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // When a second instance is launched, this callback receives the args
             // Check if any arg is a deep link URL
@@ -1749,6 +1818,10 @@ pub fn run() {
             start_voice_session,
             process_audio_chunk,
             stop_voice_session,
+            // File commands
+            save_file,
+            // Logging
+            log_debug,
             // MCP server commands
             list_mcp_servers,
             add_mcp_server,

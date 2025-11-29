@@ -10,6 +10,7 @@
     "core:event:allow-emit-to",
     "core:event:allow-listen",
     "opener:default",
-    "shell:default"
+    "shell:default",
+    "dialog:default"
   ]
 }

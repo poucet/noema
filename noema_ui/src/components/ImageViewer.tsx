@@ -1,4 +1,8 @@
 import { useCallback } from "react";
+import * as tauri from "../tauri";
+import { createLogger } from "../utils/log";
+
+const log = createLogger("ImageViewer");
 
 interface ImageViewerProps {
   data: string; // base64 encoded image data
@@ -10,18 +14,25 @@ interface ImageViewerProps {
 export function ImageViewer({ data, mimeType, alt = "Image", className = "" }: ImageViewerProps) {
   const dataUrl = `data:${mimeType};base64,${data}`;
 
-  const handleDownload = useCallback(() => {
-    // Create a temporary link and trigger download
-    const link = document.createElement("a");
-    link.href = dataUrl;
+  const handleDownload = useCallback(async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
     // Generate filename from mime type
-    const extension = mimeType.split("/")[1] || "bin";
+    const safeMimeType = mimeType || "image/png";
+    const extension = safeMimeType.split("/")[1] || "bin";
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    link.download = `image-${timestamp}.${extension}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [dataUrl, mimeType]);
+    const filename = `image-${timestamp}.${extension}`;
+
+    log.info("Download requested", { filename, mimeType: safeMimeType });
+
+    try {
+      const result = await tauri.saveFile(data, filename, safeMimeType);
+      log.info("Download result", { result });
+    } catch (err) {
+      log.error("Failed to save file", { err });
+    }
+  }, [data, mimeType]);
 
   return (
     <div className="relative group">
