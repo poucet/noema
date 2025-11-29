@@ -11,6 +11,8 @@
     "core:event:allow-listen",
     "opener:default",
     "shell:default",
-    "dialog:default"
+    "dialog:default",
+    "fs:default",
+    "fs:allow-read"
   ]
 }

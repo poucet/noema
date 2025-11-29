@@ -85,3 +85,45 @@ export interface AddMcpServerRequest {
   clientSecret?: string;
   scopes?: string[];
 }
+
+// Attachment for sending with messages
+export interface Attachment {
+  data: string;     // base64 encoded
+  mimeType: string; // e.g., "image/png", "audio/mp3"
+}
+
+// Supported MIME types for attachments
+export const SUPPORTED_IMAGE_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/gif",
+  "image/webp",
+];
+
+export const SUPPORTED_AUDIO_TYPES = [
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/m4a",
+  "audio/wav",
+  "audio/webm",
+  "audio/ogg",
+];
+
+export const SUPPORTED_ATTACHMENT_TYPES = [
+  ...SUPPORTED_IMAGE_TYPES,
+  ...SUPPORTED_AUDIO_TYPES,
+];
+
+export function isImageType(mimeType: string): boolean {
+  return SUPPORTED_IMAGE_TYPES.includes(mimeType.toLowerCase());
+}
+
+export function isAudioType(mimeType: string): boolean {
+  return SUPPORTED_AUDIO_TYPES.includes(mimeType.toLowerCase());
+}
+
+export function isSupportedAttachmentType(mimeType: string): boolean {
+  return SUPPORTED_ATTACHMENT_TYPES.includes(mimeType.toLowerCase());
+}

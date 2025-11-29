@@ -4,7 +4,7 @@ import { ChatInput } from "./components/ChatInput";
 import { Sidebar } from "./components/Sidebar";
 import { ModelSelector } from "./components/ModelSelector";
 import { McpSettings } from "./components/McpSettings";
-import type { DisplayMessage, ModelInfo, ConversationInfo } from "./types";
+import type { DisplayMessage, ModelInfo, ConversationInfo, Attachment } from "./types";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
 
@@ -130,10 +130,14 @@ function App() {
     };
   }, []);
 
-  const handleSendMessage = async (message: string) => {
+  const handleSendMessage = async (message: string, attachments: Attachment[] = []) => {
     try {
       setError(null);
-      await tauri.sendMessage(message);
+      if (attachments.length > 0) {
+        await tauri.sendMessageWithAttachments(message, attachments);
+      } else {
+        await tauri.sendMessage(message);
+      }
     } catch (err) {
       setError(String(err));
     }

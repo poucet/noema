@@ -7,6 +7,7 @@ import type {
   McpServerInfo,
   McpToolInfo,
   AddMcpServerRequest,
+  Attachment,
 } from "./types";
 
 // Tauri commands
@@ -20,6 +21,13 @@ export async function getMessages(): Promise<DisplayMessage[]> {
 
 export async function sendMessage(message: string): Promise<void> {
   return invoke<void>("send_message", { message });
+}
+
+export async function sendMessageWithAttachments(
+  message: string,
+  attachments: Attachment[]
+): Promise<void> {
+  return invoke<void>("send_message_with_attachments", { message, attachments });
 }
 
 export async function clearHistory(): Promise<void> {
