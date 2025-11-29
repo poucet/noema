@@ -51,12 +51,6 @@ pub struct ProviderInfo {
     pub name: &'static str,
     pub api_key_env: Option<&'static str>,
     pub base_url_env: &'static str,
-    pub default_model: &'static str,
-}
-
-/// Get the default model ID
-pub fn default_model() -> ModelId {
-    ModelId::new("gemini", "models/gemini-2.5-flash")
 }
 
 /// List all available provider names

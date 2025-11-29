@@ -8,16 +8,14 @@ struct ProviderVariantInfo {
     name: String,
     api_key_env: Option<String>,
     base_url_env: String,
-    default_model: String,
 }
 
-fn parse_provider_attr(attrs: &[syn::Attribute]) -> Option<(String, Option<String>, String, String)> {
+fn parse_provider_attr(attrs: &[syn::Attribute]) -> Option<(String, Option<String>, String)> {
     for attr in attrs {
         if attr.path().is_ident("provider") {
             let mut name = None;
             let mut api_key_env = None;
             let mut base_url_env = None;
-            let mut default_model = None;
 
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("name") {
@@ -29,15 +27,12 @@ fn parse_provider_attr(attrs: &[syn::Attribute]) -> Option<(String, Option<Strin
                 } else if meta.path.is_ident("base_url_env") {
                     let value: syn::LitStr = meta.value()?.parse()?;
                     base_url_env = Some(value.value());
-                } else if meta.path.is_ident("default_model") {
-                    let value: syn::LitStr = meta.value()?.parse()?;
-                    default_model = Some(value.value());
                 }
                 Ok(())
             }).ok()?;
 
-            if let (Some(n), Some(b), Some(d)) = (name, base_url_env, default_model) {
-                return Some((n, api_key_env, b, d));
+            if let (Some(n), Some(b)) = (name, base_url_env) {
+                return Some((n, api_key_env, b));
             }
         }
     }
@@ -68,9 +63,9 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
                 _ => panic!("Each variant must have exactly one unnamed field"),
             };
 
-            let (name, api_key_env, base_url_env, default_model) = parse_provider_attr(&variant.attrs)
+            let (name, api_key_env, base_url_env) = parse_provider_attr(&variant.attrs)
                 .unwrap_or_else(|| panic!(
-                    "Variant {} must have #[provider(name = \"...\", base_url_env = \"...\", default_model = \"...\")] attribute",
+                    "Variant {} must have #[provider(name = \"...\", base_url_env = \"...\")] attribute",
                     variant_name
                 ));
 
@@ -80,7 +75,6 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
                 name,
                 api_key_env,
                 base_url_env,
-                default_model,
             }
         })
         .collect();
@@ -176,13 +170,11 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
             None => quote! { None },
         };
         let base_url_env = &info.base_url_env;
-        let default_model = &info.default_model;
         quote! {
             crate::registry::ProviderInfo {
                 name: #name,
                 api_key_env: #api_key_env,
                 base_url_env: #base_url_env,
-                default_model: #default_model,
             }
         }
     });

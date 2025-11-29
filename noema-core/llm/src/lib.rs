@@ -11,8 +11,8 @@ pub mod tools;
 pub use api::*;
 pub use providers::GeneralModelProvider;
 pub use registry::{
-    create_model, default_model, get_provider_info, list_all_models, list_models, list_providers,
-    ModelId, ModelInfo, ProviderInfo,
+    create_model, get_provider_info, list_all_models, list_models, list_providers, ModelId,
+    ModelInfo, ProviderInfo,
 };
 pub use tools::ToolRegistry;
 
