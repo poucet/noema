@@ -49,7 +49,8 @@ impl Default for AppState {
 
 /// Get the path to the pending OAuth states file
 pub fn get_oauth_states_path() -> Option<std::path::PathBuf> {
-    dirs::data_dir().map(|d| d.join("noema").join("pending_oauth.json"))
+    use config::PathManager;
+    PathManager::data_dir().map(|d| d.join("pending_oauth.json"))
 }
 
 /// Load pending OAuth states from disk

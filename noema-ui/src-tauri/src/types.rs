@@ -177,6 +177,10 @@ pub struct AddMcpServerRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment {
+    #[serde(default)]
+    pub name: String,      // filename
     pub data: String,      // base64 encoded
     pub mime_type: String, // e.g., "image/png", "audio/mp3"
+    #[serde(default)]
+    pub size: usize,       // size in bytes
 }

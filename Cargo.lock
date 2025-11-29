@@ -3112,6 +3112,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "image",
+ "llm",
  "lopdf",
  "pdf-extract",
  "pdfium-render",

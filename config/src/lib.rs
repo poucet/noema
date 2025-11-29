@@ -1,3 +1,7 @@
+pub mod paths;
+
+pub use paths::PathManager;
+
 /// Load environment variables from .env files.
 /// First loads from ~/.env (home directory), then from ./.env (project directory).
 /// Project directory values take precedence over home directory values.

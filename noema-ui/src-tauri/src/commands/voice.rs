@@ -23,12 +23,17 @@ pub async fn is_voice_available(app: AppHandle) -> Result<bool, String> {
 
 /// Get the Whisper model path using AppHandle for proper mobile resolution
 fn get_whisper_model_path(app: &AppHandle) -> Option<PathBuf> {
-    // On all platforms, prefer app_data_dir
-    // This works for ~/.local/share/noema on Linux/macOS
-    // and internal storage on Android/iOS
-    app.path().app_data_dir()
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return app.path().app_data_dir()
         .ok()
-        .map(|dir| dir.join("models").join("ggml-base.en.bin"))
+        .map(|dir| dir.join("models").join("ggml-base.en.bin"));
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // Suppress unused variable warning for desktop builds where app is not used
+        let _ = app;
+        config::PathManager::whisper_model_path()
+    }
 }
 
 /// Download the Whisper model

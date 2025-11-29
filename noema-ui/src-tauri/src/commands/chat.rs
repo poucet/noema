@@ -11,20 +11,12 @@ use crate::types::{Attachment, ConversationInfo, DisplayMessage, ModelInfo};
 #[tauri::command]
 pub async fn init_app(_app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     use noema_core::SqliteStore;
+    use config::PathManager;
 
     // Use the same database path as TUI: dirs::data_dir()/noema/conversations.db
     // On mobile, fall back to Tauri's app_data_dir
     #[cfg(not(target_os = "android"))]
-    let db_path = {
-        let data_dir = dirs::data_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("noema");
-        if !data_dir.exists() {
-            std::fs::create_dir_all(&data_dir)
-                .map_err(|e| format!("Failed to create data dir: {}", e))?;
-        }
-        data_dir.join("conversations.db")
-    };
+    let db_path = PathManager::db_path().ok_or("Failed to determine database path")?;
 
     #[cfg(target_os = "android")]
     let db_path = {
@@ -38,6 +30,13 @@ pub async fn init_app(_app: AppHandle, state: State<'_, AppState>) -> Result<Str
         }
         app_dir.join("conversations.db")
     };
+
+    // Ensure directory exists
+    if let Some(parent) = db_path.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create database dir: {}", e))?;
+        }
+    }
 
     // Load environment
     config::load_env_file();
@@ -121,46 +120,18 @@ pub async fn send_message_with_attachments(
 
     // Add attachments
     for attachment in attachments {
-        let mime_lower = attachment.mime_type.to_lowercase();
-        if mime_lower.starts_with("image/") {
-            content.push(ContentBlock::Image {
-                data: attachment.data,
-                mime_type: attachment.mime_type,
-            });
-        } else if mime_lower.starts_with("audio/") {
-            content.push(ContentBlock::Audio {
-                data: attachment.data,
-                mime_type: attachment.mime_type,
-            });
-        } else if mime_lower.starts_with("text/") {
-            // Text/markdown files: decode and add as text content
-            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &attachment.data) {
-                Ok(bytes) => {
-                    match String::from_utf8(bytes) {
-                        Ok(text) => {
-                            content.push(ContentBlock::Text { text });
-                        }
-                        Err(e) => {
-                            return Err(format!("Failed to decode text file as UTF-8: {}", e));
-                        }
-                    }
-                }
-                Err(e) => {
-                    return Err(format!("Failed to decode base64: {}", e));
-                }
-            }
-        } else if mime_lower == "application/pdf" {
-            // PDF files: extract text and images
-            match process_pdf_attachment(&attachment.data) {
-                Ok(blocks) => {
-                    content.extend(blocks);
-                }
-                Err(e) => {
-                    return Err(format!("Failed to process PDF: {}", e));
-                }
-            }
+        // Map crate::types::Attachment to noema_ext::Attachment
+        let ext_attachment = noema_ext::Attachment {
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            data: attachment.data.clone(),
+            size: attachment.size,
+        };
+
+        match noema_ext::process_attachment(&ext_attachment) {
+            Ok(blocks) => content.extend(blocks),
+            Err(e) => return Err(e),
         }
-        // Ignore other unsupported types
     }
 
     if content.is_empty() {
@@ -169,41 +140,6 @@ pub async fn send_message_with_attachments(
 
     let payload = ChatPayload { content };
     send_message_internal(app, state, payload).await
-}
-
-/// Process a PDF attachment and extract text and images
-fn process_pdf_attachment(base64_data: &str) -> Result<Vec<ContentBlock>, String> {
-    use base64::Engine;
-
-    // Decode base64 to bytes
-    let pdf_bytes = base64::engine::general_purpose::STANDARD
-        .decode(base64_data)
-        .map_err(|e| format!("Failed to decode PDF base64: {}", e))?;
-
-    let extracted = noema_ext::process_pdf(&pdf_bytes)?;
-
-    let mut blocks = Vec::new();
-
-    // Add text content
-    if let Some(text) = extracted.text {
-        blocks.push(ContentBlock::Text {
-            text: format!("[PDF Content]\n{}", text),
-        });
-    }
-
-    // Add images
-    for image in extracted.images {
-        blocks.push(ContentBlock::Image {
-            data: image.data,
-            mime_type: image.mime_type,
-        });
-    }
-
-    if blocks.is_empty() {
-        return Err("Could not extract any content from PDF".to_string());
-    }
-
-    Ok(blocks)
 }
 
 /// Internal helper for sending messages

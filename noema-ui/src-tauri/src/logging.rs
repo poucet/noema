@@ -4,9 +4,11 @@ use std::io::Write;
 
 /// Log a message to ~/Library/Logs/Noema/noema.log
 pub fn log_message(msg: &str) {
-    if let Some(log_dir) = dirs::home_dir().map(|h| h.join("Library/Logs/Noema")) {
-        let _ = std::fs::create_dir_all(&log_dir);
-        let log_path = log_dir.join("noema.log");
+    use config::PathManager;
+    if let Some(log_path) = PathManager::log_file_path() {
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

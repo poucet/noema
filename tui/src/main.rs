@@ -50,10 +50,8 @@ impl Args {
                 "large" => "ggml-large-v3.bin",
                 other => other,
             };
-            dirs::data_dir()
+            config::PathManager::models_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join("noema")
-                .join("models")
                 .join(model_name)
         }
     }
@@ -176,10 +174,8 @@ impl App {
     fn new(model_id: ModelId, system_message: Option<String>, whisper_model_path: PathBuf) -> Result<Self> {
         let model = create_model(&model_id.to_string())?;
 
-        let db_path = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("noema")
-            .join("conversations.db");
+        let db_path = config::PathManager::db_path()
+            .unwrap_or_else(|| PathBuf::from("conversations.db"));
 
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -837,7 +833,8 @@ async fn main() -> Result<()> {
 
     #[cfg(not(debug_assertions))]
     let (non_blocking, _guard) = {
-        let log_dir = dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("noema").join("logs");
+        use config::PathManager;
+        let log_dir = PathManager::logs_dir().unwrap_or_else(|| PathBuf::from("."));
         std::fs::create_dir_all(&log_dir)?;
         let file_appender = RollingFileAppender::new(Rotation::DAILY, &log_dir, "noema.log");
         tracing_appender::non_blocking(file_appender)

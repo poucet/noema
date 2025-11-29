@@ -12,6 +12,7 @@ path = "src/bin/pdf_extract_test.rs"
 base64 = "0.22"
 flate2 = "1.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
+llm = { path = "../noema-core/llm" }
 lopdf = "0.38"
 pdf-extract = "0.10"
 pdfium-render = "0.8"
