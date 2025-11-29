@@ -219,34 +219,132 @@ fn process_pdf_attachment(base64_data: &str) -> Result<Vec<ContentBlock>, String
     Ok(blocks)
 }
 
-/// Extract an image from a PdfImage (only handles JPEG for now)
+/// Extract an image from a PdfImage
 fn extract_pdf_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBlock> {
     use base64::Engine;
 
-    // Get the filter to determine image format
-    let filters = &pdf_image.filters;
-
-    // Only handle DCTDecode (JPEG) for now - other formats need conversion
-    // filters is Vec<Vec<String>>, so we need to flatten
-    let is_jpeg = filters.iter().flatten().any(|f| f == "DCTDecode");
-    if !is_jpeg {
-        return None;
-    }
-
-    // Get the raw image content
+    let filters = pdf_image.filters.as_ref();
     let image_data = &pdf_image.content;
 
-    // Verify it looks like JPEG
-    if !image_data.starts_with(&[0xFF, 0xD8]) {
+    // Check for DCTDecode (JPEG)
+    if filters.map_or(false, |f| f.iter().any(|s| s == "DCTDecode")) {
+        if image_data.starts_with(&[0xFF, 0xD8]) {
+            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+            return Some(ContentBlock::Image {
+                data: base64_data,
+                mime_type: "image/jpeg".to_string(),
+            });
+        }
+    }
+
+    // Check for FlateDecode (compressed raw bitmap) - convert to PNG
+    if filters.map_or(false, |f| f.iter().any(|s| s == "FlateDecode")) {
+        return extract_flate_image(pdf_image);
+    }
+
+    // Try raw uncompressed image data
+    if filters.map_or(true, |f| f.is_empty()) {
+        return extract_raw_image(pdf_image);
+    }
+
+    None
+}
+
+/// Extract a FlateDecode compressed image and convert to PNG
+fn extract_flate_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBlock> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    let width = pdf_image.width as u32;
+    let height = pdf_image.height as u32;
+    let bits = pdf_image.bits_per_component.unwrap_or(8) as u8;
+
+    if width == 0 || height == 0 {
         return None;
     }
 
-    // Encode to base64
-    let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+    // Decompress the data
+    let mut decoder = ZlibDecoder::new(&pdf_image.content[..]);
+    let mut decompressed = Vec::new();
+    if decoder.read_to_end(&mut decompressed).is_err() {
+        return None;
+    }
 
+    convert_raw_to_png(&decompressed, width, height, bits, pdf_image.color_space.as_deref())
+}
+
+/// Extract raw uncompressed image data and convert to PNG
+fn extract_raw_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBlock> {
+    let width = pdf_image.width as u32;
+    let height = pdf_image.height as u32;
+    let bits = pdf_image.bits_per_component.unwrap_or(8) as u8;
+
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    convert_raw_to_png(&pdf_image.content, width, height, bits, pdf_image.color_space.as_deref())
+}
+
+/// Convert raw pixel data to PNG
+fn convert_raw_to_png(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    bits: u8,
+    color_space: Option<&str>,
+) -> Option<ContentBlock> {
+    use base64::Engine;
+    use image::{ImageBuffer, Rgb, Rgba, Luma};
+
+    // Determine color type from color space
+    let is_rgb = color_space.map_or(false, |cs| cs.contains("RGB"));
+    let is_gray = color_space.map_or(false, |cs| cs.contains("Gray"));
+
+    let png_data = if is_rgb && bits == 8 {
+        // RGB image
+        let expected_size = (width * height * 3) as usize;
+        if data.len() < expected_size {
+            return None;
+        }
+        let img: ImageBuffer<Rgb<u8>, _> = ImageBuffer::from_raw(width, height, data[..expected_size].to_vec())?;
+        let mut png_bytes = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
+        png_bytes.into_inner()
+    } else if is_gray && bits == 8 {
+        // Grayscale image
+        let expected_size = (width * height) as usize;
+        if data.len() < expected_size {
+            return None;
+        }
+        let img: ImageBuffer<Luma<u8>, _> = ImageBuffer::from_raw(width, height, data[..expected_size].to_vec())?;
+        let mut png_bytes = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
+        png_bytes.into_inner()
+    } else {
+        // Default: assume RGB or try RGBA
+        let rgb_size = (width * height * 3) as usize;
+        let rgba_size = (width * height * 4) as usize;
+
+        if data.len() >= rgba_size {
+            let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(width, height, data[..rgba_size].to_vec())?;
+            let mut png_bytes = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
+            png_bytes.into_inner()
+        } else if data.len() >= rgb_size {
+            let img: ImageBuffer<Rgb<u8>, _> = ImageBuffer::from_raw(width, height, data[..rgb_size].to_vec())?;
+            let mut png_bytes = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
+            png_bytes.into_inner()
+        } else {
+            return None;
+        }
+    };
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_data);
     Some(ContentBlock::Image {
         data: base64_data,
-        mime_type: "image/jpeg".to_string(),
+        mime_type: "image/png".to_string(),
     })
 }
 
