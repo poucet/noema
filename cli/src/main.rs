@@ -6,8 +6,8 @@ use llm::ModelProvider;
 use llm::ChatModel;
 use noema_core::{Agent, ConversationContext, MemorySession, SessionStore, SimpleAgent, StorageTransaction};
 
-use clap::Parser;
-use clap_derive::ValueEnum;
+use clap::Parser as ClapParser;
+use clap_derive::{Parser, ValueEnum};
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
 use tracing::Level;
