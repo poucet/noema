@@ -115,8 +115,21 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
     }
   }, [isPlaying, play, stopPlayback]);
 
+  const handleDownload = useCallback(() => {
+    const dataUrl = `data:${mimeType};base64,${data}`;
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    // Generate filename from mime type
+    const extension = mimeType.split("/")[1] || "bin";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    link.download = `audio-${timestamp}.${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [data, mimeType]);
+
   return (
-    <div className="flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+    <div className="group flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
       <button
         onClick={toggle}
         className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
@@ -158,6 +171,22 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
           ⚠️
         </div>
       )}
+
+      {/* Download button */}
+      <button
+        onClick={handleDownload}
+        className="flex-shrink-0 p-2 opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-all"
+        title="Download audio"
+      >
+        <svg className="w-5 h-5 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+          />
+        </svg>
+      </button>
     </div>
   );
 }

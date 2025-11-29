@@ -3,6 +3,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { DisplayMessage, DisplayContent, DisplayToolResultContent } from "../types";
 import { AudioPlayer } from "./AudioPlayer";
+import { ImageViewer } from "./ImageViewer";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
@@ -14,11 +15,7 @@ function renderToolResultContent(content: DisplayToolResultContent): React.React
   }
   if ("image" in content) {
     return (
-      <img
-        src={`data:${content.image.mimeType};base64,${content.image.data}`}
-        alt="Tool result"
-        className="max-w-full rounded"
-      />
+      <ImageViewer data={content.image.data} mimeType={content.image.mimeType} alt="Tool result" />
     );
   }
   if ("audio" in content) {
@@ -63,11 +60,7 @@ function ContentBlock({ block }: { block: DisplayContent }) {
 
   if ("image" in block) {
     return (
-      <img
-        src={`data:${block.image.mimeType};base64,${block.image.data}`}
-        alt="Message attachment"
-        className="max-w-full rounded-lg"
-      />
+      <ImageViewer data={block.image.data} mimeType={block.image.mimeType} alt="Message attachment" />
     );
   }
 
