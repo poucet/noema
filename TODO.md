@@ -1,3 +1,0 @@
- - log_message in noema-audio needs to bu unified iwht other log_message  and nees to be made paltform aware
-  - some files use 'directories' which is not platform safe
-  - noema-audio should split audio.rs into stuff hta'ts generic an stuff htat's cpal specific. The latter should be behind a feature-flag and only used in tui and cli, noema-ui
