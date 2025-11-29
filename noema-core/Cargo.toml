@@ -6,6 +6,8 @@ edition = "2021"
 [features]
 default = []
 sqlite = ["rusqlite", "uuid"]
+rusqlite = ["dep:rusqlite"]
+uuid = ["dep:uuid"]
 
 [dependencies]
 anyhow = "1.0"
