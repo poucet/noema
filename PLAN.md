@@ -41,6 +41,7 @@ Noema is a sophisticated, agent-based AI assistant framework written in Rust, fe
 - [x] **Platform Feature Flags**: `cpal` backend is now behind `backend-cpal` feature.
 - [x] **Browser Backend**: Implemented `BrowserAudioController` and `BrowserAudioStreamer` for `noema-ui` behind `browser` feature.
 - [x] **Cleanup**: Removed legacy `audio.rs` and `browser_voice.rs`.
+- [x] **Mobile/Cross-Platform Support**: Updated `noema-ui` to support on-demand model download and `app_data_dir` for mobile compatibility. `VoiceAgent` is now backend-agnostic.
 
 ## Future Plan
 
