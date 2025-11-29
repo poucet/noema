@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import * as tauri from "../tauri";
 import { audioLog } from "../utils/log";
 
@@ -7,15 +7,73 @@ interface AudioPlayerProps {
   mimeType: string;
 }
 
+// Number of bars in the waveform visualization
+const WAVEFORM_BARS = 50;
+
 export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [waveform, setWaveform] = useState<number[]>([]);
+  const [duration, setDuration] = useState(0);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioBufferRef = useRef<AudioBuffer | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const startTimeRef = useRef<number>(0);
   const durationRef = useRef<number>(0);
   const animationRef = useRef<number | null>(null);
+
+  // Decode audio and extract waveform on mount
+  useEffect(() => {
+    const extractWaveform = async () => {
+      try {
+        // Create a temporary audio context for decoding
+        const audioContext = new AudioContext();
+
+        // Decode base64 to binary
+        const binaryString = atob(data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Decode audio data
+        const audioBuffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
+        audioBufferRef.current = audioBuffer;
+        setDuration(audioBuffer.duration);
+
+        // Get raw audio samples (use first channel)
+        const rawData = audioBuffer.getChannelData(0);
+        const samplesPerBar = Math.floor(rawData.length / WAVEFORM_BARS);
+
+        // Calculate RMS amplitude for each bar
+        const bars: number[] = [];
+        for (let i = 0; i < WAVEFORM_BARS; i++) {
+          const start = i * samplesPerBar;
+          const end = start + samplesPerBar;
+          let sum = 0;
+          for (let j = start; j < end && j < rawData.length; j++) {
+            sum += rawData[j] * rawData[j];
+          }
+          const rms = Math.sqrt(sum / samplesPerBar);
+          bars.push(rms);
+        }
+
+        // Normalize to 0-1 range
+        const maxVal = Math.max(...bars, 0.01);
+        const normalized = bars.map(v => v / maxVal);
+        setWaveform(normalized);
+        audioLog.debug("Waveform extracted", { bars: normalized.length, maxVal });
+
+        // Close temporary context
+        await audioContext.close();
+      } catch (err) {
+        audioLog.error("Failed to extract waveform", { err });
+      }
+    };
+
+    extractWaveform();
+  }, [data]);
 
   const stopPlayback = useCallback(() => {
     if (sourceRef.current) {
@@ -137,8 +195,17 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
     }
   }, [data, mimeType]);
 
+  // Format duration as mm:ss
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const currentTime = (progress / 100) * duration;
+
   return (
-    <div className="group flex items-center gap-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+    <div className="group flex items-center gap-3 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg">
       <button
         onClick={toggle}
         className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
@@ -160,18 +227,45 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
         )}
       </button>
 
-      <div className="flex-1 flex flex-col gap-1">
-        {/* Progress bar */}
-        <div className="h-2 bg-gray-300 dark:bg-gray-600 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-blue-500 transition-all duration-100"
-            style={{ width: `${progress}%` }}
-          />
+      <div className="flex-1 flex flex-col gap-1 min-w-0">
+        {/* Waveform visualization */}
+        <div className="flex items-end h-8 w-full">
+          {waveform.length > 0 ? (
+            waveform.map((amplitude, i) => {
+              // Bar is "played" if its position is before the current progress
+              // Add 0.5 to center the threshold within each bar
+              const barPosition = ((i + 0.5) / waveform.length) * 100;
+              const isPlayed = progress > 0 && barPosition <= progress;
+              // Minimum height of 4px, max of 32px (full height)
+              const heightPx = Math.max(4, amplitude * 32);
+              return (
+                <div
+                  key={i}
+                  className={`transition-colors ${
+                    isPlayed
+                      ? "bg-blue-500"
+                      : "bg-gray-300 dark:bg-gray-500"
+                  }`}
+                  style={{
+                    height: `${heightPx}px`,
+                    width: `${100 / waveform.length}%`,
+                    marginRight: i < waveform.length - 1 ? "1px" : "0",
+                  }}
+                />
+              );
+            })
+          ) : (
+            // Loading placeholder
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-xs text-gray-400">Loading...</div>
+            </div>
+          )}
         </div>
 
-        {/* Info */}
-        <div className="text-xs text-gray-500 dark:text-gray-400">
-          {mimeType}
+        {/* Time and info */}
+        <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+          <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+          <span>{mimeType}</span>
         </div>
       </div>
 
