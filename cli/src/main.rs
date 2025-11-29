@@ -1,4 +1,3 @@
-use clap::Parser;
 use std::sync::Arc;
 
 use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
@@ -7,7 +6,8 @@ use llm::ModelProvider;
 use llm::ChatModel;
 use noema_core::{Agent, ConversationContext, MemorySession, SessionStore, SimpleAgent, StorageTransaction};
 
-use clap_derive::{ValueEnum};
+use clap::Parser;
+use clap_derive::ValueEnum;
 use std::io::{self, BufRead, Write};
 use std::str::FromStr;
 use tracing::Level;

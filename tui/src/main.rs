@@ -624,6 +624,8 @@ impl App {
                 let config = ServerConfig {
                     name: id.clone(),
                     url,
+                    auth: Default::default(),
+                    use_well_known: false,
                     auth_token: None,
                 };
 

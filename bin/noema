@@ -21,7 +21,7 @@ noema_cli() {
 }
 
 noema_gui() {
-    cd "$REPO_ROOT/noema_ui" && npm run tauri dev -- "$@"
+    cd "$REPO_ROOT/noema-ui" && npm run tauri dev -- "$@"
 }
 
 noema_build() {
@@ -29,20 +29,20 @@ noema_build() {
     cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release -p tui -p cli
     echo ""
     echo "Building Tauri GUI..."
-    cd "$REPO_ROOT/noema_ui" && npm run tauri build
+    cd "$REPO_ROOT/noema-ui" && npm run tauri build
     echo ""
     echo "Binaries available at:"
     echo "  $REPO_ROOT/target/release/tui"
     echo "  $REPO_ROOT/target/release/cli"
-    echo "  $REPO_ROOT/noema_ui/src-tauri/target/release/bundle/"
+    echo "  $REPO_ROOT/noema-ui/src-tauri/target/release/bundle/"
 }
 
 noema_install() {
     echo "Building Noema..."
-    cd "$REPO_ROOT/noema_ui" && npm run tauri build
+    cd "$REPO_ROOT/noema-ui" && npm run tauri build
 
     echo "Opening Noema installer..."
-    open "$REPO_ROOT/noema_ui/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
+    open "$REPO_ROOT/noema-ui/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
 }
 
 noema_help() {

@@ -1,5 +1,5 @@
 [package]
-name = "noema_ui"
+name = "noema-ui"
 version = "0.1.0"
 description = "Noema AI Chat Application"
 authors = ["Chris"]
@@ -32,7 +32,7 @@ pdf-extract = "0.10"
 
 # Local workspace dependencies
 noema-core = { path = "../../noema-core", features = ["sqlite"] }
-llm = { path = "../../llm" }
+llm = { path = "../../noema-core/llm" }
 config = { path = "../../config" }
 noema-audio = { path = "../../noema-audio" }
 lopdf = "0.38.0"

@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 directories = "6.0.0"
 dotenv = "0.15.0"
-llm = { path = "../llm" }
+llm = { path = "../noema-core/llm" }
