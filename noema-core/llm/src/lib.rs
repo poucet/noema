@@ -6,8 +6,14 @@ use std::sync::Arc;
 pub mod api;
 mod client;
 pub mod providers;
+pub mod registry;
 pub mod tools;
 pub use api::*;
+pub use providers::GeneralModelProvider;
+pub use registry::{
+    create_model, default_model, get_provider_info, list_all_models, list_models, list_providers,
+    ModelId, ModelInfo, ProviderInfo,
+};
 pub use tools::ToolRegistry;
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = ChatChunk> + Send>>;
@@ -88,3 +94,4 @@ pub trait ModelProvider {
     /// Create a chat model by name, returned as Arc for sharing across threads
     fn create_chat_model(&self, model_name: &str) -> Option<Arc<dyn ChatModel + Send + Sync>>;
 }
+

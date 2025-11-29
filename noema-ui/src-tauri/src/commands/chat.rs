@@ -1,7 +1,6 @@
 //! Chat-related Tauri commands
 
-use config::{create_provider, get_model_info, ModelProviderType, ProviderUrls};
-use llm::{ChatPayload, ContentBlock, ModelProvider};
+use llm::{create_model, list_all_models, ChatPayload, ContentBlock};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, SessionStore};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -40,10 +39,8 @@ pub async fn init_app(_app: AppHandle, state: State<'_, AppState>) -> Result<Str
         app_dir.join("conversations.db")
     };
 
-    // Load environment and provider URLs
+    // Load environment
     config::load_env_file();
-    let provider_urls = ProviderUrls::from_env();
-    *state.provider_urls.lock().await = provider_urls.clone();
 
     // Open database
     let store =
@@ -58,13 +55,12 @@ pub async fn init_app(_app: AppHandle, state: State<'_, AppState>) -> Result<Str
     *state.current_conversation_id.lock().await = conversation_id.clone();
 
     // Create default model (Gemini)
-    let provider_type = ModelProviderType::Gemini;
-    let (model_id, model_display_name) = get_model_info(&provider_type);
-    let provider_instance = create_provider(&provider_type, &provider_urls);
-    let model = provider_instance
-        .create_chat_model(model_id)
-        .ok_or_else(|| format!("Failed to create model: {}", model_id))?;
+    let default_model_id = "gemini/models/gemini-2.5-flash";
+    let model = create_model(default_model_id)
+        .map_err(|e| format!("Failed to create model: {}", e))?;
 
+    let model_display_name = default_model_id.split('/').last().unwrap_or(default_model_id);
+    *state.model_id.lock().await = default_model_id.to_string();
     *state.model_name.lock().await = model_display_name.to_string();
 
     // Create MCP registry
@@ -399,19 +395,11 @@ pub async fn set_model(
     model_id: String,
     provider: String,
 ) -> Result<String, String> {
-    let provider_type = match provider.to_lowercase().as_str() {
-        "ollama" => ModelProviderType::Ollama,
-        "gemini" => ModelProviderType::Gemini,
-        "claude" => ModelProviderType::Claude,
-        "openai" => ModelProviderType::OpenAI,
-        _ => return Err(format!("Unknown provider: {}", provider)),
-    };
+    // Construct full model ID as "provider/model"
+    let full_model_id = format!("{}/{}", provider, model_id);
 
-    let provider_urls = state.provider_urls.lock().await.clone();
-    let provider_instance = create_provider(&provider_type, &provider_urls);
-    let new_model = provider_instance
-        .create_chat_model(&model_id)
-        .ok_or_else(|| format!("Model not found: {}", model_id))?;
+    let new_model = create_model(&full_model_id)
+        .map_err(|e| format!("Failed to create model: {}", e))?;
 
     let display_name = model_id
         .split('/')
@@ -425,6 +413,7 @@ pub async fn set_model(
         engine.set_model(new_model, display_name.clone());
     }
 
+    *state.model_id.lock().await = full_model_id;
     *state.model_name.lock().await = display_name.clone();
 
     Ok(display_name)
@@ -432,55 +421,18 @@ pub async fn set_model(
 
 /// List available models from all providers
 #[tauri::command]
-pub async fn list_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, String> {
-    let provider_urls = state.provider_urls.lock().await.clone();
+pub async fn list_models(_state: State<'_, AppState>) -> Result<Vec<ModelInfo>, String> {
     let mut all_models = Vec::new();
 
-    // Gemini
-    let gemini = create_provider(&ModelProviderType::Gemini, &provider_urls);
-    if let Ok(models) = gemini.list_models().await {
-        for m in models {
-            all_models.push(ModelInfo {
-                id: m.id.clone(),
-                display_name: m.name().to_string(),
-                provider: "gemini".to_string(),
-            });
-        }
-    }
-
-    // Claude
-    let claude = create_provider(&ModelProviderType::Claude, &provider_urls);
-    if let Ok(models) = claude.list_models().await {
-        for m in models {
-            all_models.push(ModelInfo {
-                id: m.id.clone(),
-                display_name: m.name().to_string(),
-                provider: "claude".to_string(),
-            });
-        }
-    }
-
-    // OpenAI
-    let openai = create_provider(&ModelProviderType::OpenAI, &provider_urls);
-    if let Ok(models) = openai.list_models().await {
-        for m in models {
-            all_models.push(ModelInfo {
-                id: m.id.clone(),
-                display_name: m.name().to_string(),
-                provider: "openai".to_string(),
-            });
-        }
-    }
-
-    // Ollama
-    let ollama = create_provider(&ModelProviderType::Ollama, &provider_urls);
-    if let Ok(models) = ollama.list_models().await {
-        for m in models {
-            all_models.push(ModelInfo {
-                id: m.id.clone(),
-                display_name: m.name().to_string(),
-                provider: "ollama".to_string(),
-            });
+    for (provider_name, result) in list_all_models().await {
+        if let Ok(models) = result {
+            for m in models {
+                all_models.push(ModelInfo {
+                    id: m.definition.id.clone(),
+                    display_name: m.definition.name().to_string(),
+                    provider: provider_name.clone(),
+                });
+            }
         }
     }
 
@@ -507,8 +459,6 @@ pub async fn switch_conversation(
 ) -> Result<Vec<DisplayMessage>, String> {
     use noema_core::SessionStore;
 
-    let provider_urls = state.provider_urls.lock().await.clone();
-
     let session = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("App not initialized")?;
@@ -517,17 +467,14 @@ pub async fn switch_conversation(
             .map_err(|e| format!("Failed to open conversation: {}", e))?
     };
 
+    let model_id_str = state.model_id.lock().await.clone();
     let model_name = state.model_name.lock().await.clone();
     let mcp_registry =
         McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
 
     // Create model
-    let provider_type = ModelProviderType::Gemini;
-    let (model_id, _) = get_model_info(&provider_type);
-    let provider_instance = create_provider(&provider_type, &provider_urls);
-    let model = provider_instance
-        .create_chat_model(model_id)
-        .ok_or_else(|| format!("Failed to create model: {}", model_id))?;
+    let model = create_model(&model_id_str)
+        .map_err(|e| format!("Failed to create model: {}", e))?;
 
     // Get messages before creating new engine
     let messages: Vec<DisplayMessage> = session
@@ -547,8 +494,6 @@ pub async fn switch_conversation(
 /// Create a new conversation
 #[tauri::command]
 pub async fn new_conversation(state: State<'_, AppState>) -> Result<String, String> {
-    let provider_urls = state.provider_urls.lock().await.clone();
-
     let session = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("App not initialized")?;
@@ -558,16 +503,13 @@ pub async fn new_conversation(state: State<'_, AppState>) -> Result<String, Stri
     };
 
     let conversation_id = session.conversation_id().to_string();
+    let model_id_str = state.model_id.lock().await.clone();
     let model_name = state.model_name.lock().await.clone();
     let mcp_registry =
         McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
 
-    let provider_type = ModelProviderType::Gemini;
-    let (model_id, _) = get_model_info(&provider_type);
-    let provider_instance = create_provider(&provider_type, &provider_urls);
-    let model = provider_instance
-        .create_chat_model(model_id)
-        .ok_or_else(|| format!("Failed to create model: {}", model_id))?;
+    let model = create_model(&model_id_str)
+        .map_err(|e| format!("Failed to create model: {}", e))?;
 
     let engine = ChatEngine::new(session, model, model_name, mcp_registry);
 

@@ -1,6 +1,5 @@
 //! Application state management
 
-use config::ProviderUrls;
 use noema_audio::{BrowserVoiceSession, VoiceCoordinator};
 use noema_core::{ChatEngine, SqliteSession, SqliteStore};
 use std::collections::HashMap;
@@ -10,8 +9,10 @@ pub struct AppState {
     pub store: Mutex<Option<SqliteStore>>,
     pub engine: Mutex<Option<ChatEngine<SqliteSession>>>,
     pub current_conversation_id: Mutex<String>,
+    /// Full model ID in "provider/model" format
+    pub model_id: Mutex<String>,
+    /// Display name for the model
     pub model_name: Mutex<String>,
-    pub provider_urls: Mutex<ProviderUrls>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
     pub is_processing: Mutex<bool>,
     /// Maps OAuth state parameter to server ID for pending OAuth flows
@@ -29,8 +30,8 @@ impl AppState {
             store: Mutex::new(None),
             engine: Mutex::new(None),
             current_conversation_id: Mutex::new(String::new()),
+            model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
-            provider_urls: Mutex::new(ProviderUrls::default()),
             voice_coordinator: Mutex::new(None),
             is_processing: Mutex::new(false),
             pending_oauth_states: Mutex::new(pending_states),

@@ -1,57 +1,14 @@
 use std::sync::Arc;
 
-use config::{create_provider, get_model_info, load_env_file, ProviderUrls};
-use futures::StreamExt;
-use llm::ModelProvider;
-use llm::ChatModel;
+use config::load_env_file;
+use llm::{create_model, default_model, get_provider_info, list_providers, ChatModel, ModelId};
 use noema_core::{Agent, ConversationContext, MemorySession, SessionStore, SimpleAgent, StorageTransaction};
 
 use clap::Parser as ClapParser;
 use clap_derive::{Parser, ValueEnum};
 use std::io::{self, BufRead, Write};
-use std::str::FromStr;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
-
-#[derive(Clone, ValueEnum, Debug, PartialEq, Eq)]
-#[clap(rename_all = "lowercase")]
-enum ModelProviderType {
-    Ollama,
-    Gemini,
-    Claude,
-    OpenAI,
-}
-
-impl std::fmt::Display for ModelProviderType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl FromStr for ModelProviderType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "ollama" => Ok(ModelProviderType::Ollama),
-            "gemini" => Ok(ModelProviderType::Gemini),
-            "claude" => Ok(ModelProviderType::Claude),
-            "openai" => Ok(ModelProviderType::OpenAI),
-            _ => Err(format!("Unknown provider: {}", s)),
-        }
-    }
-}
-
-impl From<&ModelProviderType> for config::ModelProviderType {
-    fn from(p: &ModelProviderType) -> Self {
-        match p {
-            ModelProviderType::Ollama => config::ModelProviderType::Ollama,
-            ModelProviderType::Gemini => config::ModelProviderType::Gemini,
-            ModelProviderType::Claude => config::ModelProviderType::Claude,
-            ModelProviderType::OpenAI => config::ModelProviderType::OpenAI,
-        }
-    }
-}
 
 #[derive(Copy, Clone, ValueEnum, Debug, PartialEq, Eq)]
 #[clap(rename_all = "lowercase")]
@@ -63,8 +20,10 @@ enum Mode {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long, value_enum, default_value_t = ModelProviderType::Gemini)]
-    model: ModelProviderType,
+    /// Model to use in format "provider/model" (e.g., "claude/claude-sonnet-4-5-20250929")
+    /// If only provider is specified, uses that provider's default model.
+    #[arg(long, default_value_t = default_model().to_string())]
+    model: String,
 
     #[arg(long, value_enum, default_value_t = Mode::Stream)]
     mode: Mode,
@@ -74,56 +33,13 @@ struct Args {
 
     #[arg(long, short)]
     tracing: bool,
-
-    /// Custom base URL for OpenAI API (e.g., for proxy or compatible services)
-    #[arg(long, env = "OPENAI_BASE_URL")]
-    openai_url: Option<String>,
-
-    /// Custom base URL for Claude/Anthropic API (e.g., for proxy)
-    #[arg(long, env = "CLAUDE_BASE_URL")]
-    claude_url: Option<String>,
-
-    /// Custom base URL for Gemini API (e.g., for proxy)
-    #[arg(long, env = "GEMINI_BASE_URL")]
-    gemini_url: Option<String>,
-
-    /// Custom base URL for Ollama API
-    #[arg(long, env = "OLLAMA_BASE_URL")]
-    ollama_url: Option<String>,
 }
 
-// Application state
 struct AppState {
     session: MemorySession,
     model: Arc<dyn ChatModel + Send + Sync>,
-    current_provider: ModelProviderType,
-    model_display_name: &'static str,
+    model_id: ModelId,
     mode: Mode,
-    provider_urls: ProviderUrls,
-}
-
-async fn call_model_regular(
-    model: &dyn llm::ChatModel,
-    messages: Vec<llm::ChatMessage>,
-) -> anyhow::Result<()> {
-    let request = llm::ChatRequest::new(messages.iter());
-    let response = model.chat(&request).await?;
-    println!("Response: {:}", response.get_text());
-    Ok(())
-}
-
-async fn call_model_streaming(
-    model: &impl llm::ChatModel,
-    messages: Vec<llm::ChatMessage>,
-) -> anyhow::Result<()> {
-    let request = llm::ChatRequest::new(messages.iter());
-    let mut stream = model.stream_chat(&request).await?;
-    print!("Response: ");
-    while let Some(chunk) = stream.next().await {
-        print!("{:}", chunk.get_text());
-    }
-    println!("");
-    Ok(())
 }
 
 async fn chat_regular(
@@ -136,7 +52,6 @@ async fn chat_regular(
     tx.add(llm::ChatMessage::user(llm::ChatPayload::text(message)));
     agent.execute(&mut tx, model).await?;
 
-    // Print all assistant messages from the transaction
     for msg in tx.pending() {
         if msg.role == llm::api::Role::Assistant {
             println!("{}", msg.get_text());
@@ -157,7 +72,6 @@ async fn chat_streaming(
     tx.add(llm::ChatMessage::user(llm::ChatPayload::text(message)));
     agent.execute_stream(&mut tx, model).await?;
 
-    // Print all assistant messages from the transaction
     for msg in tx.pending() {
         if msg.role == llm::api::Role::Assistant {
             print!("{}", msg.get_text());
@@ -187,9 +101,9 @@ fn setup_tracing(enable: bool) {
     }
 }
 
-fn print_status_bar(model_provider: &ModelProviderType, model_name: &str) {
+fn print_status_bar(model_id: &ModelId) {
     let terminal_width: usize = 80;
-    let status = format!(" {} • {} ", model_provider, model_name);
+    let status = format!(" {} ", model_id);
     let padding = terminal_width.saturating_sub(status.len());
     let left_pad = padding / 2;
     let right_pad = padding - left_pad;
@@ -199,7 +113,25 @@ fn print_status_bar(model_provider: &ModelProviderType, model_name: &str) {
     println!("└{}┘", "─".repeat(terminal_width - 2));
 }
 
-// Slash command parsing and handling
+/// Parse a model string that can be either "provider/model" or just "provider"
+fn parse_model_arg(s: &str) -> anyhow::Result<ModelId> {
+    if let Some(id) = ModelId::parse(s) {
+        return Ok(id);
+    }
+
+    // Try as just a provider name
+    if let Some(info) = get_provider_info(s) {
+        return Ok(ModelId::new(info.name, info.default_model));
+    }
+
+    let providers: Vec<_> = list_providers().iter().map(|p| p.name).collect();
+    Err(anyhow::anyhow!(
+        "Invalid model '{}'. Use 'provider/model' format or just a provider name: {}",
+        s,
+        providers.join(", ")
+    ))
+}
+
 mod commands {
     use super::*;
 
@@ -207,7 +139,7 @@ mod commands {
         Quit,
         Help,
         Clear,
-        SetModel(ModelProviderType),
+        SetModel(String),
     }
 
     pub enum CommandResult {
@@ -232,11 +164,10 @@ mod commands {
                 "clear" => Ok(Command::Clear),
                 "model" => {
                     if parts.len() < 2 {
-                        return Err("Usage: /model <provider>".to_string());
+                        let providers: Vec<_> = list_providers().iter().map(|p| p.name).collect();
+                        return Err(format!("Usage: /model <provider/model> or /model <provider>\nAvailable providers: {}", providers.join(", ")));
                     }
-                    ModelProviderType::from_str(parts[1])
-                        .map(Command::SetModel)
-                        .map_err(|_| format!("Unknown provider: {}. Available: ollama, gemini, claude, openai", parts[1]))
+                    Ok(Command::SetModel(parts[1].to_string()))
                 }
                 _ => Err(format!("Unknown command: /{}. Type /help for available commands.", parts[0])),
             }
@@ -259,21 +190,23 @@ mod commands {
                     println!();
                     CommandResult::Continue
                 }
-                Command::SetModel(new_provider) => {
-                    let config_provider: config::ModelProviderType = (&new_provider).into();
-                    let (new_model_id, new_model_display) = get_model_info(&config_provider);
-                    let new_provider_instance = create_provider(&config_provider, &state.provider_urls);
-
-                    match new_provider_instance.create_chat_model(new_model_id) {
-                        Some(new_model) => {
-                            state.model = new_model;
-                            state.current_provider = new_provider;
-                            state.model_display_name = new_model_display;
-                            println!("Switched to {} • {}", state.current_provider, state.model_display_name);
-                            println!("(Conversation history preserved)");
+                Command::SetModel(model_str) => {
+                    match parse_model_arg(&model_str) {
+                        Ok(new_id) => {
+                            match create_model(&new_id.to_string()) {
+                                Ok(new_model) => {
+                                    state.model = new_model;
+                                    state.model_id = new_id;
+                                    println!("Switched to {}", state.model_id);
+                                    println!("(Conversation history preserved)");
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to create model: {}", e);
+                                }
+                            }
                         }
-                        None => {
-                            eprintln!("Failed to create model for {}", new_provider);
+                        Err(e) => {
+                            eprintln!("{}", e);
                         }
                     }
                     println!();
@@ -284,37 +217,27 @@ mod commands {
     }
 
     fn print_help() {
+        let providers: Vec<_> = list_providers().iter().map(|p| p.name).collect();
         println!("Available commands:");
         println!("  /quit, /exit           - Exit the chat");
         println!("  /clear                 - Clear conversation history");
-        println!("  /model <provider>      - Switch model (ollama, gemini, claude, openai)");
+        println!("  /model <provider/model> - Switch model");
+        println!("                           Or just /model <provider> for default");
+        println!("                           Providers: {}", providers.join(", "));
         println!("  /help                  - Show this help message");
         println!("  Ctrl+D                 - Exit the chat");
     }
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     load_env_file();
     let args = Args::parse();
 
     setup_tracing(args.tracing);
 
-    let provider_urls = ProviderUrls {
-        openai: args.openai_url,
-        claude: args.claude_url,
-        gemini: args.gemini_url,
-        ollama: args.ollama_url,
-    };
-
-    if args.tracing {
-        eprintln!("DEBUG: Provider URLs: {:?}", provider_urls);
-    }
-
-    let config_provider: config::ModelProviderType = (&args.model).into();
-    let (model_id, model_display_name) = get_model_info(&config_provider);
-    let provider = create_provider(&config_provider, &provider_urls);
-    let model = provider.create_chat_model(model_id).unwrap();
+    let model_id = parse_model_arg(&args.model)?;
+    let model = create_model(&model_id.to_string())?;
 
     let session = if let Some(system_msg) = args.system_message {
         MemorySession::with_system_message(system_msg)
@@ -325,10 +248,8 @@ async fn main() {
     let mut state = AppState {
         session,
         model,
-        current_provider: args.model.clone(),
-        model_display_name,
+        model_id,
         mode: args.mode,
-        provider_urls,
     };
 
     println!();
@@ -339,7 +260,7 @@ async fn main() {
     let mut lines = stdin.lock().lines();
 
     loop {
-        print_status_bar(&state.current_provider, state.model_display_name);
+        print_status_bar(&state.model_id);
         print!("> ");
         io::stdout().flush().unwrap();
 
@@ -362,7 +283,6 @@ async fn main() {
             continue;
         }
 
-        // Try to parse as command
         if input.starts_with('/') {
             match commands::Command::parse(input) {
                 Ok(cmd) => {
@@ -379,7 +299,6 @@ async fn main() {
             }
         }
 
-        // Regular message
         let result = match state.mode {
             Mode::Chat => chat_regular(&mut state.session, state.model.clone(), input).await,
             Mode::Stream => chat_streaming(&mut state.session, state.model.clone(), input).await,
@@ -392,19 +311,6 @@ async fn main() {
         println!();
     }
 
-
     println!("Conversation had {} messages", state.session.len());
-    let model_name = match args.model {
-        ModelProviderType::Ollama => "gemma3n:latest",
-        ModelProviderType::Gemini => "models/gemini-2.5-flash",
-        ModelProviderType::Claude => "claude-sonnet-4-5-20250929",
-        ModelProviderType::OpenAI => "gpt-4o-mini",
-    };
-
-    let model = provider.create_chat_model(model_name).unwrap();
-    let messages = vec![llm::ChatMessage::user(llm::ChatPayload::text("Hello, how are you?".to_string()))];
-    match args.mode {
-        Mode::Chat => call_model_regular(&model, messages).await.unwrap(),
-        Mode::Stream => call_model_streaming(&model, messages).await.unwrap(),
-    }
+    Ok(())
 }
