@@ -191,8 +191,7 @@ impl App {
         }
 
         let mcp_registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
-        let display_name = model_id.to_string();
-        let engine = ChatEngine::new(session, model, display_name, mcp_registry);
+        let engine = ChatEngine::new(session, model, mcp_registry);
 
         Ok(App {
             input: Input::default(),
@@ -215,8 +214,7 @@ impl App {
         let conversation_id = session.conversation_id().to_string();
         let model = create_model(&self.current_model_id.to_string()).expect("Failed to create model");
         let mcp_registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
-        let display_name = self.current_model_id.to_string();
-        self.engine = ChatEngine::new(session, model, display_name, mcp_registry);
+        self.engine = ChatEngine::new(session, model, mcp_registry);
         self.current_conversation_id = conversation_id;
         self.scroll_offset = 0;
     }
@@ -413,7 +411,7 @@ impl App {
         if self.is_streaming {
             Err(anyhow::anyhow!("Cannot switch model while streaming"))
         } else {
-            self.engine.set_model(model, new_id.to_string());
+            self.engine.set_model(model);
             self.current_model_id = new_id.clone();
             Ok(format!("Switched to {}", new_id))
         }

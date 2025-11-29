@@ -24,6 +24,10 @@ impl ClaudeChatModel {
 
 #[async_trait]
 impl ChatModel for ClaudeChatModel {
+    fn name(&self) -> &str {
+        &self.model_name
+    }
+
     async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let url = format!("{}/messages", self.base_url);
 

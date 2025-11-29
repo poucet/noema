@@ -22,6 +22,10 @@ impl OllamaChatModel {
 
 #[async_trait]
 impl ChatModel for OllamaChatModel {
+    fn name(&self) -> &str {
+        &self.model_name
+    }
+
     async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let url = format!("{}/api/chat", self.base_url);
 

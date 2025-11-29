@@ -7,59 +7,6 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::state::AppState;
 use crate::types::{Attachment, ConversationInfo, DisplayMessage, ModelInfo};
 
-/// Initialize the application - sets up database and default model
-#[tauri::command]
-pub async fn init_app(_app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    use noema_core::SqliteStore;
-    use config::PathManager;
-
-    // Use PathManager for DB path (handles both desktop and mobile if set_data_dir was called)
-    let db_path = PathManager::db_path().ok_or("Failed to determine database path")?;
-
-    // Ensure directory exists
-    if let Some(parent) = db_path.parent() {
-        if !parent.exists() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create database dir: {}", e))?;
-        }
-    }
-
-    // Load environment
-    config::load_env_file();
-
-    // Open database
-    let store =
-        SqliteStore::open(&db_path).map_err(|e| format!("Failed to open database: {}", e))?;
-
-    // Create initial session
-    let session = store
-        .create_conversation()
-        .map_err(|e| format!("Failed to create session: {}", e))?;
-
-    let conversation_id = session.conversation_id().to_string();
-    *state.current_conversation_id.lock().await = conversation_id.clone();
-
-    // Create default model (Gemini)
-    let default_model_id = "gemini/models/gemini-2.5-flash";
-    let model = create_model(default_model_id)
-        .map_err(|e| format!("Failed to create model: {}", e))?;
-
-    let model_display_name = default_model_id.split('/').last().unwrap_or(default_model_id);
-    *state.model_id.lock().await = default_model_id.to_string();
-    *state.model_name.lock().await = model_display_name.to_string();
-
-    // Create MCP registry
-    let mcp_registry =
-        McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
-
-    // Create engine
-    let engine = ChatEngine::new(session, model, model_display_name.to_string(), mcp_registry);
-
-    *state.store.lock().await = Some(store);
-    *state.engine.lock().await = Some(engine);
-
-    Ok(model_display_name.to_string())
-}
-
 /// Get current messages in the conversation
 #[tauri::command]
 pub async fn get_messages(state: State<'_, AppState>) -> Result<Vec<DisplayMessage>, String> {
@@ -133,83 +80,44 @@ async fn send_message_internal(
     state: State<'_, AppState>,
     payload: ChatPayload,
 ) -> Result<(), String> {
-    // Check if already processing - if so, queue this message
-    {
-        let is_processing = *state.is_processing.lock().await;
-        if is_processing {
-            // Already processing, the message will be queued in the engine
-            // but we shouldn't spawn another polling task
-            let engine_guard = state.engine.lock().await;
-            let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-            engine.send_message(payload);
-            return Ok(());
-        }
-    }
-
-    // Mark as processing
-    *state.is_processing.lock().await = true;
-
     // Emit user message immediately
     let user_msg = DisplayMessage::from_payload(&payload);
     app.emit("user_message", &user_msg)
         .map_err(|e| e.to_string())?;
 
-    // Send to engine
-    {
-        let engine_guard = state.engine.lock().await;
-        let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-        engine.send_message(payload);
-    }
+    // Send to engine - the event loop (started at init) will handle the response
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+    engine.send_message(payload);
 
-    // Spawn a task to poll for events
-    let app_handle = app.clone();
+    Ok(())
+}
+
+/// Start the engine event polling loop - runs continuously from app init
+pub fn start_engine_event_loop(app: AppHandle) {
     tokio::spawn(async move {
-        let state = app_handle.state::<AppState>();
-
-        // Use a scope guard pattern to ensure is_processing is always reset
-        struct ProcessingGuard<'a> {
-            state: &'a AppState,
-            completed: bool,
-        }
-
-        impl<'a> ProcessingGuard<'a> {
-            fn new(state: &'a AppState) -> Self {
-                Self { state, completed: false }
-            }
-
-            fn mark_completed(&mut self) {
-                self.completed = true;
-            }
-        }
-
-        impl Drop for ProcessingGuard<'_> {
-            fn drop(&mut self) {
-                if !self.completed {
-                    // If we're dropping without completing, reset is_processing
-                    // Use blocking lock since we're in drop
-                    if let Ok(mut guard) = self.state.is_processing.try_lock() {
-                        *guard = false;
-                    }
-                }
-            }
-        }
-
-        let mut guard = ProcessingGuard::new(&state);
+        let state = app.state::<AppState>();
 
         loop {
             let event = {
                 let mut engine_guard = state.engine.lock().await;
-                let engine = match engine_guard.as_mut() {
-                    Some(e) => e,
-                    None => break,
-                };
-                engine.try_recv()
+                match engine_guard.as_mut() {
+                    Some(engine) => engine.try_recv(),
+                    None => {
+                        // Engine not yet initialized, wait and retry
+                        drop(engine_guard);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                        continue;
+                    }
+                }
             };
 
             match event {
                 Some(EngineEvent::Message(msg)) => {
+                    // Mark as processing when we start receiving message chunks
+                    *state.is_processing.lock().await = true;
                     let display_msg = DisplayMessage::from_chat_message(&msg);
-                    let _ = app_handle.emit("streaming_message", &display_msg);
+                    let _ = app.emit("streaming_message", &display_msg);
                 }
                 Some(EngineEvent::MessageComplete) => {
                     // Get all messages after completion
@@ -227,24 +135,18 @@ async fn send_message_internal(
                             vec![]
                         }
                     };
-                    let _ = app_handle.emit("message_complete", &messages);
-                    // Mark as no longer processing
+                    let _ = app.emit("message_complete", &messages);
                     *state.is_processing.lock().await = false;
-                    guard.mark_completed();
-                    break;
                 }
                 Some(EngineEvent::Error(err)) => {
-                    let _ = app_handle.emit("error", &err);
-                    // Mark as no longer processing
+                    let _ = app.emit("error", &err);
                     *state.is_processing.lock().await = false;
-                    guard.mark_completed();
-                    break;
                 }
                 Some(EngineEvent::ModelChanged(name)) => {
-                    let _ = app_handle.emit("model_changed", &name);
+                    let _ = app.emit("model_changed", &name);
                 }
                 Some(EngineEvent::HistoryCleared) => {
-                    let _ = app_handle.emit("history_cleared", ());
+                    let _ = app.emit("history_cleared", ());
                 }
                 None => {
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -252,8 +154,6 @@ async fn send_message_internal(
             }
         }
     });
-
-    Ok(())
 }
 
 /// Clear conversation history
@@ -287,7 +187,7 @@ pub async fn set_model(
     {
         let mut engine_guard = state.engine.lock().await;
         let engine = engine_guard.as_mut().ok_or("App not initialized")?;
-        engine.set_model(new_model, display_name.clone());
+        engine.set_model(new_model);
     }
 
     *state.model_id.lock().await = full_model_id;
@@ -345,7 +245,6 @@ pub async fn switch_conversation(
     };
 
     let model_id_str = state.model_id.lock().await.clone();
-    let model_name = state.model_name.lock().await.clone();
     let mcp_registry =
         McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
 
@@ -360,7 +259,7 @@ pub async fn switch_conversation(
         .map(DisplayMessage::from_chat_message)
         .collect();
 
-    let engine = ChatEngine::new(session, model, model_name, mcp_registry);
+    let engine = ChatEngine::new(session, model, mcp_registry);
 
     *state.engine.lock().await = Some(engine);
     *state.current_conversation_id.lock().await = conversation_id;
@@ -381,14 +280,13 @@ pub async fn new_conversation(state: State<'_, AppState>) -> Result<String, Stri
 
     let conversation_id = session.conversation_id().to_string();
     let model_id_str = state.model_id.lock().await.clone();
-    let model_name = state.model_name.lock().await.clone();
     let mcp_registry =
         McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
 
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
-    let engine = ChatEngine::new(session, model, model_name, mcp_registry);
+    let engine = ChatEngine::new(session, model, mcp_registry);
 
     *state.engine.lock().await = Some(engine);
     *state.current_conversation_id.lock().await = conversation_id.clone();

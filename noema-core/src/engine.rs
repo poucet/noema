@@ -6,10 +6,7 @@ use tokio::task::JoinHandle;
 
 pub enum EngineCommand {
     SendMessage(ChatPayload),
-    SetModel {
-        model: Arc<dyn ChatModel + Send + Sync>,
-        name: String,
-    },
+    SetModel(Arc<dyn ChatModel + Send + Sync>),
     ClearHistory,
 }
 
@@ -31,7 +28,7 @@ pub struct ChatEngine<S: SessionStore + 'static> {
     mcp_registry: Arc<Mutex<McpRegistry>>,
     cmd_tx: mpsc::UnboundedSender<EngineCommand>,
     event_rx: mpsc::UnboundedReceiver<EngineEvent>,
-    model_name: String,
+    model: Arc<dyn ChatModel + Send + Sync>,
     #[allow(dead_code)]
     processor_handle: JoinHandle<()>,
 }
@@ -43,7 +40,6 @@ where
     pub fn new(
         session: S,
         model: Arc<dyn ChatModel + Send + Sync>,
-        model_name: String,
         mcp_registry: McpRegistry,
     ) -> Self {
         let session = Arc::new(Mutex::new(session));
@@ -71,7 +67,7 @@ where
             mcp_registry,
             cmd_tx,
             event_rx,
-            model_name,
+            model,
             processor_handle,
         }
     }
@@ -126,7 +122,8 @@ where
                         }
                     }
                 }
-                EngineCommand::SetModel { model: new_model, name } => {
+                EngineCommand::SetModel(new_model) => {
+                    let name = new_model.name().to_string();
                     model = new_model;
                     let _ = event_tx.send(EngineEvent::ModelChanged(name));
                 }
@@ -143,9 +140,9 @@ where
         let _ = self.cmd_tx.send(EngineCommand::SendMessage(payload.into()));
     }
 
-    pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>, name: String) {
-        self.model_name = name.clone();
-        let _ = self.cmd_tx.send(EngineCommand::SetModel { model, name });
+    pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>) {
+        self.model = Arc::clone(&model);
+        let _ = self.cmd_tx.send(EngineCommand::SetModel(model));
     }
 
     pub fn clear_history(&self) {
@@ -172,6 +169,6 @@ where
     }
 
     pub fn get_model_name(&self) -> &str {
-        &self.model_name
+        self.model.name()
     }
 }

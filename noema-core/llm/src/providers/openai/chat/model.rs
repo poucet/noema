@@ -30,6 +30,10 @@ impl OpenAIChatModel {
 
 #[async_trait]
 impl ChatModel for OpenAIChatModel {
+    fn name(&self) -> &str {
+        &self.model_name
+    }
+
     async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let openai_request =
             ChatCompletionRequest::from_request(self.model_name.clone(), request, false);

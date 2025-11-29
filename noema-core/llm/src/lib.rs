@@ -69,6 +69,8 @@ impl ModelDefinition {
 
 #[async_trait]
 pub trait ChatModel {
+    fn name(&self) -> &str;
+
     async fn chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatMessage>;
 
     async fn stream_chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatStream>;
@@ -77,6 +79,10 @@ pub trait ChatModel {
 // Blanket implementation for Arc<dyn ChatModel> to make it easier to work with
 #[async_trait]
 impl ChatModel for Arc<dyn ChatModel + Send + Sync> {
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+
     async fn chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatMessage> {
         (**self).chat(messages).await
     }

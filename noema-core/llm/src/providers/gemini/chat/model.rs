@@ -22,6 +22,10 @@ impl GeminiChatModel {
 
 #[async_trait]
 impl ChatModel for GeminiChatModel {
+    fn name(&self) -> &str {
+        &self.model_name
+    }
+
     async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let url = format!("{}/{}:generateContent", self.base_url, self.model_name);
 

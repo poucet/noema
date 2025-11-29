@@ -70,7 +70,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // Chat commands
-            commands::chat::init_app,
+            commands::init::init_app,
             commands::chat::get_messages,
             commands::chat::send_message,
             commands::chat::send_message_with_attachments,
