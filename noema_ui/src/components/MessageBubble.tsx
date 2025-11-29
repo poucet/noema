@@ -2,6 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { DisplayMessage, DisplayContent, DisplayToolResultContent } from "../types";
+import { AudioPlayer } from "./AudioPlayer";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
@@ -22,12 +23,7 @@ function renderToolResultContent(content: DisplayToolResultContent): React.React
   }
   if ("audio" in content) {
     return (
-      <audio controls className="w-full">
-        <source
-          src={`data:${content.audio.mimeType};base64,${content.audio.data}`}
-          type={content.audio.mimeType}
-        />
-      </audio>
+      <AudioPlayer data={content.audio.data} mimeType={content.audio.mimeType} />
     );
   }
   return null;
@@ -77,12 +73,7 @@ function ContentBlock({ block }: { block: DisplayContent }) {
 
   if ("audio" in block) {
     return (
-      <audio controls className="w-full">
-        <source
-          src={`data:${block.audio.mimeType};base64,${block.audio.data}`}
-          type={block.audio.mimeType}
-        />
-      </audio>
+      <AudioPlayer data={block.audio.data} mimeType={block.audio.mimeType} />
     );
   }
 
