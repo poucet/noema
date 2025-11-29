@@ -1,0 +1,5 @@
+- [ ] Add RAG
+- [ ] Add Search
+- [ ] Add embeddings
+- [ ] Add document storage with import from google docs.
+- [ ] Test pdf extraction
