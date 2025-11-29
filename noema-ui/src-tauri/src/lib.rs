@@ -78,6 +78,7 @@ pub fn run() {
             commands::chat::get_current_conversation_id,
             // Voice commands
             commands::voice::is_voice_available,
+            commands::voice::download_voice_model,
             commands::voice::toggle_voice,
             commands::voice::get_voice_status,
             commands::voice::start_voice_session,

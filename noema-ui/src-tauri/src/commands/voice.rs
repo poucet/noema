@@ -8,41 +8,74 @@ use noema_audio::{
 use noema_audio::StreamingAudioCapture;
 
 use tauri::{AppHandle, Emitter, Manager, State};
+use std::path::PathBuf;
+use tokio::io::AsyncWriteExt;
 
 use crate::logging::log_message;
 use crate::state::AppState;
 
 /// Check if voice is available (Whisper model exists)
 #[tauri::command]
-pub async fn is_voice_available() -> Result<bool, String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let model_path = data_dir.join("noema").join("models").join("ggml-base.en.bin");
-        Ok(model_path.exists())
-    }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        Ok(false) // Voice not supported on mobile yet
-    }
+pub async fn is_voice_available(app: AppHandle) -> Result<bool, String> {
+    let model_path = get_whisper_model_path(&app).ok_or("Could not determine model path")?;
+    Ok(model_path.exists())
 }
 
-/// Get the Whisper model path
-fn get_whisper_model_path() -> Option<std::path::PathBuf> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        let data_dir = dirs::data_dir()?;
-        let model_path = data_dir.join("noema").join("models").join("ggml-base.en.bin");
-        if model_path.exists() {
-            Some(model_path)
-        } else {
-            None
+/// Get the Whisper model path using AppHandle for proper mobile resolution
+fn get_whisper_model_path(app: &AppHandle) -> Option<PathBuf> {
+    // On all platforms, prefer app_data_dir
+    // This works for ~/.local/share/noema on Linux/macOS
+    // and internal storage on Android/iOS
+    app.path().app_data_dir()
+        .ok()
+        .map(|dir| dir.join("models").join("ggml-base.en.bin"))
+}
+
+/// Download the Whisper model
+#[tauri::command]
+pub async fn download_voice_model(app: AppHandle) -> Result<(), String> {
+    let model_path = get_whisper_model_path(&app)
+        .ok_or("Could not determine model path")?;
+
+    if model_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = model_path.parent() {
+        tokio::fs::create_dir_all(parent).await
+            .map_err(|e| format!("Failed to create model directory: {}", e))?;
+    }
+
+    let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
+    log_message(&format!("Downloading model from {}", url));
+    app.emit("download_progress", "starting").ok();
+
+    let client = reqwest::Client::new();
+    let response = client.get(url).send().await
+        .map_err(|e| format!("Failed to fetch model: {}", e))?;
+
+    let total_size = response.content_length().unwrap_or(0);
+    let mut stream = response.bytes_stream();
+    let mut file = tokio::fs::File::create(&model_path).await
+        .map_err(|e| format!("Failed to create model file: {}", e))?;
+
+    let mut downloaded: u64 = 0;
+    
+    use futures::StreamExt;
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("Download error: {}", e))?;
+        file.write_all(&chunk).await.map_err(|e| format!("Write error: {}", e))?;
+        
+        downloaded += chunk.len() as u64;
+        if total_size > 0 {
+            let progress = (downloaded as f64 / total_size as f64 * 100.0) as u8;
+            app.emit("download_progress", progress).ok();
         }
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    {
-        None
-    }
+
+    log_message("Model download complete");
+    app.emit("download_progress", "complete").ok();
+    Ok(())
 }
 
 /// Spawn the event polling loop for the voice coordinator
@@ -107,9 +140,13 @@ pub async fn toggle_voice(app: AppHandle, state: State<'_, AppState>) -> Result<
         // Enable voice
         #[cfg(feature = "native-audio")]
         {
-            let model_path = get_whisper_model_path().ok_or(
-                "Whisper model not found. Please download ggml-base.en.bin to ~/.local/share/noema/models/",
+            let model_path = get_whisper_model_path(&app).ok_or(
+                "Whisper model not found. Please download it first.",
             )?;
+
+            if !model_path.exists() {
+                return Err("Model file not found. Please download it.".to_string());
+            }
 
             let streamer = StreamingAudioCapture::new()
                 .map_err(|e| format!("Failed to initialize audio capture: {}", e))?;
@@ -170,9 +207,13 @@ pub async fn start_voice_session(app: AppHandle, state: State<'_, AppState>) -> 
         *state.browser_audio_controller.lock().await = None;
     }
 
-    let model_path = get_whisper_model_path().ok_or(
-        "Whisper model not found. Please download ggml-base.en.bin to ~/.local/share/noema/models/",
+    let model_path = get_whisper_model_path(&app).ok_or(
+        "Whisper model not found. Please download it first.",
     )?;
+
+    if !model_path.exists() {
+        return Err("Model file not found. Please download it.".to_string());
+    }
 
     // Create browser backend (controller + streamer)
     // Assuming browser sends 16kHz or we handle resampling. 
