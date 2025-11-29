@@ -6,7 +6,7 @@ import { ModelSelector } from "./components/ModelSelector";
 import { McpSettings } from "./components/McpSettings";
 import type { DisplayMessage, ModelInfo, ConversationInfo } from "./types";
 import * as tauri from "./tauri";
-import type { VoiceStatus } from "./tauri";
+import { useVoiceInput } from "./hooks/useVoiceInput";
 
 function App() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -18,11 +18,23 @@ function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
-  const [voiceAvailable, setVoiceAvailable] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("disabled");
   const [showMcpSettings, setShowMcpSettings] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Voice input hook - handles browser audio capture and Whisper transcription
+  const handleVoiceTranscription = (text: string) => {
+    handleSendMessage(text);
+  };
+
+  const handleVoiceError = (err: string) => {
+    setError(`Voice error: ${err}`);
+  };
+
+  const voice = useVoiceInput({
+    onTranscription: handleVoiceTranscription,
+    onError: handleVoiceError,
+  });
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -51,9 +63,6 @@ function App() {
 
         // Load models in background
         tauri.listModels().then(setModels).catch(console.error);
-
-        // Check if voice is available
-        tauri.isVoiceAvailable().then(setVoiceAvailable).catch(console.error);
 
         setIsInitialized(true);
       } catch (err) {
@@ -114,19 +123,7 @@ function App() {
       setMessages([]);
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    // Voice events
-    tauri.onVoiceStatus((status) => {
-      setVoiceStatus(status);
-    }).then((unlisten) => unlisteners.push(unlisten));
-
-    tauri.onVoiceTranscription((text) => {
-      // Automatically send transcribed text as a message
-      handleSendMessage(text);
-    }).then((unlisten) => unlisteners.push(unlisten));
-
-    tauri.onVoiceError((err) => {
-      setError(`Voice error: ${err}`);
-    }).then((unlisten) => unlisteners.push(unlisten));
+    // Voice events are now handled by the useVoiceInput hook
 
     return () => {
       unlisteners.forEach((unlisten) => unlisten());
@@ -137,15 +134,6 @@ function App() {
     try {
       setError(null);
       await tauri.sendMessage(message);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
-
-  const handleToggleVoice = async () => {
-    try {
-      setError(null);
-      await tauri.toggleVoice();
     } catch (err) {
       setError(String(err));
     }
@@ -323,9 +311,9 @@ function App() {
         <ChatInput
           onSend={handleSendMessage}
           disabled={isLoading}
-          voiceAvailable={voiceAvailable}
-          voiceStatus={voiceStatus}
-          onToggleVoice={handleToggleVoice}
+          voiceAvailable={voice.isAvailable}
+          voiceStatus={voice.status}
+          onToggleVoice={voice.toggle}
         />
       </div>
     </div>

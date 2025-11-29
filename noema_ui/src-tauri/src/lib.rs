@@ -2,7 +2,7 @@
 
 use config::{create_provider, get_model_info, ModelProviderType, ProviderUrls};
 use llm::{ChatMessage, ChatPayload, ContentBlock, ModelProvider, Role, ToolResultContent};
-use noema_audio::{VoiceAgent, VoiceCoordinator};
+use noema_audio::{BrowserVoiceSession, VoiceAgent, VoiceCoordinator};
 use noema_core::{AuthMethod, ChatEngine, EngineEvent, McpRegistry, ServerConfig, SessionStore, SqliteSession, SqliteStore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -256,6 +256,8 @@ pub struct AppState {
     is_processing: Mutex<bool>,
     /// Maps OAuth state parameter to server ID for pending OAuth flows
     pending_oauth_states: Mutex<HashMap<String, String>>,
+    /// Browser voice session for WebAudio-based input
+    browser_voice_session: Mutex<Option<BrowserVoiceSession>>,
 }
 
 impl AppState {
@@ -273,6 +275,7 @@ impl AppState {
             voice_enabled: Mutex::new(false),
             is_processing: Mutex::new(false),
             pending_oauth_states: Mutex::new(pending_states),
+            browser_voice_session: Mutex::new(None),
         }
     }
 }
@@ -859,6 +862,13 @@ async fn toggle_voice(
 /// Get current voice status
 #[tauri::command]
 async fn get_voice_status(state: State<'_, AppState>) -> Result<String, String> {
+    // Check browser voice session first
+    let browser_session = state.browser_voice_session.lock().await;
+    if browser_session.is_some() {
+        return Ok("listening".to_string());
+    }
+    drop(browser_session);
+
     let voice_enabled = *state.voice_enabled.lock().await;
     if !voice_enabled {
         return Ok("disabled".to_string());
@@ -875,6 +885,80 @@ async fn get_voice_status(state: State<'_, AppState>) -> Result<String, String> 
         }
     } else {
         Ok("disabled".to_string())
+    }
+}
+
+// ============================================================================
+// Browser Voice Commands (WebAudio-based)
+// ============================================================================
+
+/// Start a browser voice session
+#[tauri::command]
+async fn start_voice_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let model_path = get_whisper_model_path()
+        .ok_or("Whisper model not found. Please download ggml-base.en.bin to ~/.local/share/noema/models/")?;
+
+    let session = BrowserVoiceSession::new(&model_path)
+        .map_err(|e| format!("Failed to start voice session: {}", e))?;
+
+    *state.browser_voice_session.lock().await = Some(session);
+    app.emit("voice_status", "listening").ok();
+    log_message("Browser voice session started");
+
+    Ok(())
+}
+
+/// Process audio samples from browser WebAudio API
+#[tauri::command]
+async fn process_audio_chunk(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    samples: Vec<f32>,
+) -> Result<(), String> {
+    let session_guard = state.browser_voice_session.lock().await;
+    let session = session_guard.as_ref().ok_or("No active voice session")?;
+
+    // Process samples through VAD and transcription
+    if let Some(transcription) = session.process_samples(&samples) {
+        log_message(&format!("Transcription: {}", transcription));
+        app.emit("voice_transcription", &transcription).ok();
+    }
+
+    // Update status based on speech detection
+    if session.is_speech_active() {
+        app.emit("voice_status", "listening").ok();
+    }
+
+    Ok(())
+}
+
+/// Stop the browser voice session and get final transcription
+#[tauri::command]
+async fn stop_voice_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let mut session_guard = state.browser_voice_session.lock().await;
+
+    if let Some(session) = session_guard.take() {
+        app.emit("voice_status", "transcribing").ok();
+        log_message("Stopping browser voice session");
+
+        // Get any remaining transcription
+        let final_text = session.finish();
+
+        if let Some(ref text) = final_text {
+            log_message(&format!("Final transcription: {}", text));
+            app.emit("voice_transcription", text).ok();
+        }
+
+        app.emit("voice_status", "disabled").ok();
+        Ok(final_text)
+    } else {
+        Ok(None)
     }
 }
 
@@ -1661,6 +1745,10 @@ pub fn run() {
             is_voice_available,
             toggle_voice,
             get_voice_status,
+            // Browser voice commands
+            start_voice_session,
+            process_audio_chunk,
+            stop_voice_session,
             // MCP server commands
             list_mcp_servers,
             add_mcp_server,

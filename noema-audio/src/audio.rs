@@ -403,7 +403,7 @@ impl StreamingAudioCapture {
 }
 
 #[derive(Clone)]
-struct VoiceActivityDetector {
+pub struct VoiceActivityDetector {
     energy_threshold: f32,
     silence_duration_ms: u64,
     speech_duration_ms: u64,
@@ -422,7 +422,7 @@ enum VadState {
 }
 
 impl VoiceActivityDetector {
-    fn new(sample_rate_hz: u32) -> Self {
+    pub fn new(sample_rate_hz: u32) -> Self {
         Self {
             energy_threshold: 0.01,
             silence_duration_ms: 500,
@@ -434,7 +434,7 @@ impl VoiceActivityDetector {
         }
     }
 
-    fn process_samples(&mut self, samples: &[f32]) -> Option<SpeechEvent> {
+    pub fn process_samples(&mut self, samples: &[f32]) -> Option<SpeechEvent> {
         let energy = self.calculate_energy(samples);
         let is_speech = energy > self.energy_threshold;
         let now = Instant::now();

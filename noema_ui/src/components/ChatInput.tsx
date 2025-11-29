@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import type { VoiceStatus } from "../tauri";
+
+export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing";
 
 interface ChatInputProps {
   onSend: (message: string) => void;

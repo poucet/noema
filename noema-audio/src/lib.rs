@@ -5,6 +5,7 @@
 //! - Voice activity detection (VAD)
 //! - Speech-to-text transcription via Whisper
 //! - Voice-enabled agent wrapper
+//! - Browser audio streaming support
 //!
 //! # Example
 //!
@@ -24,11 +25,13 @@
 //! ```
 
 pub mod audio;
+pub mod browser_voice;
 pub mod coordinator;
 pub mod transcription;
 pub mod voice_agent;
 
 pub use audio::{AudioCapture, AudioPlayback, AudioSegment, SpeechEvent, StreamingAudioCapture};
+pub use browser_voice::BrowserVoiceSession;
 pub use coordinator::VoiceCoordinator;
 pub use transcription::Transcriber;
 pub use voice_agent::{VoiceAgent, VoiceEvent};

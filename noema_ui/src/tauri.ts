@@ -194,3 +194,16 @@ export function onOauthError(
 ): Promise<UnlistenFn> {
   return listen<string>("oauth_error", (event) => callback(event.payload));
 }
+
+// Browser voice commands (WebAudio-based)
+export async function startVoiceSession(): Promise<void> {
+  return invoke<void>("start_voice_session");
+}
+
+export async function processAudioChunk(samples: number[]): Promise<void> {
+  return invoke<void>("process_audio_chunk", { samples });
+}
+
+export async function stopVoiceSession(): Promise<string | null> {
+  return invoke<string | null>("stop_voice_session");
+}
