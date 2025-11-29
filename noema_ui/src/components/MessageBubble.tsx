@@ -9,9 +9,40 @@ interface MessageBubbleProps {
   message: DisplayMessage;
 }
 
+function MarkdownText({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={{
+        code(props) {
+          const { children, className } = props;
+          const isInline = !className;
+          return isInline ? (
+            <code className="bg-gray-800 text-gray-100 px-1 py-0.5 rounded text-sm">
+              {children}
+            </code>
+          ) : (
+            <code className={className}>{children}</code>
+          );
+        },
+        pre(props) {
+          return (
+            <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-sm">
+              {props.children}
+            </pre>
+          );
+        },
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
+
 function renderToolResultContent(content: DisplayToolResultContent): React.ReactNode {
   if ("text" in content) {
-    return <span>{content.text}</span>;
+    return <MarkdownText text={content.text} />;
   }
   if ("image" in content) {
     return (
@@ -28,34 +59,7 @@ function renderToolResultContent(content: DisplayToolResultContent): React.React
 
 function ContentBlock({ block }: { block: DisplayContent }) {
   if ("text" in block) {
-    return (
-      <ReactMarkdown
-        remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{
-          code(props) {
-            const { children, className } = props;
-            const isInline = !className;
-            return isInline ? (
-              <code className="bg-gray-800 text-gray-100 px-1 py-0.5 rounded text-sm">
-                {children}
-              </code>
-            ) : (
-              <code className={className}>{children}</code>
-            );
-          },
-          pre(props) {
-            return (
-              <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-sm">
-                {props.children}
-              </pre>
-            );
-          },
-        }}
-      >
-        {block.text}
-      </ReactMarkdown>
-    );
+    return <MarkdownText text={block.text} />;
   }
 
   if ("image" in block) {
