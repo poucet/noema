@@ -921,6 +921,7 @@ async fn list_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServerInf
 }
 
 /// Add a new MCP server configuration
+/// If auth_type is not specified or is "auto", probe .well-known to detect OAuth
 #[tauri::command]
 async fn add_mcp_server(
     state: State<'_, AppState>,
@@ -931,8 +932,7 @@ async fn add_mcp_server(
             token: request.token.ok_or("Token required for token auth")?,
         },
         "oauth" => {
-            // For OAuth, we'll discover endpoints via .well-known and use dynamic client registration
-            // or a default client ID. The client_id will be populated during the OAuth flow.
+            // Explicitly requested OAuth
             AuthMethod::OAuth {
                 client_id: request.client_id.unwrap_or_else(|| "noema".to_string()),
                 client_secret: request.client_secret,
@@ -944,14 +944,41 @@ async fn add_mcp_server(
                 expires_at: None,
             }
         }
-        _ => AuthMethod::None,
+        "none" => AuthMethod::None,
+        _ => {
+            // Auto-detect: probe .well-known to see if OAuth is available
+            log_message(&format!("Auto-detecting auth for server: {}", request.url));
+            if let Ok(well_known) = fetch_well_known(&request.url).await {
+                if well_known.get("authorization_endpoint").is_some() {
+                    log_message("OAuth detected via .well-known");
+                    AuthMethod::OAuth {
+                        client_id: "noema".to_string(),
+                        client_secret: None,
+                        authorization_url: None,
+                        token_url: None,
+                        scopes: vec![],
+                        access_token: None,
+                        refresh_token: None,
+                        expires_at: None,
+                    }
+                } else {
+                    log_message("No OAuth in .well-known, using no auth");
+                    AuthMethod::None
+                }
+            } else {
+                log_message("No .well-known found, using no auth");
+                AuthMethod::None
+            }
+        }
     };
+
+    let use_well_known = matches!(auth, AuthMethod::OAuth { .. });
 
     let config = ServerConfig {
         name: request.name,
         url: request.url,
         auth,
-        use_well_known: request.use_well_known,
+        use_well_known,
         auth_token: None,
     };
 

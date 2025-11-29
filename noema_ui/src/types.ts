@@ -56,13 +56,14 @@ export function hasMedia(content: DisplayContent[]): boolean {
 }
 
 // MCP Server types
-export type McpAuthType = "none" | "token" | "oauth";
+// "auto" means the backend will probe .well-known to detect OAuth
+export type McpAuthType = "none" | "token" | "oauth" | "auto";
 
 export interface McpServerInfo {
   id: string;
   name: string;
   url: string;
-  authType: McpAuthType;
+  authType: string; // Detected auth type from backend
   isConnected: boolean;
   needsOauthLogin: boolean;
   toolCount: number;
@@ -83,5 +84,4 @@ export interface AddMcpServerRequest {
   clientId?: string;
   clientSecret?: string;
   scopes?: string[];
-  useWellKnown?: boolean;
 }

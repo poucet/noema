@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-shell";
-import type { McpServerInfo, McpToolInfo, McpAuthType } from "../types";
+import type { McpServerInfo, McpToolInfo } from "../types";
 import * as tauri from "../tauri";
 
 interface McpSettingsProps {
@@ -15,12 +15,11 @@ export function McpSettings({ onClose }: McpSettingsProps) {
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [serverTools, setServerTools] = useState<Record<string, McpToolInfo[]>>({});
   const [oauthPending, setOauthPending] = useState<string | null>(null);
+  const [addingServer, setAddingServer] = useState(false);
 
-  // Form state - simplified
+  // Form state - just name and URL, auth is auto-detected
   const [formName, setFormName] = useState("");
   const [formUrl, setFormUrl] = useState("");
-  const [formAuthType, setFormAuthType] = useState<McpAuthType>("none");
-  const [formToken, setFormToken] = useState("");
 
   const loadServers = useCallback(async () => {
     try {
@@ -66,28 +65,27 @@ export function McpSettings({ onClose }: McpSettingsProps) {
   const handleAddServer = async () => {
     try {
       setError(null);
+      setAddingServer(true);
       const id = generateId(formName);
 
+      // Use "auto" to let backend probe .well-known and detect OAuth
       await tauri.addMcpServer({
         id,
         name: formName,
         url: formUrl,
-        authType: formAuthType,
-        token: formAuthType === "token" ? formToken : undefined,
-        // For OAuth, we use .well-known discovery - no client credentials needed from user
-        useWellKnown: formAuthType === "oauth" ? true : undefined,
+        authType: "auto",
       });
 
       // Reset form
       setFormName("");
       setFormUrl("");
-      setFormAuthType("none");
-      setFormToken("");
       setShowAddForm(false);
 
       await loadServers();
     } catch (err) {
       setError(String(err));
+    } finally {
+      setAddingServer(false);
     }
   };
 
@@ -364,50 +362,18 @@ export function McpSettings({ onClose }: McpSettingsProps) {
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Authentication
-                      </label>
-                      <select
-                        value={formAuthType}
-                        onChange={e => setFormAuthType(e.target.value as McpAuthType)}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      >
-                        <option value="none">None</option>
-                        <option value="token">Bearer Token</option>
-                        <option value="oauth">OAuth 2.0 (via .well-known)</option>
-                      </select>
-                    </div>
-
-                    {formAuthType === "token" && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Token
-                        </label>
-                        <input
-                          type="password"
-                          value={formToken}
-                          onChange={e => setFormToken(e.target.value)}
-                          placeholder="Your bearer token"
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        />
-                      </div>
-                    )}
-
-                    {formAuthType === "oauth" && (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        OAuth endpoints will be discovered automatically via .well-known.
-                        You'll be prompted to login after adding the server.
-                      </p>
-                    )}
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Authentication will be auto-detected. If the server requires OAuth,
+                      you'll be prompted to login after adding it.
+                    </p>
 
                     <div className="flex gap-2 pt-2">
                       <button
                         onClick={handleAddServer}
-                        disabled={!formName || !formUrl}
+                        disabled={!formName || !formUrl || addingServer}
                         className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white rounded font-medium"
                       >
-                        Add Server
+                        {addingServer ? "Detecting auth..." : "Add Server"}
                       </button>
                       <button
                         onClick={() => setShowAddForm(false)}
