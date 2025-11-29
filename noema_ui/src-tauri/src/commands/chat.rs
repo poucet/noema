@@ -136,8 +136,35 @@ pub async fn send_message_with_attachments(
                 data: attachment.data,
                 mime_type: attachment.mime_type,
             });
+        } else if mime_lower.starts_with("text/") {
+            // Text/markdown files: decode and add as text content
+            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &attachment.data) {
+                Ok(bytes) => {
+                    match String::from_utf8(bytes) {
+                        Ok(text) => {
+                            content.push(ContentBlock::Text { text });
+                        }
+                        Err(e) => {
+                            return Err(format!("Failed to decode text file as UTF-8: {}", e));
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(format!("Failed to decode base64: {}", e));
+                }
+            }
+        } else if mime_lower == "application/pdf" {
+            // PDF files: extract text and images
+            match process_pdf_attachment(&attachment.data) {
+                Ok(blocks) => {
+                    content.extend(blocks);
+                }
+                Err(e) => {
+                    return Err(format!("Failed to process PDF: {}", e));
+                }
+            }
         }
-        // Ignore unsupported types
+        // Ignore other unsupported types
     }
 
     if content.is_empty() {
@@ -146,6 +173,85 @@ pub async fn send_message_with_attachments(
 
     let payload = ChatPayload { content };
     send_message_internal(app, state, payload).await
+}
+
+/// Process a PDF attachment and extract text and images
+fn process_pdf_attachment(base64_data: &str) -> Result<Vec<ContentBlock>, String> {
+    use base64::Engine;
+
+    // Decode base64 to bytes
+    let pdf_bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_data)
+        .map_err(|e| format!("Failed to decode PDF base64: {}", e))?;
+
+    let mut blocks = Vec::new();
+
+    // Extract text from PDF
+    match pdf_extract::extract_text_from_mem(&pdf_bytes) {
+        Ok(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                blocks.push(ContentBlock::Text {
+                    text: format!("[PDF Content]\n{}", trimmed),
+                });
+            }
+        }
+        Err(e) => {
+            // Log error but continue
+            crate::log_message(&format!("PDF text extraction failed: {}", e));
+        }
+    }
+
+    // Try to extract embedded images from PDF using lopdf's get_page_images
+    if let Ok(doc) = lopdf::Document::load_mem(&pdf_bytes) {
+        for (_page_num, page_id) in doc.get_pages() {
+            // get_page_images returns PdfImage structs
+            if let Ok(images) = doc.get_page_images(page_id) {
+                for pdf_image in images {
+                    if let Some(image_block) = extract_pdf_image(&pdf_image) {
+                        blocks.push(image_block);
+                    }
+                }
+            }
+        }
+    }
+
+    if blocks.is_empty() {
+        return Err("Could not extract any content from PDF".to_string());
+    }
+
+    Ok(blocks)
+}
+
+/// Extract an image from a PdfImage (only handles JPEG for now)
+fn extract_pdf_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBlock> {
+    use base64::Engine;
+
+    // Get the filter to determine image format
+    let filters = &pdf_image.filters;
+
+    // Only handle DCTDecode (JPEG) for now - other formats need conversion
+    // filters is Vec<Vec<String>>, so we need to flatten
+    let is_jpeg = filters.iter().flatten().any(|f| f == "DCTDecode");
+    if !is_jpeg {
+        return None;
+    }
+
+    // Get the raw image content
+    let image_data = &pdf_image.content;
+
+    // Verify it looks like JPEG
+    if !image_data.starts_with(&[0xFF, 0xD8]) {
+        return None;
+    }
+
+    // Encode to base64
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
+
+    Some(ContentBlock::Image {
+        data: base64_data,
+        mime_type: "image/jpeg".to_string(),
+    })
 }
 
 /// Internal helper for sending messages

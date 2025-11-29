@@ -30,6 +30,12 @@ function getMimeType(filePath: string): string | null {
     wav: "audio/wav",
     webm: "audio/webm",
     ogg: "audio/ogg",
+    // Text
+    txt: "text/plain",
+    md: "text/markdown",
+    markdown: "text/markdown",
+    // Documents
+    pdf: "application/pdf",
   };
   return ext ? mimeTypes[ext] || null : null;
 }
