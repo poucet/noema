@@ -1,10 +1,4 @@
 //! Audio capture and playback using cpal
-//!
-//! Provides:
-//! - `AudioCapture` - Microphone input capture
-//! - `AudioPlayback` - Speaker output
-//! - `StreamingAudioCapture` - Real-time audio streaming with VAD
-//! - `VoiceActivityDetector` - Detects speech start/end
 
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -12,8 +6,11 @@ use cpal::{Device, Host, SampleFormat, SampleRate, StreamConfig};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
+
+use crate::traits::{AudioPlayer, AudioStreamer};
+use crate::types::SpeechEvent;
+use crate::vad::VoiceActivityDetector;
 
 /// Convert samples to f32 format
 fn convert_samples<T, F>(data: &[T], convert_fn: F) -> Vec<f32>
@@ -22,28 +19,6 @@ where
     F: Fn(T) -> f32,
 {
     data.iter().map(|&sample| convert_fn(sample)).collect()
-}
-
-/// Resample audio to 16kHz for Whisper compatibility
-pub fn resample_to_16khz(samples: &[f32], original_sample_rate: u32) -> Vec<f32> {
-    if original_sample_rate == 16000 {
-        return samples.to_vec();
-    }
-
-    let ratio = original_sample_rate as f32 / 16000.0;
-    let output_len = (samples.len() as f32 / ratio) as usize;
-    let mut output = Vec::with_capacity(output_len);
-
-    for i in 0..output_len {
-        let src_index = (i as f32 * ratio) as usize;
-        if src_index < samples.len() {
-            output.push(samples[src_index]);
-        } else {
-            output.push(0.0);
-        }
-    }
-
-    output
 }
 
 fn build_and_run_stream<T, F>(
@@ -80,46 +55,15 @@ where
     Ok(stream)
 }
 
-/// Audio segment with timestamp and normalized 16kHz data
-#[derive(Debug, Clone)]
-pub struct AudioSegment {
-    pub timestamp: Instant,
-    pub audio_data: Vec<f32>,
-}
-
-impl AudioSegment {
-    pub fn new(timestamp: Instant, audio_data: Vec<f32>) -> Self {
-        Self {
-            timestamp,
-            audio_data,
-        }
-    }
-
-    pub fn duration_ms(&self) -> f32 {
-        (self.audio_data.len() as f32 / 16000.0) * 1000.0
-    }
-}
-
-/// Events emitted during speech detection
-#[derive(Debug, Clone)]
-pub enum SpeechEvent {
-    /// Speech has started
-    SpeechStart { timestamp: Instant },
-    /// Speech has ended with complete audio segment
-    SpeechEnd(AudioSegment),
-    /// Intermediate speech chunk during active speech
-    SpeechChunk(AudioSegment),
-}
-
 /// Audio capture from default input device
-pub struct AudioCapture {
+pub struct CpalAudioCapture {
     #[allow(dead_code)]
     host: Host,
     input_device: Device,
     config: StreamConfig,
 }
 
-impl AudioCapture {
+impl CpalAudioCapture {
     pub fn new() -> Result<Self> {
         let host = cpal::default_host();
         let input_device = host
@@ -160,14 +104,14 @@ impl AudioCapture {
 }
 
 /// Audio playback to default output device
-pub struct AudioPlayback {
+pub struct CpalAudioPlayer {
     #[allow(dead_code)]
     host: Host,
     output_device: Device,
     config: StreamConfig,
 }
 
-impl AudioPlayback {
+impl CpalAudioPlayer {
     pub fn new() -> Result<Self> {
         let host = cpal::default_host();
         let output_device = host
@@ -194,9 +138,11 @@ impl AudioPlayback {
             config,
         })
     }
+}
 
+impl AudioPlayer for CpalAudioPlayer {
     /// Play audio samples (expected to be 16kHz mono f32)
-    pub fn play_samples(&self, samples: &[f32]) -> Result<()> {
+    fn play(&self, samples: &[f32]) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
@@ -248,27 +194,29 @@ impl Drop for StreamHandle {
 }
 
 /// Streaming audio capture with voice activity detection
-pub struct StreamingAudioCapture {
-    audio_capture: AudioCapture,
+pub struct CpalAudioStreamer {
+    audio_capture: CpalAudioCapture,
     /// Handle to control stream lifetime - drop this to stop capture
     stream_handle: Option<StreamHandle>,
 }
 
-impl StreamingAudioCapture {
+impl CpalAudioStreamer {
     pub fn new() -> Result<Self> {
-        let audio_capture = AudioCapture::new()?;
+        let audio_capture = CpalAudioCapture::new()?;
 
         Ok(Self {
             audio_capture,
             stream_handle: None,
         })
     }
+}
 
+impl AudioStreamer for CpalAudioStreamer {
     /// Start streaming audio and return a receiver for speech events
     ///
     /// This spawns a dedicated thread to own the audio stream (cpal::Stream is !Send).
     /// The stream will stop when the StreamHandle is dropped.
-    pub fn start_streaming(&mut self) -> Result<Receiver<SpeechEvent>> {
+    fn start_streaming(&mut self) -> Result<Receiver<SpeechEvent>> {
         let (event_sender, event_receiver) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
@@ -320,14 +268,6 @@ impl StreamingAudioCapture {
 
             let sender = Arc::new(Mutex::new(event_sender));
             let vad = Arc::new(Mutex::new(VoiceActivityDetector::new(sample_rate)));
-
-            // Copy the VAD settings
-            {
-                let mut vad_guard = vad.lock().unwrap();
-                vad_guard.energy_threshold = 0.01;
-                vad_guard.silence_duration_ms = 500;
-                vad_guard.speech_duration_ms = 200;
-            }
 
             let sample_format = supported_config.sample_format();
 
@@ -399,121 +339,5 @@ impl StreamingAudioCapture {
         });
 
         Ok(event_receiver)
-    }
-}
-
-#[derive(Clone)]
-pub struct VoiceActivityDetector {
-    energy_threshold: f32,
-    silence_duration_ms: u64,
-    speech_duration_ms: u64,
-    current_state: VadState,
-    state_start_time: Instant,
-    accumulated_audio: Vec<f32>,
-    sample_rate_hz: u32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum VadState {
-    Silence,
-    PossibleSpeech,
-    Speech,
-    PossibleSilence,
-}
-
-impl VoiceActivityDetector {
-    pub fn new(sample_rate_hz: u32) -> Self {
-        Self {
-            energy_threshold: 0.01,
-            silence_duration_ms: 500,
-            speech_duration_ms: 200,
-            current_state: VadState::Silence,
-            state_start_time: Instant::now(),
-            accumulated_audio: Vec::new(),
-            sample_rate_hz,
-        }
-    }
-
-    pub fn process_samples(&mut self, samples: &[f32]) -> Option<SpeechEvent> {
-        let energy = self.calculate_energy(samples);
-        let is_speech = energy > self.energy_threshold;
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.state_start_time);
-
-        match self.current_state {
-            VadState::Silence => {
-                if is_speech {
-                    debug!("VAD: Silence -> PossibleSpeech (energy: {:.4})", energy);
-                    self.transition_to(VadState::PossibleSpeech, now);
-                    self.accumulated_audio.clear();
-                    self.accumulated_audio.extend_from_slice(samples);
-                }
-                None
-            }
-            VadState::PossibleSpeech => {
-                self.accumulated_audio.extend_from_slice(samples);
-
-                if is_speech && elapsed.as_millis() >= self.speech_duration_ms as u128 {
-                    info!("VAD: PossibleSpeech -> Speech (confirmed speech start)");
-                    self.transition_to(VadState::Speech, now);
-                    Some(SpeechEvent::SpeechStart { timestamp: now })
-                } else if !is_speech {
-                    debug!("VAD: PossibleSpeech -> Silence (false positive)");
-                    self.transition_to(VadState::Silence, now);
-                    None
-                } else {
-                    None
-                }
-            }
-            VadState::Speech => {
-                self.accumulated_audio.extend_from_slice(samples);
-
-                if !is_speech {
-                    debug!("VAD: Speech -> PossibleSilence");
-                    self.transition_to(VadState::PossibleSilence, now);
-                }
-                Some(SpeechEvent::SpeechChunk(AudioSegment::new(
-                    now,
-                    samples.to_vec(),
-                )))
-            }
-            VadState::PossibleSilence => {
-                self.accumulated_audio.extend_from_slice(samples);
-
-                if is_speech {
-                    debug!("VAD: PossibleSilence -> Speech (speech resumed)");
-                    self.transition_to(VadState::Speech, now);
-                    Some(SpeechEvent::SpeechChunk(AudioSegment::new(
-                        now,
-                        samples.to_vec(),
-                    )))
-                } else if elapsed.as_millis() >= self.silence_duration_ms as u128 {
-                    let raw_audio = self.accumulated_audio.clone();
-                    self.transition_to(VadState::Silence, now);
-                    self.accumulated_audio.clear();
-
-                    let audio_data = resample_to_16khz(&raw_audio, self.sample_rate_hz);
-                    info!("VAD: PossibleSilence -> Silence (speech ended, {} samples)", audio_data.len());
-
-                    Some(SpeechEvent::SpeechEnd(AudioSegment::new(now, audio_data)))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    fn calculate_energy(&self, samples: &[f32]) -> f32 {
-        if samples.is_empty() {
-            return 0.0;
-        }
-
-        let sum_squares: f32 = samples.iter().map(|&x| x * x).sum();
-        (sum_squares / samples.len() as f32).sqrt()
-    }
-
-    fn transition_to(&mut self, new_state: VadState, timestamp: Instant) {
-        self.current_state = new_state;
-        self.state_start_time = timestamp;
     }
 }

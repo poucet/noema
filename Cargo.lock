@@ -750,6 +750,7 @@ dependencies = [
  "config",
  "futures",
  "llm",
+ "noema-audio",
  "noema-core",
  "tokio",
  "tracing",

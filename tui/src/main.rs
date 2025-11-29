@@ -7,8 +7,8 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use llm::{create_model, default_model, get_provider_info, list_models, list_providers, ContentBlock, ModelId};
-use noema_audio::{VoiceAgent, VoiceCoordinator};
+use llm::{create_model, get_provider_info, list_models, list_providers, ContentBlock, ModelId};
+use noema_audio::{VoiceAgent, VoiceCoordinator, StreamingAudioCapture};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ServerConfig, SessionStore, SqliteSession, SqliteStore};
 use ratatui::{
     backend::CrosstermBackend,
@@ -157,8 +157,16 @@ struct AppWithCommands {
 
 fn parse_model_arg(s: &str) -> anyhow::Result<ModelId> {
     if let Some(id) = ModelId::parse(s) { return Ok(id); }
+    // Fallback: try to find a provider with this name and use a hardcoded default
     if let Some(info) = get_provider_info(s) {
-        return Ok(ModelId::new(info.name, info.default_model));
+        let default_model = match info.name {
+            "gemini" => "models/gemini-2.5-flash",
+            "claude" => "claude-3-5-sonnet-20241022",
+            "openai" => "gpt-4o",
+            "ollama" => "llama3:latest",
+            _ => "default",
+        };
+        return Ok(ModelId::new(info.name, default_model));
     }
     let providers: Vec<_> = list_providers().iter().map(|p| p.name).collect();
     Err(anyhow::anyhow!("Invalid model '{}'. Use 'provider/model' or provider name: {}", s, providers.join(", ")))
@@ -426,15 +434,6 @@ impl App {
                     }
                 }
             }
-        } else {
-            for info in list_providers() {
-                if info.name.starts_with(&partial.to_lowercase()) {
-                    completions.push(commands::Completion::with_description(
-                        info.name.to_string(),
-                        format!("default: {}", info.default_model)
-                    ));
-                }
-            }
         }
         Ok(completions)
     }
@@ -506,7 +505,10 @@ impl App {
             self.voice_coordinator = None;
             Ok("Voice mode disabled".to_string())
         } else {
-            match VoiceAgent::new(&self.whisper_model_path) {
+            let streamer = StreamingAudioCapture::new()
+                .map_err(|e| anyhow::anyhow!("Failed to initialize audio: {}", e))?;
+
+            match VoiceAgent::new(Box::new(streamer), &self.whisper_model_path) {
                 Ok(voice_agent) => {
                     let model_name = self.whisper_model_path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
                     self.voice_coordinator = Some(VoiceCoordinator::new(voice_agent));
@@ -850,7 +852,7 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let model_id = default_model();
+    let model_id = ModelId::new("gemini", "models/gemini-2.5-flash");
     let mut app = AppWithCommands::new(model_id, None, whisper_model_path)?;
     app.start();
 

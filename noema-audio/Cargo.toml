@@ -3,11 +3,16 @@ name = "noema-audio"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+backend-cpal = ["dep:cpal"]
+browser = []
+
 [dependencies]
 anyhow = "1.0.100"
 async-trait = "0.1.89"
 chrono = "0.4"
-cpal = "0.16.0"
+cpal = { version = "0.16.0", optional = true }
 dirs = "6.0"
 llm = { version = "0.1.0", path = "../noema-core/llm" }
 noema-core = { version = "0.1.0", path = "../noema-core" }

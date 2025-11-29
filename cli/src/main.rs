@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use config::load_env_file;
-use llm::{create_model, default_model, get_provider_info, list_providers, ChatModel, ModelId};
+use llm::{create_model, get_provider_info, list_providers, ChatModel, ModelId};
 use noema_core::{Agent, ConversationContext, MemorySession, SessionStore, SimpleAgent, StorageTransaction};
 
 use clap::Parser as ClapParser;
@@ -22,7 +22,7 @@ enum Mode {
 struct Args {
     /// Model to use in format "provider/model" (e.g., "claude/claude-sonnet-4-5-20250929")
     /// If only provider is specified, uses that provider's default model.
-    #[arg(long, default_value_t = default_model().to_string())]
+    #[arg(long)]
     model: String,
 
     #[arg(long, value_enum, default_value_t = Mode::Stream)]
@@ -117,11 +117,6 @@ fn print_status_bar(model_id: &ModelId) {
 fn parse_model_arg(s: &str) -> anyhow::Result<ModelId> {
     if let Some(id) = ModelId::parse(s) {
         return Ok(id);
-    }
-
-    // Try as just a provider name
-    if let Some(info) = get_provider_info(s) {
-        return Ok(ModelId::new(info.name, info.default_model));
     }
 
     let providers: Vec<_> = list_providers().iter().map(|p| p.name).collect();

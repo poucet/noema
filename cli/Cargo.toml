@@ -9,6 +9,7 @@ clap = { version = "4.5.49", features = ["env"] }
 clap_derive = "4.5.49"
 config = { path = "../config" }
 noema-core = { path = "../noema-core" }
+noema-audio = { path = "../noema-audio", features = ["backend-cpal"] }
 futures = "0.3.31"
 llm = { path = "../noema-core/llm" }
 tokio = { version = "1.47.1", features = ["full"] }

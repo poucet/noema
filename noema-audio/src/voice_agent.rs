@@ -3,7 +3,8 @@
 //! Wraps any Agent to add voice input capabilities via microphone
 //! and speech-to-text transcription.
 
-use crate::audio::{SpeechEvent, StreamingAudioCapture};
+use crate::traits::AudioStreamer;
+use crate::types::SpeechEvent;
 use crate::transcription::Transcriber;
 use anyhow::Result;
 use std::path::Path;
@@ -33,7 +34,7 @@ pub enum VoiceEvent {
 /// and forwards to the wrapped agent for processing.
 pub struct VoiceAgent {
     #[allow(dead_code)]
-    audio_capture: Option<StreamingAudioCapture>,
+    streamer: Box<dyn AudioStreamer>,
     event_rx: Option<mpsc::UnboundedReceiver<VoiceEvent>>,
     #[allow(dead_code)]
     transcription_thread: Option<JoinHandle<()>>,
@@ -43,13 +44,13 @@ impl VoiceAgent {
     /// Create a new voice agent and start the voice session
     ///
     /// # Arguments
+    /// * `streamer` - The audio streamer to use (e.g. CpalAudioStreamer or BrowserAudioStreamer)
     /// * `model_path` - Path to the Whisper GGML model file
-    pub fn new(model_path: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(mut streamer: Box<dyn AudioStreamer>, model_path: impl AsRef<Path>) -> Result<Self> {
         // Validate the model exists by creating a transcriber
         let _ = Transcriber::new(model_path.as_ref())?;
 
-        let mut capture = StreamingAudioCapture::new()?;
-        let speech_rx = capture.start_streaming()?;
+        let speech_rx = streamer.start_streaming()?;
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         let model_path = model_path.as_ref().to_string_lossy().to_string();
@@ -59,7 +60,7 @@ impl VoiceAgent {
         });
 
         Ok(Self {
-            audio_capture: Some(capture),
+            streamer,
             event_rx: Some(event_rx),
             transcription_thread: Some(handle),
         })

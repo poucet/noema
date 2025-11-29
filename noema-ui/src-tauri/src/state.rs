@@ -1,6 +1,7 @@
 //! Application state management
 
-use noema_audio::{BrowserVoiceSession, VoiceCoordinator};
+use noema_audio::VoiceCoordinator;
+use noema_audio::BrowserAudioController;
 use noema_core::{ChatEngine, SqliteSession, SqliteStore};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -17,8 +18,8 @@ pub struct AppState {
     pub is_processing: Mutex<bool>,
     /// Maps OAuth state parameter to server ID for pending OAuth flows
     pub pending_oauth_states: Mutex<HashMap<String, String>>,
-    /// Browser voice session for WebAudio-based input
-    pub browser_voice_session: Mutex<Option<BrowserVoiceSession>>,
+    /// Browser voice controller for WebAudio-based input
+    pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
 }
 
 impl AppState {
@@ -35,7 +36,7 @@ impl AppState {
             voice_coordinator: Mutex::new(None),
             is_processing: Mutex::new(false),
             pending_oauth_states: Mutex::new(pending_states),
-            browser_voice_session: Mutex::new(None),
+            browser_audio_controller: Mutex::new(None),
         }
     }
 }
