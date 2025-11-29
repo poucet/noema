@@ -1,0 +1,17 @@
+[package]
+name = "noema-ext"
+version = "0.1.0"
+edition = "2021"
+description = "Extension utilities for Noema - PDF processing, etc."
+
+[[bin]]
+name = "pdf_extract_test"
+path = "src/bin/pdf_extract_test.rs"
+
+[dependencies]
+base64 = "0.22"
+flate2 = "1.0"
+image = { version = "0.25", default-features = false, features = ["png"] }
+lopdf = "0.38"
+pdf-extract = "0.10"
+pdfium-render = "0.8"

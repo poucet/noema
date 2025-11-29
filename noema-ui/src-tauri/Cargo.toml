@@ -28,16 +28,13 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 base64 = "0.22"
-pdf-extract = "0.10"
-image = { version = "0.25", default-features = false, features = ["png"] }
-flate2 = "1.0"
 
 # Local workspace dependencies
 noema-core = { path = "../../noema-core", features = ["sqlite"] }
 llm = { path = "../../noema-core/llm" }
 config = { path = "../../config" }
 noema-audio = { path = "../../noema-audio" }
-lopdf = "0.38.0"
+noema-ext = { path = "../../noema-ext" }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"

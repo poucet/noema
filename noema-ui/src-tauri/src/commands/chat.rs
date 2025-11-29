@@ -180,34 +180,23 @@ fn process_pdf_attachment(base64_data: &str) -> Result<Vec<ContentBlock>, String
         .decode(base64_data)
         .map_err(|e| format!("Failed to decode PDF base64: {}", e))?;
 
+    let extracted = noema_ext::process_pdf(&pdf_bytes)?;
+
     let mut blocks = Vec::new();
 
-    // Extract text from PDF
-    match pdf_extract::extract_text_from_mem(&pdf_bytes) {
-        Ok(text) => {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                blocks.push(ContentBlock::Text {
-                    text: format!("[PDF Content]\n{}", trimmed),
-                });
-            }
-        }
-        Err(e) => {
-            // Log error but continue
-            crate::log_message(&format!("PDF text extraction failed: {}", e));
-        }
+    // Add text content
+    if let Some(text) = extracted.text {
+        blocks.push(ContentBlock::Text {
+            text: format!("[PDF Content]\n{}", text),
+        });
     }
 
-    // Extract embedded images by scanning all document objects
-    // (not just page XObjects, which may not always be properly linked)
-    if let Ok(doc) = lopdf::Document::load_mem(&pdf_bytes) {
-        for (_obj_id, obj) in doc.objects.iter() {
-            if let lopdf::Object::Stream(stream) = obj {
-                if let Some(image_block) = extract_image_from_stream(stream) {
-                    blocks.push(image_block);
-                }
-            }
-        }
+    // Add images
+    for image in extracted.images {
+        blocks.push(ContentBlock::Image {
+            data: image.data,
+            mime_type: image.mime_type,
+        });
     }
 
     if blocks.is_empty() {
@@ -215,173 +204,6 @@ fn process_pdf_attachment(base64_data: &str) -> Result<Vec<ContentBlock>, String
     }
 
     Ok(blocks)
-}
-
-/// Extract an image from a lopdf Stream object
-fn extract_image_from_stream(stream: &lopdf::Stream) -> Option<ContentBlock> {
-    use base64::Engine;
-    use lopdf::Object;
-
-    let dict = &stream.dict;
-
-    // Check if this is an image XObject
-    let subtype = dict.get(b"Subtype").ok()?;
-    if let Object::Name(name) = subtype {
-        if name != b"Image" {
-            return None;
-        }
-    } else {
-        return None;
-    }
-
-    // Get image properties
-    let width = match dict.get(b"Width").ok()? {
-        Object::Integer(w) => *w as u32,
-        _ => return None,
-    };
-    let height = match dict.get(b"Height").ok()? {
-        Object::Integer(h) => *h as u32,
-        _ => return None,
-    };
-
-    if width == 0 || height == 0 {
-        return None;
-    }
-
-    let bits = dict
-        .get(b"BitsPerComponent")
-        .ok()
-        .and_then(|o| match o {
-            Object::Integer(b) => Some(*b as u8),
-            _ => None,
-        })
-        .unwrap_or(8);
-
-    // Get color space
-    let color_space = dict.get(b"ColorSpace").ok().and_then(|o| match o {
-        Object::Name(name) => Some(String::from_utf8_lossy(name).to_string()),
-        _ => None,
-    });
-
-    // Get filter(s)
-    let filters: Vec<String> = match dict.get(b"Filter").ok() {
-        Some(Object::Name(name)) => vec![String::from_utf8_lossy(name).to_string()],
-        Some(Object::Array(arr)) => arr
-            .iter()
-            .filter_map(|o| match o {
-                Object::Name(name) => Some(String::from_utf8_lossy(name).to_string()),
-                _ => None,
-            })
-            .collect(),
-        _ => vec![],
-    };
-
-    let image_data = &stream.content;
-
-    // Check for DCTDecode (JPEG) - data can be used directly
-    if filters.iter().any(|f| f == "DCTDecode") {
-        if image_data.starts_with(&[0xFF, 0xD8]) {
-            let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
-            return Some(ContentBlock::Image {
-                data: base64_data,
-                mime_type: "image/jpeg".to_string(),
-            });
-        }
-    }
-
-    // Check for FlateDecode (compressed raw bitmap) - decompress and convert to PNG
-    if filters.iter().any(|f| f == "FlateDecode") {
-        return extract_flate_from_stream(image_data, width, height, bits, color_space.as_deref());
-    }
-
-    // Try raw uncompressed image data
-    if filters.is_empty() {
-        return convert_raw_to_png(image_data, width, height, bits, color_space.as_deref());
-    }
-
-    None
-}
-
-/// Extract a FlateDecode compressed image from raw stream data
-fn extract_flate_from_stream(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    bits: u8,
-    color_space: Option<&str>,
-) -> Option<ContentBlock> {
-    use flate2::read::ZlibDecoder;
-    use std::io::Read;
-
-    let mut decoder = ZlibDecoder::new(data);
-    let mut decompressed = Vec::new();
-    if decoder.read_to_end(&mut decompressed).is_err() {
-        return None;
-    }
-
-    convert_raw_to_png(&decompressed, width, height, bits, color_space)
-}
-
-/// Convert raw pixel data to PNG
-fn convert_raw_to_png(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    bits: u8,
-    color_space: Option<&str>,
-) -> Option<ContentBlock> {
-    use base64::Engine;
-    use image::{ImageBuffer, Rgb, Rgba, Luma};
-
-    // Determine color type from color space
-    let is_rgb = color_space.map_or(false, |cs| cs.contains("RGB"));
-    let is_gray = color_space.map_or(false, |cs| cs.contains("Gray"));
-
-    let png_data = if is_rgb && bits == 8 {
-        // RGB image
-        let expected_size = (width * height * 3) as usize;
-        if data.len() < expected_size {
-            return None;
-        }
-        let img: ImageBuffer<Rgb<u8>, _> = ImageBuffer::from_raw(width, height, data[..expected_size].to_vec())?;
-        let mut png_bytes = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
-        png_bytes.into_inner()
-    } else if is_gray && bits == 8 {
-        // Grayscale image
-        let expected_size = (width * height) as usize;
-        if data.len() < expected_size {
-            return None;
-        }
-        let img: ImageBuffer<Luma<u8>, _> = ImageBuffer::from_raw(width, height, data[..expected_size].to_vec())?;
-        let mut png_bytes = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
-        png_bytes.into_inner()
-    } else {
-        // Default: assume RGB or try RGBA
-        let rgb_size = (width * height * 3) as usize;
-        let rgba_size = (width * height * 4) as usize;
-
-        if data.len() >= rgba_size {
-            let img: ImageBuffer<Rgba<u8>, _> = ImageBuffer::from_raw(width, height, data[..rgba_size].to_vec())?;
-            let mut png_bytes = std::io::Cursor::new(Vec::new());
-            img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
-            png_bytes.into_inner()
-        } else if data.len() >= rgb_size {
-            let img: ImageBuffer<Rgb<u8>, _> = ImageBuffer::from_raw(width, height, data[..rgb_size].to_vec())?;
-            let mut png_bytes = std::io::Cursor::new(Vec::new());
-            img.write_to(&mut png_bytes, image::ImageFormat::Png).ok()?;
-            png_bytes.into_inner()
-        } else {
-            return None;
-        }
-    };
-
-    let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_data);
-    Some(ContentBlock::Image {
-        data: base64_data,
-        mime_type: "image/png".to_string(),
-    })
 }
 
 /// Internal helper for sending messages
