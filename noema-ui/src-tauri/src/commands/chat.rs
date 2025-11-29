@@ -198,15 +198,13 @@ fn process_pdf_attachment(base64_data: &str) -> Result<Vec<ContentBlock>, String
         }
     }
 
-    // Try to extract embedded images from PDF using lopdf's get_page_images
+    // Extract embedded images by scanning all document objects
+    // (not just page XObjects, which may not always be properly linked)
     if let Ok(doc) = lopdf::Document::load_mem(&pdf_bytes) {
-        for (_page_num, page_id) in doc.get_pages() {
-            // get_page_images returns PdfImage structs
-            if let Ok(images) = doc.get_page_images(page_id) {
-                for pdf_image in images {
-                    if let Some(image_block) = extract_pdf_image(&pdf_image) {
-                        blocks.push(image_block);
-                    }
+        for (_obj_id, obj) in doc.objects.iter() {
+            if let lopdf::Object::Stream(stream) = obj {
+                if let Some(image_block) = extract_image_from_stream(stream) {
+                    blocks.push(image_block);
                 }
             }
         }
@@ -219,15 +217,69 @@ fn process_pdf_attachment(base64_data: &str) -> Result<Vec<ContentBlock>, String
     Ok(blocks)
 }
 
-/// Extract an image from a PdfImage
-fn extract_pdf_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBlock> {
+/// Extract an image from a lopdf Stream object
+fn extract_image_from_stream(stream: &lopdf::Stream) -> Option<ContentBlock> {
     use base64::Engine;
+    use lopdf::Object;
 
-    let filters = pdf_image.filters.as_ref();
-    let image_data = &pdf_image.content;
+    let dict = &stream.dict;
 
-    // Check for DCTDecode (JPEG)
-    if filters.map_or(false, |f| f.iter().any(|s| s == "DCTDecode")) {
+    // Check if this is an image XObject
+    let subtype = dict.get(b"Subtype").ok()?;
+    if let Object::Name(name) = subtype {
+        if name != b"Image" {
+            return None;
+        }
+    } else {
+        return None;
+    }
+
+    // Get image properties
+    let width = match dict.get(b"Width").ok()? {
+        Object::Integer(w) => *w as u32,
+        _ => return None,
+    };
+    let height = match dict.get(b"Height").ok()? {
+        Object::Integer(h) => *h as u32,
+        _ => return None,
+    };
+
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    let bits = dict
+        .get(b"BitsPerComponent")
+        .ok()
+        .and_then(|o| match o {
+            Object::Integer(b) => Some(*b as u8),
+            _ => None,
+        })
+        .unwrap_or(8);
+
+    // Get color space
+    let color_space = dict.get(b"ColorSpace").ok().and_then(|o| match o {
+        Object::Name(name) => Some(String::from_utf8_lossy(name).to_string()),
+        _ => None,
+    });
+
+    // Get filter(s)
+    let filters: Vec<String> = match dict.get(b"Filter").ok() {
+        Some(Object::Name(name)) => vec![String::from_utf8_lossy(name).to_string()],
+        Some(Object::Array(arr)) => arr
+            .iter()
+            .filter_map(|o| match o {
+                Object::Name(name) => Some(String::from_utf8_lossy(name).to_string()),
+                _ => None,
+            })
+            .collect(),
+        _ => vec![],
+    };
+
+    let image_data = &stream.content;
+
+    // Check for DCTDecode (JPEG) - data can be used directly
+    if filters.iter().any(|f| f == "DCTDecode") {
         if image_data.starts_with(&[0xFF, 0xD8]) {
             let base64_data = base64::engine::general_purpose::STANDARD.encode(image_data);
             return Some(ContentBlock::Image {
@@ -237,53 +289,37 @@ fn extract_pdf_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBloc
         }
     }
 
-    // Check for FlateDecode (compressed raw bitmap) - convert to PNG
-    if filters.map_or(false, |f| f.iter().any(|s| s == "FlateDecode")) {
-        return extract_flate_image(pdf_image);
+    // Check for FlateDecode (compressed raw bitmap) - decompress and convert to PNG
+    if filters.iter().any(|f| f == "FlateDecode") {
+        return extract_flate_from_stream(image_data, width, height, bits, color_space.as_deref());
     }
 
     // Try raw uncompressed image data
-    if filters.map_or(true, |f| f.is_empty()) {
-        return extract_raw_image(pdf_image);
+    if filters.is_empty() {
+        return convert_raw_to_png(image_data, width, height, bits, color_space.as_deref());
     }
 
     None
 }
 
-/// Extract a FlateDecode compressed image and convert to PNG
-fn extract_flate_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBlock> {
+/// Extract a FlateDecode compressed image from raw stream data
+fn extract_flate_from_stream(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    bits: u8,
+    color_space: Option<&str>,
+) -> Option<ContentBlock> {
     use flate2::read::ZlibDecoder;
     use std::io::Read;
 
-    let width = pdf_image.width as u32;
-    let height = pdf_image.height as u32;
-    let bits = pdf_image.bits_per_component.unwrap_or(8) as u8;
-
-    if width == 0 || height == 0 {
-        return None;
-    }
-
-    // Decompress the data
-    let mut decoder = ZlibDecoder::new(&pdf_image.content[..]);
+    let mut decoder = ZlibDecoder::new(data);
     let mut decompressed = Vec::new();
     if decoder.read_to_end(&mut decompressed).is_err() {
         return None;
     }
 
-    convert_raw_to_png(&decompressed, width, height, bits, pdf_image.color_space.as_deref())
-}
-
-/// Extract raw uncompressed image data and convert to PNG
-fn extract_raw_image(pdf_image: &lopdf::xobject::PdfImage) -> Option<ContentBlock> {
-    let width = pdf_image.width as u32;
-    let height = pdf_image.height as u32;
-    let bits = pdf_image.bits_per_component.unwrap_or(8) as u8;
-
-    if width == 0 || height == 0 {
-        return None;
-    }
-
-    convert_raw_to_png(&pdf_image.content, width, height, bits, pdf_image.color_space.as_deref())
+    convert_raw_to_png(&decompressed, width, height, bits, color_space)
 }
 
 /// Convert raw pixel data to PNG
