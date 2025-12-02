@@ -814,7 +814,7 @@ dependencies = [
 name = "config"
 version = "0.1.0"
 dependencies = [
- "directories",
+ "dirs",
  "dotenv",
 ]
 
@@ -2749,6 +2749,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "futures",
  "llm_macros",
@@ -3073,14 +3074,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "config",
  "futures",
+ "hex",
  "llm",
  "rmcp",
  "rusqlite",
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-stream",
  "toml 0.9.8",

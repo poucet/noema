@@ -12,7 +12,8 @@ interface SidebarProps {
 }
 
 function formatDate(timestamp: number): string {
-  const date = new Date(timestamp * 1000);
+  // Timestamp is already in milliseconds (epoch ms from Rust i64)
+  const date = new Date(timestamp);
   const now = new Date();
   const diffDays = Math.floor(
     (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)

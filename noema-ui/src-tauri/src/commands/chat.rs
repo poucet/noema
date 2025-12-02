@@ -236,11 +236,33 @@ pub async fn switch_conversation(
 ) -> Result<Vec<DisplayMessage>, String> {
     use noema_core::SessionStore;
 
+    // Get blob store for resolving asset refs
+    let blob_store = {
+        let blob_guard = state.blob_store.lock().await;
+        blob_guard
+            .clone()
+            .ok_or("Blob store not initialized")?
+    };
+
     let session = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("App not initialized")?;
+
+        // Create resolver that reads from blob store
+        let resolver = {
+            let blob = blob_store.clone();
+            move |asset_id: String| {
+                let blob = blob.clone();
+                async move {
+                    blob.get(&asset_id)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                }
+            }
+        };
+
         store
-            .open_conversation(&conversation_id)
+            .open_conversation(&conversation_id, resolver)
+            .await
             .map_err(|e| format!("Failed to open conversation: {}", e))?
     };
 
@@ -253,11 +275,13 @@ pub async fn switch_conversation(
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
     // Get messages before creating new engine
-    let messages: Vec<DisplayMessage> = session
-        .messages()
+    let chat_messages = session.messages();
+    eprintln!("switch_conversation: got {} messages from session", chat_messages.len());
+    let messages: Vec<DisplayMessage> = chat_messages
         .iter()
         .map(DisplayMessage::from_chat_message)
         .collect();
+    eprintln!("switch_conversation: converted to {} display messages", messages.len());
 
     let engine = ChatEngine::new(session, model, mcp_registry);
 

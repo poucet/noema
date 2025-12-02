@@ -1,6 +1,7 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, ToolResultContent};
+use noema_core::storage::StoredContent;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,8 +38,12 @@ impl From<noema_core::ConversationInfo> for ConversationInfo {
 #[serde(rename_all = "camelCase")]
 pub enum DisplayContent {
     Text(String),
+    /// Inline Base64 image
     Image { data: String, mime_type: String },
+    /// Inline Base64 audio
     Audio { data: String, mime_type: String },
+    /// Asset stored in blob storage - client should fetch via asset API
+    AssetRef { asset_id: String, mime_type: String, filename: Option<String> },
     ToolCall { name: String, id: String },
     ToolResult { id: String, content: Vec<DisplayToolResultContent> },
 }
@@ -129,6 +134,39 @@ fn tool_result_content_to_display(c: &ToolResultContent) -> DisplayToolResultCon
         ToolResultContent::Audio { data, mime_type } => DisplayToolResultContent::Audio {
             data: data.clone(),
             mime_type: mime_type.clone(),
+        },
+    }
+}
+
+/// Convert StoredContent (with blob refs) to DisplayContent
+/// Used when sending messages to the frontend - refs are preserved so client can fetch them
+pub fn stored_content_to_display(content: &StoredContent) -> DisplayContent {
+    match content {
+        StoredContent::Text { text } => DisplayContent::Text(text.clone()),
+        StoredContent::Image { data, mime_type } => DisplayContent::Image {
+            data: data.clone(),
+            mime_type: mime_type.clone(),
+        },
+        StoredContent::Audio { data, mime_type } => DisplayContent::Audio {
+            data: data.clone(),
+            mime_type: mime_type.clone(),
+        },
+        StoredContent::AssetRef { asset_id, mime_type, filename } => DisplayContent::AssetRef {
+            asset_id: asset_id.clone(),
+            mime_type: mime_type.clone(),
+            filename: filename.clone(),
+        },
+        StoredContent::ToolCall(call) => DisplayContent::ToolCall {
+            name: call.name.clone(),
+            id: call.id.clone(),
+        },
+        StoredContent::ToolResult(result) => DisplayContent::ToolResult {
+            id: result.tool_call_id.clone(),
+            content: result
+                .content
+                .iter()
+                .map(tool_result_content_to_display)
+                .collect(),
         },
     }
 }

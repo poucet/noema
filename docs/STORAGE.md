@@ -1,14 +1,19 @@
-# Noema Storage Architecture
+# Unified Storage Architecture
 
-This document describes the storage layout, database schema, file locations, and configuration mechanisms used by Noema.
+**Version:** 1.0
+**Target Architecture:** SQLite (Enhanced) + Content-Addressable Filesystem
+**Goal:** Local-first storage with enterprise-grade capabilities.
+
+---
 
 ## Overview
 
-Noema uses a combination of:
-- **SQLite database** for conversations and messages
-- **TOML files** for configuration (MCP servers)
-- **Environment files** for API keys and provider settings
-- **Binary files** for ML models (Whisper voice)
+The unified storage uses:
+- **SQLite database** with WAL mode for conversations, messages, threads, and metadata
+- **Content-Addressable Storage (CAS)** for binary assets (images, audio, documents)
+- **TOML configuration** for user preferences and MCP servers
+- **Environment files** for secrets only (API keys, encryption key)
+- **Vector extension** (`sqlite-vec`) for embedding-based search
 
 All paths follow platform conventions (XDG on Linux, Application Support on macOS, AppData on Windows).
 
@@ -29,176 +34,264 @@ All paths follow platform conventions (XDG on Linux, Application Support on macO
 
 ```
 <data_dir>/
-├── noema.db              # SQLite database (conversations, messages)
-├── pending_oauth.json    # Temporary OAuth state (auto-deleted after completion)
+├── database/
+│   ├── noema.db              # Main SQLite database (WAL mode)
+│   └── noema.db-wal          # Write-Ahead Log
+│
+├── blob_storage/             # Content-Addressable Storage
+│   ├── 7f/                   # Sharded by first 2 chars of SHA-256
+│   │   └── 7f8a9b...png      # Actual file content
+│   └── a1/
+│       └── a1b2c3...pdf
+│
+├── config/
+│   ├── settings.toml         # User preferences & MCP servers
+│   └── .env                  # SECRETS ONLY (API Keys, Encryption Key)
+│
 └── models/
-    └── ggml-base.en.bin  # Whisper voice model (~140MB, downloaded on-demand)
-
-<config_dir>/
-└── mcp.toml              # MCP server configuration
-
-<cache_dir>/
-└── (reserved for future use)
-
-<logs_dir>/
-└── (application logs)
+    └── ggml-base.en.bin      # Whisper voice model (~140MB)
 ```
+
+---
+
+## Database Technology Stack
+
+| Component | Technology |
+|-----------|------------|
+| Engine | SQLite 3.45+ |
+| Vector Extension | `sqlite-vec` |
+| Mode | WAL (Write-Ahead Logging) |
+| JSON Strategy | Native SQLite JSON functions (`json_extract`) |
 
 ---
 
 ## Database Schema
 
-### File: `<data_dir>/noema.db`
+### File: `<data_dir>/database/noema.db`
 
-SQLite database with WAL mode enabled for concurrent access.
+### A. Identity & Auth
 
-### Tables
+Single-tenant by default with "owner@local" user. Supports multi-tenant for enterprise deployments.
 
-#### `conversations`
+```sql
+CREATE TABLE users (
+    id TEXT PRIMARY KEY,                    -- UUID v4
+    email TEXT UNIQUE NOT NULL,             -- Default: "owner@local"
 
-Stores conversation metadata.
+    -- Encrypted API Keys (AES-256-GCM using ENCRYPTION_KEY)
+    encrypted_anthropic_key TEXT,
+    encrypted_openai_key TEXT,
+    encrypted_gemini_key TEXT,
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | UUID v4 identifier |
-| `name` | TEXT | nullable | User-defined conversation name |
-| `created_at` | INTEGER | NOT NULL, DEFAULT now | Unix timestamp (seconds) |
-| `updated_at` | INTEGER | NOT NULL, DEFAULT now | Unix timestamp (seconds) |
+    -- OAuth persistence
+    google_oauth_refresh_token TEXT,
 
-#### `messages`
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-Stores individual messages within conversations.
+**Default User:** On first launch, create `owner@local` user automatically (bypass login for local mode).
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | TEXT | PRIMARY KEY | UUID v4 identifier |
-| `conversation_id` | TEXT | NOT NULL, FK → conversations | Parent conversation |
-| `role` | TEXT | NOT NULL | `"user"`, `"assistant"`, or `"system"` |
-| `payload` | JSON | NOT NULL | Serialized message content (see below) |
-| `position` | INTEGER | NOT NULL | Ordering within conversation (0-indexed) |
-| `created_at` | INTEGER | NOT NULL, DEFAULT now | Unix timestamp (seconds) |
+### B. Conversations & Threads
 
-**Index:** `idx_messages_conversation` on `(conversation_id, position)` for efficient retrieval.
+Threads enable branching conversations from any message.
 
-### Message Payload Schema
+```sql
+CREATE TABLE conversations (
+    id TEXT PRIMARY KEY,                    -- UUID v4
+    user_id TEXT REFERENCES users(id),
+    title TEXT,
+    system_prompt TEXT,
 
-The `payload` column contains JSON-serialized `ChatPayload` with the following structure:
+    -- Semantic Search
+    summary_text TEXT,
+    summary_embedding BLOB,                 -- 1536-dim float vector (sqlite-vec)
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE threads (
+    id TEXT PRIMARY KEY,                    -- UUID v4
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
+    parent_message_id TEXT,                 -- Fork point (NULL for main thread)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_threads_conversation ON threads(conversation_id);
+```
+
+### C. Messages
+
+Messages contain structured content blocks with references to assets (no inline Base64).
+
+```sql
+CREATE TABLE messages (
+    id TEXT PRIMARY KEY,                    -- UUID v4
+    thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+    role TEXT CHECK(role IN ('user', 'assistant', 'system')),
+
+    -- Content: JSON Array of Content Blocks
+    content_json TEXT NOT NULL,
+
+    -- Search & Embeddings
+    text_content TEXT,                      -- Extracted plain text for FTS
+    embedding BLOB,                         -- 1536-dim vector (sqlite-vec)
+
+    -- Metadata
+    provider TEXT,                          -- 'anthropic', 'openai', 'google', 'ollama'
+    model TEXT,
+    tokens_used INTEGER,
+
+    position INTEGER NOT NULL,              -- Ordering within thread
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_messages_thread ON messages(thread_id, position);
+```
+
+### D. Assets (Content-Addressable Storage)
+
+Files are deduplicated by SHA-256 hash.
+
+```sql
+CREATE TABLE assets (
+    id TEXT PRIMARY KEY,                    -- SHA-256 hash of content
+    mime_type TEXT NOT NULL,
+    original_filename TEXT,
+    file_size_bytes INTEGER,
+
+    metadata_json TEXT,                     -- Dimensions, duration, etc.
+
+    local_path TEXT,                        -- Relative path in blob_storage/
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## Content Block Schema
+
+The `content_json` column in messages contains a JSON array of content blocks:
 
 ```json
-// Text message
+// Text content
+{"type": "text", "text": "Hello, world!"}
+
+// Image reference (CAS)
+{"type": "image", "asset_id": "7f8a9b...", "alt": "Screenshot"}
+
+// Audio reference (CAS)
+{"type": "audio", "asset_id": "a1b2c3...", "duration_ms": 5000}
+
+// Document reference (CAS)
+{"type": "document", "asset_id": "d4e5f6...", "filename": "report.pdf"}
+
+// Tool call (assistant requesting execution)
 {
-  "Text": "Hello, world!"
+  "type": "tool_call",
+  "id": "call_abc123",
+  "name": "get_weather",
+  "arguments": {"location": "NYC"}
 }
 
-// Image content
+// Tool result
 {
-  "Image": {
-    "mime_type": "image/png",
-    "data": "<base64-encoded>"
-  }
-}
-
-// Audio content
-{
-  "Audio": {
-    "mime_type": "audio/wav",
-    "data": "<base64-encoded>"
-  }
-}
-
-// Tool call (assistant requesting tool execution)
-{
-  "ToolCall": {
-    "id": "call_abc123",
-    "name": "get_weather",
-    "arguments": "{\"location\": \"NYC\"}"
-  }
-}
-
-// Tool result (response to tool call)
-{
-  "ToolResult": {
-    "tool_call_id": "call_abc123",
-    "content": [
-      {"type": "text", "text": "72°F, sunny"}
-    ]
-  }
+  "type": "tool_result",
+  "tool_call_id": "call_abc123",
+  "content": [{"type": "text", "text": "72°F, sunny"}]
 }
 ```
 
-### Transaction Semantics
+---
 
-Messages are written transactionally:
+## Content-Addressable Storage (CAS)
 
-1. `session.begin()` → creates transaction with pending buffer
-2. `tx.add(message)` → buffers message in memory
-3. `session.commit(tx)` → writes all pending to SQLite atomically
-4. On drop without commit → logs warning, discards pending
+### How It Works
 
-**Lazy creation:** Conversations are not persisted until the first message is committed.
+1. **Upload/Generate** → Calculate SHA-256 hash of file content
+2. **Check** → Does `blob_storage/{hash[0:2]}/{hash}` exist?
+3. **Store** → If not, write file to sharded directory
+4. **Reference** → Store hash as `asset_id` in messages
+
+### Directory Sharding
+
+Files are sharded by the first 2 characters of their SHA-256 hash:
+
+```
+blob_storage/
+├── 7f/
+│   ├── 7f8a9bc4d5e6f7...png
+│   └── 7fab12cd34ef56...jpg
+├── a1/
+│   └── a1b2c3d4e5f6a7...pdf
+└── ff/
+    └── ff00112233445566...wav
+```
+
+### Benefits
+
+- **Deduplication** - Same file stored once regardless of how many times referenced
+- **Integrity** - Hash verifies content hasn't changed
+- **No Base64 bloat** - Binary files stay binary (saves ~33% space)
+- **Streaming** - Files can be read/written incrementally
 
 ---
 
 ## Configuration Files
 
-### MCP Configuration
+### Settings
 
-**File:** `<config_dir>/mcp.toml`
-
-Defines MCP (Model Context Protocol) server connections.
+**File:** `<data_dir>/config/settings.toml`
 
 ```toml
-[servers.filesystem]
-name = "Local Filesystem"
-url = "npx:-y--@anthropic-ai/mcp-filesystem-server/path/to/dir"
+[storage]
+data_dir = "~/.local/share/noema"  # Override default location
 
-[servers.filesystem.auth]
+[ui]
+theme = "system"                    # "light", "dark", "system"
+font_size = 14
+
+[models]
+default_provider = "anthropic"
+default_model = "claude-sonnet-4-20250514"
+
+[mcp.servers.filesystem]
+name = "Local Filesystem"
+command = "npx"
+args = ["-y", "@anthropic-ai/mcp-filesystem-server", "/path/to/dir"]
+
+[mcp.servers.filesystem.auth]
 type = "none"
 
-[servers.github]
+[mcp.servers.github]
 name = "GitHub"
 url = "https://api.github.com/mcp"
 use_well_known = true
 
-[servers.github.auth]
+[mcp.servers.github.auth]
 type = "oauth"
 client_id = "your-client-id"
-client_secret = "your-client-secret"
-# Populated after successful OAuth flow:
-access_token = "gho_xxxxx"
-refresh_token = "ghr_xxxxx"
-expires_at = 1735689600
-
-[servers.custom-api]
-name = "Custom API"
-url = "https://mcp.example.com"
-
-[servers.custom-api.auth]
-type = "token"
-token = "sk-xxxxx"
 ```
 
-**Auth types:**
-- `none` - No authentication
-- `token` - Bearer token authentication
-- `oauth` - OAuth 2.0 flow (tokens stored after authorization)
+### Secrets
 
-### Environment Variables
-
-**Files:** `~/.env` (global) and `./.env` (project-local)
-
-Project-local values override global values.
+**File:** `<data_dir>/config/.env`
 
 ```bash
-# API Keys
-CLAUDE_API_KEY=sk-ant-xxxxx
-GEMINI_API_KEY=AIzaSy-xxxxx
+# Master encryption key for API keys stored in DB
+ENCRYPTION_KEY=base64-encoded-32-byte-key
+
+# Alternative: Direct API keys (if not using encrypted DB storage)
+ANTHROPIC_API_KEY=sk-ant-xxxxx
 OPENAI_API_KEY=sk-xxxxx
+GEMINI_API_KEY=AIzaSy-xxxxx
 
 # Provider endpoint overrides
 OLLAMA_BASE_URL=http://localhost:11434
-ANTHROPIC_BASE_URL=https://custom-proxy.example.com
 ```
+
+**Security:** This file should have `600` permissions (owner read/write only).
 
 ---
 
@@ -208,148 +301,165 @@ ANTHROPIC_BASE_URL=https://custom-proxy.example.com
 
 **File:** `<data_dir>/models/ggml-base.en.bin`
 
-- **Format:** GGML binary (Whisper.cpp compatible)
-- **Size:** ~140MB
-- **Download:** On-demand via `download_voice_model` command
-- **Source:** Hugging Face model hub
-
-The model is downloaded only when voice features are first used.
+| Property | Value |
+|----------|-------|
+| Format | GGML binary (Whisper.cpp) |
+| Size | ~140MB |
+| Download | On-demand via `download_voice_model` |
+| Source | Hugging Face model hub |
 
 ---
 
-## Temporary Files
+## Encryption
 
-### OAuth State
+### API Key Encryption
 
-**File:** `<data_dir>/pending_oauth.json`
+API keys stored in the `users` table are encrypted using AES-256-GCM:
 
-Stores pending OAuth authorization states for MCP server authentication.
+1. Master key derived from `ENCRYPTION_KEY` in `.env`
+2. Each key encrypted with unique nonce
+3. Format: `nonce || ciphertext || tag` (base64 encoded)
 
-```json
-{
-  "state_parameter_abc123": "server-id-xyz"
-}
+### At-Rest Encryption (Optional)
+
+For sensitive deployments, enable SQLite Encryption Extension (SEE) or SQLCipher.
+
+---
+
+## Vector Search
+
+### sqlite-vec Integration
+
+```sql
+-- Create virtual table for vector search
+CREATE VIRTUAL TABLE message_vectors USING vec0(
+    embedding float[1536]
+);
+
+-- Insert embedding
+INSERT INTO message_vectors(rowid, embedding)
+VALUES (?, ?);
+
+-- Similarity search (cosine distance)
+SELECT messages.*, distance
+FROM message_vectors
+JOIN messages ON messages.rowid = message_vectors.rowid
+WHERE embedding MATCH ?
+ORDER BY distance
+LIMIT 10;
 ```
 
-This file is:
-- Created when initiating OAuth flow
-- Read when OAuth callback is received
-- Entry removed after successful authorization
-- Safe to delete (will require re-authorization)
+### Embedding Dimensions
+
+| Provider | Model | Dimensions |
+|----------|-------|------------|
+| OpenAI | text-embedding-3-small | 1536 |
+| OpenAI | text-embedding-3-large | 3072 |
+| Anthropic | (via Voyage) | 1024 |
 
 ---
 
-## Mobile Considerations
+## Migration Path
 
-On Android and iOS, standard path detection may fail. The application accepts a custom data directory override:
+### From Noema (Base64 Storage)
 
-```rust
-PathManager::set_data_dir(app.path().app_data_dir()?);
-```
+1. **Extract Base64 blobs** from `messages.payload`
+2. **Decode and hash** each blob
+3. **Write to CAS** at `blob_storage/{hash[0:2]}/{hash}`
+4. **Replace payload** with `{"type": "image", "asset_id": "..."}`
+5. **Insert into assets table**
 
-When set, all other directories derive from this base:
-- `config_dir` → `data_dir`
-- `cache_dir` → `data_dir/cache`
-- `logs_dir` → `data_dir/logs`
+### From Episteme (PostgreSQL)
 
----
-
-## In-Memory Caches
-
-### Completion Cache
-
-- **Purpose:** Cache command completion results
-- **TTL:** 5 minutes
-- **Scope:** Per-session, not persisted
-- **Key format:** `"{input}:{partial}"`
-
-### Session Message Cache
-
-- **Purpose:** Avoid repeated database reads
-- **Scope:** Per-session
-- **Sync:** Updated on commit, reflects database state
+1. **Export** using `pg_dump` with `--format=plain`
+2. **Transform** JSONB → TEXT, ARRAY → JSON
+3. **Import** using SQLite `.read` or migration script
+4. **Rebuild vectors** using sqlite-vec
 
 ---
 
 ## Initialization Sequence
 
-On application startup:
-
-1. **Storage Init**
-   - Resolve `db_path()` based on platform
-   - Create parent directories if needed
-   - Open SQLite connection with WAL mode
-   - Run schema creation (idempotent)
-
-2. **Config Load**
-   - Load `~/.env` (if exists)
-   - Load `./.env` (if exists, overwrites globals)
-
-3. **Session Create**
-   - Generate new conversation UUID
-   - (Conversation not written to DB until first message)
-
-4. **MCP Load**
-   - Load `mcp.toml` from config directory
-   - Initialize server registry
-
-5. **Engine Init**
-   - Create chat engine with session and model
+```
+1. Resolve data_dir (platform-specific or override)
+2. Create directory structure if missing
+3. Open SQLite with WAL mode
+4. Run schema migrations (idempotent)
+5. Ensure "owner@local" user exists
+6. Load settings.toml
+7. Load .env secrets
+8. Initialize MCP registry
+9. Create default thread if none exists
+```
 
 ---
 
 ## Path Manager API
 
-The `PathManager` struct provides all path resolution:
-
 ```rust
 use config::PathManager;
 
 // Base directories
-PathManager::data_dir()    // → PathBuf
-PathManager::config_dir()  // → PathBuf
-PathManager::cache_dir()   // → PathBuf
-PathManager::logs_dir()    // → PathBuf
+PathManager::data_dir()     // → ~/.local/share/noema
+PathManager::config_dir()   // → ~/.config/noema (or data_dir/config)
+PathManager::cache_dir()    // → ~/.cache/noema
+PathManager::logs_dir()     // → data_dir/logs
 
-// Specific files
-PathManager::db_path()            // → data_dir/noema.db
-PathManager::models_dir()         // → data_dir/models
+// Database
+PathManager::db_dir()       // → data_dir/database
+PathManager::db_path()      // → data_dir/database/noema.db
+
+// Content-Addressable Storage
+PathManager::blob_dir()     // → data_dir/blob_storage
+PathManager::blob_path(hash: &str) // → data_dir/blob_storage/{hash[0:2]}/{hash}
+
+// Models
+PathManager::models_dir()   // → data_dir/models
 PathManager::whisper_model_path() // → data_dir/models/ggml-base.en.bin
 
-// Mobile override
-PathManager::set_data_dir(path)   // Set custom base for mobile
+// Config files
+PathManager::settings_path() // → data_dir/config/settings.toml
+PathManager::env_path()      // → data_dir/config/.env
 ```
 
 ---
 
-## Backup and Migration
+## Backup & Restore
 
-### Backing Up Data
+### Essential Files
 
-Essential files to backup:
+```bash
+# Full backup
+tar -czf noema-backup.tar.gz \
+  ~/.local/share/noema/database/ \
+  ~/.local/share/noema/blob_storage/ \
+  ~/.local/share/noema/config/
+
+# Restore
+tar -xzf noema-backup.tar.gz -C ~/
 ```
-<data_dir>/noema.db       # All conversations and messages
-<config_dir>/mcp.toml     # MCP server configuration
-~/.env                    # API keys (if stored here)
+
+### Database-Only Backup
+
+```bash
+sqlite3 ~/.local/share/noema/database/noema.db ".backup backup.db"
 ```
-
-### Database Migration
-
-The schema is created on first run. Future migrations should:
-1. Check schema version (not yet implemented)
-2. Apply incremental migrations
-3. Update version marker
-
-Currently, schema changes require manual migration or database recreation.
 
 ---
 
 ## Security Considerations
 
-1. **API Keys** - Stored in plaintext in `.env` files. Consider using system keychain for production.
+| Asset | Protection |
+|-------|------------|
+| API Keys | AES-256-GCM encryption in DB |
+| `.env` file | File permissions (600) |
+| OAuth tokens | Encrypted in settings.toml |
+| Conversation data | Optional SQLCipher encryption |
+| Blob storage | Filesystem permissions |
 
-2. **OAuth Tokens** - Stored in `mcp.toml`. File permissions should restrict access.
+### Recommendations
 
-3. **Database** - Contains full conversation history. Encrypt at rest if handling sensitive data.
-
-4. **Model Files** - Downloaded from external sources. Verify checksums when possible.
+1. **Never commit** `.env` or `settings.toml` with secrets
+2. **Use keychain** integration for production deployments
+3. **Enable disk encryption** on the host system
+4. **Audit blob_storage** - files are named by hash, not original filename

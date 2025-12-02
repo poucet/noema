@@ -8,8 +8,8 @@ pub use paths::PathManager;
 /// Call this before parsing CLI args to ensure env vars are available.
 pub fn load_env_file() {
     // Load from home directory first (lower precedence)
-    if let Some(home) = directories::UserDirs::new() {
-        let home_env_path = home.home_dir().join(".env");
+    if let Some(home) = dirs::home_dir() {
+        let home_env_path = home.join(".env");
         dotenv::from_path(home_env_path).ok();
     }
 

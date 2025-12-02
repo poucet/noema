@@ -1,9 +1,11 @@
 //! Application state management
 
-use noema_audio::VoiceCoordinator;
 use noema_audio::BrowserAudioController;
+use noema_audio::VoiceCoordinator;
+use noema_core::storage::BlobStore;
 use noema_core::{ChatEngine, SqliteSession, SqliteStore};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct AppState {
@@ -20,6 +22,10 @@ pub struct AppState {
     pub pending_oauth_states: Mutex<HashMap<String, String>>,
     /// Browser voice controller for WebAudio-based input
     pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
+    /// Content-addressable blob storage for assets
+    pub blob_store: Mutex<Option<Arc<BlobStore>>>,
+    /// Lock to prevent concurrent initialization (React StrictMode calls init twice)
+    pub init_lock: std::sync::Mutex<bool>,
 }
 
 impl AppState {
@@ -37,6 +43,8 @@ impl AppState {
             is_processing: Mutex::new(false),
             pending_oauth_states: Mutex::new(pending_states),
             browser_audio_controller: Mutex::new(None),
+            blob_store: Mutex::new(None),
+            init_lock: std::sync::Mutex::new(false),
         }
     }
 }

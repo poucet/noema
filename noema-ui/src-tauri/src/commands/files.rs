@@ -1,9 +1,10 @@
 //! File-related Tauri commands
 
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::logging::log_message;
+use crate::state::AppState;
 
 /// Save binary data to a file using the system save dialog
 #[tauri::command]
@@ -61,4 +62,51 @@ pub async fn save_file(
         log_message("User cancelled");
         Ok(false) // User cancelled
     }
+}
+
+// Note: Asset fetching is done via the noema-asset:// custom protocol
+// which enables proper HTTP caching. See lib.rs for the protocol handler.
+// Frontend fetches assets at: noema-asset://localhost/{asset_id}?mime_type={mime}
+
+/// Store an asset in blob storage
+///
+/// Returns the asset ID (SHA-256 hash) for referencing in messages.
+#[tauri::command]
+pub async fn store_asset(
+    state: State<'_, AppState>,
+    data: String,      // base64 encoded
+    mime_type: String,
+    filename: Option<String>,
+) -> Result<String, String> {
+    use base64::Engine;
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    let blob_store_guard = state.blob_store.lock().await;
+    let blob_store = blob_store_guard
+        .as_ref()
+        .ok_or("Blob store not initialized")?;
+
+    // Store in blob storage
+    let stored = blob_store
+        .store(&bytes)
+        .map_err(|e| format!("Failed to store blob: {}", e))?;
+
+    // Register metadata in SQLite
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Store not initialized")?;
+
+    store
+        .register_asset(
+            &stored.hash,
+            &mime_type,
+            filename.as_deref(),
+            Some(bytes.len() as i64),
+            None, // local_path not needed for CAS
+        )
+        .map_err(|e| format!("Failed to register asset: {}", e))?;
+
+    Ok(stored.hash)
 }

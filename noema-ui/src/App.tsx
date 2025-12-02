@@ -50,6 +50,12 @@ function App() {
     async function init() {
       try {
         const modelName = await tauri.initApp();
+        // Empty string means this is a duplicate init call (React StrictMode)
+        // The real init is still running, so just bail out
+        if (!modelName) {
+          console.log("Duplicate init call, skipping");
+          return;
+        }
         setCurrentModel(modelName);
 
         const convos = await tauri.listConversations();

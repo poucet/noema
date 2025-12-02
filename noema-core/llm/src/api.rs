@@ -83,6 +83,17 @@ pub enum ContentBlock {
     ToolResult(ToolResult),
 }
 
+impl ContentBlock {
+    /// Get the mime_type for media content blocks
+    pub fn mime_type(&self) -> Option<&str> {
+        match self {
+            ContentBlock::Image { mime_type, .. } => Some(mime_type),
+            ContentBlock::Audio { mime_type, .. } => Some(mime_type),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct ChatPayload {
     pub content: Vec<ContentBlock>,
@@ -167,6 +178,7 @@ impl ChatPayload {
             .join("")
     }
 
+    /// Get images from this payload
     pub fn get_images(&self) -> Vec<(&str, &str)> {
         self.content
             .iter()
@@ -177,6 +189,7 @@ impl ChatPayload {
             .collect()
     }
 
+    /// Get audio from this payload
     pub fn get_audio(&self) -> Vec<(&str, &str)> {
         self.content
             .iter()
