@@ -82,6 +82,10 @@ mod tests {
 
     #[async_trait]
     impl ChatModel for MockModel {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
         async fn chat(&self, _request: &ChatRequest) -> anyhow::Result<ChatMessage> {
             Ok(ChatMessage::assistant(ChatPayload::text(&self.response)))
         }

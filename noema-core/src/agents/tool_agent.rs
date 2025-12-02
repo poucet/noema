@@ -184,6 +184,10 @@ mod tests {
 
     #[async_trait]
     impl ChatModel for MockToolModel {
+        fn name(&self) -> &str {
+            "mock-tool"
+        }
+
         async fn chat(&self, _request: &ChatRequest) -> anyhow::Result<ChatMessage> {
             let count = self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
