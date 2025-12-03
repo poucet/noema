@@ -101,7 +101,11 @@ impl std::fmt::Display for UnresolvedBlobError {
 impl std::error::Error for UnresolvedBlobError {}
 
 /// Stored payload with blob reference support
+///
+/// Episteme stores content as a plain array `[{...}]`, so we use `#[serde(transparent)]`
+/// to serialize/deserialize directly as an array without the `content` wrapper.
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[serde(transparent)]
 pub struct StoredPayload {
     pub content: Vec<StoredContent>,
 }

@@ -36,9 +36,15 @@ pub async fn init_app(app: AppHandle, state: State<'_, AppState>) -> Result<Stri
         return Ok(String::new());
     }
 
-    init_storage(&state).await?;
+    init_storage(&state).await.map_err(|e| {
+        eprintln!("ERROR in init_storage: {}", e);
+        e
+    })?;
     init_config()?;
-    let session = init_session(&state).await?;
+    let session = init_session(&state).await.map_err(|e| {
+        eprintln!("ERROR in init_session: {}", e);
+        e
+    })?;
     let mcp_registry = init_mcp()?;
     let result = init_engine(&state, session, mcp_registry).await?;
 

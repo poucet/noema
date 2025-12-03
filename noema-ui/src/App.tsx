@@ -21,6 +21,7 @@ function App() {
   const [showMcpSettings, setShowMcpSettings] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Voice input hook - handles browser audio capture and Whisper transcription
   const handleVoiceTranscription = (text: string) => {
@@ -36,13 +37,17 @@ function App() {
     onError: handleVoiceError,
   });
 
-  // Auto-scroll to bottom
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  // Auto-scroll to bottom when new messages arrive
+  const prevMessagesLengthRef = useRef(0);
 
   useEffect(() => {
-    scrollToBottom();
+    // Only auto-scroll if messages were added (not on initial load or conversation switch)
+    if (messages.length > prevMessagesLengthRef.current || streamingMessage) {
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      }
+    }
+    prevMessagesLengthRef.current = messages.length;
   }, [messages, streamingMessage]);
 
   // Initialize app
@@ -278,7 +283,7 @@ function App() {
         )}
 
         {/* Messages area */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4">
           <div className="max-w-4xl mx-auto">
             {messages.length === 0 && !streamingMessage ? (
               <div className="text-center py-20">

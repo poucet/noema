@@ -93,6 +93,19 @@ impl SqliteStore {
 
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+
+        // Check if tables already exist - if they do, skip schema creation
+        // This allows us to work with existing Episteme databases
+        let tables_exist: bool = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            .and_then(|mut stmt| stmt.exists([]))
+            .unwrap_or(false);
+
+        if tables_exist {
+            // Database already exists, don't try to recreate schema
+            return Ok(());
+        }
+
         // Unified schema for Noema/Episteme
         // Timestamps are INTEGER (epoch milliseconds)
         conn.execute_batch(
@@ -314,10 +327,11 @@ impl SqliteStore {
             };
 
             // Load messages from the main thread as StoredMessage (with refs)
-            let query = "SELECT m.role, m.content_json FROM messages m
+            // Note: Episteme uses 'content' and 'sequence_number', Noema uses 'content_json' and 'position'
+            let query = "SELECT m.role, m.content FROM messages m
                  JOIN threads t ON m.thread_id = t.id
                  WHERE t.conversation_id = ?1 AND t.parent_message_id IS NULL
-                 ORDER BY m.position";
+                 ORDER BY m.sequence_number";
 
             let mut stmt = conn.prepare(query)?;
 
@@ -435,10 +449,10 @@ impl SqliteStore {
     pub fn load_stored_messages(&self, conversation_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn.lock().unwrap();
 
-        let query = "SELECT m.role, m.content_json FROM messages m
+        let query = "SELECT m.role, m.content FROM messages m
              JOIN threads t ON m.thread_id = t.id
              WHERE t.conversation_id = ?1 AND t.parent_message_id IS NULL
-             ORDER BY m.position";
+             ORDER BY m.sequence_number";
 
         let mut stmt = conn.prepare(query)?;
 
@@ -620,12 +634,13 @@ impl SqliteSession {
             let stored_payload: StoredPayload = msg.payload.clone().into();
             let content_json = serde_json::to_string(&stored_payload)?;
             let text_content = msg.get_text();
-            let position = (start_position + i) as i64;
+            let sequence_number = (start_position + i) as i64;
 
+            // Episteme uses 'content' and 'sequence_number', also requires 'status' field
             conn.execute(
-                "INSERT INTO messages (id, thread_id, role, content_json, text_content, position, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![&id, &thread_id, role, &content_json, &text_content, position, now],
+                "INSERT INTO messages (id, thread_id, role, content, text_content, sequence_number, status, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'completed', ?7)",
+                params![&id, &thread_id, role, &content_json, &text_content, sequence_number, now],
             )?;
         }
 
