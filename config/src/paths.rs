@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 static DATA_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+static LOG_FILE_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct PathManager;
 
@@ -9,6 +10,11 @@ impl PathManager {
     /// Set a custom data directory (useful for Android/iOS where standard detection fails)
     pub fn set_data_dir(path: PathBuf) {
         let _ = DATA_DIR_OVERRIDE.set(path);
+    }
+
+    /// Set a custom log file path (overrides the default log location)
+    pub fn set_log_file(path: PathBuf) {
+        let _ = LOG_FILE_OVERRIDE.set(path);
     }
 
     // Helper to get the base data directory
@@ -78,6 +84,10 @@ impl PathManager {
     }
 
     pub fn log_file_path() -> Option<PathBuf> {
+        // Check for override first
+        if let Some(path) = LOG_FILE_OVERRIDE.get() {
+            return Some(path.clone());
+        }
         Self::logs_dir().map(|d| d.join("noema.log"))
     }
 

@@ -1,6 +1,5 @@
 #!/bin/bash
 # noema CLI helper with subcommands
-# Can be called directly: noema tui, noema cli, etc.
 
 set -e
 
@@ -12,28 +11,27 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Subcommands
 # ============================================================================
 
-noema_tui() {
-    cargo run --manifest-path "$REPO_ROOT/Cargo.toml" -p tui -- "$@"
-}
-
-noema_cli() {
-    cargo run --manifest-path "$REPO_ROOT/Cargo.toml" -p cli -- "$@"
-}
 
 noema_gui() {
-    cd "$REPO_ROOT/noema-ui" && npm run tauri dev -- "$@"
+    # Use a local log file that gets cleared on each run
+    local LOG_FILE="$REPO_ROOT/noema.log"
+
+    # Clear the log file
+    : > "$LOG_FILE"
+
+    echo "Traffic log: $LOG_FILE"
+
+    # Export the log file path as an environment variable
+    export NOEMA_LOG_FILE="$LOG_FILE"
+
+    cd "$REPO_ROOT/noema-ui" && npm run tauri dev "$@"
 }
 
 noema_build() {
-    echo "Building noema..."
-    cargo build --manifest-path "$REPO_ROOT/Cargo.toml" --release -p tui -p cli
-    echo ""
     echo "Building Tauri GUI..."
     cd "$REPO_ROOT/noema-ui" && npm run tauri build
     echo ""
     echo "Binaries available at:"
-    echo "  $REPO_ROOT/target/release/tui"
-    echo "  $REPO_ROOT/target/release/cli"
     echo "  $REPO_ROOT/noema-ui/src-tauri/target/release/bundle/"
 }
 
@@ -52,22 +50,10 @@ Noema CLI Helper
 Usage: noema <command> [options]
 
 Commands:
-  tui [options]       Run the TUI chat interface (default)
-  cli [options]       Run the CLI chat interface
   gui                 Run the Tauri GUI (React + web)
   build               Build release binaries
   install             Open the macOS installer (.dmg)
   help                Show this help message
-
-TUI/CLI Options:
-  --model <provider>        Model provider: ollama, gemini, claude, openai (default: gemini)
-  --mode <mode>             Chat mode: chat, stream (default: stream)
-  --system-message <msg>    Set a custom system message
-  -t, --tracing             Enable tracing output
-  --openai-url <url>        Custom OpenAI API base URL
-  --claude-url <url>        Custom Claude API base URL
-  --gemini-url <url>        Custom Gemini API base URL
-  --ollama-url <url>        Custom Ollama API base URL
 
 Environment Variables:
   OPENAI_BASE_URL           OpenAI API base URL
@@ -79,18 +65,6 @@ Environment Variables:
   GEMINI_API_KEY            Gemini API key
 
 Examples:
-  # Run TUI with default settings
-  noema tui
-
-  # Run CLI with Claude
-  noema cli --model claude
-
-  # Run TUI through a proxy
-  noema tui --gemini-url http://localhost:8888/gemini
-
-  # Run CLI with streaming disabled
-  noema cli --mode chat
-
   # Run the Tauri GUI
   noema gui
 
@@ -103,7 +77,7 @@ EOF
 
 # Export list of available commands (for meta-wrapper discovery)
 noema_commands() {
-    echo "tui cli gui build install help"
+    echo "gui build install help"
 }
 
 # ============================================================================
@@ -125,15 +99,12 @@ noema_complete() {
     local subcommand="${words[0]}"
 
     case "$subcommand" in
-        tui|cli)
-            echo "--model --mode --system-message -t --tracing --openai-url --claude-url --gemini-url --ollama-url"
-            ;;
     esac
 }
 
 # Main entry point when called directly
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-    cmd="${1:-tui}"
+    cmd="${1:-gui}"
     shift || true
 
     case "$cmd" in
@@ -143,7 +114,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
         complete)
             noema_complete "$@"
             ;;
-        tui|cli|gui|build|install|help)
+        gui|build|install|help)
             "noema_$cmd" "$@"
             ;;
         *)

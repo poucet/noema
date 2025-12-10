@@ -21,6 +21,7 @@ pub mod context;
 pub mod engine;
 pub mod mcp;
 pub mod storage;
+pub mod traffic_log;
 
 pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};

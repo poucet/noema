@@ -189,7 +189,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const toggle = useCallback(async () => {
     if (status === "disabled") {
       await startRecording();
-    } else if (status === "listening") {
+    } else if (status === "listening" || status === "enabled" || status === "buffering") {
+      // Allow stopping in listening, enabled (idle during thinking), or buffering states
       await stopRecording();
     }
     // Don't do anything if transcribing - wait for it to finish

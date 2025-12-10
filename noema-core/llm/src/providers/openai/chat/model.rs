@@ -1,5 +1,6 @@
 use crate::api::{ChatChunk, ChatMessage, ChatRequest, Role};
 use crate::client::Client;
+use crate::traffic_log;
 use crate::ChatModel;
 use crate::ChatStream;
 use async_trait::async_trait;
@@ -37,14 +38,25 @@ impl ChatModel for OpenAIChatModel {
     async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatMessage> {
         let openai_request =
             ChatCompletionRequest::from_request(self.model_name.clone(), request, false);
-        let response: ChatCompletionResponse =
-            self.client.post(self.chat_url(), &openai_request).await?;
-        Ok(response.into())
+        traffic_log::log_request(&self.model_name, &openai_request);
+
+        match self.client.post(self.chat_url(), &openai_request).await {
+            Ok(response) => {
+                traffic_log::log_response(&self.model_name, &response);
+                let response: ChatCompletionResponse = response;
+                Ok(response.into())
+            }
+            Err(e) => {
+                traffic_log::log_error(&self.model_name, &e.to_string());
+                Err(e)
+            }
+        }
     }
 
     async fn stream_chat(&self, request: &ChatRequest) -> anyhow::Result<ChatStream> {
         let openai_request =
             ChatCompletionRequest::from_request(self.model_name.clone(), request, true);
+        traffic_log::log_stream_start(&self.model_name, &openai_request);
 
         let stream = self
             .client

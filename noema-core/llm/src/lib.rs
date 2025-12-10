@@ -8,6 +8,7 @@ mod client;
 pub mod providers;
 pub mod registry;
 pub mod tools;
+pub mod traffic_log;
 pub use api::*;
 pub use providers::GeneralModelProvider;
 pub use registry::{

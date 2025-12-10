@@ -2,10 +2,11 @@
 
 use config::PathManager;
 use llm::create_model;
+use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::BlobStore;
 use noema_core::{ChatEngine, McpRegistry, SqliteSession, SqliteStore};
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::chat::start_engine_event_loop;
 use crate::logging::log_message;
@@ -82,10 +83,56 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     log_message(&format!("Engine initialized with model: {}", result));
 
     // Start the engine event loop (runs continuously)
-    start_engine_event_loop(app);
+    start_engine_event_loop(app.clone());
     log_message("Event loop started");
 
+    // Start auto-connect for MCP servers (runs in background)
+    start_mcp_auto_connect(app, state).await;
+    log_message("MCP auto-connect started");
+
     Ok(result)
+}
+
+/// Start auto-connect for all configured MCP servers
+async fn start_mcp_auto_connect(app: AppHandle, state: &AppState) {
+    // Get the MCP registry from the engine
+    let engine_guard = state.engine.lock().await;
+    let engine = match engine_guard.as_ref() {
+        Some(e) => e,
+        None => {
+            log_message("Cannot start MCP auto-connect: engine not initialized");
+            return;
+        }
+    };
+
+    let mcp_registry = engine.get_mcp_registry();
+    drop(engine_guard);
+
+    // Create callback that emits events to frontend
+    let app_handle = app.clone();
+    let on_status_change: Arc<dyn Fn(&str, &ServerStatus) + Send + Sync> =
+        Arc::new(move |server_id: &str, status: &ServerStatus| {
+            let status_str = match status {
+                ServerStatus::Disconnected => "disconnected".to_string(),
+                ServerStatus::Connected => "connected".to_string(),
+                ServerStatus::Retrying { attempt } => format!("retrying:{}", attempt),
+                ServerStatus::RetryStopped { last_error } => format!("stopped:{}", last_error),
+            };
+
+            log_message(&format!("MCP server '{}' status: {}", server_id, status_str));
+
+            // Emit event to frontend
+            let _ = app_handle.emit(
+                "mcp_server_status",
+                serde_json::json!({
+                    "server_id": server_id,
+                    "status": status_str,
+                }),
+            );
+        });
+
+    let count = start_auto_connect(mcp_registry, Some(on_status_change)).await;
+    log_message(&format!("Started auto-connect for {} MCP servers", count));
 }
 
 async fn init_storage(state: &AppState) -> Result<(), String> {

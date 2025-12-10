@@ -77,6 +77,8 @@ pub async fn download_voice_model(app: AppHandle, url: String) -> Result<(), Str
 fn spawn_voice_loop(app: AppHandle) {
     tokio::spawn(async move {
         let state = app.state::<AppState>();
+        let mut last_status: Option<String> = None;
+
         loop {
             // Check if we're currently processing a message - if so, buffer voice input
             let is_processing = *state.is_processing.lock().await;
@@ -96,15 +98,21 @@ fn spawn_voice_loop(app: AppHandle) {
                 }
             };
 
-            // Emit status updates with buffered count
-            if is_listening {
-                app.emit("voice_status", "listening").ok();
+            // Determine current status
+            let current_status = if is_listening {
+                "listening".to_string()
             } else if is_transcribing {
-                app.emit("voice_status", "transcribing").ok();
+                "transcribing".to_string()
             } else if buffered_count > 0 {
-                app.emit("voice_status", format!("buffering:{}", buffered_count)).ok();
+                format!("buffering:{}", buffered_count)
             } else {
-                app.emit("voice_status", "enabled").ok();
+                "enabled".to_string()
+            };
+
+            // Only emit status when it changes to avoid spam
+            if last_status.as_ref() != Some(&current_status) {
+                app.emit("voice_status", &current_status).ok();
+                last_status = Some(current_status);
             }
 
             // Send transcribed message (buffered messages are concatenated)

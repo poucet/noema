@@ -1,6 +1,8 @@
 //! MCP (Model Context Protocol) server commands
 
+use noema_core::mcp::{spawn_retry_task, ServerStatus};
 use noema_core::{AuthMethod, ServerConfig};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::logging::log_message;
@@ -31,6 +33,15 @@ pub async fn list_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServe
             AuthMethod::OAuth { .. } => "oauth",
         };
 
+        // Get server status
+        let server_status = registry.get_status(id);
+        let status = match &server_status {
+            ServerStatus::Disconnected => "disconnected".to_string(),
+            ServerStatus::Connected => "connected".to_string(),
+            ServerStatus::Retrying { attempt } => format!("retrying:{}", attempt),
+            ServerStatus::RetryStopped { last_error } => format!("stopped:{}", last_error),
+        };
+
         servers.push(McpServerInfo {
             id: id.to_string(),
             name: config.name.clone(),
@@ -39,6 +50,9 @@ pub async fn list_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServe
             is_connected,
             needs_oauth_login: config.auth.needs_oauth_login(),
             tool_count,
+            status,
+            auto_connect: config.auto_connect,
+            auto_retry: config.auto_retry,
         });
     }
 
@@ -108,6 +122,8 @@ pub async fn add_mcp_server(
         auth,
         use_well_known,
         auth_token: None,
+        auto_connect: true,
+        auto_retry: true,
     };
 
     let engine_guard = state.engine.lock().await;
@@ -369,6 +385,8 @@ pub async fn start_mcp_oauth(
                             auth: updated_auth,
                             use_well_known: config.use_well_known,
                             auth_token: None,
+                            auto_connect: config.auto_connect,
+                            auto_retry: config.auto_retry,
                         };
 
                         registry.add_server(server_id.clone(), updated_config);
@@ -529,6 +547,8 @@ pub async fn complete_mcp_oauth(
                 auth: updated_auth,
                 use_well_known: config.use_well_known,
                 auth_token: None,
+                auto_connect: config.auto_connect,
+                auto_retry: config.auto_retry,
             };
 
             registry.add_server(server_id, updated_config);
@@ -648,6 +668,8 @@ pub async fn complete_oauth_internal(
                 auth: updated_auth,
                 use_well_known: config.use_well_known,
                 auth_token: None,
+                auto_connect: config.auto_connect,
+                auto_retry: config.auto_retry,
             };
 
             registry.add_server(server_id.to_string(), updated_config);
@@ -657,6 +679,158 @@ pub async fn complete_oauth_internal(
         }
         _ => Err("Server is not configured for OAuth".to_string()),
     }
+}
+
+/// Update auto-connect and auto-retry settings for an MCP server
+#[tauri::command]
+pub async fn update_mcp_server_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    server_id: String,
+    auto_connect: bool,
+    auto_retry: bool,
+) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    // Get existing config
+    let config = registry
+        .config()
+        .get_server(&server_id)
+        .ok_or("Server not found")?
+        .clone();
+
+    // Update config with new settings
+    let updated_config = ServerConfig {
+        name: config.name,
+        url: config.url.clone(),
+        auth: config.auth,
+        use_well_known: config.use_well_known,
+        auth_token: config.auth_token,
+        auto_connect,
+        auto_retry,
+    };
+
+    registry.add_server(server_id.clone(), updated_config.clone());
+    registry.save_config().map_err(|e| e.to_string())?;
+
+    // If auto_retry was disabled, cancel any active retry
+    if !auto_retry {
+        registry.cancel_retry(&server_id);
+    }
+
+    // If auto_retry was enabled and server is not connected, start retry
+    if auto_retry && !registry.is_connected(&server_id) && !registry.is_retry_active(&server_id) {
+        // Create callback for status updates
+        let app_handle = app.clone();
+        let cb: Option<Box<dyn Fn(&str, &ServerStatus) + Send + Sync>> =
+            Some(Box::new(move |server_id: &str, status: &ServerStatus| {
+                let status_str = match status {
+                    ServerStatus::Disconnected => "disconnected".to_string(),
+                    ServerStatus::Connected => "connected".to_string(),
+                    ServerStatus::Retrying { attempt } => format!("retrying:{}", attempt),
+                    ServerStatus::RetryStopped { last_error } => format!("stopped:{}", last_error),
+                };
+
+                log_message(&format!("MCP server '{}' status: {}", server_id, status_str));
+
+                let _ = app_handle.emit(
+                    "mcp_server_status",
+                    serde_json::json!({
+                        "server_id": server_id,
+                        "status": status_str,
+                    }),
+                );
+            }));
+
+        let token = spawn_retry_task(
+            Arc::clone(&mcp_registry),
+            server_id.clone(),
+            updated_config,
+            cb,
+        );
+        registry.set_retry_token(&server_id, token);
+    }
+
+    Ok(())
+}
+
+/// Stop retry attempts for an MCP server
+#[tauri::command]
+pub async fn stop_mcp_retry(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    registry.cancel_retry(&server_id);
+    registry.set_status(
+        &server_id,
+        ServerStatus::RetryStopped {
+            last_error: "Manually stopped".to_string(),
+        },
+    );
+
+    Ok(())
+}
+
+/// Start retry attempts for an MCP server
+#[tauri::command]
+pub async fn start_mcp_retry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    server_id: String,
+) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let mcp_registry = engine.get_mcp_registry();
+    let mut registry = mcp_registry.lock().await;
+
+    // Check if already connected or retry in progress
+    if registry.is_connected(&server_id) {
+        return Err("Server is already connected".to_string());
+    }
+    if registry.is_retry_active(&server_id) {
+        return Err("Retry is already in progress".to_string());
+    }
+
+    let config = registry
+        .config()
+        .get_server(&server_id)
+        .ok_or("Server not found")?
+        .clone();
+
+    // Create callback for status updates
+    let app_handle = app.clone();
+    let cb: Option<Box<dyn Fn(&str, &ServerStatus) + Send + Sync>> =
+        Some(Box::new(move |server_id: &str, status: &ServerStatus| {
+            let status_str = match status {
+                ServerStatus::Disconnected => "disconnected".to_string(),
+                ServerStatus::Connected => "connected".to_string(),
+                ServerStatus::Retrying { attempt } => format!("retrying:{}", attempt),
+                ServerStatus::RetryStopped { last_error } => format!("stopped:{}", last_error),
+            };
+
+            log_message(&format!("MCP server '{}' status: {}", server_id, status_str));
+
+            let _ = app_handle.emit(
+                "mcp_server_status",
+                serde_json::json!({
+                    "server_id": server_id,
+                    "status": status_str,
+                }),
+            );
+        }));
+
+    let token = spawn_retry_task(Arc::clone(&mcp_registry), server_id.clone(), config, cb);
+    registry.set_retry_token(&server_id, token);
+
+    Ok(())
 }
 
 /// Handle incoming deep link URLs (e.g., noema://oauth/callback?code=...&state=...)

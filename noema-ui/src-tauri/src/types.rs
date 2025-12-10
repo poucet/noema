@@ -182,6 +182,12 @@ pub struct McpServerInfo {
     pub is_connected: bool,
     pub needs_oauth_login: bool,
     pub tool_count: usize,
+    /// Connection status: "disconnected", "connected", "retrying:N", "stopped:error"
+    pub status: String,
+    /// Whether to auto-connect on app startup
+    pub auto_connect: bool,
+    /// Whether to auto-retry with exponential backoff
+    pub auto_retry: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

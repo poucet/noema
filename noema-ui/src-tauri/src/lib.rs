@@ -93,6 +93,11 @@ fn handle_asset_request(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Check for NOEMA_LOG_FILE environment variable
+    if let Ok(path) = std::env::var("NOEMA_LOG_FILE") {
+        PathManager::set_log_file(std::path::PathBuf::from(path));
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
@@ -182,15 +187,18 @@ pub fn run() {
             commands::mcp::list_mcp_servers,
             commands::mcp::add_mcp_server,
             commands::mcp::remove_mcp_server,
-            // Settings commands
-            commands::settings::get_user_email,
-            commands::settings::set_user_email,
             commands::mcp::connect_mcp_server,
             commands::mcp::disconnect_mcp_server,
             commands::mcp::get_mcp_server_tools,
             commands::mcp::test_mcp_server,
             commands::mcp::start_mcp_oauth,
             commands::mcp::complete_mcp_oauth,
+            commands::mcp::update_mcp_server_settings,
+            commands::mcp::stop_mcp_retry,
+            commands::mcp::start_mcp_retry,
+            // Settings commands
+            commands::settings::get_user_email,
+            commands::settings::set_user_email,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

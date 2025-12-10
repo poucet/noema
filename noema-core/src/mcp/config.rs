@@ -87,6 +87,16 @@ pub struct ServerConfig {
     /// Optional authentication token (legacy, prefer `auth` field)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
+    /// Automatically connect to this server on app startup
+    #[serde(default = "default_true")]
+    pub auto_connect: bool,
+    /// Enable automatic retry with exponential backoff when connection fails
+    #[serde(default = "default_true")]
+    pub auto_retry: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Root configuration containing all MCP servers.
