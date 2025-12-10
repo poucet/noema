@@ -378,16 +378,102 @@ pub(crate) struct GeminiTool {
     pub(crate) function_declarations: Vec<GeminiFunctionDeclaration>,
 }
 
+/// Keys that Gemini API does not support in JSON Schema
+const UNSUPPORTED_SCHEMA_KEYS: &[&str] = &[
+    "$schema",
+    "$id",
+    "$anchor",
+    "$dynamicRef",
+    "$dynamicAnchor",
+    "$vocabulary",
+    "$comment",
+    // Note: $ref and $defs are handled specially - $ref is resolved, then both are removed
+];
+
+/// Sanitize a JSON Schema for Gemini API compatibility.
+///
+/// Gemini rejects schemas with advanced JSON Schema features like $schema, $ref, $defs, etc.
+/// This function recursively removes unsupported keys and resolves $ref references by inlining
+/// the referenced definitions.
+fn sanitize_schema_for_gemini(schema: serde_json::Value) -> serde_json::Value {
+    // Extract $defs from root for reference resolution
+    let defs = schema
+        .as_object()
+        .and_then(|obj| obj.get("$defs"))
+        .and_then(|d| d.as_object())
+        .cloned();
+
+    sanitize_schema_recursive(schema, defs.as_ref())
+}
+
+fn sanitize_schema_recursive(
+    schema: serde_json::Value,
+    defs: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> serde_json::Value {
+    let obj = match schema {
+        serde_json::Value::Object(obj) => obj,
+        other => return other,
+    };
+
+    // Handle $ref - resolve before removing
+    if let Some(ref_value) = obj.get("$ref") {
+        if let Some(ref_str) = ref_value.as_str() {
+            if let Some(ref_name) = ref_str.strip_prefix("#/$defs/") {
+                if let Some(defs_map) = defs {
+                    if let Some(definition) = defs_map.get(ref_name) {
+                        // Inline and recursively sanitize the definition
+                        return sanitize_schema_recursive(definition.clone(), defs);
+                    }
+                }
+            }
+        }
+        // Can't resolve $ref - return empty object
+        return serde_json::json!({});
+    }
+
+    // Build new object without unsupported keys
+    let mut result = serde_json::Map::new();
+    for (key, value) in obj {
+        // Skip unsupported keys
+        if UNSUPPORTED_SCHEMA_KEYS.contains(&key.as_str()) || key == "$defs" || key == "$ref" {
+            continue;
+        }
+
+        let sanitized_value = match value {
+            serde_json::Value::Object(_) => sanitize_schema_recursive(value, defs),
+            serde_json::Value::Array(arr) => serde_json::Value::Array(
+                arr.into_iter()
+                    .map(|item| {
+                        if item.is_object() {
+                            sanitize_schema_recursive(item, defs)
+                        } else {
+                            item
+                        }
+                    })
+                    .collect(),
+            ),
+            other => other,
+        };
+        result.insert(key, sanitized_value);
+    }
+
+    serde_json::Value::Object(result)
+}
+
 impl From<&Vec<crate::api::ToolDefinition>> for GeminiTool {
     fn from(tools: &Vec<crate::api::ToolDefinition>) -> Self {
         GeminiTool {
             function_declarations: tools
                 .iter()
-                .map(|t| GeminiFunctionDeclaration {
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                    parameters: serde_json::to_value(&t.input_schema)
-                        .expect("Failed to serialize tool schema"),
+                .map(|t| {
+                    let raw_schema = serde_json::to_value(&t.input_schema)
+                        .expect("Failed to serialize tool schema");
+                    let sanitized_schema = sanitize_schema_for_gemini(raw_schema);
+                    GeminiFunctionDeclaration {
+                        name: t.name.clone(),
+                        description: t.description.clone(),
+                        parameters: sanitized_schema,
+                    }
                 })
                 .collect(),
         }
