@@ -1,6 +1,7 @@
 //! Agent with dynamic MCP tool support
 
 use crate::mcp::McpToolRegistry;
+use crate::traffic_log;
 use crate::Agent;
 use crate::ConversationContext;
 use async_trait::async_trait;
@@ -149,6 +150,9 @@ impl Agent for McpAgent {
             content.extend(other_blocks);
 
             let accumulated = ChatMessage::new(role, ChatPayload::new(content));
+
+            // Log the accumulated response
+            traffic_log::log_llm_response(model.name(), &accumulated);
 
             // Add the complete accumulated message to context
             context.add(accumulated.clone());

@@ -19,7 +19,7 @@ export type DisplayContent =
   | { text: string }
   | { image: { data: string; mimeType: string } }
   | { audio: { data: string; mimeType: string } }
-  | { toolCall: { name: string; id: string } }
+  | { toolCall: { name: string; id: string; arguments: unknown } }
   | { toolResult: { id: string; content: DisplayToolResultContent[] } };
 
 export type DisplayToolResultContent =

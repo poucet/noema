@@ -1,3 +1,4 @@
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -57,6 +58,77 @@ function renderToolResultContent(content: DisplayToolResultContent): React.React
   return null;
 }
 
+function getToolResultSummary(content: DisplayToolResultContent[]): string {
+  if (content.length === 0) return "Empty result";
+  const first = content[0];
+  if ("text" in first) {
+    const text = first.text;
+    if (text.length <= 60) return text;
+    return text.slice(0, 60) + "...";
+  }
+  if ("image" in first) return "[Image]";
+  if ("audio" in first) return "[Audio]";
+  return "[Result]";
+}
+
+function ToolCallBlock({ name, arguments: args }: { name: string; arguments: unknown }) {
+  const [expanded, setExpanded] = useState(false);
+  const argsString = args && typeof args === "object"
+    ? JSON.stringify(args, null, 2)
+    : String(args ?? "");
+  const shortArgs = args && typeof args === "object"
+    ? JSON.stringify(args)
+    : String(args ?? "");
+  const shortDisplay = shortArgs.length > 60 ? shortArgs.slice(0, 60) + "..." : shortArgs;
+
+  return (
+    <div className="bg-purple-900/50 text-purple-200 px-3 py-2 rounded-lg text-sm">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left flex items-center gap-2"
+      >
+        <span className="text-purple-400">{expanded ? "▼" : "▶"}</span>
+        <span className="font-semibold">{name}</span>
+        {!expanded && shortDisplay && (
+          <span className="text-purple-300/70 text-xs truncate flex-1">{shortDisplay}</span>
+        )}
+      </button>
+      {expanded && argsString && (
+        <pre className="mt-2 text-xs bg-purple-950/50 p-2 rounded overflow-x-auto whitespace-pre-wrap">
+          {argsString}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function ToolResultBlock({ content }: { content: DisplayToolResultContent[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const summary = getToolResultSummary(content);
+
+  return (
+    <div className="bg-teal-900/50 text-teal-200 px-3 py-2 rounded-lg text-sm">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left flex items-center gap-2"
+      >
+        <span className="text-teal-400">{expanded ? "▼" : "▶"}</span>
+        <span className="font-semibold">Result</span>
+        {!expanded && (
+          <span className="text-teal-300/70 text-xs truncate flex-1">{summary}</span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-2">
+          {content.map((c, i) => (
+            <div key={i}>{renderToolResultContent(c)}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContentBlock({ block }: { block: DisplayContent }) {
   if ("text" in block) {
     return <MarkdownText text={block.text} />;
@@ -75,24 +147,11 @@ function ContentBlock({ block }: { block: DisplayContent }) {
   }
 
   if ("toolCall" in block) {
-    return (
-      <div className="bg-purple-900/50 text-purple-200 px-3 py-2 rounded-lg text-sm">
-        <span className="font-semibold">Tool Call:</span> {block.toolCall.name}
-      </div>
-    );
+    return <ToolCallBlock name={block.toolCall.name} arguments={block.toolCall.arguments} />;
   }
 
   if ("toolResult" in block) {
-    return (
-      <div className="bg-teal-900/50 text-teal-200 px-3 py-2 rounded-lg text-sm">
-        <span className="font-semibold">Tool Result:</span>
-        <div className="mt-1">
-          {block.toolResult.content.map((content, i) => (
-            <div key={i}>{renderToolResultContent(content)}</div>
-          ))}
-        </div>
-      </div>
-    );
+    return <ToolResultBlock content={block.toolResult.content} />;
   }
 
   return null;

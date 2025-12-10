@@ -152,6 +152,13 @@ impl ChatPayload {
         ChatPayload { content }
     }
 
+    /// Create a payload with a single tool call
+    pub fn tool_call(tool_call: ToolCall) -> Self {
+        ChatPayload {
+            content: vec![ContentBlock::ToolCall(tool_call)],
+        }
+    }
+
     /// Create a tool result with multimodal content
     pub fn tool_result(tool_call_id: String, result_content: Vec<ToolResultContent>) -> Self {
         ChatPayload {

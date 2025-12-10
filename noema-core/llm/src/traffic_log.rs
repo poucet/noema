@@ -28,6 +28,12 @@ pub fn log_stream_start(model: &str, request: &impl serde::Serialize) {
     log_traffic("STREAM_START", &format!("[{}]\n{}", model, json));
 }
 
+/// Log an LLM streaming response (accumulated from chunks)
+pub fn log_stream_response(model: &str, response: &impl serde::Serialize) {
+    let json = serde_json::to_string_pretty(response).unwrap_or_else(|_| "<serialization error>".to_string());
+    log_traffic("STREAM_RESPONSE", &format!("[{}]\n{}", model, json));
+}
+
 /// Internal function to write to the log file
 fn log_traffic(event_type: &str, message: &str) {
     if let Some(log_path) = PathManager::log_file_path() {

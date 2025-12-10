@@ -44,7 +44,7 @@ pub enum DisplayContent {
     Audio { data: String, mime_type: String },
     /// Asset stored in blob storage - client should fetch via asset API
     AssetRef { asset_id: String, mime_type: String, filename: Option<String> },
-    ToolCall { name: String, id: String },
+    ToolCall { name: String, id: String, arguments: serde_json::Value },
     ToolResult { id: String, content: Vec<DisplayToolResultContent> },
 }
 
@@ -112,6 +112,7 @@ fn content_block_to_display(block: &ContentBlock) -> DisplayContent {
         ContentBlock::ToolCall(call) => DisplayContent::ToolCall {
             name: call.name.clone(),
             id: call.id.clone(),
+            arguments: call.arguments.clone(),
         },
         ContentBlock::ToolResult(result) => DisplayContent::ToolResult {
             id: result.tool_call_id.clone(),
@@ -159,6 +160,7 @@ pub fn stored_content_to_display(content: &StoredContent) -> DisplayContent {
         StoredContent::ToolCall(call) => DisplayContent::ToolCall {
             name: call.name.clone(),
             id: call.id.clone(),
+            arguments: call.arguments.clone(),
         },
         StoredContent::ToolResult(result) => DisplayContent::ToolResult {
             id: result.tool_call_id.clone(),

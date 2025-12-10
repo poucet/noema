@@ -1,10 +1,12 @@
 use crate::client::Client;
 use crate::traffic_log;
 
-use super::api::{Delta, MessagesRequest, MessagesResponse, StreamEvent};
+use super::api::{ContentBlock, Delta, MessagesRequest, MessagesResponse, StreamEvent};
 use crate::{ChatMessage, ChatModel, ChatRequest, ChatStream};
 use async_trait::async_trait;
 use futures::StreamExt;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tracing::warn;
 
 pub struct ClaudeChatModel {
@@ -59,19 +61,58 @@ impl ChatModel for ClaudeChatModel {
             .post_stream(url, &api_request, |line: &str| line.strip_prefix("data: "))
             .await?;
 
-        // Process Claude's streaming events and extract text deltas
-        let chunk_stream = streamed_response.filter_map(|event: StreamEvent| {
+        // Track tool calls being built up during streaming
+        // Key: content block index, Value: (id, name, accumulated_json)
+        let tool_calls: Arc<Mutex<HashMap<usize, (String, String, String)>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let tool_calls_clone = Arc::clone(&tool_calls);
+
+        // Process Claude's streaming events and extract text deltas + tool calls
+        let chunk_stream = streamed_response.filter_map(move |event: StreamEvent| {
+            let tool_calls = Arc::clone(&tool_calls_clone);
             async move {
                 match event {
-                    StreamEvent::ContentBlockDelta { delta, .. } => match delta {
-                        Delta::TextDelta { text } => Some(crate::ChatChunk::assistant(crate::ChatPayload::text(text))),
-                        Delta::ThinkingDelta { thinking } => Some(crate::ChatChunk::assistant(crate::ChatPayload::text(thinking))), // Represent thinking as text
+                    StreamEvent::ContentBlockStart { index, content_block } => {
+                        // When a tool use block starts, record it
+                        if let ContentBlock::ToolUse { id, name, .. } = content_block {
+                            let mut calls = tool_calls.lock().unwrap();
+                            calls.insert(index, (id, name, String::new()));
+                        }
+                        None
+                    }
+                    StreamEvent::ContentBlockDelta { index, delta } => match delta {
+                        Delta::TextDelta { text } => {
+                            Some(crate::ChatChunk::assistant(crate::ChatPayload::text(text)))
+                        }
+                        Delta::ThinkingDelta { thinking } => {
+                            Some(crate::ChatChunk::assistant(crate::ChatPayload::text(thinking)))
+                        }
                         Delta::InputJsonDelta { partial_json } => {
-                            // For tool use, we could accumulate and return, but for now skip
-                            warn!("Skipping tool use JSON delta: {}", partial_json);
+                            // Accumulate the JSON for this tool call
+                            let mut calls = tool_calls.lock().unwrap();
+                            if let Some((_, _, json)) = calls.get_mut(&index) {
+                                json.push_str(&partial_json);
+                            }
                             None
                         }
                     },
+                    StreamEvent::ContentBlockStop { index } => {
+                        // When a tool use block ends, emit the complete tool call
+                        let mut calls = tool_calls.lock().unwrap();
+                        if let Some((id, name, json)) = calls.remove(&index) {
+                            let arguments: serde_json::Value =
+                                serde_json::from_str(&json).unwrap_or(serde_json::Value::Null);
+                            let tool_call = crate::api::ToolCall {
+                                id,
+                                name,
+                                arguments,
+                            };
+                            return Some(crate::ChatChunk::assistant(crate::ChatPayload::tool_call(
+                                tool_call,
+                            )));
+                        }
+                        None
+                    }
                     StreamEvent::Error { error } => {
                         warn!(
                             "Received error event: {} - {}",
@@ -79,7 +120,7 @@ impl ChatModel for ClaudeChatModel {
                         );
                         None
                     }
-                    // Ignore other event types
+                    // Ignore other event types (MessageStart, MessageDelta, MessageStop, Ping)
                     _ => None,
                 }
             }
