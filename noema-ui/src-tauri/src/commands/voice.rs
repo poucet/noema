@@ -81,32 +81,35 @@ fn spawn_voice_loop(app: AppHandle) {
             // Check if we're currently processing a message - if so, buffer voice input
             let is_processing = *state.is_processing.lock().await;
 
-            let (messages, errors, is_listening, is_transcribing) = {
+            let (message, errors, is_listening, is_transcribing, buffered_count) = {
                 let mut coordinator_guard = state.voice_coordinator.lock().await;
                 if let Some(coordinator) = coordinator_guard.as_mut() {
                     let is_listening = coordinator.is_listening();
                     let is_transcribing = coordinator.is_transcribing();
+                    let buffered_count = coordinator.buffered_count();
                     // Buffer messages while processing, release when not processing
-                    let (msgs, errs) = coordinator.process(is_processing);
-                    (msgs, errs, is_listening, is_transcribing)
+                    let (msg, errs) = coordinator.process(is_processing);
+                    (msg, errs, is_listening, is_transcribing, buffered_count)
                 } else {
                     // Voice was disabled or session ended
                     break;
                 }
             };
 
-            // Emit status updates
+            // Emit status updates with buffered count
             if is_listening {
                 app.emit("voice_status", "listening").ok();
             } else if is_transcribing {
                 app.emit("voice_status", "transcribing").ok();
+            } else if buffered_count > 0 {
+                app.emit("voice_status", format!("buffering:{}", buffered_count)).ok();
             } else {
                 app.emit("voice_status", "enabled").ok();
             }
 
-            // Send transcribed messages as chat messages
-            for message in messages {
-                app.emit("voice_transcription", &message).ok();
+            // Send transcribed message (buffered messages are concatenated)
+            if let Some(msg) = message {
+                app.emit("voice_transcription", &msg).ok();
             }
 
             // Report errors

@@ -415,6 +415,7 @@ function App() {
           disabled={isLoading}
           voiceAvailable={voice.isAvailable}
           voiceStatus={voice.status}
+          voiceBufferedCount={voice.bufferedCount}
           onToggleVoice={voice.toggle}
         />
       </div>

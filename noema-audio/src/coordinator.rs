@@ -5,6 +5,7 @@ pub struct VoiceCoordinator {
     pending_messages: Vec<String>,
     is_listening: bool,
     is_transcribing: bool,
+    is_buffering: bool,
 }
 
 impl VoiceCoordinator {
@@ -14,6 +15,7 @@ impl VoiceCoordinator {
             pending_messages: Vec::new(),
             is_listening: false,
             is_transcribing: false,
+            is_buffering: false,
         }
     }
 
@@ -25,12 +27,21 @@ impl VoiceCoordinator {
         self.is_transcribing
     }
 
+    pub fn is_buffering(&self) -> bool {
+        self.is_buffering
+    }
+
+    pub fn buffered_count(&self) -> usize {
+        self.pending_messages.len()
+    }
+
     /// Poll for voice events and return messages to send.
     /// If `buffering` is true, transcriptions are queued instead of returned.
-    /// Returns (messages_to_send, errors)
-    pub fn process(&mut self, buffering: bool) -> (Vec<String>, Vec<String>) {
-        let mut messages = Vec::new();
+    /// Returns (message_to_send, errors) - buffered messages are concatenated into one
+    pub fn process(&mut self, buffering: bool) -> (Option<String>, Vec<String>) {
         let mut errors = Vec::new();
+
+        self.is_buffering = buffering;
 
         while let Some(event) = self.agent.try_recv() {
             match event {
@@ -46,11 +57,7 @@ impl VoiceCoordinator {
                     self.is_listening = false;
                     self.is_transcribing = false;
                     if !text.trim().is_empty() {
-                        if buffering {
-                            self.pending_messages.push(text);
-                        } else {
-                            messages.push(text);
-                        }
+                        self.pending_messages.push(text);
                     }
                 }
                 VoiceEvent::Error(e) => {
@@ -62,10 +69,15 @@ impl VoiceCoordinator {
             }
         }
 
-        if !buffering && !self.pending_messages.is_empty() {
-            messages.append(&mut self.pending_messages);
-        }
+        // Only flush pending messages when not buffering
+        let message = if !buffering && !self.pending_messages.is_empty() {
+            let combined = self.pending_messages.join(" ");
+            self.pending_messages.clear();
+            Some(combined)
+        } else {
+            None
+        };
 
-        (messages, errors)
+        (message, errors)
     }
 }

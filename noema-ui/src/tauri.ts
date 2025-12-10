@@ -132,8 +132,8 @@ export async function getVoiceStatus(): Promise<string> {
   return invoke<string>("get_voice_status");
 }
 
-// Voice events
-export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing";
+// Voice events - status can also be "buffering:N" where N is count of queued messages
+export type VoiceStatus = string;
 
 export function onVoiceStatus(
   callback: (status: VoiceStatus) => void

@@ -300,8 +300,9 @@ pub async fn new_conversation(state: State<'_, AppState>) -> Result<String, Stri
     let session = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("App not initialized")?;
+        let user_id = state.user_id.lock().await;
         store
-            .create_conversation()
+            .create_conversation(&user_id)
             .map_err(|e| format!("Failed to create conversation: {}", e))?
     };
 

@@ -288,19 +288,14 @@ impl SqliteStore {
         Ok(asset)
     }
 
-    /// Create a new conversation session (lazy - not persisted until first message)
-    pub fn create_conversation(&self) -> Result<SqliteSession> {
-        self.create_conversation_for_user(None)
-    }
-
-    /// Create a new conversation session for a specific user
-    pub fn create_conversation_for_user(&self, user_id: Option<&str>) -> Result<SqliteSession> {
+    /// Create a new conversation session for a user (lazy - not persisted until first message)
+    pub fn create_conversation(&self, user_id: &str) -> Result<SqliteSession> {
         let id = Uuid::new_v4().to_string();
         // Don't insert into DB yet - will be done on first commit
         Ok(SqliteSession {
             conn: self.conn.clone(),
             conversation_id: id,
-            user_id: user_id.map(String::from),
+            user_id: Some(user_id.to_string()),
             cache: Vec::new(),
             persisted: false,
         })

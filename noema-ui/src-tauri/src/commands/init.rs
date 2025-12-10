@@ -192,7 +192,7 @@ async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
     } else {
         // No conversations exist, create a new one
         store
-            .create_conversation()
+            .create_conversation(&user_id)
             .map_err(|e| format!("Failed to create conversation: {}", e))?
     };
 

@@ -4,13 +4,14 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { isSupportedAttachmentType, type Attachment } from "../types";
 
-export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing";
+export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing" | "buffering";
 
 interface ChatInputProps {
   onSend: (message: string, attachments: Attachment[]) => void;
   disabled?: boolean;
   voiceAvailable?: boolean;
   voiceStatus?: VoiceStatus;
+  voiceBufferedCount?: number;
   onToggleVoice?: () => void;
 }
 
@@ -89,6 +90,7 @@ export function ChatInput({
   disabled = false,
   voiceAvailable = false,
   voiceStatus = "disabled",
+  voiceBufferedCount = 0,
   onToggleVoice,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
@@ -282,6 +284,8 @@ export function ChatInput({
         return `${base} bg-red-500 hover:bg-red-600 text-white animate-pulse`;
       case "transcribing":
         return `${base} bg-amber-500 hover:bg-amber-600 text-white`;
+      case "buffering":
+        return `${base} bg-purple-500 hover:bg-purple-600 text-white`;
       case "enabled":
         return `${base} bg-teal-500 hover:bg-teal-600 text-white`;
       default:
@@ -329,6 +333,8 @@ export function ChatInput({
                 ? "Listening..."
                 : voiceStatus === "transcribing"
                 ? "Transcribing..."
+                : voiceStatus === "buffering"
+                ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? 's' : ''} queued`
                 : "Voice enabled (click to disable)"
             }
           >
@@ -368,6 +374,8 @@ export function ChatInput({
                 ? "Listening... speak now"
                 : voiceStatus === "transcribing"
                 ? "Transcribing..."
+                : voiceStatus === "buffering"
+                ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? 's' : ''} queued while thinking...`
                 : attachments.length > 0
                 ? "Add a message or send attachments..."
                 : "Type a message or drop files..."

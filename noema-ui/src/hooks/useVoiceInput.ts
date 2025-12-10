@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import * as tauri from "../tauri";
 import { voiceLog } from "../utils/log";
 
-export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing";
+export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing" | "buffering";
 
 interface UseVoiceInputOptions {
   onTranscription?: (text: string) => void;
@@ -11,6 +11,7 @@ interface UseVoiceInputOptions {
 
 export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const [status, setStatus] = useState<VoiceStatus>("disabled");
+  const [bufferedCount, setBufferedCount] = useState(0);
   const [isAvailable, setIsAvailable] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
@@ -65,10 +66,19 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       voiceLog.debug("Voice status changed", { newStatus });
       if (newStatus === "listening") {
         setStatus("listening");
+        setBufferedCount(0);
       } else if (newStatus === "transcribing") {
         setStatus("transcribing");
       } else if (newStatus === "disabled") {
         setStatus("disabled");
+        setBufferedCount(0);
+      } else if (newStatus.startsWith("buffering:")) {
+        const count = parseInt(newStatus.split(":")[1], 10) || 0;
+        setStatus("buffering");
+        setBufferedCount(count);
+      } else if (newStatus === "enabled") {
+        setStatus("enabled");
+        setBufferedCount(0);
       }
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -187,6 +197,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
 
   return {
     status,
+    bufferedCount,
     isAvailable,
     toggle,
     startRecording,
