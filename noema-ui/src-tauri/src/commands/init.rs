@@ -259,20 +259,28 @@ async fn init_engine(
     session: SqliteSession,
     mcp_registry: McpRegistry,
 ) -> Result<String, String> {
-    let default_model_id = "gemini/models/gemini-2.5-flash-lite";
-    let model =
-        create_model(default_model_id).map_err(|e| format!("Failed to create model: {}", e))?;
+    const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
 
-    let model_display_name = default_model_id
+    // Load default model from settings, fall back to hardcoded default
+    let settings = config::Settings::load();
+    let model_id = settings
+        .default_model
+        .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
+
+    let model =
+        create_model(&model_id).map_err(|e| format!("Failed to create model: {}", e))?;
+
+    let model_display_name = model_id
         .split('/')
         .last()
-        .unwrap_or(default_model_id);
+        .unwrap_or(&model_id)
+        .to_string();
 
-    *state.model_id.lock().await = default_model_id.to_string();
-    *state.model_name.lock().await = model_display_name.to_string();
+    *state.model_id.lock().await = model_id;
+    *state.model_name.lock().await = model_display_name.clone();
 
     let engine = ChatEngine::new(session, model, mcp_registry);
     *state.engine.lock().await = Some(engine);
 
-    Ok(model_display_name.to_string())
+    Ok(model_display_name)
 }

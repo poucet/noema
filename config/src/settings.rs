@@ -9,6 +9,8 @@ use std::fs;
 pub struct Settings {
     /// User email for database user identification
     pub user_email: Option<String>,
+    /// Default model ID (e.g., "claude/models/claude-sonnet-4-5-20250929")
+    pub default_model: Option<String>,
 }
 
 impl Settings {

@@ -192,8 +192,15 @@ pub async fn set_model(
         engine.set_model(new_model);
     }
 
-    *state.model_id.lock().await = full_model_id;
+    *state.model_id.lock().await = full_model_id.clone();
     *state.model_name.lock().await = display_name.clone();
+
+    // Save as default model in settings
+    let mut settings = config::Settings::load();
+    settings.default_model = Some(full_model_id);
+    if let Err(e) = settings.save() {
+        log_message(&format!("Warning: Failed to save default model setting: {}", e));
+    }
 
     Ok(display_name)
 }
