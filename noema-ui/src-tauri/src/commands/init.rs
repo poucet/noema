@@ -36,17 +36,36 @@ pub async fn init_app(app: AppHandle, state: State<'_, AppState>) -> Result<Stri
         return Ok(String::new());
     }
 
-    init_storage(&state).await.map_err(|e| {
+    // Run initialization, resetting the lock on error so retry is possible
+    match do_init(app, &state).await {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            // Reset the lock so user can retry after fixing the issue
+            if let Ok(mut guard) = state.init_lock.lock() {
+                *guard = false;
+            }
+            Err(e)
+        }
+    }
+}
+
+async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
+    // Load config first so env vars are available
+    init_config()?;
+    init_storage(state).await.map_err(|e| {
         eprintln!("ERROR in init_storage: {}", e);
         e
     })?;
-    init_config()?;
-    let session = init_session(&state).await.map_err(|e| {
+    init_user(state).await.map_err(|e| {
+        eprintln!("ERROR in init_user: {}", e);
+        e
+    })?;
+    let session = init_session(state).await.map_err(|e| {
         eprintln!("ERROR in init_session: {}", e);
         e
     })?;
     let mcp_registry = init_mcp()?;
-    let result = init_engine(&state, session, mcp_registry).await?;
+    let result = init_engine(state, session, mcp_registry).await?;
 
     // Start the engine event loop (runs continuously)
     start_engine_event_loop(app);
@@ -83,13 +102,56 @@ fn init_config() -> Result<(), String> {
     Ok(())
 }
 
-async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
+async fn init_user(state: &AppState) -> Result<(), String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
+    // First check if user email is explicitly configured in settings
+    let settings = config::Settings::load();
+    let user = if let Some(email) = settings.user_email {
+        // User has configured a specific email - use that
+        store
+            .get_user_by_email(&email)
+            .map_err(|e| format!("Failed to query user: {}", e))?
+            .ok_or_else(|| format!("User not found: {}. Create the user in Episteme first.", email))?
+    } else {
+        // No email configured - use smart selection logic
+        let users = store
+            .list_users()
+            .map_err(|e| format!("Failed to list users: {}", e))?;
+
+        match users.len() {
+            0 => {
+                // No users exist - create default user
+                store
+                    .get_or_create_default_user()
+                    .map_err(|e| format!("Failed to create default user: {}", e))?
+            }
+            1 => {
+                // Exactly one user - use that user
+                users.into_iter().next().unwrap()
+            }
+            _ => {
+                // Multiple users - need user to select
+                let emails: Vec<String> = users.iter().map(|u| u.email.clone()).collect();
+                return Err(format!("MULTIPLE_USERS:{}", emails.join(",")));
+            }
+        }
+    };
+
+    drop(store_guard);
+    *state.user_id.lock().await = user.id;
+    Ok(())
+}
+
+async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let user_id = state.user_id.lock().await.clone();
+
     // Try to open the most recent conversation, or create a new one if none exist
     let conversations = store
-        .list_conversations()
+        .list_conversations(&user_id)
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
     let session = if let Some(most_recent) = conversations.first() {

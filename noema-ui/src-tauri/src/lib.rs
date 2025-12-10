@@ -182,6 +182,9 @@ pub fn run() {
             commands::mcp::list_mcp_servers,
             commands::mcp::add_mcp_server,
             commands::mcp::remove_mcp_server,
+            // Settings commands
+            commands::settings::get_user_email,
+            commands::settings::set_user_email,
             commands::mcp::connect_mcp_server,
             commands::mcp::disconnect_mcp_server,
             commands::mcp::get_mcp_server_tools,

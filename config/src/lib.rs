@@ -1,6 +1,8 @@
 pub mod paths;
+pub mod settings;
 
 pub use paths::PathManager;
+pub use settings::Settings;
 
 /// Load environment variables from .env files.
 /// First loads from ~/.env (home directory), then from ./.env (project directory).

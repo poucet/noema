@@ -216,14 +216,15 @@ pub async fn list_models(_state: State<'_, AppState>) -> Result<Vec<ModelInfo>, 
     Ok(all_models)
 }
 
-/// List all conversations
+/// List all conversations for the current user
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, AppState>) -> Result<Vec<ConversationInfo>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
+    let user_id = state.user_id.lock().await.clone();
 
     store
-        .list_conversations()
+        .list_conversations(&user_id)
         .map(|convos| convos.into_iter().map(ConversationInfo::from).collect())
         .map_err(|e| format!("Failed to list conversations: {}", e))
 }

@@ -19,6 +19,7 @@ function App() {
   const [currentModel, setCurrentModel] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
   const [showMcpSettings, setShowMcpSettings] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -77,7 +78,14 @@ function App() {
 
         setIsInitialized(true);
       } catch (err) {
-        setError(String(err));
+        const errorMsg = String(err);
+        // Check if multiple users exist and selection is needed
+        if (errorMsg.includes("MULTIPLE_USERS:")) {
+          const emails = errorMsg.split("MULTIPLE_USERS:")[1].split(",");
+          setAvailableUsers(emails);
+        } else {
+          setError(errorMsg);
+        }
       }
     }
     init();
@@ -224,12 +232,80 @@ function App() {
   };
 
 
+  // Retry initialization after setup
+  const retryInit = async () => {
+    setError(null);
+    setAvailableUsers([]);
+    try {
+      const modelName = await tauri.initApp();
+      if (!modelName) return; // Duplicate call
+
+      setCurrentModel(modelName);
+      const convos = await tauri.listConversations();
+      setConversations(convos);
+      const convId = await tauri.getCurrentConversationId();
+      setCurrentConversationId(convId);
+      const msgs = await tauri.getMessages();
+      setMessages(msgs);
+      tauri.listModels().then(setModels).catch(console.error);
+      setIsInitialized(true);
+    } catch (err) {
+      const errorMsg = String(err);
+      if (errorMsg.includes("MULTIPLE_USERS:")) {
+        const emails = errorMsg.split("MULTIPLE_USERS:")[1].split(",");
+        setAvailableUsers(emails);
+      } else {
+        setError(errorMsg);
+      }
+    }
+  };
+
+  // User selection screen (when multiple users exist)
+  if (availableUsers.length > 0) {
+    const handleUserSelect = async (email: string) => {
+      try {
+        await tauri.setUserEmail(email);
+        await retryInit();
+      } catch (err) {
+        setError(String(err));
+      }
+    };
+
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-900">
+        <div className="bg-gray-800 p-8 rounded-lg shadow-lg max-w-md w-full mx-4">
+          <h1 className="text-2xl font-bold text-white mb-2">Select Account</h1>
+          <p className="text-gray-400 mb-6">
+            Multiple accounts found. Choose which one to use:
+          </p>
+          <div className="space-y-2">
+            {availableUsers.map((email) => (
+              <button
+                key={email}
+                onClick={() => handleUserSelect(email)}
+                className="w-full px-4 py-3 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded-lg text-white text-left transition-colors"
+              >
+                {email}
+              </button>
+            ))}
+          </div>
+          {error && (
+            <p className="text-red-400 text-sm mt-4">{error}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (!isInitialized) {
     return (
-      <div className="h-screen flex items-center justify-center bg-white dark:bg-gray-900">
+      <div className="h-screen flex items-center justify-center bg-gray-900">
         <div className="text-center">
           <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Initializing...</p>
+          <p className="text-gray-400">Initializing...</p>
+          {error && (
+            <p className="text-red-400 text-sm mt-4 max-w-md mx-auto">{error}</p>
+          )}
         </div>
       </div>
     );

@@ -142,18 +142,19 @@ impl SqliteStore {
                 created_at INTEGER NOT NULL
             );
 
-            -- Messages
+            -- Messages (Episteme-compatible: content, sequence_number, status)
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
                 thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
                 role TEXT CHECK(role IN ('user', 'assistant', 'system')),
-                content_json TEXT NOT NULL,
+                content TEXT NOT NULL,
                 text_content TEXT,
                 embedding BLOB,
                 provider TEXT,
                 model TEXT,
                 tokens_used INTEGER,
-                position INTEGER NOT NULL,
+                sequence_number INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'completed',
                 created_at INTEGER NOT NULL
             );
 
@@ -171,7 +172,7 @@ impl SqliteStore {
             -- Indexes
             CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
             CREATE INDEX IF NOT EXISTS idx_threads_conversation ON threads(conversation_id);
-            CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, position);
+            CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, sequence_number);
             "#,
         )
         .context("Failed to initialize database schema")?;
@@ -204,8 +205,8 @@ impl SqliteStore {
         let id = Uuid::new_v4().to_string();
         let now = unix_timestamp();
         conn.execute(
-            "INSERT INTO users (id, email, created_at) VALUES (?1, ?2, ?3)",
-            params![&id, DEFAULT_USER_EMAIL, now],
+            "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            params![&id, DEFAULT_USER_EMAIL, now, now],
         )?;
 
         Ok(UserInfo {
@@ -230,6 +231,21 @@ impl SqliteStore {
             )
             .ok();
         Ok(user)
+    }
+
+    /// List all users in the database
+    pub fn list_users(&self) -> Result<Vec<UserInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, email FROM users ORDER BY created_at")?;
+        let users = stmt
+            .query_map([], |row| {
+                Ok(UserInfo {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(users)
     }
 
     /// Register an asset in the database
@@ -378,20 +394,21 @@ impl SqliteStore {
         })
     }
 
-    /// List all conversations with their info
-    pub fn list_conversations(&self) -> Result<Vec<ConversationInfo>> {
+    /// List conversations for a specific user
+    pub fn list_conversations(&self, user_id: &str) -> Result<Vec<ConversationInfo>> {
         let conn = self.conn.lock().unwrap();
 
         let query = "SELECT c.id, c.title, COUNT(m.id) as msg_count, c.created_at, c.updated_at
              FROM conversations c
              LEFT JOIN threads t ON t.conversation_id = c.id
              LEFT JOIN messages m ON m.thread_id = t.id
+             WHERE c.user_id = ?1
              GROUP BY c.id
              ORDER BY c.updated_at DESC";
 
         let mut stmt = conn.prepare(query)?;
         let infos: Vec<ConversationInfo> = stmt
-            .query_map([], |row| {
+            .query_map(params![user_id], |row| {
                 Ok(ConversationInfo {
                     id: row.get(0)?,
                     name: row.get(1)?,
@@ -786,25 +803,26 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_list_conversations() {
         let store = SqliteStore::in_memory().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
 
         // Empty conversations should not be listed (lazy creation)
         store.create_conversation().unwrap();
         store.create_conversation().unwrap();
-        let infos = store.list_conversations().unwrap();
+        let infos = store.list_conversations(&user.id).unwrap();
         assert_eq!(infos.len(), 0);
 
         // Conversations with messages should be listed
-        let mut session1 = store.create_conversation().unwrap();
+        let mut session1 = store.create_conversation_for_user(Some(&user.id)).unwrap();
         let mut tx = session1.begin();
         tx.add(ChatMessage::user("Hello".into()));
         session1.commit(tx).await.unwrap();
 
-        let mut session2 = store.create_conversation().unwrap();
+        let mut session2 = store.create_conversation_for_user(Some(&user.id)).unwrap();
         let mut tx = session2.begin();
         tx.add(ChatMessage::user("World".into()));
         session2.commit(tx).await.unwrap();
 
-        let infos = store.list_conversations().unwrap();
+        let infos = store.list_conversations(&user.id).unwrap();
         assert_eq!(infos.len(), 2);
         assert_eq!(infos[0].message_count, 1);
         assert!(infos[0].name.is_none());
@@ -813,7 +831,8 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_rename_conversation() {
         let store = SqliteStore::in_memory().unwrap();
-        let mut session = store.create_conversation().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let mut session = store.create_conversation_for_user(Some(&user.id)).unwrap();
         let id = session.conversation_id().to_string();
 
         let mut tx = session.begin();
@@ -823,20 +842,21 @@ mod tests {
         // Rename
         store.rename_conversation(&id, Some("My Chat")).unwrap();
 
-        let infos = store.list_conversations().unwrap();
+        let infos = store.list_conversations(&user.id).unwrap();
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].name.as_deref(), Some("My Chat"));
 
         // Clear name
         store.rename_conversation(&id, None).unwrap();
-        let infos = store.list_conversations().unwrap();
+        let infos = store.list_conversations(&user.id).unwrap();
         assert!(infos[0].name.is_none());
     }
 
     #[tokio::test]
     async fn test_sqlite_delete_conversation() {
         let store = SqliteStore::in_memory().unwrap();
-        let mut session = store.create_conversation().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let mut session = store.create_conversation_for_user(Some(&user.id)).unwrap();
         let id = session.conversation_id().to_string();
 
         let mut tx = session.begin();
@@ -845,7 +865,7 @@ mod tests {
 
         store.delete_conversation(&id).unwrap();
 
-        let infos = store.list_conversations().unwrap();
+        let infos = store.list_conversations(&user.id).unwrap();
         assert!(infos.is_empty());
     }
 

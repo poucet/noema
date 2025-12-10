@@ -135,6 +135,7 @@ struct App {
     input: Input,
     engine: ChatEngine<SqliteSession>,
     store: SqliteStore,
+    user_id: String,
     current_conversation_id: String,
     current_model_id: ModelId,
     status_message: Option<String>,
@@ -182,6 +183,14 @@ impl App {
         }
 
         let store = SqliteStore::open(&db_path)?;
+
+        // Load user from settings
+        let settings = config::Settings::load();
+        let user_email = settings.user_email
+            .ok_or_else(|| anyhow::anyhow!("User email not configured. Set user_email in ~/.local/share/noema/config/settings.toml"))?;
+        let user = store.get_user_by_email(&user_email)?
+            .ok_or_else(|| anyhow::anyhow!("User not found: {}. Create the user in Episteme first.", user_email))?;
+
         let mut session = store.create_conversation()?;
         let conversation_id = session.conversation_id().to_string();
 
@@ -197,6 +206,7 @@ impl App {
             input: Input::default(),
             engine,
             store,
+            user_id: user.id,
             current_conversation_id: conversation_id,
             current_model_id: model_id,
             status_message: None,
@@ -524,7 +534,7 @@ impl App {
                 Ok(format!("Started new conversation {}", &conv_id[..8]))
             }
             ConversationSubcommand::List => {
-                let conversations = self.store.list_conversations()?;
+                let conversations = self.store.list_conversations(&self.user_id)?;
                 if conversations.is_empty() { return Ok("No saved conversations.".to_string()); }
                 let mut output = String::from("Saved conversations:\n");
                 for info in conversations {
@@ -539,7 +549,7 @@ impl App {
             ConversationSubcommand::Load => {
                 let conversation_id = id.ok_or_else(|| anyhow::anyhow!("Usage: /conversation load <id>"))?;
                 if self.is_streaming { return Err(anyhow::anyhow!("Cannot load conversation while streaming")); }
-                let conversations = self.store.list_conversations()?;
+                let conversations = self.store.list_conversations(&self.user_id)?;
                 let matching: Vec<_> = conversations.iter().filter(|info| info.id.starts_with(&conversation_id)).collect();
                 let full_id = match matching.len() {
                     0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
@@ -553,7 +563,7 @@ impl App {
             }
             ConversationSubcommand::Delete => {
                 let conversation_id = id.ok_or_else(|| anyhow::anyhow!("Usage: /conversation delete <id>"))?;
-                let conversations = self.store.list_conversations()?;
+                let conversations = self.store.list_conversations(&self.user_id)?;
                 let matching: Vec<_> = conversations.iter().filter(|info| info.id.starts_with(&conversation_id)).collect();
                 let full_id = match matching.len() {
                     0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
@@ -568,7 +578,7 @@ impl App {
             }
             ConversationSubcommand::Rename => {
                 let conversation_id = id.ok_or_else(|| anyhow::anyhow!("Usage: /conversation rename <id> [name]"))?;
-                let conversations = self.store.list_conversations()?;
+                let conversations = self.store.list_conversations(&self.user_id)?;
                 let matching: Vec<_> = conversations.iter().filter(|info| info.id.starts_with(&conversation_id)).collect();
                 let full_id = match matching.len() {
                     0 => return Err(anyhow::anyhow!("Conversation not found: {}", conversation_id)),
@@ -589,7 +599,7 @@ impl App {
     async fn complete_conversation_id(&self, subcommand: &ConversationSubcommand, partial: &str) -> Result<Vec<commands::Completion>, anyhow::Error> {
         match subcommand {
             ConversationSubcommand::Load | ConversationSubcommand::Rename => {
-                let conversations = self.store.list_conversations()?;
+                let conversations = self.store.list_conversations(&self.user_id)?;
                 Ok(conversations.into_iter()
                     .filter(|info| info.id.starts_with(partial))
                     .map(|info| {
@@ -600,7 +610,7 @@ impl App {
                     .collect())
             }
             ConversationSubcommand::Delete => {
-                let conversations = self.store.list_conversations()?;
+                let conversations = self.store.list_conversations(&self.user_id)?;
                 Ok(conversations.into_iter()
                     .filter(|info| info.id.starts_with(partial) && info.id != self.current_conversation_id)
                     .map(|info| {

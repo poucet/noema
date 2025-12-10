@@ -233,3 +233,12 @@ export async function logDebug(
 ): Promise<void> {
   return invoke<void>("log_debug", { level, source, message });
 }
+
+// Settings
+export async function getUserEmail(): Promise<string | null> {
+  return invoke<string | null>("get_user_email");
+}
+
+export async function setUserEmail(email: string): Promise<void> {
+  return invoke<void>("set_user_email", { email });
+}
