@@ -67,27 +67,77 @@ pub(crate) struct ListModelsResponse {
     pub(crate) models: Vec<ModelDefinition>,
 }
 
+/// Ollama tool call representation
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct OllamaToolCall {
+    pub(crate) function: OllamaFunctionCall,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct OllamaFunctionCall {
+    pub(crate) name: String,
+    pub(crate) arguments: serde_json::Value,
+}
+
 // Ollama representation of messages.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Message {
     pub(crate) role: Role,
+    #[serde(default)]
     pub(crate) content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tool_calls: Option<Vec<OllamaToolCall>>,
 }
 
 // TODO: Can we autoderive most of these From classes for values and for references to values?
 impl From<Message> for crate::ChatMessage {
     fn from(msg: Message) -> Self {
         let role = msg.role;
-        let payload = crate::ChatPayload::text(msg.content);
-        crate::ChatMessage::new(role, payload)
+        let mut content = Vec::new();
+
+        // Add text content if present
+        if !msg.content.is_empty() {
+            content.push(crate::api::ContentBlock::Text {
+                text: msg.content,
+            });
+        }
+
+        // Add tool calls if present
+        if let Some(tool_calls) = msg.tool_calls {
+            for (i, tc) in tool_calls.into_iter().enumerate() {
+                content.push(crate::api::ContentBlock::ToolCall(crate::api::ToolCall {
+                    id: format!("call_{}", i),
+                    name: tc.function.name,
+                    arguments: tc.function.arguments,
+                }));
+            }
+        }
+
+        crate::ChatMessage::new(role, crate::ChatPayload::new(content))
     }
 }
 
 impl From<&crate::ChatMessage> for Message {
     fn from(msg: &crate::ChatMessage) -> Message {
+        let tool_calls: Vec<_> = msg
+            .get_tool_calls()
+            .iter()
+            .map(|tc| OllamaToolCall {
+                function: OllamaFunctionCall {
+                    name: tc.name.clone(),
+                    arguments: tc.arguments.clone(),
+                },
+            })
+            .collect();
+
         Message {
             role: msg.role,
             content: msg.get_text(),
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
         }
     }
 }
@@ -95,16 +145,58 @@ impl From<&crate::ChatMessage> for Message {
 impl From<Message> for crate::ChatChunk {
     fn from(msg: Message) -> Self {
         let role = msg.role;
-        let payload = crate::ChatPayload::text(msg.content);
-        crate::ChatChunk::new(role, payload)
+        let mut content = Vec::new();
+
+        // Add text content if present
+        if !msg.content.is_empty() {
+            content.push(crate::api::ContentBlock::Text {
+                text: msg.content,
+            });
+        }
+
+        // Add tool calls if present
+        if let Some(tool_calls) = msg.tool_calls {
+            for (i, tc) in tool_calls.into_iter().enumerate() {
+                content.push(crate::api::ContentBlock::ToolCall(crate::api::ToolCall {
+                    id: format!("call_{}", i),
+                    name: tc.function.name,
+                    arguments: tc.function.arguments,
+                }));
+            }
+        }
+
+        crate::ChatChunk::new(role, crate::ChatPayload::new(content))
     }
 }
 
 impl From<crate::ChatChunk> for Message {
     fn from(value: crate::ChatChunk) -> Self {
+        let tool_calls: Vec<_> = value
+            .payload
+            .content
+            .iter()
+            .filter_map(|block| {
+                if let crate::api::ContentBlock::ToolCall(tc) = block {
+                    Some(OllamaToolCall {
+                        function: OllamaFunctionCall {
+                            name: tc.name.clone(),
+                            arguments: tc.arguments.clone(),
+                        },
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         Message {
             role: value.role,
             content: value.payload.get_text(),
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
         }
     }
 }
