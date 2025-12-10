@@ -283,10 +283,10 @@ function App() {
     };
 
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-900">
-        <div className="bg-gray-800 p-8 rounded-lg shadow-lg max-w-md w-full mx-4">
-          <h1 className="text-2xl font-bold text-white mb-2">Select Account</h1>
-          <p className="text-gray-400 mb-6">
+      <div className="h-screen flex items-center justify-center bg-background">
+        <div className="bg-surface p-8 rounded-lg shadow-lg max-w-md w-full mx-4">
+          <h1 className="text-2xl font-bold text-foreground mb-2">Select Account</h1>
+          <p className="text-muted mb-6">
             Multiple accounts found. Choose which one to use:
           </p>
           <div className="space-y-2">
@@ -294,7 +294,7 @@ function App() {
               <button
                 key={email}
                 onClick={() => handleUserSelect(email)}
-                className="w-full px-4 py-3 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded-lg text-white text-left transition-colors"
+                className="w-full px-4 py-3 bg-elevated hover:bg-surface border border-gray-600 rounded-lg text-foreground text-left transition-colors"
               >
                 {email}
               </button>
@@ -310,10 +310,10 @@ function App() {
 
   if (!isInitialized) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-900">
+      <div className="h-screen flex items-center justify-center bg-background">
         <div className="text-center">
-          <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-400">Initializing...</p>
+          <div className="animate-spin w-8 h-8 border-4 border-teal-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-muted">Initializing...</p>
           {error && (
             <p className="text-red-400 text-sm mt-4 max-w-md mx-auto">{error}</p>
           )}
@@ -323,7 +323,7 @@ function App() {
   }
 
   return (
-    <div className="h-screen flex bg-white dark:bg-gray-900">
+    <div className="h-screen flex bg-background">
       {/* Sidebar */}
       <Sidebar
         conversations={conversations}
@@ -343,8 +343,8 @@ function App() {
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <div className="border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between bg-white dark:bg-gray-900">
-          <h1 className="text-lg font-semibold text-gray-800 dark:text-white">
+        <div className="border-b border-gray-700 px-4 py-3 flex items-center justify-between bg-background">
+          <h1 className="text-lg font-semibold text-foreground">
             Noema
           </h1>
           <ModelSelector
@@ -356,11 +356,11 @@ function App() {
 
         {/* Error banner */}
         {error && (
-          <div className="bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 px-4 py-2 flex items-center justify-between">
+          <div className="bg-red-900/50 text-red-200 px-4 py-2 flex items-center justify-between">
             <span className="text-sm">{error}</span>
             <button
               onClick={() => setError(null)}
-              className="text-red-600 dark:text-red-300 hover:text-red-800 dark:hover:text-red-100"
+              className="text-red-300 hover:text-red-100"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -374,13 +374,13 @@ function App() {
           <div className="max-w-4xl mx-auto">
             {messages.length === 0 && !streamingMessage ? (
               <div className="text-center py-20">
-                <h2 className="text-2xl font-semibold text-gray-800 dark:text-white mb-2">
+                <h2 className="text-2xl font-semibold text-foreground mb-2">
                   Welcome to Noema
                 </h2>
-                <p className="text-gray-600 dark:text-gray-400">
+                <p className="text-muted">
                   Start a conversation by typing a message below.
                 </p>
-                <p className="text-gray-500 dark:text-gray-500 text-sm mt-4">
+                <p className="text-muted text-sm mt-4">
                   Supports Markdown and LaTeX math: $E = mc^2$
                 </p>
               </div>
@@ -394,11 +394,11 @@ function App() {
                 )}
                 {isLoading && !streamingMessage && (
                   <div className="flex justify-start mb-4">
-                    <div className="bg-gray-100 dark:bg-gray-800 px-4 py-3 rounded-2xl">
+                    <div className="bg-surface px-4 py-3 rounded-2xl">
                       <div className="flex gap-1">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></div>
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></div>
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></div>
+                        <div className="w-2 h-2 bg-muted rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></div>
+                        <div className="w-2 h-2 bg-muted rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></div>
+                        <div className="w-2 h-2 bg-muted rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></div>
                       </div>
                     </div>
                   </div>

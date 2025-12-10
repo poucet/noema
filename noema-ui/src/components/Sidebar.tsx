@@ -50,12 +50,12 @@ export function Sidebar({
   };
 
   return (
-    <div className="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col h-full">
+    <div className="w-64 bg-surface border-r border-gray-700 flex flex-col h-full">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="p-4 border-b border-gray-700">
         <button
           onClick={onNewConversation}
-          className="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors"
+          className="w-full px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium transition-colors"
         >
           + New Chat
         </button>
@@ -64,7 +64,7 @@ export function Sidebar({
       {/* Conversations list */}
       <div className="flex-1 overflow-y-auto">
         {conversations.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400 text-center p-4 text-sm">
+          <p className="text-muted text-center p-4 text-sm">
             No conversations yet
           </p>
         ) : (
@@ -88,7 +88,7 @@ export function Sidebar({
                           if (e.key === "Enter") submitRename();
                           if (e.key === "Escape") setEditingId(null);
                         }}
-                        className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                        className="w-full px-2 py-1 text-sm border border-gray-600 rounded bg-elevated text-foreground"
                         autoFocus
                       />
                     </div>
@@ -97,8 +97,8 @@ export function Sidebar({
                       onClick={() => onSelectConversation(conv.id)}
                       className={`w-full text-left p-3 rounded-lg transition-colors group ${
                         isCurrent
-                          ? "bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100"
-                          : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300"
+                          ? "bg-teal-900/50 text-teal-100"
+                          : "hover:bg-elevated text-gray-300"
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -111,7 +111,7 @@ export function Sidebar({
                               e.stopPropagation();
                               startRename(conv);
                             }}
-                            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                            className="p-1 text-muted hover:text-foreground"
                             title="Rename"
                           >
                             <svg
@@ -133,7 +133,7 @@ export function Sidebar({
                               e.stopPropagation();
                               onDeleteConversation(conv.id);
                             }}
-                            className="p-1 text-gray-400 hover:text-red-500"
+                            className="p-1 text-muted hover:text-red-500"
                             title="Delete"
                           >
                             <svg
@@ -152,7 +152,7 @@ export function Sidebar({
                           </button>
                         </div>
                       </div>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                      <span className="text-xs text-muted">
                         {formatDate(conv.updatedAt)}
                       </span>
                     </button>
@@ -165,10 +165,10 @@ export function Sidebar({
       </div>
 
       {/* Settings footer */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+      <div className="p-4 border-t border-gray-700">
         <button
           onClick={onOpenMcpSettings}
-          className="w-full flex items-center gap-2 px-3 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 text-muted hover:bg-elevated rounded-lg transition-colors"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />

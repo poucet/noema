@@ -130,9 +130,9 @@ mod tests {
         assert_eq!(id.provider, "claude");
         assert_eq!(id.model, "claude-sonnet-4-5-20250929");
 
-        let id = ModelId::parse("gemini/models/gemini-2.5-flash").unwrap();
+        let id = ModelId::parse("gemini/models/gemini-2.5-flash-lite").unwrap();
         assert_eq!(id.provider, "gemini");
-        assert_eq!(id.model, "models/gemini-2.5-flash");
+        assert_eq!(id.model, "models/gemini-2.5-flash-lite");
 
         assert!(ModelId::parse("invalid").is_none());
         assert!(ModelId::parse("/model").is_none());

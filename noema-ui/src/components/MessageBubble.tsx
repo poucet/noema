@@ -19,7 +19,7 @@ function MarkdownText({ text }: { text: string }) {
           const { children, className } = props;
           const isInline = !className;
           return isInline ? (
-            <code className="bg-gray-800 text-gray-100 px-1 py-0.5 rounded text-sm">
+            <code className="bg-elevated text-gray-100 px-1 py-0.5 rounded text-sm">
               {children}
             </code>
           ) : (
@@ -28,7 +28,7 @@ function MarkdownText({ text }: { text: string }) {
         },
         pre(props) {
           return (
-            <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-sm">
+            <pre className="bg-background text-gray-100 p-3 rounded-lg overflow-x-auto text-sm">
               {props.children}
             </pre>
           );
@@ -76,7 +76,7 @@ function ContentBlock({ block }: { block: DisplayContent }) {
 
   if ("toolCall" in block) {
     return (
-      <div className="bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-3 py-2 rounded-lg text-sm">
+      <div className="bg-purple-900/50 text-purple-200 px-3 py-2 rounded-lg text-sm">
         <span className="font-semibold">Tool Call:</span> {block.toolCall.name}
       </div>
     );
@@ -84,7 +84,7 @@ function ContentBlock({ block }: { block: DisplayContent }) {
 
   if ("toolResult" in block) {
     return (
-      <div className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 px-3 py-2 rounded-lg text-sm">
+      <div className="bg-teal-900/50 text-teal-200 px-3 py-2 rounded-lg text-sm">
         <span className="font-semibold">Tool Result:</span>
         <div className="mt-1">
           {block.toolResult.content.map((content, i) => (
@@ -109,13 +109,13 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       <div
         className={`max-w-[80%] px-4 py-3 rounded-2xl ${
           isUser
-            ? "bg-blue-500 text-white"
+            ? "bg-teal-600 text-white"
             : isSystem
-            ? "bg-yellow-100 dark:bg-yellow-900 text-yellow-900 dark:text-yellow-100"
-            : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            ? "bg-amber-500/20 text-amber-100"
+            : "bg-surface text-foreground"
         }`}
       >
-        <div className="prose prose-sm dark:prose-invert max-w-none">
+        <div className="prose prose-sm prose-invert max-w-none">
           {message.content.map((block, i) => (
             <ContentBlock key={i} block={block} />
           ))}

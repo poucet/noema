@@ -1,6 +1,34 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
 
+/* Extend Tailwind theme with custom dark mode colors */
+@theme {
+  /* Background colors - use with bg-background, bg-surface, bg-elevated */
+  --color-background: #202428;
+  --color-surface: #282c30;
+  --color-elevated: #303438;
+
+  /* Foreground colors - use with text-foreground, text-muted */
+  --color-foreground: #ffffff;
+  --color-muted: #9ca3af;
+
+  /* Primary accent (teal) - use with bg-teal-500, text-teal-400, etc. */
+  --color-teal-100: #e0f2f2;
+  --color-teal-200: #b2e8e8;
+  --color-teal-300: #80dddd;
+  --color-teal-400: #4dd2d2;
+  --color-teal-500: #26c6c6;
+  --color-teal-600: #008080;
+  --color-teal-700: #006b6b;
+  --color-teal-800: #005656;
+  --color-teal-900: #004040;
+
+  /* Secondary accent (amber) */
+  --color-amber-400: #ffd54f;
+  --color-amber-500: #ffca28;
+  --color-amber-600: #ffc107;
+}
+
 /* Custom styles for chat app */
 @layer base {
   html {
@@ -13,12 +41,46 @@
     margin: 0;
     height: 100%;
     overflow: hidden;
+    @apply bg-background text-foreground;
   }
 
   #root {
     height: 100%;
     overflow: hidden;
   }
+
+}
+
+/* Custom scrollbar styling for dark mode - outside @layer for higher specificity */
+*,
+*::before,
+*::after {
+  scrollbar-width: thin;
+  scrollbar-color: #404448 #202428;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #202428;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #404448;
+  border-radius: 5px;
+  border: 2px solid #202428;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #505860;
+}
+
+::-webkit-scrollbar-corner {
+  background: #202428;
 }
 
 @layer components {

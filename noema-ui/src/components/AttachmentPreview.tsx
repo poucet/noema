@@ -9,11 +9,11 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
   if (attachments.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-2 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+    <div className="flex flex-wrap gap-2 p-2 border-t border-gray-700 bg-surface">
       {attachments.map((attachment, index) => (
         <div
           key={index}
-          className="relative group rounded-lg overflow-hidden bg-white dark:bg-gray-700 shadow-sm"
+          className="relative group rounded-lg overflow-hidden bg-elevated shadow-sm"
         >
           {isImageType(attachment.mimeType) ? (
             <img
@@ -22,9 +22,9 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               className="h-16 w-16 object-cover"
             />
           ) : isAudioType(attachment.mimeType) ? (
-            <div className="h-16 w-16 flex items-center justify-center bg-purple-100 dark:bg-purple-900">
+            <div className="h-16 w-16 flex items-center justify-center bg-purple-900/50">
               <svg
-                className="w-8 h-8 text-purple-600 dark:text-purple-300"
+                className="w-8 h-8 text-purple-300"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -38,9 +38,9 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               </svg>
             </div>
           ) : (
-            <div className="h-16 w-16 flex items-center justify-center bg-gray-100 dark:bg-gray-600">
+            <div className="h-16 w-16 flex items-center justify-center bg-elevated">
               <svg
-                className="w-8 h-8 text-gray-400"
+                className="w-8 h-8 text-muted"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"

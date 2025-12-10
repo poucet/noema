@@ -281,19 +281,19 @@ export function ChatInput({
       case "listening":
         return `${base} bg-red-500 hover:bg-red-600 text-white animate-pulse`;
       case "transcribing":
-        return `${base} bg-yellow-500 hover:bg-yellow-600 text-white`;
+        return `${base} bg-amber-500 hover:bg-amber-600 text-white`;
       case "enabled":
-        return `${base} bg-green-500 hover:bg-green-600 text-white`;
+        return `${base} bg-teal-500 hover:bg-teal-600 text-white`;
       default:
-        return `${base} bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300`;
+        return `${base} bg-surface hover:bg-elevated text-muted`;
     }
   };
 
   return (
     <div
       ref={containerRef}
-      className={`relative border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 ${
-        isDragOver ? "ring-2 ring-blue-500 ring-inset" : ""
+      className={`relative border-t border-gray-700 bg-background ${
+        isDragOver ? "ring-2 ring-teal-500 ring-inset" : ""
       }`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -302,8 +302,8 @@ export function ChatInput({
     >
       {/* Drag overlay */}
       {isDragOver && (
-        <div className="absolute inset-0 bg-blue-500/20 flex items-center justify-center pointer-events-none z-10 rounded-lg border-2 border-dashed border-blue-500">
-          <div className="bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg">
+        <div className="absolute inset-0 bg-teal-500/20 flex items-center justify-center pointer-events-none z-10 rounded-lg border-2 border-dashed border-teal-500">
+          <div className="bg-teal-600 text-white px-4 py-2 rounded-lg shadow-lg">
             Drop files to attach
           </div>
         </div>
@@ -315,48 +315,48 @@ export function ChatInput({
       {/* Input area */}
       <div className="p-4">
         <div className="flex gap-3 items-end max-w-4xl mx-auto">
-          {voiceAvailable && (
-            <button
-              type="button"
-              onClick={onToggleVoice}
-              disabled={disabled}
-              className={getVoiceButtonClass()}
-              title={
-                voiceStatus === "disabled"
-                  ? "Enable voice input"
-                  : voiceStatus === "listening"
-                  ? "Listening..."
-                  : voiceStatus === "transcribing"
-                  ? "Transcribing..."
-                  : "Voice enabled (click to disable)"
-              }
+          <button
+            type="button"
+            onClick={onToggleVoice}
+            disabled={disabled || !voiceAvailable}
+            className={getVoiceButtonClass()}
+            title={
+              !voiceAvailable
+                ? "Voice input not available"
+                : voiceStatus === "disabled"
+                ? "Enable voice input"
+                : voiceStatus === "listening"
+                ? "Listening..."
+                : voiceStatus === "transcribing"
+                ? "Transcribing..."
+                : "Voice enabled (click to disable)"
+            }
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                {voiceStatus === "disabled" ? (
-                  // Microphone off icon
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                  />
-                ) : (
-                  // Microphone on icon
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                  />
-                )}
-              </svg>
-            </button>
-          )}
+              {voiceStatus === "disabled" || !voiceAvailable ? (
+                // Microphone off icon
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
+              ) : (
+                // Microphone on icon
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
+              )}
+            </svg>
+          </button>
           <textarea
             ref={textareaRef}
             value={message}
@@ -374,13 +374,13 @@ export function ChatInput({
             }
             disabled={disabled}
             rows={1}
-            className="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 disabled:opacity-50"
+            className="flex-1 px-4 py-3 border border-gray-600 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-surface text-foreground placeholder-muted disabled:opacity-50 overflow-hidden"
           />
           <button
             type="button"
             onClick={handleSubmit}
             disabled={disabled || (!message.trim() && attachments.length === 0)}
-            className="px-4 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-2xl transition-colors"
+            className="px-4 py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-2xl transition-colors"
           >
             <svg
               className="w-5 h-5"

@@ -179,15 +179,15 @@ export function McpSettings({ onClose }: McpSettingsProps) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+      <div className="bg-surface rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-800 dark:text-white">
+        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-foreground">
             MCP Servers
           </h2>
           <button
             onClick={onClose}
-            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="p-2 text-muted hover:text-foreground"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -197,7 +197,7 @@ export function McpSettings({ onClose }: McpSettingsProps) {
 
         {/* Error banner */}
         {error && (
-          <div className="px-6 py-2 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 text-sm">
+          <div className="px-6 py-2 bg-red-900/50 text-red-200 text-sm">
             {error}
             <button onClick={() => setError(null)} className="ml-2 underline">dismiss</button>
           </div>
@@ -206,43 +206,43 @@ export function McpSettings({ onClose }: McpSettingsProps) {
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {loading ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <div className="text-center py-8 text-muted">
               Loading...
             </div>
           ) : (
             <>
               {/* Server list */}
               {servers.length === 0 ? (
-                <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+                <p className="text-muted text-center py-8">
                   No MCP servers configured. Add one to get started.
                 </p>
               ) : (
                 <ul className="space-y-3 mb-6">
                   {servers.map(server => (
-                    <li key={server.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    <li key={server.id} className="border border-gray-700 rounded-lg overflow-hidden">
                       <div
-                        className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700"
+                        className="p-4 cursor-pointer hover:bg-elevated"
                         onClick={() => handleExpandServer(server.id)}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             {/* Connection status indicator */}
-                            <div className={`w-3 h-3 rounded-full ${server.isConnected ? 'bg-green-500' : 'bg-gray-400'}`} />
+                            <div className={`w-3 h-3 rounded-full ${server.isConnected ? 'bg-teal-500' : 'bg-gray-500'}`} />
                             <div>
-                              <h3 className="font-medium text-gray-800 dark:text-white">
+                              <h3 className="font-medium text-foreground">
                                 {server.name}
                               </h3>
-                              <p className="text-sm text-gray-500 dark:text-gray-400">
+                              <p className="text-sm text-muted">
                                 {server.url}
                               </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-300">
+                            <span className="text-xs px-2 py-1 bg-elevated rounded text-gray-300">
                               {server.authType}
                             </span>
                             {server.isConnected && (
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                              <span className="text-xs text-muted">
                                 {server.toolCount} tools
                               </span>
                             )}
@@ -260,40 +260,40 @@ export function McpSettings({ onClose }: McpSettingsProps) {
 
                       {/* Expanded content */}
                       {expandedServer === server.id && (
-                        <div className="px-4 pb-4 border-t border-gray-200 dark:border-gray-700 pt-3">
+                        <div className="px-4 pb-4 border-t border-gray-700 pt-3">
                           {/* Actions */}
                           <div className="flex gap-2 mb-3">
                             {server.needsOauthLogin ? (
                               <button
                                 onClick={() => handleStartOauth(server.id)}
-                                className="px-3 py-1.5 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded"
+                                className="px-3 py-1.5 text-sm bg-teal-600 hover:bg-teal-700 text-white rounded"
                               >
                                 Login with OAuth
                               </button>
                             ) : server.isConnected ? (
                               <button
                                 onClick={() => handleDisconnect(server.id)}
-                                className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded"
+                                className="px-3 py-1.5 text-sm bg-elevated hover:bg-background text-gray-200 rounded"
                               >
                                 Disconnect
                               </button>
                             ) : (
                               <button
                                 onClick={() => handleConnect(server.id)}
-                                className="px-3 py-1.5 text-sm bg-green-500 hover:bg-green-600 text-white rounded"
+                                className="px-3 py-1.5 text-sm bg-teal-600 hover:bg-teal-700 text-white rounded"
                               >
                                 Connect
                               </button>
                             )}
                             <button
                               onClick={() => handleTestConnection(server.id)}
-                              className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded"
+                              className="px-3 py-1.5 text-sm bg-elevated hover:bg-background text-gray-200 rounded"
                             >
                               Test
                             </button>
                             <button
                               onClick={() => handleRemoveServer(server.id)}
-                              className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 text-red-700 dark:text-red-200 rounded"
+                              className="px-3 py-1.5 text-sm bg-red-900/50 hover:bg-red-900 text-red-200 rounded"
                             >
                               Remove
                             </button>
@@ -302,15 +302,15 @@ export function McpSettings({ onClose }: McpSettingsProps) {
                           {/* Tools list */}
                           {server.isConnected && serverTools[server.id] && (
                             <div>
-                              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              <h4 className="text-sm font-medium text-gray-300 mb-2">
                                 Available Tools:
                               </h4>
                               <ul className="text-sm space-y-1">
                                 {serverTools[server.id].map(tool => (
-                                  <li key={tool.name} className="text-gray-600 dark:text-gray-400">
+                                  <li key={tool.name} className="text-muted">
                                     <span className="font-mono">{tool.name}</span>
                                     {tool.description && (
-                                      <span className="text-gray-500 dark:text-gray-500"> - {tool.description}</span>
+                                      <span className="text-gray-500"> - {tool.description}</span>
                                     )}
                                   </li>
                                 ))}
@@ -335,11 +335,11 @@ export function McpSettings({ onClose }: McpSettingsProps) {
 
               {/* Add server form */}
               {showAddForm ? (
-                <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                  <h3 className="font-medium text-gray-800 dark:text-white mb-4">Add MCP Server</h3>
+                <div className="border border-gray-700 rounded-lg p-4">
+                  <h3 className="font-medium text-foreground mb-4">Add MCP Server</h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-300 mb-1">
                         Name
                       </label>
                       <input
@@ -347,11 +347,11 @@ export function McpSettings({ onClose }: McpSettingsProps) {
                         value={formName}
                         onChange={e => setFormName(e.target.value)}
                         placeholder="My Server"
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        className="w-full px-3 py-2 border border-gray-600 rounded bg-elevated text-foreground"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-300 mb-1">
                         URL
                       </label>
                       <input
@@ -359,10 +359,10 @@ export function McpSettings({ onClose }: McpSettingsProps) {
                         value={formUrl}
                         onChange={e => setFormUrl(e.target.value)}
                         placeholder="https://mcp-server.example.com"
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        className="w-full px-3 py-2 border border-gray-600 rounded bg-elevated text-foreground"
                       />
                     </div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-muted">
                       Authentication will be auto-detected. If the server requires OAuth,
                       you'll be prompted to login after adding it.
                     </p>
@@ -371,13 +371,13 @@ export function McpSettings({ onClose }: McpSettingsProps) {
                       <button
                         onClick={handleAddServer}
                         disabled={!formName || !formUrl || addingServer}
-                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white rounded font-medium"
+                        className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-600 text-white rounded font-medium"
                       >
                         {addingServer ? "Detecting auth..." : "Add Server"}
                       </button>
                       <button
                         onClick={() => setShowAddForm(false)}
-                        className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded"
+                        className="px-4 py-2 bg-elevated hover:bg-background text-gray-200 rounded"
                       >
                         Cancel
                       </button>
@@ -387,7 +387,7 @@ export function McpSettings({ onClose }: McpSettingsProps) {
               ) : (
                 <button
                   onClick={() => setShowAddForm(true)}
-                  className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 dark:text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors"
+                  className="w-full py-3 border-2 border-dashed border-gray-600 rounded-lg text-muted hover:border-teal-500 hover:text-teal-400 transition-colors"
                 >
                   + Add MCP Server
                 </button>
@@ -412,11 +412,11 @@ function OAuthCodeEntry({
   const [code, setCode] = useState("");
 
   return (
-    <div className="mb-6 p-4 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-      <h4 className="font-medium text-gray-800 dark:text-white mb-2">
+    <div className="mb-6 p-4 border border-teal-800 bg-teal-900/20 rounded-lg">
+      <h4 className="font-medium text-foreground mb-2">
         Waiting for OAuth Login
       </h4>
-      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+      <p className="text-sm text-muted mb-3">
         A browser window should have opened for authentication.
         After authorizing, the app will automatically complete the login.
         If it doesn't work, you can paste the code manually:
@@ -427,18 +427,18 @@ function OAuthCodeEntry({
           value={code}
           onChange={e => setCode(e.target.value)}
           placeholder="Paste authorization code"
-          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          className="flex-1 px-3 py-2 border border-gray-600 rounded bg-elevated text-foreground"
         />
         <button
           onClick={() => onSubmit(code)}
           disabled={!code}
-          className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white rounded"
+          className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-600 text-white rounded"
         >
           Submit
         </button>
         <button
           onClick={onCancel}
-          className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded"
+          className="px-4 py-2 bg-elevated hover:bg-background text-gray-200 rounded"
         >
           Cancel
         </button>

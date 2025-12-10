@@ -212,7 +212,7 @@ async fn init_engine(
     session: SqliteSession,
     mcp_registry: McpRegistry,
 ) -> Result<String, String> {
-    let default_model_id = "gemini/models/gemini-2.5-flash";
+    let default_model_id = "gemini/models/gemini-2.5-flash-lite";
     let model =
         create_model(default_model_id).map_err(|e| format!("Failed to create model: {}", e))?;
 

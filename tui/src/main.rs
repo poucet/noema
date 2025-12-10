@@ -159,7 +159,7 @@ fn parse_model_arg(s: &str) -> anyhow::Result<ModelId> {
     // Fallback: try to find a provider with this name and use a hardcoded default
     if let Some(info) = get_provider_info(s) {
         let default_model = match info.name {
-            "gemini" => "models/gemini-2.5-flash",
+            "gemini" => "models/gemini-2.5-flash-lite",
             "claude" => "claude-3-5-sonnet-20241022",
             "openai" => "gpt-4o",
             "ollama" => "llama3:latest",
