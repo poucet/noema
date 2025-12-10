@@ -396,10 +396,11 @@ const UNSUPPORTED_SCHEMA_KEYS: &[&str] = &[
 /// This function recursively removes unsupported keys and resolves $ref references by inlining
 /// the referenced definitions.
 fn sanitize_schema_for_gemini(schema: serde_json::Value) -> serde_json::Value {
-    // Extract $defs from root for reference resolution
+    // Extract $defs or definitions from root for reference resolution
+    // Note: $defs is JSON Schema draft 2019-09+, "definitions" is draft 4-7
     let defs = schema
         .as_object()
-        .and_then(|obj| obj.get("$defs"))
+        .and_then(|obj| obj.get("$defs").or_else(|| obj.get("definitions")))
         .and_then(|d| d.as_object())
         .cloned();
 
@@ -418,7 +419,11 @@ fn sanitize_schema_recursive(
     // Handle $ref - resolve before removing
     if let Some(ref_value) = obj.get("$ref") {
         if let Some(ref_str) = ref_value.as_str() {
-            if let Some(ref_name) = ref_str.strip_prefix("#/$defs/") {
+            // Handle both #/$defs/ (draft 2019-09+) and #/definitions/ (draft 4-7)
+            let ref_name = ref_str
+                .strip_prefix("#/$defs/")
+                .or_else(|| ref_str.strip_prefix("#/definitions/"));
+            if let Some(ref_name) = ref_name {
                 if let Some(defs_map) = defs {
                     if let Some(definition) = defs_map.get(ref_name) {
                         // Inline and recursively sanitize the definition
@@ -435,7 +440,12 @@ fn sanitize_schema_recursive(
     let mut result = serde_json::Map::new();
     for (key, value) in obj {
         // Skip unsupported keys
-        if UNSUPPORTED_SCHEMA_KEYS.contains(&key.as_str()) || key == "$defs" || key == "$ref" {
+        // Note: "definitions" is JSON Schema draft 4-7, "$defs" is draft 2019-09+
+        if UNSUPPORTED_SCHEMA_KEYS.contains(&key.as_str())
+            || key == "$defs"
+            || key == "definitions"
+            || key == "$ref"
+        {
             continue;
         }
 
@@ -468,7 +478,27 @@ impl From<&Vec<crate::api::ToolDefinition>> for GeminiTool {
                 .map(|t| {
                     let raw_schema = serde_json::to_value(&t.input_schema)
                         .expect("Failed to serialize tool schema");
+
+                    // Log the raw schema before transformation
+                    if let Ok(pretty) = serde_json::to_string_pretty(&raw_schema) {
+                        tracing::debug!(
+                            tool_name = %t.name,
+                            schema = %pretty,
+                            "MCP tool schema BEFORE Gemini sanitization"
+                        );
+                    }
+
                     let sanitized_schema = sanitize_schema_for_gemini(raw_schema);
+
+                    // Log the sanitized schema after transformation
+                    if let Ok(pretty) = serde_json::to_string_pretty(&sanitized_schema) {
+                        tracing::debug!(
+                            tool_name = %t.name,
+                            schema = %pretty,
+                            "MCP tool schema AFTER Gemini sanitization"
+                        );
+                    }
+
                     GeminiFunctionDeclaration {
                         name: t.name.clone(),
                         description: t.description.clone(),
