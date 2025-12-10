@@ -60,10 +60,12 @@ impl Client {
     {
         let response = self.client.post(url).json(request).send().await?;
         if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
             return Err(anyhow::anyhow!(
-                "Request failed with status: {} - {:?}",
-                response.status(),
-                response.error_for_status()
+                "Request failed with status {}: {}",
+                status,
+                error_body
             ));
         }
         let text = response.text().await?;
@@ -87,9 +89,12 @@ impl Client {
     {
         let response = self.client.post(url).json(&request).send().await?;
         if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
             return Err(anyhow::anyhow!(
-                "Request failed with status: {}",
-                response.status()
+                "Request failed with status {}: {}",
+                status,
+                error_body
             ));
         }
 

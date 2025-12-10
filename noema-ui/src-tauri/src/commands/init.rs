@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 use crate::commands::chat::start_engine_event_loop;
+use crate::logging::log_message;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -50,25 +51,39 @@ pub async fn init_app(app: AppHandle, state: State<'_, AppState>) -> Result<Stri
 }
 
 async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
+    log_message("Starting app initialization");
+
     // Load config first so env vars are available
     init_config()?;
+    log_message("Config loaded");
+
     init_storage(state).await.map_err(|e| {
-        eprintln!("ERROR in init_storage: {}", e);
+        log_message(&format!("ERROR in init_storage: {}", e));
         e
     })?;
+    log_message("Storage initialized");
+
     init_user(state).await.map_err(|e| {
-        eprintln!("ERROR in init_user: {}", e);
+        log_message(&format!("ERROR in init_user: {}", e));
         e
     })?;
+    log_message("User initialized");
+
     let session = init_session(state).await.map_err(|e| {
-        eprintln!("ERROR in init_session: {}", e);
+        log_message(&format!("ERROR in init_session: {}", e));
         e
     })?;
+    log_message("Session initialized");
+
     let mcp_registry = init_mcp()?;
+    log_message("MCP registry loaded");
+
     let result = init_engine(state, session, mcp_registry).await?;
+    log_message(&format!("Engine initialized with model: {}", result));
 
     // Start the engine event loop (runs continuously)
     start_engine_event_loop(app);
+    log_message("Event loop started");
 
     Ok(result)
 }

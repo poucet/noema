@@ -4,6 +4,7 @@ use llm::{create_model, list_all_models, ChatPayload, ContentBlock};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, SessionStore};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{Attachment, ConversationInfo, DisplayMessage, ModelInfo};
 
@@ -139,6 +140,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                     *state.is_processing.lock().await = false;
                 }
                 Some(EngineEvent::Error(err)) => {
+                    log_message(&format!("ENGINE ERROR: {}", err));
                     let _ = app.emit("error", &err);
                     *state.is_processing.lock().await = false;
                 }

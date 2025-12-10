@@ -7,6 +7,7 @@ import { McpSettings } from "./components/McpSettings";
 import type { DisplayMessage, ModelInfo, ConversationInfo, Attachment } from "./types";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
+import { appLog } from "./utils/log";
 
 function App() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -84,6 +85,7 @@ function App() {
           const emails = errorMsg.split("MULTIPLE_USERS:")[1].split(",");
           setAvailableUsers(emails);
         } else {
+          appLog.error("Init error", errorMsg);
           setError(errorMsg);
         }
       }
@@ -129,6 +131,7 @@ function App() {
     }).then((unlisten) => unlisteners.push(unlisten));
 
     tauri.onError((err) => {
+      appLog.error("Backend error received", err);
       setError(err);
       setIsLoading(false);
       setStreamingMessage(null);
@@ -158,6 +161,7 @@ function App() {
         await tauri.sendMessage(message);
       }
     } catch (err) {
+      appLog.error("Send message error", String(err));
       setError(String(err));
     }
   };
@@ -170,6 +174,7 @@ function App() {
       const convos = await tauri.listConversations();
       setConversations(convos);
     } catch (err) {
+      appLog.error("New conversation error", String(err));
       setError(String(err));
     }
   };
@@ -180,6 +185,7 @@ function App() {
       setCurrentConversationId(id);
       setMessages(msgs);
     } catch (err) {
+      appLog.error("Select conversation error", String(err));
       setError(String(err));
     }
   };
@@ -209,6 +215,7 @@ function App() {
       const convos = await tauri.listConversations();
       setConversations(convos);
     } catch (err) {
+      appLog.error("Delete conversation error", String(err));
       setError(String(err));
     }
   };
@@ -219,6 +226,7 @@ function App() {
       const convos = await tauri.listConversations();
       setConversations(convos);
     } catch (err) {
+      appLog.error("Rename conversation error", String(err));
       setError(String(err));
     }
   };
@@ -227,6 +235,7 @@ function App() {
     try {
       await tauri.setModel(modelId, provider);
     } catch (err) {
+      appLog.error("Select model error", String(err));
       setError(String(err));
     }
   };
@@ -255,6 +264,7 @@ function App() {
         const emails = errorMsg.split("MULTIPLE_USERS:")[1].split(",");
         setAvailableUsers(emails);
       } else {
+        appLog.error("RetryInit error", errorMsg);
         setError(errorMsg);
       }
     }
@@ -267,6 +277,7 @@ function App() {
         await tauri.setUserEmail(email);
         await retryInit();
       } catch (err) {
+        appLog.error("User select error", String(err));
         setError(String(err));
       }
     };
