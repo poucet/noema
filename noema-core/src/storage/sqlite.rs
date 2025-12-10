@@ -668,17 +668,17 @@ impl SqliteSession {
     fn create_conversation_record(&self, conn: &Connection) -> Result<()> {
         let now = unix_timestamp();
 
-        // Create conversation
+        // Create conversation with default title (required for Episteme DB compatibility)
         conn.execute(
-            "INSERT INTO conversations (id, user_id, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![&self.conversation_id, &self.user_id, now, now],
+            "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![&self.conversation_id, &self.user_id, "New Conversation", now, now],
         )?;
 
         // Create main thread for this conversation
         let thread_id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO threads (id, conversation_id, parent_message_id, created_at) VALUES (?1, ?2, NULL, ?3)",
-            params![&thread_id, &self.conversation_id, now],
+            "INSERT INTO threads (id, conversation_id, parent_message_id, status, created_at) VALUES (?1, ?2, NULL, ?3, ?4)",
+            params![&thread_id, &self.conversation_id, "active", now],
         )?;
 
         Ok(())
