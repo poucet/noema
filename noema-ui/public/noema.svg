@@ -1,0 +1,19 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="120" fill="#002B2B"/>
+  
+  <defs>
+    <linearGradient id="neuralGradient" x1="128" y1="128" x2="384" y2="384" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#008080"/> <stop offset="100%" stop-color="#00F5D4"/> </linearGradient>
+    
+    <filter id="softGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <path d="M140 372V140H210L302 284V140H372V372H302L210 228V372H140Z" 
+        fill="url(#neuralGradient)"
+        filter="url(#softGlow)"/>
+
+  <circle cx="302" cy="256" r="12" fill="white" fill-opacity="0.8"/>
+</svg>

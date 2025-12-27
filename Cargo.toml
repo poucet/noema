@@ -1,4 +1,4 @@
 [workspace]
 resolver = "3"
-members = ["commands", "config", "noema-core", "noema-core/llm", "noema-audio", "noema-ext", "noema-ui/src-tauri"]
+members = ["commands", "config", "noema-core", "noema-core/llm", "noema-audio", "noema-ext", "noema-ui/src-tauri", "noema-mcp-gdocs"]
 default-members = ["noema-ui/src-tauri"]
