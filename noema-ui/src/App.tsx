@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { MessageBubble } from "./components/MessageBubble";
 import { ChatInput } from "./components/ChatInput";
-import { Sidebar } from "./components/Sidebar";
+import { ActivityBar, type ActivityId } from "./components/ActivityBar";
+import { SidePanel } from "./components/SidePanel";
 import { ModelSelector } from "./components/ModelSelector";
 import { Settings } from "./components/Settings";
 import type { DisplayMessage, ModelInfo, ConversationInfo, Attachment } from "./types";
@@ -19,6 +20,7 @@ function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
+  const [activeActivity, setActiveActivity] = useState<ActivityId>("conversations");
   const [showSettings, setShowSettings] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<string[]>([]);
 
@@ -324,15 +326,22 @@ function App() {
 
   return (
     <div className="h-screen flex bg-background">
-      {/* Sidebar */}
-      <Sidebar
+      {/* Activity Bar */}
+      <ActivityBar
+        activeActivity={activeActivity}
+        onActivityChange={setActiveActivity}
+        onOpenSettings={() => setShowSettings(true)}
+      />
+
+      {/* Side Panel */}
+      <SidePanel
+        activeActivity={activeActivity}
         conversations={conversations}
         currentConversationId={currentConversationId}
         onNewConversation={handleNewConversation}
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
-        onOpenSettings={() => setShowSettings(true)}
       />
 
       {/* Settings Modal */}
