@@ -23,6 +23,7 @@ pub use memory::{MemorySession, MemoryTransaction};
 #[cfg(feature = "sqlite")]
 pub use sqlite::{
     ConversationInfo, DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
+    SpanInfo, SpanSetInfo, SpanSetWithContent, SpanType,
     SqliteSession, SqliteStore, StoredMessage,
 };
 pub use traits::{SessionStore, StorageTransaction};

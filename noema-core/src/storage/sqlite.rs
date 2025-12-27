@@ -132,6 +132,60 @@ pub struct DocumentRevisionInfo {
     pub created_by: String,
 }
 
+/// Span type (user input or assistant response)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpanType {
+    User,
+    Assistant,
+}
+
+impl SpanType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SpanType::User => "user",
+            SpanType::Assistant => "assistant",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "user" => Some(SpanType::User),
+            "assistant" => Some(SpanType::Assistant),
+            _ => None,
+        }
+    }
+}
+
+/// Information about a span (one model's response within a SpanSet)
+#[derive(Debug, Clone)]
+pub struct SpanInfo {
+    pub id: String,
+    pub model_id: Option<String>,
+    pub message_count: usize,
+    pub is_selected: bool,
+    pub created_at: i64,
+}
+
+/// A SpanSet with its selected span's messages
+#[derive(Debug, Clone)]
+pub struct SpanSetWithContent {
+    pub id: String,
+    pub span_type: SpanType,
+    pub messages: Vec<StoredMessage>,
+    pub alternates: Vec<SpanInfo>,
+}
+
+/// Information about a SpanSet (position in conversation)
+#[derive(Debug, Clone)]
+pub struct SpanSetInfo {
+    pub id: String,
+    pub thread_id: String,
+    pub sequence_number: i64,
+    pub span_type: SpanType,
+    pub selected_span_id: Option<String>,
+    pub created_at: i64,
+}
+
 /// Shared SQLite connection pool
 ///
 /// This is the main entry point for SQLite storage. Create one store
@@ -292,6 +346,40 @@ impl SqliteStore {
             CREATE INDEX IF NOT EXISTS idx_document_tabs_document ON document_tabs(document_id);
             CREATE INDEX IF NOT EXISTS idx_document_tabs_parent ON document_tabs(parent_tab_id);
             CREATE INDEX IF NOT EXISTS idx_document_revisions_tab ON document_revisions(tab_id);
+
+            -- SpanSets: positions in conversation (for parallel model responses)
+            CREATE TABLE IF NOT EXISTS span_sets (
+                id TEXT PRIMARY KEY,
+                thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+                sequence_number INTEGER NOT NULL,
+                span_type TEXT CHECK(span_type IN ('user', 'assistant')) NOT NULL,
+                selected_span_id TEXT,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_span_sets_thread ON span_sets(thread_id, sequence_number);
+
+            -- Spans: alternative responses within a SpanSet
+            CREATE TABLE IF NOT EXISTS spans (
+                id TEXT PRIMARY KEY,
+                span_set_id TEXT REFERENCES span_sets(id) ON DELETE CASCADE,
+                model_id TEXT,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_spans_span_set ON spans(span_set_id);
+
+            -- Span messages: individual messages within a span (for multi-turn agentic responses)
+            CREATE TABLE IF NOT EXISTS span_messages (
+                id TEXT PRIMARY KEY,
+                span_id TEXT REFERENCES spans(id) ON DELETE CASCADE,
+                sequence_number INTEGER NOT NULL,
+                role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_span_messages_span ON span_messages(span_id, sequence_number);
             "#,
         )
         .context("Failed to initialize database schema")?;
@@ -807,6 +895,271 @@ impl SqliteStore {
         Ok(revs)
     }
 
+    // ========== SpanSet Methods (for parallel model responses) ==========
+
+    /// Create a new SpanSet (a position in the conversation)
+    pub fn create_span_set(
+        &self,
+        thread_id: &str,
+        span_type: SpanType,
+    ) -> Result<String> {
+        let conn = self.conn.lock().unwrap();
+        let id = Uuid::new_v4().to_string();
+        let now = unix_timestamp();
+
+        // Get next sequence number for this thread
+        let sequence_number: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+
+        conn.execute(
+            "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![&id, thread_id, sequence_number, span_type.as_str(), now],
+        )?;
+
+        Ok(id)
+    }
+
+    /// Create a new Span within a SpanSet (one model's response)
+    pub fn create_span(
+        &self,
+        span_set_id: &str,
+        model_id: Option<&str>,
+    ) -> Result<String> {
+        let conn = self.conn.lock().unwrap();
+        let id = Uuid::new_v4().to_string();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO spans (id, span_set_id, model_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![&id, span_set_id, model_id, now],
+        )?;
+
+        // If this is the first span in the set, make it the selected one
+        conn.execute(
+            "UPDATE span_sets SET selected_span_id = ?1
+             WHERE id = ?2 AND selected_span_id IS NULL",
+            params![&id, span_set_id],
+        )?;
+
+        Ok(id)
+    }
+
+    /// Add a message to a span (for multi-turn agentic responses)
+    pub fn add_span_message(
+        &self,
+        span_id: &str,
+        role: Role,
+        content: &StoredPayload,
+    ) -> Result<String> {
+        let conn = self.conn.lock().unwrap();
+        let id = Uuid::new_v4().to_string();
+        let now = unix_timestamp();
+
+        // Get next sequence number for this span
+        let sequence_number: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_messages WHERE span_id = ?1",
+                params![span_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+
+        let role_str = match role {
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::System => "system",
+        };
+        let content_json = serde_json::to_string(content)?;
+
+        conn.execute(
+            "INSERT INTO span_messages (id, span_id, sequence_number, role, content, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![&id, span_id, sequence_number, role_str, &content_json, now],
+        )?;
+
+        Ok(id)
+    }
+
+    /// Get all spans for a SpanSet with message counts
+    pub fn get_span_set_alternates(&self, span_set_id: &str) -> Result<Vec<SpanInfo>> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get selected_span_id for this span_set
+        let selected_span_id: Option<String> = conn
+            .query_row(
+                "SELECT selected_span_id FROM span_sets WHERE id = ?1",
+                params![span_set_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.model_id, s.created_at,
+                    (SELECT COUNT(*) FROM span_messages WHERE span_id = s.id) as msg_count
+             FROM spans s
+             WHERE s.span_set_id = ?1
+             ORDER BY s.created_at",
+        )?;
+
+        let spans = stmt
+            .query_map(params![span_set_id], |row| {
+                let id: String = row.get(0)?;
+                Ok(SpanInfo {
+                    id: id.clone(),
+                    model_id: row.get(1)?,
+                    created_at: row.get(2)?,
+                    message_count: row.get(3)?,
+                    is_selected: selected_span_id.as_ref() == Some(&id),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(spans)
+    }
+
+    /// Set the selected span for a SpanSet
+    pub fn set_selected_span(&self, span_set_id: &str, span_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
+            params![span_id, span_set_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get messages for a specific span
+    pub fn get_span_messages(&self, span_id: &str) -> Result<Vec<StoredMessage>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT role, content FROM span_messages WHERE span_id = ?1 ORDER BY sequence_number",
+        )?;
+
+        let messages = stmt
+            .query_map(params![span_id], |row| {
+                let role_str: String = row.get(0)?;
+                let content_json: String = row.get(1)?;
+                Ok((role_str, content_json))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|(role_str, content_json)| {
+                let role = match role_str.as_str() {
+                    "user" => Role::User,
+                    "assistant" => Role::Assistant,
+                    "system" => Role::System,
+                    _ => return None,
+                };
+                let payload: StoredPayload = serde_json::from_str(&content_json).ok()?;
+                Some(StoredMessage { role, payload })
+            })
+            .collect();
+
+        Ok(messages)
+    }
+
+    /// Get a SpanSet with its selected span's content
+    pub fn get_span_set_with_content(&self, span_set_id: &str) -> Result<Option<SpanSetWithContent>> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get span_set info
+        let span_set_info: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT span_type, selected_span_id FROM span_sets WHERE id = ?1",
+                params![span_set_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+
+        let (span_type_str, selected_span_id) = match span_set_info {
+            Some(info) => info,
+            None => return Ok(None),
+        };
+
+        let span_type = SpanType::from_str(&span_type_str).unwrap_or(SpanType::User);
+        drop(conn); // Release lock before calling other methods
+
+        // Get alternates
+        let alternates = self.get_span_set_alternates(span_set_id)?;
+
+        // Get messages from selected span
+        let messages = if let Some(ref span_id) = selected_span_id {
+            self.get_span_messages(span_id)?
+        } else {
+            Vec::new()
+        };
+
+        Ok(Some(SpanSetWithContent {
+            id: span_set_id.to_string(),
+            span_type,
+            messages,
+            alternates,
+        }))
+    }
+
+    /// Get all SpanSets for a thread in order
+    pub fn get_thread_span_sets(&self, thread_id: &str) -> Result<Vec<SpanSetInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, thread_id, sequence_number, span_type, selected_span_id, created_at
+             FROM span_sets WHERE thread_id = ?1 ORDER BY sequence_number",
+        )?;
+
+        let span_sets = stmt
+            .query_map(params![thread_id], |row| {
+                let span_type_str: String = row.get(3)?;
+                Ok(SpanSetInfo {
+                    id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    sequence_number: row.get(2)?,
+                    span_type: SpanType::from_str(&span_type_str).unwrap_or(SpanType::User),
+                    selected_span_id: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(span_sets)
+    }
+
+    /// Helper: Create a user SpanSet with a single span and message
+    pub fn add_user_span_set(
+        &self,
+        thread_id: &str,
+        content: &StoredPayload,
+    ) -> Result<String> {
+        let span_set_id = self.create_span_set(thread_id, SpanType::User)?;
+        let span_id = self.create_span(&span_set_id, None)?;
+        self.add_span_message(&span_id, Role::User, content)?;
+        Ok(span_set_id)
+    }
+
+    /// Helper: Create an assistant SpanSet and return the span_set_id
+    /// Caller should then create spans for each model
+    pub fn add_assistant_span_set(&self, thread_id: &str) -> Result<String> {
+        self.create_span_set(thread_id, SpanType::Assistant)
+    }
+
+    /// Helper: Add an assistant span with initial message
+    pub fn add_assistant_span(
+        &self,
+        span_set_id: &str,
+        model_id: &str,
+        content: &StoredPayload,
+    ) -> Result<String> {
+        let span_id = self.create_span(span_set_id, Some(model_id))?;
+        self.add_span_message(&span_id, Role::Assistant, content)?;
+        Ok(span_id)
+    }
+
     /// Create a new conversation session for a user (lazy - not persisted until first message)
     pub fn create_conversation(&self, user_id: &str) -> Result<SqliteSession> {
         let id = Uuid::new_v4().to_string();
@@ -1196,8 +1549,8 @@ impl SqliteSession {
         // Create main thread for this conversation
         let thread_id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO threads (id, conversation_id, parent_message_id, status, created_at) VALUES (?1, ?2, NULL, ?3, ?4)",
-            params![&thread_id, &self.conversation_id, "active", now],
+            "INSERT INTO threads (id, conversation_id, parent_message_id, created_at) VALUES (?1, ?2, NULL, ?3)",
+            params![&thread_id, &self.conversation_id, now],
         )?;
 
         Ok(())
@@ -1261,18 +1614,21 @@ impl SessionStore for SqliteSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::StoredContent;
 
     #[test]
     fn test_sqlite_store_create() {
         let store = SqliteStore::in_memory().unwrap();
-        let session = store.create_conversation().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let session = store.create_conversation(&user.id).unwrap();
         assert!(session.is_empty());
     }
 
     #[tokio::test]
     async fn test_sqlite_session_commit() {
         let store = SqliteStore::in_memory().unwrap();
-        let mut session = store.create_conversation().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let mut session = store.create_conversation(&user.id).unwrap();
 
         let mut tx = session.begin();
         tx.add(ChatMessage::user("Hello".into()));
@@ -1288,11 +1644,12 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_session_persistence() {
         let store = SqliteStore::in_memory().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
         let conversation_id;
 
         // Create and populate session
         {
-            let mut session = store.create_conversation().unwrap();
+            let mut session = store.create_conversation(&user.id).unwrap();
             conversation_id = session.conversation_id().to_string();
 
             let mut tx = session.begin();
@@ -1320,18 +1677,18 @@ mod tests {
         let user = store.get_or_create_default_user().unwrap();
 
         // Empty conversations should not be listed (lazy creation)
-        store.create_conversation().unwrap();
-        store.create_conversation().unwrap();
+        store.create_conversation(&user.id).unwrap();
+        store.create_conversation(&user.id).unwrap();
         let infos = store.list_conversations(&user.id).unwrap();
         assert_eq!(infos.len(), 0);
 
         // Conversations with messages should be listed
-        let mut session1 = store.create_conversation_for_user(Some(&user.id)).unwrap();
+        let mut session1 = store.create_conversation(&user.id).unwrap();
         let mut tx = session1.begin();
         tx.add(ChatMessage::user("Hello".into()));
         session1.commit(tx).await.unwrap();
 
-        let mut session2 = store.create_conversation_for_user(Some(&user.id)).unwrap();
+        let mut session2 = store.create_conversation(&user.id).unwrap();
         let mut tx = session2.begin();
         tx.add(ChatMessage::user("World".into()));
         session2.commit(tx).await.unwrap();
@@ -1339,14 +1696,15 @@ mod tests {
         let infos = store.list_conversations(&user.id).unwrap();
         assert_eq!(infos.len(), 2);
         assert_eq!(infos[0].message_count, 1);
-        assert!(infos[0].name.is_none());
+        // Conversations now have a default title of "New Conversation"
+        assert!(infos[0].name.is_some());
     }
 
     #[tokio::test]
     async fn test_sqlite_rename_conversation() {
         let store = SqliteStore::in_memory().unwrap();
         let user = store.get_or_create_default_user().unwrap();
-        let mut session = store.create_conversation_for_user(Some(&user.id)).unwrap();
+        let mut session = store.create_conversation(&user.id).unwrap();
         let id = session.conversation_id().to_string();
 
         let mut tx = session.begin();
@@ -1370,7 +1728,7 @@ mod tests {
     async fn test_sqlite_delete_conversation() {
         let store = SqliteStore::in_memory().unwrap();
         let user = store.get_or_create_default_user().unwrap();
-        let mut session = store.create_conversation_for_user(Some(&user.id)).unwrap();
+        let mut session = store.create_conversation(&user.id).unwrap();
         let id = session.conversation_id().to_string();
 
         let mut tx = session.begin();
@@ -1386,7 +1744,8 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_clear() {
         let store = SqliteStore::in_memory().unwrap();
-        let mut session = store.create_conversation().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let mut session = store.create_conversation(&user.id).unwrap();
         let id = session.conversation_id().to_string();
 
         let mut tx = session.begin();
@@ -1413,7 +1772,8 @@ mod tests {
     #[test]
     fn test_sqlite_transaction_rollback() {
         let store = SqliteStore::in_memory().unwrap();
-        let session = store.create_conversation().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let session = store.create_conversation(&user.id).unwrap();
 
         let mut tx = session.begin();
         tx.add(ChatMessage::user("Hello".into()));
@@ -1423,5 +1783,144 @@ mod tests {
 
         // Session should still be empty
         assert!(session.is_empty());
+    }
+
+    // ========== SpanSet Tests ==========
+
+    /// Helper to create a text StoredPayload for testing
+    fn text_payload(s: &str) -> StoredPayload {
+        StoredPayload::new(vec![StoredContent::Text { text: s.to_string() }])
+    }
+
+    /// Helper to get text from a StoredPayload for testing
+    fn get_payload_text(payload: &StoredPayload) -> Option<&str> {
+        payload.content.first().and_then(|c| match c {
+            StoredContent::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Helper to create a thread for testing
+    fn create_test_thread(store: &SqliteStore, user_id: &str) -> String {
+        let conn = store.conn.lock().unwrap();
+        let now = unix_timestamp();
+        let conv_id = Uuid::new_v4().to_string();
+        let thread_id = Uuid::new_v4().to_string();
+
+        conn.execute(
+            "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![&conv_id, user_id, "Test Conv", now, now],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO threads (id, conversation_id, parent_message_id, created_at) VALUES (?1, ?2, NULL, ?3)",
+            params![&thread_id, &conv_id, now],
+        ).unwrap();
+
+        thread_id
+    }
+
+    #[test]
+    fn test_span_set_create() {
+        let store = SqliteStore::in_memory().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let thread_id = create_test_thread(&store, &user.id);
+
+        // Create a user span set
+        let span_set_id = store.create_span_set(&thread_id, SpanType::User).unwrap();
+        assert!(!span_set_id.is_empty());
+
+        // Verify it exists
+        let span_sets = store.get_thread_span_sets(&thread_id).unwrap();
+        assert_eq!(span_sets.len(), 1);
+        assert_eq!(span_sets[0].span_type, SpanType::User);
+        assert_eq!(span_sets[0].sequence_number, 1);
+    }
+
+    #[test]
+    fn test_span_set_with_multiple_alternates() {
+        let store = SqliteStore::in_memory().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let thread_id = create_test_thread(&store, &user.id);
+
+        // Create a user span set with message
+        let user_content = text_payload("Hello, which model is best?");
+        let _user_span_set_id = store.add_user_span_set(&thread_id, &user_content).unwrap();
+
+        // Create an assistant span set
+        let asst_span_set_id = store.add_assistant_span_set(&thread_id).unwrap();
+
+        // Add multiple model responses (alternates)
+        let claude_content = text_payload("I'm Claude, happy to help!");
+        let gpt_content = text_payload("I'm GPT-4, at your service!");
+        let gemini_content = text_payload("I'm Gemini, let me assist!");
+
+        let _claude_span_id = store.add_assistant_span(&asst_span_set_id, "anthropic/claude-sonnet", &claude_content).unwrap();
+        let gpt_span_id = store.add_assistant_span(&asst_span_set_id, "openai/gpt-4o", &gpt_content).unwrap();
+        let _gemini_span_id = store.add_assistant_span(&asst_span_set_id, "google/gemini-pro", &gemini_content).unwrap();
+
+        // Verify we have 3 alternates
+        let alternates = store.get_span_set_alternates(&asst_span_set_id).unwrap();
+        assert_eq!(alternates.len(), 3);
+
+        // First one should be selected by default
+        assert!(alternates[0].is_selected);
+        assert!(!alternates[1].is_selected);
+        assert!(!alternates[2].is_selected);
+
+        // Verify models
+        assert_eq!(alternates[0].model_id.as_deref(), Some("anthropic/claude-sonnet"));
+        assert_eq!(alternates[1].model_id.as_deref(), Some("openai/gpt-4o"));
+        assert_eq!(alternates[2].model_id.as_deref(), Some("google/gemini-pro"));
+
+        // Each should have 1 message
+        assert_eq!(alternates[0].message_count, 1);
+        assert_eq!(alternates[1].message_count, 1);
+        assert_eq!(alternates[2].message_count, 1);
+
+        // Get span set with content - should show Claude's response (first/selected)
+        let span_set_content = store.get_span_set_with_content(&asst_span_set_id).unwrap().unwrap();
+        assert_eq!(span_set_content.span_type, SpanType::Assistant);
+        assert_eq!(span_set_content.messages.len(), 1);
+        assert_eq!(get_payload_text(&span_set_content.messages[0].payload), Some("I'm Claude, happy to help!"));
+        assert_eq!(span_set_content.alternates.len(), 3);
+
+        // Switch to GPT
+        store.set_selected_span(&asst_span_set_id, &gpt_span_id).unwrap();
+
+        // Verify selection changed
+        let span_set_content = store.get_span_set_with_content(&asst_span_set_id).unwrap().unwrap();
+        assert_eq!(get_payload_text(&span_set_content.messages[0].payload), Some("I'm GPT-4, at your service!"));
+    }
+
+    #[test]
+    fn test_span_with_multiple_messages() {
+        let store = SqliteStore::in_memory().unwrap();
+        let user = store.get_or_create_default_user().unwrap();
+        let thread_id = create_test_thread(&store, &user.id);
+
+        // Create assistant span set
+        let span_set_id = store.create_span_set(&thread_id, SpanType::Assistant).unwrap();
+        let span_id = store.create_span(&span_set_id, Some("anthropic/claude-sonnet")).unwrap();
+
+        // Simulate agentic multi-turn: assistant -> tool call -> tool result -> assistant
+        let msg1 = text_payload("Let me check that for you.");
+        let msg2 = text_payload("[Tool call: search]");  // In reality this would be structured
+        let msg3 = text_payload("Based on my search, here's what I found...");
+
+        store.add_span_message(&span_id, Role::Assistant, &msg1).unwrap();
+        store.add_span_message(&span_id, Role::System, &msg2).unwrap();  // Tool calls often stored as system
+        store.add_span_message(&span_id, Role::Assistant, &msg3).unwrap();
+
+        // Verify all messages are in the span
+        let messages = store.get_span_messages(&span_id).unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::Assistant);
+        assert_eq!(messages[1].role, Role::System);
+        assert_eq!(messages[2].role, Role::Assistant);
+
+        // Alternates should show message count of 3
+        let alternates = store.get_span_set_alternates(&span_set_id).unwrap();
+        assert_eq!(alternates[0].message_count, 3);
     }
 }
