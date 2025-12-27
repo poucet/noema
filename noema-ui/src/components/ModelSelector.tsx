@@ -19,15 +19,6 @@ export function ModelSelector({
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Debug logging
-  console.log("[ModelSelector] Rendering with props:", {
-    modelsCount: models.length,
-    currentModel,
-    favoriteModels,
-    hasFavoriteModels: favoriteModels?.length > 0,
-    hasOnToggleFavorite: typeof onToggleFavorite === 'function',
-  });
-
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -59,9 +50,7 @@ export function ModelSelector({
 
   const handleToggleFavorite = (e: React.MouseEvent, model: ModelInfo) => {
     e.stopPropagation();
-    const fullId = getFullModelId(model);
-    console.log("[ModelSelector] Toggling favorite:", fullId);
-    onToggleFavorite(fullId);
+    onToggleFavorite(getFullModelId(model));
   };
 
   const StarIcon = ({ filled }: { filled: boolean }) => (
@@ -127,12 +116,6 @@ export function ModelSelector({
 
         {isOpen && (
           <div className="absolute top-full right-0 mt-1 w-72 bg-surface border border-gray-700 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
-            {/* Debug info */}
-            {console.log("[ModelSelector] Dropdown open, rendering models:", {
-              favoriteModelsList: favoriteModelsList.map(m => getFullModelId(m)),
-              groupedProviders: Object.keys(groupedModels),
-              totalModels: models.length,
-            })}
             {/* Favorites section */}
             {favoriteModelsList.length > 0 && (
               <div>

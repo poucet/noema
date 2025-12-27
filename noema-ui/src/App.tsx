@@ -263,13 +263,10 @@ function App() {
   };
 
   const handleToggleFavorite = async (modelId: string) => {
-    console.log("[App] handleToggleFavorite called with:", modelId);
     try {
       const updatedFavorites = await tauri.toggleFavoriteModel(modelId);
-      console.log("[App] Updated favorites:", updatedFavorites);
       setFavoriteModels(updatedFavorites);
     } catch (err) {
-      console.error("[App] Toggle favorite error:", err);
       appLog.error("Toggle favorite error", String(err));
       setError(String(err));
     }
