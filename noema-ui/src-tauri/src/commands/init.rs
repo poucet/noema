@@ -6,9 +6,10 @@ use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::BlobStore;
 use noema_core::{ChatEngine, McpRegistry, SqliteSession, SqliteStore};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::chat::start_engine_event_loop;
+use crate::gdocs_server::{self, GDocsServerState};
 use crate::logging::log_message;
 use crate::state::AppState;
 
@@ -76,6 +77,9 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     })?;
     log_message("Session initialized");
 
+    // Start embedded Google Docs MCP server
+    start_gdocs_server(&app).await;
+
     let mcp_registry = init_mcp()?;
     log_message("MCP registry loaded");
 
@@ -91,6 +95,19 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     log_message("MCP auto-connect started");
 
     Ok(result)
+}
+
+/// Start the embedded Google Docs MCP server
+async fn start_gdocs_server(app: &AppHandle) {
+    let gdocs_state = app.state::<GDocsServerState>();
+    match gdocs_server::start_gdocs_server(&gdocs_state).await {
+        Ok(url) => {
+            log_message(&format!("Google Docs MCP server started at {}", url));
+        }
+        Err(e) => {
+            log_message(&format!("Failed to start Google Docs server: {}", e));
+        }
+    }
 }
 
 /// Start auto-connect for all configured MCP servers

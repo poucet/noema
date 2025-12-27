@@ -29,6 +29,8 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 base64 = "0.22"
+urlencoding = "2"
+tracing = "0.1"
 
 # Local workspace dependencies
 noema-core = { path = "../../noema-core", features = ["sqlite"] }
@@ -36,6 +38,7 @@ llm = { path = "../../noema-core/llm" }
 config = { path = "../../config" }
 noema-audio = { path = "../../noema-audio", features = ["browser"] }
 noema-ext = { path = "../../noema-ext" }
+noema-mcp-gdocs = { path = "../../noema-mcp-gdocs" }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"

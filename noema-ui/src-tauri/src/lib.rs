@@ -1,7 +1,9 @@
 //! Tauri bridge for Noema - connects React frontend to noema-core
 
 mod commands;
+mod gdocs_server;
 mod logging;
+mod oauth_callback;
 mod state;
 mod types;
 
@@ -133,6 +135,7 @@ pub fn run() {
             }
         }))
         .manage(AppState::new())
+        .manage(gdocs_server::GDocsServerState::default())
         .setup(|app| {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
@@ -203,6 +206,18 @@ pub fn run() {
             commands::settings::set_api_key,
             commands::settings::remove_api_key,
             commands::settings::get_provider_info,
+            // Document commands (episteme-compatible)
+            commands::gdocs::list_documents,
+            commands::gdocs::get_document,
+            commands::gdocs::get_document_by_google_id,
+            commands::gdocs::get_document_content,
+            commands::gdocs::get_document_tab,
+            commands::gdocs::delete_document,
+            commands::gdocs::sync_google_doc,
+            // Google Docs OAuth commands
+            commands::gdocs::get_gdocs_oauth_status,
+            commands::gdocs::configure_gdocs_oauth,
+            commands::gdocs::get_gdocs_server_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
