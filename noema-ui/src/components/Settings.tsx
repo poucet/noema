@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { McpSettingsContent } from "./McpSettingsContent";
 import { ApiKeySettings } from "./ApiKeySettings";
+import { GoogleDocsSettings } from "./GoogleDocsSettings";
 
-type TabId = "mcp" | "apikeys";
+type TabId = "mcp" | "apikeys" | "gdocs";
 
 interface SettingsProps {
   onClose: () => void;
@@ -17,6 +18,7 @@ interface TabConfig {
 const tabs: TabConfig[] = [
   { id: "mcp", label: "MCP Servers" },
   { id: "apikeys", label: "API Keys" },
+  { id: "gdocs", label: "Google Docs" },
 ];
 
 export function Settings({ onClose, initialTab = "mcp" }: SettingsProps) {
@@ -71,6 +73,7 @@ export function Settings({ onClose, initialTab = "mcp" }: SettingsProps) {
         <div className="flex-1 overflow-y-auto p-6">
           {activeTab === "mcp" && <McpSettingsContent />}
           {activeTab === "apikeys" && <ApiKeySettings />}
+          {activeTab === "gdocs" && <GoogleDocsSettings />}
         </div>
       </div>
     </div>

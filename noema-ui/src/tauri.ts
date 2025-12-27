@@ -9,6 +9,11 @@ import type {
   AddMcpServerRequest,
   Attachment,
 } from "./types";
+import type {
+  DocumentInfoResponse,
+  DocumentContentResponse,
+  DocumentTabResponse,
+} from "./generated";
 
 // Tauri commands
 export async function initApp(): Promise<string> {
@@ -264,4 +269,33 @@ export async function removeApiKey(provider: string): Promise<void> {
 
 export async function getProviderInfo(): Promise<ProviderInfo[]> {
   return invoke<ProviderInfo[]>("get_provider_info");
+}
+
+// Document commands (episteme-compatible)
+export async function listDocuments(): Promise<DocumentInfoResponse[]> {
+  return invoke<DocumentInfoResponse[]>("list_documents");
+}
+
+export async function getDocument(docId: string): Promise<DocumentInfoResponse | null> {
+  return invoke<DocumentInfoResponse | null>("get_document", { docId });
+}
+
+export async function getDocumentByGoogleId(googleDocId: string): Promise<DocumentInfoResponse | null> {
+  return invoke<DocumentInfoResponse | null>("get_document_by_google_id", { googleDocId });
+}
+
+export async function getDocumentContent(docId: string): Promise<DocumentContentResponse> {
+  return invoke<DocumentContentResponse>("get_document_content", { docId });
+}
+
+export async function getDocumentTab(tabId: string): Promise<DocumentTabResponse | null> {
+  return invoke<DocumentTabResponse | null>("get_document_tab", { tabId });
+}
+
+export async function deleteDocument(docId: string): Promise<boolean> {
+  return invoke<boolean>("delete_document", { docId });
+}
+
+export async function syncGoogleDoc(docId: string): Promise<void> {
+  return invoke<void>("sync_google_doc", { docId });
 }

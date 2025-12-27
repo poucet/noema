@@ -8,14 +8,48 @@ import { ImageViewer } from "./ImageViewer";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
+  onDocumentClick?: (docId: string) => void;
 }
 
-function MarkdownText({ text }: { text: string }) {
+interface MarkdownTextProps {
+  text: string;
+  onDocumentClick?: (docId: string) => void;
+}
+
+function MarkdownText({ text, onDocumentClick }: MarkdownTextProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={{
+        a({ href, children }) {
+          // Check for noema://doc/ links (document references)
+          if (href?.startsWith('noema://doc/')) {
+            const docId = href.replace('noema://doc/', '');
+            return (
+              <button
+                onClick={() => onDocumentClick?.(docId)}
+                className="text-teal-400 hover:text-teal-300 underline inline-flex items-center gap-1"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                {children}
+              </button>
+            );
+          }
+          // Regular external links - open in browser
+          return (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-teal-400 hover:text-teal-300 underline"
+            >
+              {children}
+            </a>
+          );
+        },
         code(props) {
           const { children, className } = props;
           const isInline = !className;
@@ -129,9 +163,14 @@ function ToolResultBlock({ content }: { content: DisplayToolResultContent[] }) {
   );
 }
 
-function ContentBlock({ block }: { block: DisplayContent }) {
+interface ContentBlockProps {
+  block: DisplayContent;
+  onDocumentClick?: (docId: string) => void;
+}
+
+function ContentBlock({ block, onDocumentClick }: ContentBlockProps) {
   if ("text" in block) {
-    return <MarkdownText text={block.text} />;
+    return <MarkdownText text={block.text} onDocumentClick={onDocumentClick} />;
   }
 
   if ("image" in block) {
@@ -157,7 +196,7 @@ function ContentBlock({ block }: { block: DisplayContent }) {
   return null;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onDocumentClick }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
 
@@ -176,7 +215,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       >
         <div className="prose prose-sm prose-invert max-w-none">
           {message.content.map((block, i) => (
-            <ContentBlock key={i} block={block} />
+            <ContentBlock key={i} block={block} onDocumentClick={onDocumentClick} />
           ))}
         </div>
       </div>

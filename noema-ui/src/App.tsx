@@ -5,6 +5,7 @@ import { ActivityBar, type ActivityId } from "./components/ActivityBar";
 import { SidePanel } from "./components/SidePanel";
 import { ModelSelector } from "./components/ModelSelector";
 import { Settings } from "./components/Settings";
+import { DocumentPanel } from "./components/DocumentPanel";
 import type { DisplayMessage, ModelInfo, ConversationInfo, Attachment } from "./types";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
@@ -23,6 +24,7 @@ function App() {
   const [activeActivity, setActiveActivity] = useState<ActivityId>("conversations");
   const [showSettings, setShowSettings] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<string[]>([]);
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -349,6 +351,14 @@ function App() {
         <Settings onClose={() => setShowSettings(false)} />
       )}
 
+      {/* Document Panel */}
+      {activeDocumentId && (
+        <DocumentPanel
+          documentId={activeDocumentId}
+          onClose={() => setActiveDocumentId(null)}
+        />
+      )}
+
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
@@ -396,10 +406,17 @@ function App() {
             ) : (
               <>
                 {messages.map((msg, i) => (
-                  <MessageBubble key={i} message={msg} />
+                  <MessageBubble
+                    key={i}
+                    message={msg}
+                    onDocumentClick={setActiveDocumentId}
+                  />
                 ))}
                 {streamingMessage && (
-                  <MessageBubble message={streamingMessage} />
+                  <MessageBubble
+                    message={streamingMessage}
+                    onDocumentClick={setActiveDocumentId}
+                  />
                 )}
                 {isLoading && !streamingMessage && (
                   <div className="flex justify-start mb-4">
