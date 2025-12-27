@@ -1,0 +1,48 @@
+[package]
+name = "noema-mcp-gdocs"
+version = "0.1.0"
+edition = "2021"
+description = "Google Docs MCP server for Noema"
+
+[lib]
+name = "noema_mcp_gdocs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "noema-mcp-gdocs"
+path = "src/main.rs"
+
+[dependencies]
+# MCP protocol
+rmcp = { version = "0.9", features = ["server", "transport-streamable-http-server"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP server
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower-service = "0.3"
+http-body-util = "0.1"
+
+# HTTP client for Google APIs
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+
+# Utilities
+base64 = "0.22"
+chrono = "0.4"
+html2md = "0.2"
