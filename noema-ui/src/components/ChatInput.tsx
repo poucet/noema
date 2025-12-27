@@ -3,11 +3,26 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { isSupportedAttachmentType, type Attachment } from "../types";
+import type { DocumentInfoResponse } from "../generated";
+import * as tauri from "../tauri";
 
 export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing" | "buffering";
 
+interface MentionState {
+  isActive: boolean;
+  query: string;
+  startPosition: number;
+  selectedIndex: number;
+}
+
+// Referenced document for RAG
+export interface ReferencedDocument {
+  id: string;
+  title: string;
+}
+
 interface ChatInputProps {
-  onSend: (message: string, attachments: Attachment[]) => void;
+  onSend: (message: string, attachments: Attachment[], referencedDocuments?: ReferencedDocument[]) => void;
   disabled?: boolean;
   voiceAvailable?: boolean;
   voiceStatus?: VoiceStatus;
@@ -99,6 +114,18 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // @ mention autocomplete state
+  const [mentionState, setMentionState] = useState<MentionState>({
+    isActive: false,
+    query: "",
+    startPosition: 0,
+    selectedIndex: 0,
+  });
+  const [mentionResults, setMentionResults] = useState<DocumentInfoResponse[]>([]);
+  const mentionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track documents referenced via @ mentions for RAG
+  const [referencedDocs, setReferencedDocs] = useState<ReferencedDocument[]>([]);
+
   // Auto-resize textarea
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -107,6 +134,106 @@ export function ChatInput({
       textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
     }
   }, [message]);
+
+  // Search for documents when mention query changes
+  useEffect(() => {
+    if (!mentionState.isActive || mentionState.query.length === 0) {
+      setMentionResults([]);
+      return;
+    }
+
+    // Debounce the search
+    if (mentionDebounceRef.current) {
+      clearTimeout(mentionDebounceRef.current);
+    }
+
+    mentionDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await tauri.searchDocuments(mentionState.query, 5);
+        setMentionResults(results);
+        setMentionState(prev => ({ ...prev, selectedIndex: 0 }));
+      } catch (err) {
+        console.error("Failed to search documents:", err);
+        setMentionResults([]);
+      }
+    }, 150);
+
+    return () => {
+      if (mentionDebounceRef.current) {
+        clearTimeout(mentionDebounceRef.current);
+      }
+    };
+  }, [mentionState.isActive, mentionState.query]);
+
+  // Handle message changes to detect @ mentions
+  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    const cursorPos = e.target.selectionStart;
+    setMessage(newValue);
+
+    // Check if we should activate or update mention mode
+    const textBeforeCursor = newValue.substring(0, cursorPos);
+    const atIndex = textBeforeCursor.lastIndexOf("@");
+
+    if (atIndex >= 0) {
+      // Check if @ is at start or preceded by whitespace
+      const charBefore = atIndex > 0 ? textBeforeCursor[atIndex - 1] : " ";
+      if (charBefore === " " || charBefore === "\n" || atIndex === 0) {
+        const query = textBeforeCursor.substring(atIndex + 1);
+        // Only activate if query doesn't contain whitespace (still typing the mention)
+        if (!query.includes(" ") && !query.includes("\n")) {
+          setMentionState({
+            isActive: true,
+            query,
+            startPosition: atIndex,
+            selectedIndex: 0,
+          });
+          return;
+        }
+      }
+    }
+
+    // Deactivate mention mode if conditions not met
+    if (mentionState.isActive) {
+      setMentionState(prev => ({ ...prev, isActive: false }));
+    }
+  }, [mentionState.isActive]);
+
+  // Insert a document mention
+  const insertMention = useCallback((doc: DocumentInfoResponse) => {
+    const beforeMention = message.substring(0, mentionState.startPosition);
+    const afterMention = message.substring(
+      mentionState.startPosition + mentionState.query.length + 1
+    );
+    // Insert a visual @title marker in the message
+    const mentionText = `@${doc.title} `;
+    const newMessage = beforeMention + mentionText + afterMention;
+    setMessage(newMessage);
+    setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
+    setMentionResults([]);
+
+    // Add to referenced documents (for RAG) if not already present
+    setReferencedDocs(prev => {
+      if (prev.some(d => d.id === doc.id)) {
+        return prev;
+      }
+      return [...prev, { id: doc.id, title: doc.title }];
+    });
+
+    // Focus and position cursor after the mention
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newCursorPos = beforeMention.length + mentionText.length;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  }, [message, mentionState.startPosition, mentionState.query]);
+
+  // Remove a referenced document
+  const removeReferencedDoc = useCallback((docId: string) => {
+    setReferencedDocs(prev => prev.filter(d => d.id !== docId));
+  }, []);
 
   // Set up Tauri drag-drop event listener
   // Track last processed drop to avoid duplicates (Tauri bug: https://github.com/tauri-apps/tauri/issues/14134)
@@ -172,14 +299,46 @@ export function ChatInput({
 
   const handleSubmit = () => {
     const trimmed = message.trim();
-    if ((trimmed || attachments.length > 0) && !disabled) {
-      onSend(trimmed, attachments);
+    if ((trimmed || attachments.length > 0 || referencedDocs.length > 0) && !disabled) {
+      onSend(trimmed, attachments, referencedDocs.length > 0 ? referencedDocs : undefined);
       setMessage("");
       setAttachments([]);
+      setReferencedDocs([]);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Handle mention navigation
+    if (mentionState.isActive && mentionResults.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionState(prev => ({
+          ...prev,
+          selectedIndex: Math.min(prev.selectedIndex + 1, mentionResults.length - 1),
+        }));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionState(prev => ({
+          ...prev,
+          selectedIndex: Math.max(prev.selectedIndex - 1, 0),
+        }));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        insertMention(mentionResults[mentionState.selectedIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
+        return;
+      }
+    }
+
+    // Normal submit on Enter
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -316,8 +475,66 @@ export function ChatInput({
       {/* Attachment preview */}
       <AttachmentPreview attachments={attachments} onRemove={handleRemoveAttachment} />
 
+      {/* Referenced documents chips */}
+      {referencedDocs.length > 0 && (
+        <div className="px-4 pt-2 max-w-4xl mx-auto">
+          <div className="flex flex-wrap gap-2">
+            {referencedDocs.map(doc => (
+              <span
+                key={doc.id}
+                className="inline-flex items-center gap-1 px-2 py-1 bg-teal-900/50 text-teal-300 rounded-full text-sm"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                {doc.title}
+                <button
+                  onClick={() => removeReferencedDoc(doc.id)}
+                  className="ml-1 hover:text-red-400"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Input area */}
-      <div className="p-4">
+      <div className="p-4 relative">
+        {/* Mention autocomplete dropdown */}
+        {mentionState.isActive && mentionResults.length > 0 && (
+          <div className="absolute bottom-full left-4 right-4 mb-2 max-w-4xl mx-auto">
+            <div className="bg-elevated border border-gray-600 rounded-lg shadow-lg overflow-hidden">
+              <div className="text-xs text-muted px-3 py-2 border-b border-gray-700">
+                Documents
+              </div>
+              <ul className="max-h-48 overflow-y-auto">
+                {mentionResults.map((doc, index) => (
+                  <li key={doc.id}>
+                    <button
+                      type="button"
+                      onClick={() => insertMention(doc)}
+                      className={`w-full text-left px-3 py-2 flex items-center gap-2 ${
+                        index === mentionState.selectedIndex
+                          ? "bg-teal-600/30 text-teal-100"
+                          : "hover:bg-gray-700/50 text-foreground"
+                      }`}
+                    >
+                      <svg className="w-4 h-4 text-teal-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span className="truncate">{doc.title}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-3 items-end max-w-4xl mx-auto">
           <button
             type="button"
@@ -366,7 +583,7 @@ export function ChatInput({
           <textarea
             ref={textareaRef}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={handleMessageChange}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={
@@ -376,9 +593,9 @@ export function ChatInput({
                 ? "Transcribing..."
                 : voiceStatus === "buffering"
                 ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? 's' : ''} queued while thinking...`
-                : attachments.length > 0
-                ? "Add a message or send attachments..."
-                : "Type a message or drop files..."
+                : attachments.length > 0 || referencedDocs.length > 0
+                ? "Add a message..."
+                : "Type a message, @ to reference docs..."
             }
             disabled={disabled}
             rows={1}
@@ -387,7 +604,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={disabled || (!message.trim() && attachments.length === 0)}
+            disabled={disabled || (!message.trim() && attachments.length === 0 && referencedDocs.length === 0)}
             className="px-4 py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-2xl transition-colors"
           >
             <svg
