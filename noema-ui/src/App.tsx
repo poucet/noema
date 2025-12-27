@@ -4,6 +4,7 @@ import { ChatInput } from "./components/ChatInput";
 import { ActivityBar, type ActivityId } from "./components/ActivityBar";
 import { SidePanel } from "./components/SidePanel";
 import { ModelSelector } from "./components/ModelSelector";
+import { FavoriteModelChips } from "./components/FavoriteModelChips";
 import { Settings } from "./components/Settings";
 import { DocumentPanel } from "./components/DocumentPanel";
 import type { DisplayMessage, ModelInfo, ConversationInfo, Attachment } from "./types";
@@ -21,6 +22,9 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
+  const [currentModelId, setCurrentModelId] = useState(""); // Full model ID (provider/model)
+  const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
+  const [selectedModelsForComparison, setSelectedModelsForComparison] = useState<string[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
   const [activeActivity, setActiveActivity] = useState<ActivityId>("conversations");
   const [showSettings, setShowSettings] = useState(false);
@@ -83,6 +87,9 @@ function App() {
 
         // Load models in background
         tauri.listModels().then(setModels).catch(console.error);
+
+        // Load favorite models
+        tauri.getFavoriteModels().then(setFavoriteModels).catch(console.error);
 
         setIsInitialized(true);
       } catch (err) {
@@ -248,10 +255,40 @@ function App() {
   const handleSelectModel = async (modelId: string, provider: string) => {
     try {
       await tauri.setModel(modelId, provider);
+      setCurrentModelId(`${provider}/${modelId}`);
     } catch (err) {
       appLog.error("Select model error", String(err));
       setError(String(err));
     }
+  };
+
+  const handleToggleFavorite = async (modelId: string) => {
+    console.log("[App] handleToggleFavorite called with:", modelId);
+    try {
+      const updatedFavorites = await tauri.toggleFavoriteModel(modelId);
+      console.log("[App] Updated favorites:", updatedFavorites);
+      setFavoriteModels(updatedFavorites);
+    } catch (err) {
+      console.error("[App] Toggle favorite error:", err);
+      appLog.error("Toggle favorite error", String(err));
+      setError(String(err));
+    }
+  };
+
+  const handleToggleModelForComparison = (modelId: string) => {
+    setSelectedModelsForComparison((prev) =>
+      prev.includes(modelId)
+        ? prev.filter((id) => id !== modelId)
+        : [...prev, modelId]
+    );
+  };
+
+  const handleSendToMultipleModels = () => {
+    // TODO: Implement parallel model execution in Phase 3
+    // For now, just log the selected models
+    appLog.info("Send to multiple models", selectedModelsForComparison.join(", "));
+    // Clear selection after sending
+    setSelectedModelsForComparison([]);
   };
 
 
@@ -271,6 +308,7 @@ function App() {
       const msgs = await tauri.getMessages();
       setMessages(msgs);
       tauri.listModels().then(setModels).catch(console.error);
+      tauri.getFavoriteModels().then(setFavoriteModels).catch(console.error);
       setIsInitialized(true);
     } catch (err) {
       const errorMsg = String(err);
@@ -382,7 +420,9 @@ function App() {
             <ModelSelector
               models={models}
               currentModel={currentModel}
+              favoriteModels={favoriteModels}
               onSelectModel={handleSelectModel}
+              onToggleFavorite={handleToggleFavorite}
             />
           )}
         </div>
@@ -451,6 +491,16 @@ function App() {
                 <div ref={messagesEndRef} />
               </div>
             </div>
+
+            {/* Favorite model chips for parallel comparison */}
+            <FavoriteModelChips
+              models={models}
+              favoriteModelIds={favoriteModels}
+              selectedModelIds={selectedModelsForComparison}
+              currentModelId={currentModelId}
+              onToggleSelection={handleToggleModelForComparison}
+              onSendToModels={handleSendToMultipleModels}
+            />
 
             {/* Input area */}
             <ChatInput

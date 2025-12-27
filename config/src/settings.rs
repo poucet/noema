@@ -15,6 +15,9 @@ pub struct Settings {
     /// Encrypted API keys (provider name -> encrypted key)
     #[serde(default)]
     pub api_keys: HashMap<String, String>,
+    /// Favorite model IDs for quick access (e.g., ["claude/claude-sonnet-4-5", "openai/gpt-4o"])
+    #[serde(default)]
+    pub favorite_models: Vec<String>,
 }
 
 impl Settings {
@@ -74,5 +77,26 @@ impl Settings {
     /// Get the list of providers with configured API keys.
     pub fn configured_providers(&self) -> Vec<String> {
         self.api_keys.keys().cloned().collect()
+    }
+
+    /// Get favorite model IDs.
+    pub fn get_favorite_models(&self) -> &[String] {
+        &self.favorite_models
+    }
+
+    /// Toggle a model as favorite. Returns true if now favorited, false if removed.
+    pub fn toggle_favorite_model(&mut self, model_id: &str) -> bool {
+        if let Some(pos) = self.favorite_models.iter().position(|m| m == model_id) {
+            self.favorite_models.remove(pos);
+            false
+        } else {
+            self.favorite_models.push(model_id.to_string());
+            true
+        }
+    }
+
+    /// Check if a model is favorited.
+    pub fn is_favorite_model(&self, model_id: &str) -> bool {
+        self.favorite_models.iter().any(|m| m == model_id)
     }
 }

@@ -177,6 +177,8 @@ pub fn run() {
             commands::chat::rename_conversation,
             commands::chat::get_model_name,
             commands::chat::get_current_conversation_id,
+            commands::chat::get_favorite_models,
+            commands::chat::toggle_favorite_model,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,

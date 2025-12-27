@@ -85,6 +85,15 @@ export async function getCurrentConversationId(): Promise<string> {
   return invoke<string>("get_current_conversation_id");
 }
 
+// Favorite models
+export async function getFavoriteModels(): Promise<string[]> {
+  return invoke<string[]>("get_favorite_models");
+}
+
+export async function toggleFavoriteModel(modelId: string): Promise<string[]> {
+  return invoke<string[]>("toggle_favorite_model", { modelId });
+}
+
 // Event listeners
 export function onUserMessage(
   callback: (message: DisplayMessage) => void

@@ -318,7 +318,7 @@ mod tests {
             Message {
                 role: Role::User,
                 content: "Hello".to_string(),
-                tool_calls: None, 
+                tool_calls: None,
             },
             Message {
                 role: Role::Assistant,

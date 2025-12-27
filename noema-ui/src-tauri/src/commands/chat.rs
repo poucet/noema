@@ -476,3 +476,19 @@ pub async fn get_model_name(state: State<'_, AppState>) -> Result<String, String
 pub async fn get_current_conversation_id(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.current_conversation_id.lock().await.clone())
 }
+
+/// Get favorite models
+#[tauri::command]
+pub async fn get_favorite_models() -> Result<Vec<String>, String> {
+    let settings = config::Settings::load();
+    Ok(settings.favorite_models)
+}
+
+/// Toggle a model as favorite
+#[tauri::command]
+pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, String> {
+    let mut settings = config::Settings::load();
+    settings.toggle_favorite_model(&model_id);
+    settings.save().map_err(|e| format!("Failed to save settings: {}", e))?;
+    Ok(settings.favorite_models)
+}
