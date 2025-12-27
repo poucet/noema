@@ -58,6 +58,7 @@ pub fn get_provider_info() -> Vec<ProviderInfoResponse> {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderInfoResponse {
     pub name: String,
     pub requires_api_key: bool,

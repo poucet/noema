@@ -3,7 +3,7 @@ import { MessageBubble } from "./components/MessageBubble";
 import { ChatInput } from "./components/ChatInput";
 import { Sidebar } from "./components/Sidebar";
 import { ModelSelector } from "./components/ModelSelector";
-import { McpSettings } from "./components/McpSettings";
+import { Settings } from "./components/Settings";
 import type { DisplayMessage, ModelInfo, ConversationInfo, Attachment } from "./types";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
@@ -19,7 +19,7 @@ function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
-  const [showMcpSettings, setShowMcpSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -332,12 +332,12 @@ function App() {
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
-        onOpenMcpSettings={() => setShowMcpSettings(true)}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
-      {/* MCP Settings Modal */}
-      {showMcpSettings && (
-        <McpSettings onClose={() => setShowMcpSettings(false)} />
+      {/* Settings Modal */}
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
       )}
 
       {/* Main chat area */}
