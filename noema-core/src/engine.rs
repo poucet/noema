@@ -1,11 +1,15 @@
 use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry, SessionStore, StorageTransaction};
-use llm::{ChatMessage, ChatModel, ChatPayload};
+use llm::{create_model, ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
+use futures::future::join_all;
 
 pub enum EngineCommand {
     SendMessage(ChatPayload),
+    /// Send a message to multiple models in parallel
+    /// (payload, model_ids) where model_ids are full IDs like "anthropic/claude-sonnet-4-5"
+    SendParallelMessage(ChatPayload, Vec<String>),
     SetModel(Arc<dyn ChatModel + Send + Sync>),
     ClearHistory,
 }
@@ -18,6 +22,37 @@ pub enum EngineEvent {
     Error(String),
     ModelChanged(String),
     HistoryCleared,
+
+    // Parallel execution events
+    /// Streaming message from a specific model during parallel execution
+    ParallelStreamingMessage {
+        model_id: String,
+        message: ChatMessage,
+    },
+    /// A model completed its response during parallel execution
+    ParallelModelComplete {
+        model_id: String,
+        messages: Vec<ChatMessage>,
+    },
+    /// All parallel models have completed
+    ParallelComplete {
+        /// Info about each model's response for display
+        alternates: Vec<ParallelAlternateInfo>,
+    },
+    /// Error from a specific model during parallel execution
+    ParallelModelError {
+        model_id: String,
+        error: String,
+    },
+}
+
+/// Information about a parallel model response (for UI display)
+#[derive(Debug, Clone)]
+pub struct ParallelAlternateInfo {
+    pub model_id: String,
+    pub model_display_name: String,
+    pub message_count: usize,
+    pub is_selected: bool,
 }
 
 /// Chat engine that manages conversation sessions with any storage backend
@@ -122,6 +157,119 @@ where
                         }
                     }
                 }
+                EngineCommand::SendParallelMessage(payload, model_ids) => {
+                    // 1. Add user message to session first
+                    let user_msg = ChatMessage::user(payload.clone());
+                    {
+                        let mut sess = session.lock().await;
+                        let mut tx = sess.begin();
+                        tx.add(user_msg.clone());
+                        if let Err(e) = sess.commit(tx).await {
+                            let _ = event_tx.send(EngineEvent::Error(format!("Failed to save user message: {}", e)));
+                            continue;
+                        }
+                    }
+
+                    // 2. Get conversation history for context
+                    let history: Vec<ChatMessage> = {
+                        let sess = session.lock().await;
+                        sess.messages().to_vec()
+                    };
+
+                    // 3. Spawn parallel tasks for each model
+                    let mut handles = Vec::new();
+
+                    for model_id in model_ids {
+                        let event_tx = event_tx.clone();
+                        let history = history.clone();
+                        let mcp_registry = Arc::clone(&mcp_registry);
+
+                        let handle = tokio::spawn(async move {
+                            // Create model for this parallel request
+                            let model = match create_model(&model_id) {
+                                Ok(m) => m,
+                                Err(e) => {
+                                    let _ = event_tx.send(EngineEvent::ParallelModelError {
+                                        model_id: model_id.clone(),
+                                        error: format!("Failed to create model: {}", e),
+                                    });
+                                    return (model_id, Err(e.to_string()));
+                                }
+                            };
+
+                            // Create a temporary in-memory context for this model's execution
+                            let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
+                            let agent = McpAgent::new(Arc::new(tool_registry), 10);
+
+                            // Create a minimal transaction with history
+                            let mut messages = history.clone();
+
+                            // Run agent with streaming
+                            // For now, we use a simple approach: run the model and collect results
+                            // In a future iteration, we could stream individual chunks
+                            match run_single_model_agent(&agent, &mut messages, model, &event_tx, &model_id).await {
+                                Ok(response_messages) => {
+                                    // Send completion event for this model
+                                    let _ = event_tx.send(EngineEvent::ParallelModelComplete {
+                                        model_id: model_id.clone(),
+                                        messages: response_messages.clone(),
+                                    });
+                                    (model_id, Ok(response_messages))
+                                }
+                                Err(e) => {
+                                    let _ = event_tx.send(EngineEvent::ParallelModelError {
+                                        model_id: model_id.clone(),
+                                        error: e.clone(),
+                                    });
+                                    (model_id, Err(e))
+                                }
+                            }
+                        });
+
+                        handles.push(handle);
+                    }
+
+                    // 4. Wait for all models to complete
+                    let results = join_all(handles).await;
+
+                    // 5. Collect successful alternates and save first one to session
+                    let mut alternates = Vec::new();
+                    let mut first_successful = true;
+                    let mut first_response_messages: Option<Vec<ChatMessage>> = None;
+
+                    for result in results {
+                        if let Ok((model_id, Ok(messages))) = result {
+                            let display_name = model_id.split('/').last().unwrap_or(&model_id).to_string();
+                            alternates.push(ParallelAlternateInfo {
+                                model_id,
+                                model_display_name: display_name,
+                                message_count: messages.len(),
+                                is_selected: first_successful,
+                            });
+                            // Save first successful response for committing to session
+                            if first_successful {
+                                first_response_messages = Some(messages);
+                            }
+                            first_successful = false;
+                        }
+                    }
+
+                    // 6. Commit the first successful response to the session
+                    // This ensures getMessages() returns the conversation with a response
+                    if let Some(response_msgs) = first_response_messages {
+                        let mut sess = session.lock().await;
+                        let mut tx = sess.begin();
+                        for msg in response_msgs {
+                            tx.add(msg);
+                        }
+                        if let Err(e) = sess.commit(tx).await {
+                            let _ = event_tx.send(EngineEvent::Error(format!("Failed to save response: {}", e)));
+                        }
+                    }
+
+                    // 7. Send parallel complete event
+                    let _ = event_tx.send(EngineEvent::ParallelComplete { alternates });
+                }
                 EngineCommand::SetModel(new_model) => {
                     let name = new_model.name().to_string();
                     model = new_model;
@@ -170,5 +318,59 @@ where
 
     pub fn get_model_name(&self) -> &str {
         self.model.name()
+    }
+
+    /// Send a message to multiple models in parallel
+    pub fn send_parallel_message(&self, payload: impl Into<ChatPayload>, model_ids: Vec<String>) {
+        let _ = self.cmd_tx.send(EngineCommand::SendParallelMessage(payload.into(), model_ids));
+    }
+}
+
+/// Helper function to run a single model's agent loop
+/// This is extracted to allow parallel execution of multiple models
+async fn run_single_model_agent(
+    agent: &McpAgent,
+    messages: &mut Vec<ChatMessage>,
+    model: Arc<dyn ChatModel + Send + Sync>,
+    event_tx: &mpsc::UnboundedSender<EngineEvent>,
+    model_id: &str,
+) -> Result<Vec<ChatMessage>, String> {
+    use crate::MemorySession;
+
+    // Create a temporary in-memory session with the conversation history
+    let mut temp_session = MemorySession::new();
+    for msg in messages.iter() {
+        let mut tx = temp_session.begin();
+        tx.add(msg.clone());
+        temp_session.commit(tx).await.map_err(|e| e.to_string())?;
+    }
+
+    // Begin a new transaction for the agent to add responses to
+    let mut tx = temp_session.begin();
+
+    // Run the agent
+    match agent.execute_stream(&mut tx, model).await {
+        Ok(_) => {
+            // Get the pending messages (new responses from this model)
+            let response_messages: Vec<ChatMessage> = tx.pending().to_vec();
+
+            // Stream each message as it's generated
+            for msg in &response_messages {
+                let _ = event_tx.send(EngineEvent::ParallelStreamingMessage {
+                    model_id: model_id.to_string(),
+                    message: msg.clone(),
+                });
+            }
+
+            // Explicitly rollback - we don't need to persist to the temp session
+            // The real response will be committed by the main engine loop
+            tx.rollback();
+
+            Ok(response_messages)
+        }
+        Err(e) => {
+            tx.rollback();
+            Err(e.to_string())
+        }
     }
 }

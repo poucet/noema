@@ -241,6 +241,63 @@ pub struct Attachment {
     pub size: usize,       // size in bytes
 }
 
+/// Information about a parallel model response (for UI display)
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelAlternateInfo {
+    pub model_id: String,
+    pub model_display_name: String,
+    pub message_count: usize,
+    pub is_selected: bool,
+}
+
+impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
+    fn from(info: noema_core::ParallelAlternateInfo) -> Self {
+        Self {
+            model_id: info.model_id,
+            model_display_name: info.model_display_name,
+            message_count: info.message_count,
+            is_selected: info.is_selected,
+        }
+    }
+}
+
+/// Streaming message from a specific model during parallel execution
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelStreamingMessage {
+    pub model_id: String,
+    pub message: DisplayMessage,
+}
+
+/// A model completed its response during parallel execution
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelModelComplete {
+    pub model_id: String,
+    pub messages: Vec<DisplayMessage>,
+}
+
+/// All parallel models have completed
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelComplete {
+    pub alternates: Vec<ParallelAlternateInfo>,
+}
+
+/// Error from a specific model during parallel execution
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelModelError {
+    pub model_id: String,
+    pub error: String,
+}
+
 #[cfg(test)]
 mod ts_export {
     use super::*;
@@ -256,6 +313,10 @@ mod ts_export {
         McpToolInfo::export_all().expect("Failed to export McpToolInfo");
         AddMcpServerRequest::export_all().expect("Failed to export AddMcpServerRequest");
         Attachment::export_all().expect("Failed to export Attachment");
+        ParallelAlternateInfo::export_all().expect("Failed to export ParallelAlternateInfo");
+        ParallelStreamingMessage::export_all().expect("Failed to export ParallelStreamingMessage");
+        ParallelModelComplete::export_all().expect("Failed to export ParallelModelComplete");
+        ParallelComplete::export_all().expect("Failed to export ParallelComplete");
+        ParallelModelError::export_all().expect("Failed to export ParallelModelError");
     }
-
 }

@@ -230,7 +230,7 @@ impl SqliteStore {
             return Ok(());
         }
 
-        // Unified schema for Noema/Episteme
+        // Unified span-based schema for Noema
         // Timestamps are INTEGER (epoch milliseconds)
         conn.execute_batch(
             r#"
@@ -258,27 +258,13 @@ impl SqliteStore {
                 updated_at INTEGER NOT NULL
             );
 
-            -- Threads (for conversation branching)
+            -- Threads: a path through the conversation
+            -- parent_span_id points to the specific span this thread forks from (NULL for main thread)
             CREATE TABLE IF NOT EXISTS threads (
                 id TEXT PRIMARY KEY,
                 conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
-                parent_message_id TEXT,
-                created_at INTEGER NOT NULL
-            );
-
-            -- Messages (Episteme-compatible: content, sequence_number, status)
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
-                role TEXT CHECK(role IN ('user', 'assistant', 'system')),
-                content TEXT NOT NULL,
-                text_content TEXT,
-                embedding BLOB,
-                provider TEXT,
-                model TEXT,
-                tokens_used INTEGER,
-                sequence_number INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'completed',
+                parent_span_id TEXT REFERENCES spans(id),
+                status TEXT NOT NULL DEFAULT 'active',
                 created_at INTEGER NOT NULL
             );
 
@@ -339,7 +325,6 @@ impl SqliteStore {
             -- Indexes
             CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
             CREATE INDEX IF NOT EXISTS idx_threads_conversation ON threads(conversation_id);
-            CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, sequence_number);
             CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
             CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source);
             CREATE INDEX IF NOT EXISTS idx_documents_user_source_id ON documents(user_id, source, source_id);
@@ -376,6 +361,7 @@ impl SqliteStore {
                 sequence_number INTEGER NOT NULL,
                 role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
                 content TEXT NOT NULL,
+                text_content TEXT,
                 created_at INTEGER NOT NULL
             );
 
@@ -1209,12 +1195,16 @@ impl SqliteStore {
                 None => anyhow::bail!("Conversation not found: {}", conversation_id),
             };
 
-            // Load messages from the main thread as StoredMessage (with refs)
-            // Note: Episteme uses 'content' and 'sequence_number', Noema uses 'content_json' and 'position'
-            let query = "SELECT m.role, m.content FROM messages m
-                 JOIN threads t ON m.thread_id = t.id
-                 WHERE t.conversation_id = ?1 AND t.parent_message_id IS NULL
-                 ORDER BY m.sequence_number";
+            // Load messages from span_messages via the main thread's span_sets
+            // Walk through span_sets in order, using selected_span to get messages
+            let query = "SELECT sm.role, sm.content
+                 FROM span_messages sm
+                 JOIN spans s ON sm.span_id = s.id
+                 JOIN span_sets ss ON s.span_set_id = ss.id
+                 JOIN threads t ON ss.thread_id = t.id
+                 WHERE t.conversation_id = ?1 AND t.parent_span_id IS NULL
+                   AND s.id = ss.selected_span_id
+                 ORDER BY ss.sequence_number, sm.sequence_number";
 
             let mut stmt = conn.prepare(query)?;
 
@@ -1265,10 +1255,11 @@ impl SqliteStore {
     pub fn list_conversations(&self, user_id: &str) -> Result<Vec<ConversationInfo>> {
         let conn = self.conn.lock().unwrap();
 
-        let query = "SELECT c.id, c.title, COUNT(m.id) as msg_count, c.created_at, c.updated_at
+        // Count span_sets as the "message count" (each span_set is a turn in conversation)
+        let query = "SELECT c.id, c.title, COUNT(ss.id) as msg_count, c.created_at, c.updated_at
              FROM conversations c
-             LEFT JOIN threads t ON t.conversation_id = c.id
-             LEFT JOIN messages m ON m.thread_id = t.id
+             LEFT JOIN threads t ON t.conversation_id = c.id AND t.parent_span_id IS NULL
+             LEFT JOIN span_sets ss ON ss.thread_id = t.id
              WHERE c.user_id = ?1
              GROUP BY c.id
              ORDER BY c.updated_at DESC";
@@ -1333,10 +1324,15 @@ impl SqliteStore {
     pub fn load_stored_messages(&self, conversation_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn.lock().unwrap();
 
-        let query = "SELECT m.role, m.content FROM messages m
-             JOIN threads t ON m.thread_id = t.id
-             WHERE t.conversation_id = ?1 AND t.parent_message_id IS NULL
-             ORDER BY m.sequence_number";
+        // Load from span_messages via the main thread's selected spans
+        let query = "SELECT sm.role, sm.content
+             FROM span_messages sm
+             JOIN spans s ON sm.span_id = s.id
+             JOIN span_sets ss ON s.span_set_id = ss.id
+             JOIN threads t ON ss.thread_id = t.id
+             WHERE t.conversation_id = ?1 AND t.parent_span_id IS NULL
+               AND s.id = ss.selected_span_id
+             ORDER BY ss.sequence_number, sm.sequence_number";
 
         let mut stmt = conn.prepare(query)?;
 
@@ -1373,19 +1369,12 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Delete a conversation and all its messages
+    /// Delete a conversation and all its data
     pub fn delete_conversation(&self, conversation_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 
-        // Delete messages through threads (CASCADE should handle this, but be explicit)
-        conn.execute(
-            "DELETE FROM messages WHERE thread_id IN (SELECT id FROM threads WHERE conversation_id = ?1)",
-            params![conversation_id],
-        )?;
-        conn.execute(
-            "DELETE FROM threads WHERE conversation_id = ?1",
-            params![conversation_id],
-        )?;
+        // CASCADE should handle all deletions, but delete conversation explicitly
+        // threads -> span_sets -> spans -> span_messages all cascade
         conn.execute(
             "DELETE FROM conversations WHERE id = ?1",
             params![conversation_id],
@@ -1496,35 +1485,81 @@ impl SqliteSession {
         self.user_id.as_deref()
     }
 
-    fn write_messages(&self, messages: &[ChatMessage], start_position: usize) -> Result<()> {
+    /// Write messages as spans to the database
+    /// Each call creates a span_set with a single span containing the messages
+    fn write_as_span(
+        &self,
+        messages: &[ChatMessage],
+        span_type: &str,
+        model_id: Option<&str>,
+    ) -> Result<String> {
         let conn = self.conn.lock().unwrap();
         let now = unix_timestamp();
 
-        // Get the main thread
-        let thread_id: String = conn.query_row(
-            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_message_id IS NULL",
+        // Get the main thread, or create one if it doesn't exist
+        let thread_id: String = match conn.query_row(
+            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
             params![&self.conversation_id],
             |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // Create main thread for new conversation
+                let thread_id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
+                    params![&thread_id, &self.conversation_id, now],
+                )?;
+                thread_id
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        // Get next sequence number for span_set
+        let sequence_number: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
+                params![&thread_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+
+        // Create span_set
+        let span_set_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![&span_set_id, &thread_id, sequence_number, span_type, now],
         )?;
 
+        // Create span
+        let span_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![&span_id, &span_set_id, model_id, now],
+        )?;
+
+        // Set this span as the selected one
+        conn.execute(
+            "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
+            params![&span_id, &span_set_id],
+        )?;
+
+        // Write span_messages
         for (i, msg) in messages.iter().enumerate() {
-            let id = Uuid::new_v4().to_string();
+            let msg_id = Uuid::new_v4().to_string();
             let role = match msg.role {
                 Role::User => "user",
                 Role::Assistant => "assistant",
                 Role::System => "system",
             };
-            // Convert to StoredPayload for serialization (supports blob refs)
             let stored_payload: StoredPayload = msg.payload.clone().into();
             let content_json = serde_json::to_string(&stored_payload)?;
             let text_content = msg.get_text();
-            let sequence_number = (start_position + i) as i64;
 
-            // Episteme uses 'content' and 'sequence_number', also requires 'status' field
             conn.execute(
-                "INSERT INTO messages (id, thread_id, role, content, text_content, sequence_number, status, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'completed', ?7)",
-                params![&id, &thread_id, role, &content_json, &text_content, sequence_number, now],
+                "INSERT INTO span_messages (id, span_id, sequence_number, role, content, text_content, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![&msg_id, &span_id, i as i64, role, &content_json, &text_content, now],
             )?;
         }
 
@@ -1534,22 +1569,22 @@ impl SqliteSession {
             params![now, &self.conversation_id],
         )?;
 
-        Ok(())
+        Ok(span_id)
     }
 
     fn create_conversation_record(&self, conn: &Connection) -> Result<()> {
         let now = unix_timestamp();
 
-        // Create conversation with default title (required for Episteme DB compatibility)
+        // Create conversation
         conn.execute(
             "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![&self.conversation_id, &self.user_id, "New Conversation", now, now],
         )?;
 
-        // Create main thread for this conversation
+        // Create main thread for this conversation (parent_span_id is NULL for main thread)
         let thread_id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO threads (id, conversation_id, parent_message_id, created_at) VALUES (?1, ?2, NULL, ?3)",
+            "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
             params![&thread_id, &self.conversation_id, now],
         )?;
 
@@ -1574,7 +1609,6 @@ impl SessionStore for SqliteSession {
     }
 
     async fn commit(&mut self, transaction: Self::Transaction) -> Result<()> {
-        let start_position = self.cache.len();
         let messages = transaction.commit();
 
         if messages.is_empty() {
@@ -1589,8 +1623,15 @@ impl SessionStore for SqliteSession {
             self.persisted = true;
         }
 
-        // Write messages to database
-        self.write_messages(&messages, start_position)?;
+        // Determine span type based on first message role
+        let span_type = match messages.first().map(|m| &m.role) {
+            Some(Role::User) => "user",
+            Some(Role::Assistant) | Some(Role::System) => "assistant",
+            None => return Ok(()),
+        };
+
+        // Write as span to database
+        self.write_as_span(&messages, span_type, None)?;
 
         // Update cache
         self.cache.extend(messages);
@@ -1601,8 +1642,9 @@ impl SessionStore for SqliteSession {
     async fn clear(&mut self) -> Result<()> {
         {
             let conn = self.conn.lock().unwrap();
+            // Delete span_messages via cascade from span_sets
             conn.execute(
-                "DELETE FROM messages WHERE thread_id IN (SELECT id FROM threads WHERE conversation_id = ?1)",
+                "DELETE FROM span_sets WHERE thread_id IN (SELECT id FROM threads WHERE conversation_id = ?1)",
                 params![&self.conversation_id],
             )?;
         }
@@ -1813,7 +1855,7 @@ mod tests {
         ).unwrap();
 
         conn.execute(
-            "INSERT INTO threads (id, conversation_id, parent_message_id, created_at) VALUES (?1, ?2, NULL, ?3)",
+            "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
             params![&thread_id, &conv_id, now],
         ).unwrap();
 

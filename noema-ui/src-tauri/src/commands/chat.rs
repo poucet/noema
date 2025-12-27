@@ -246,6 +246,46 @@ pub fn start_engine_event_loop(app: AppHandle) {
                 Some(EngineEvent::HistoryCleared) => {
                     let _ = app.emit("history_cleared", ());
                 }
+                // Parallel execution events
+                Some(EngineEvent::ParallelStreamingMessage { model_id, message }) => {
+                    *state.is_processing.lock().await = true;
+                    let display_msg = DisplayMessage::from_chat_message(&message);
+                    let _ = app.emit("parallel_streaming_message", serde_json::json!({
+                        "modelId": model_id,
+                        "message": display_msg
+                    }));
+                }
+                Some(EngineEvent::ParallelModelComplete { model_id, messages }) => {
+                    let display_messages: Vec<DisplayMessage> = messages
+                        .iter()
+                        .map(DisplayMessage::from_chat_message)
+                        .collect();
+                    let _ = app.emit("parallel_model_complete", serde_json::json!({
+                        "modelId": model_id,
+                        "messages": display_messages
+                    }));
+                }
+                Some(EngineEvent::ParallelComplete { alternates }) => {
+                    let alternates_json: Vec<serde_json::Value> = alternates
+                        .iter()
+                        .map(|a| serde_json::json!({
+                            "modelId": a.model_id,
+                            "modelDisplayName": a.model_display_name,
+                            "messageCount": a.message_count,
+                            "isSelected": a.is_selected
+                        }))
+                        .collect();
+                    let _ = app.emit("parallel_complete", serde_json::json!({
+                        "alternates": alternates_json
+                    }));
+                    *state.is_processing.lock().await = false;
+                }
+                Some(EngineEvent::ParallelModelError { model_id, error }) => {
+                    let _ = app.emit("parallel_model_error", serde_json::json!({
+                        "modelId": model_id,
+                        "error": error
+                    }));
+                }
                 None => {
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                 }
@@ -491,4 +531,114 @@ pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, Stri
     settings.toggle_favorite_model(&model_id);
     settings.save().map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(settings.favorite_models)
+}
+
+/// Send a message to multiple models in parallel
+#[tauri::command]
+pub async fn send_parallel_message(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    message: String,
+    model_ids: Vec<String>,
+) -> Result<(), String> {
+    if model_ids.is_empty() {
+        return Err("At least one model must be selected".to_string());
+    }
+
+    let payload = llm::ChatPayload::text(message);
+
+    // Emit user message immediately
+    let user_msg = DisplayMessage::from_payload(&payload);
+    app.emit("user_message", &user_msg)
+        .map_err(|e| e.to_string())?;
+
+    // Send to engine for parallel processing
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+    engine.send_parallel_message(payload, model_ids);
+
+    Ok(())
+}
+
+/// Information about a span (alternate response) for UI display
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpanInfoResponse {
+    pub id: String,
+    pub model_id: Option<String>,
+    pub message_count: usize,
+    pub is_selected: bool,
+    pub created_at: i64,
+}
+
+/// Get all alternates (spans) for a SpanSet
+#[tauri::command]
+pub async fn get_span_set_alternates(
+    state: State<'_, AppState>,
+    span_set_id: String,
+) -> Result<Vec<SpanInfoResponse>, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    let alternates = store
+        .get_span_set_alternates(&span_set_id)
+        .map_err(|e| format!("Failed to get alternates: {}", e))?;
+
+    Ok(alternates
+        .into_iter()
+        .map(|a| SpanInfoResponse {
+            id: a.id,
+            model_id: a.model_id,
+            message_count: a.message_count,
+            is_selected: a.is_selected,
+            created_at: a.created_at,
+        })
+        .collect())
+}
+
+/// Set the selected span for a SpanSet (switch active alternate)
+#[tauri::command]
+pub async fn set_selected_span(
+    state: State<'_, AppState>,
+    span_set_id: String,
+    span_id: String,
+) -> Result<(), String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    store
+        .set_selected_span(&span_set_id, &span_id)
+        .map_err(|e| format!("Failed to set selected span: {}", e))
+}
+
+/// Get messages from a specific span
+#[tauri::command]
+pub async fn get_span_messages(
+    state: State<'_, AppState>,
+    span_id: String,
+) -> Result<Vec<DisplayMessage>, String> {
+    use crate::types::stored_content_to_display;
+
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    let messages = store
+        .get_span_messages(&span_id)
+        .map_err(|e| format!("Failed to get span messages: {}", e))?;
+
+    Ok(messages
+        .into_iter()
+        .map(|m| {
+            let role = match m.role {
+                llm::Role::User => "user",
+                llm::Role::Assistant => "assistant",
+                llm::Role::System => "system",
+            };
+            let content = m.payload.content.iter().map(stored_content_to_display).collect();
+            DisplayMessage {
+                role: role.to_string(),
+                content,
+            }
+        })
+        .collect())
 }

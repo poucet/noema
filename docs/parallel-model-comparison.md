@@ -389,68 +389,81 @@ New file: `noema-ui/src/components/BranchSwitcher.tsx`
 
 ## Implementation Order (with testing checkpoints)
 
-### Step 1: Model Favorites
+### Step 1: Model Favorites ✅ COMPLETED
 - Settings field + Tauri commands
 - ModelSelector favorites section
 - FavoriteModelChips component
 
-**Test & Commit:**
-- [ ] Can star/unstar models in dropdown
-- [ ] Favorites appear at top of dropdown
-- [ ] Favorites persist across app restarts
-- [ ] Favorite chips appear above input
-- [ ] Can select/deselect chips for multi-model mode
+**Commits:**
+- `d0e2e7bc` - Add model favorites feature with star toggle in dropdown
+- `ec95b6e4` - Clean up debug logging and fix dropdown position
+
+**Test:**
+- [x] Can star/unstar models in dropdown (☆/★ icons)
+- [x] Favorites appear at top of dropdown with yellow "★ Favorites" header
+- [x] Favorites persist across app restarts (saved to settings.toml)
+- [x] Favorite chips component created (FavoriteModelChips.tsx)
+- [ ] Can select/deselect chips for multi-model mode (wired but needs testing)
 
 ---
 
-### Step 2: SpanSet Data Layer
+### Step 2: SpanSet Data Layer ✅ COMPLETED (Backend Only)
 - Database schema changes (span_sets + spans + span_messages)
-- Migration for existing messages
 - Storage methods for span management
-- Tauri commands for get/set selected span
+- Comprehensive tests
 
-**Test & Commit:**
-- [ ] Existing conversations still load correctly after migration
-- [ ] New user message creates span_set + span + message
-- [ ] New assistant response creates span with message(s)
-- [ ] Multi-turn responses (with tool calls) create multiple messages in one span
-- [ ] Can retrieve alternates for a span_set
-- [ ] Can change selected span (backend only, no UI yet)
+**Commits:**
+- `6c53c785` - Add SpanSet data layer for parallel model responses
+
+**What's done:**
+- [x] New tables: `span_sets`, `spans`, `span_messages`
+- [x] Types: `SpanType`, `SpanInfo`, `SpanSetInfo`, `SpanSetWithContent`
+- [x] Storage methods:
+  - `create_span_set`, `create_span`, `add_span_message`
+  - `get_span_set_alternates`, `set_selected_span`
+  - `get_span_messages`, `get_span_set_with_content`
+  - `get_thread_span_sets`
+  - Helper methods: `add_user_span_set`, `add_assistant_span_set`, `add_assistant_span`
+- [x] Tests pass: `cargo test -p noema-core --features sqlite`
+
+**Still TODO for Step 2:**
+- [ ] Migration for existing messages (not yet implemented)
+- [x] Tauri commands for span operations: `get_span_set_alternates`, `set_selected_span`, `get_span_messages`
+- [ ] Integration with existing conversation loading
 
 ---
 
-### Step 3: Parallel Execution Backend
+### Step 3: Parallel Execution Backend + UI ✅ READY FOR TESTING
 - Engine parallel execution logic
 - Independent agentic loops per model
-- New streaming events (ParallelStreamingMessage, ParallelToolCall, etc.)
-- Tauri commands: send_parallel_message, regenerate_with_models
-
-**Test & Commit:**
-- [ ] Can send to multiple models via command (test with 2 models)
-- [ ] Each model streams independently
-- [ ] Models can make different numbers of tool calls
-- [ ] One model finishing doesn't affect others still running
-- [ ] All final responses saved as alternates on same message_set
-- [ ] Events fire correctly for each model (streaming, tool calls, complete)
-
----
-
-### Step 4: Parallel UI - Streaming View
+- New streaming events (ParallelStreamingMessage, ParallelModelComplete, ParallelComplete, ParallelModelError)
+- Tauri command: send_parallel_message
 - Event listeners in App.tsx
-- Parallel streaming view with tabs
-- Show tool calls inline per model
-- Wire up FavoriteModelChips to trigger parallel send
+- Parallel streaming grid view
+- FavoriteModelChips triggers parallel send
 
-**Test & Commit:**
-- [ ] Selecting 2+ favorite chips and sending shows parallel streaming
-- [ ] Can see tabs with each model's streaming response
-- [ ] Tool calls shown inline for each model
-- [ ] Models complete at different times - UI handles gracefully
-- [ ] When all complete, message shows with alternates
+**What's done:**
+- [x] `EngineCommand::SendParallelMessage` - sends to multiple models in parallel
+- [x] `EngineEvent` variants for parallel execution (streaming, model complete, all complete, errors)
+- [x] `ParallelAlternateInfo` type for tracking model responses
+- [x] `run_single_model_agent()` helper for isolated model execution
+- [x] `send_parallel_message` Tauri command
+- [x] Event loop handlers for all parallel events
+- [x] TypeScript bindings: `sendParallelMessage()` + event listeners
+- [x] App.tsx state: `isParallelMode`, `parallelStreaming`, `parallelAlternates`
+- [x] Parallel streaming grid UI (shows model responses side by side)
+- [x] FavoriteModelChips → handleSendMessage → parallel send when 2+ models selected
+
+**Test:**
+- [ ] Select 2+ models using favorite chips
+- [ ] Send a message → should show parallel streaming grid
+- [ ] Each model's response appears in its own panel
+- [ ] When all complete, responses are shown
+- [ ] Errors from individual models are displayed
 
 ---
 
-### Step 5: MessageBubble Alternates Tabs
+### Step 4: MessageBubble Alternates Tabs
 - Add alternates tabs to MessageBubble
 - Switching tabs changes displayed content
 - Add regenerate button
@@ -463,11 +476,11 @@ New file: `noema-ui/src/components/BranchSwitcher.tsx`
 
 ---
 
-### Step 6: RegenerateModal
+### Step 5: RegenerateModal
 - Modal for selecting models to regenerate with
 - Wire up regenerate button → modal → parallel execution
 
-**Test & Commit:**
+**Test:**
 - [ ] Clicking regenerate opens modal
 - [ ] Can select multiple models
 - [ ] Regenerate creates new alternates on the message
@@ -475,12 +488,12 @@ New file: `noema-ui/src/components/BranchSwitcher.tsx`
 
 ---
 
-### Step 7: Fork from Alternate
+### Step 6: Fork from Alternate
 - Fork command + storage logic
 - BranchSwitcher component
 - Branch management commands
 
-**Test & Commit:**
+**Test:**
 - [ ] Can fork from any alternate
 - [ ] New branch appears in BranchSwitcher
 - [ ] Can switch between branches

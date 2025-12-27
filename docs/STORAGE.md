@@ -94,7 +94,7 @@ CREATE TABLE users (
 
 ### B. Conversations & Threads
 
-Threads enable branching conversations from any message.
+Threads enable branching conversations. Each thread forks from a specific span (alternative response).
 
 ```sql
 CREATE TABLE conversations (
@@ -107,47 +107,74 @@ CREATE TABLE conversations (
     summary_text TEXT,
     summary_embedding BLOB,                 -- 1536-dim float vector (sqlite-vec)
 
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
 );
 
+-- Threads: a path through the conversation
+-- parent_span_id points to the specific span this thread forks from (NULL for main thread)
 CREATE TABLE threads (
     id TEXT PRIMARY KEY,                    -- UUID v4
     conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
-    parent_message_id TEXT,                 -- Fork point (NULL for main thread)
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    parent_span_id TEXT REFERENCES spans(id),  -- Fork point (NULL for main thread)
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL
 );
 
 CREATE INDEX idx_threads_conversation ON threads(conversation_id);
 ```
 
-### C. Messages
+### C. Span-Based Messages
 
-Messages contain structured content blocks with references to assets (no inline Base64).
+Content is stored in a span-based hierarchy that supports:
+- **Parallel model responses**: Multiple AI responses at the same position
+- **Editable user input**: User can edit their messages, creating alternatives
+- **Thread forking**: Fork from any specific span (response alternative)
 
 ```sql
-CREATE TABLE messages (
-    id TEXT PRIMARY KEY,                    -- UUID v4
+-- SpanSets: a position in the conversation (can have multiple alternative spans)
+CREATE TABLE span_sets (
+    id TEXT PRIMARY KEY,
     thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
-    role TEXT CHECK(role IN ('user', 'assistant', 'system')),
-
-    -- Content: JSON Array of Content Blocks
-    content_json TEXT NOT NULL,
-
-    -- Search & Embeddings
-    text_content TEXT,                      -- Extracted plain text for FTS
-    embedding BLOB,                         -- 1536-dim vector (sqlite-vec)
-
-    -- Metadata
-    provider TEXT,                          -- 'anthropic', 'openai', 'google', 'ollama'
-    model TEXT,
-    tokens_used INTEGER,
-
-    position INTEGER NOT NULL,              -- Ordering within thread
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    sequence_number INTEGER NOT NULL,
+    span_type TEXT CHECK(span_type IN ('user', 'assistant')) NOT NULL,
+    selected_span_id TEXT REFERENCES spans(id),  -- Currently active span
+    created_at INTEGER NOT NULL
 );
 
-CREATE INDEX idx_messages_thread ON messages(thread_id, position);
+CREATE INDEX idx_span_sets_thread ON span_sets(thread_id, sequence_number);
+
+-- Spans: one alternative at a position (user edit OR model response)
+CREATE TABLE spans (
+    id TEXT PRIMARY KEY,
+    span_set_id TEXT REFERENCES span_sets(id) ON DELETE CASCADE,
+    model_id TEXT,  -- NULL for user spans, model identifier for assistant spans
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_spans_span_set ON spans(span_set_id);
+
+-- SpanMessages: individual messages within a span (for multi-turn agentic responses)
+CREATE TABLE span_messages (
+    id TEXT PRIMARY KEY,
+    span_id TEXT REFERENCES spans(id) ON DELETE CASCADE,
+    sequence_number INTEGER NOT NULL,
+    role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
+    content TEXT NOT NULL,                  -- JSON Array of Content Blocks
+    text_content TEXT,                      -- Extracted plain text for FTS
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_span_messages_span ON span_messages(span_id, sequence_number);
+```
+
+**Hierarchy:**
+```
+Conversation
+  └── Thread (main, or forked from a span)
+        └── SpanSet (position 1, 2, 3...)
+              └── Span (alternative A, B, C...)
+                    └── SpanMessage (for multi-turn within one "response")
 ```
 
 ### D. Assets (Content-Addressable Storage)

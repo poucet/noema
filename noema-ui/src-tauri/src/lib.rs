@@ -179,6 +179,10 @@ pub fn run() {
             commands::chat::get_current_conversation_id,
             commands::chat::get_favorite_models,
             commands::chat::toggle_favorite_model,
+            commands::chat::send_parallel_message,
+            commands::chat::get_span_set_alternates,
+            commands::chat::set_selected_span,
+            commands::chat::get_span_messages,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,

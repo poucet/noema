@@ -25,6 +25,16 @@ function App() {
   const [currentModelId, setCurrentModelId] = useState(""); // Full model ID (provider/model)
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
   const [selectedModelsForComparison, setSelectedModelsForComparison] = useState<string[]>([]);
+  // Parallel execution state
+  const [isParallelMode, setIsParallelMode] = useState(false);
+  const [parallelStreaming, setParallelStreaming] = useState<Map<string, DisplayMessage>>(new Map());
+  const [parallelAlternates, setParallelAlternates] = useState<tauri.ParallelAlternateInfo[]>([]);
+  // Completed parallel responses (preserved after streaming ends for display)
+  const [completedParallelResponses, setCompletedParallelResponses] = useState<Map<string, DisplayMessage[]>>(new Map());
+  // Ref to store parallel responses immediately (bypasses React batching)
+  const parallelResponsesRef = useRef<Map<string, DisplayMessage[]>>(new Map());
+  // Selected tab for parallel comparison view
+  const [selectedComparisonTab, setSelectedComparisonTab] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [activeActivity, setActiveActivity] = useState<ActivityId>("conversations");
   const [showSettings, setShowSettings] = useState(false);
@@ -159,6 +169,52 @@ function App() {
       setMessages([]);
     }).then((unlisten) => unlisteners.push(unlisten));
 
+    // Parallel execution events
+    tauri.onParallelStreamingMessage(({ modelId, message }) => {
+      setIsParallelMode(true);
+      setIsLoading(true);
+      setParallelStreaming((prev) => new Map(prev).set(modelId, message));
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    tauri.onParallelModelComplete(({ modelId, messages: modelMessages }) => {
+      // Store complete messages in ref immediately (bypasses React batching)
+      parallelResponsesRef.current.set(modelId, modelMessages);
+      // Also update streaming map with final message for display during streaming
+      if (modelMessages.length > 0) {
+        setParallelStreaming((prev) => new Map(prev).set(modelId, modelMessages[modelMessages.length - 1]));
+      }
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    tauri.onParallelComplete(({ alternates }) => {
+      // Skip if ref is empty (duplicate event from React StrictMode)
+      if (parallelResponsesRef.current.size === 0) {
+        return;
+      }
+
+      setParallelAlternates(alternates);
+      setIsLoading(false);
+      // Copy from ref (which has complete data) to state for display
+      setCompletedParallelResponses(new Map(parallelResponsesRef.current));
+      // Set initial tab to first model
+      const firstModel = Array.from(parallelResponsesRef.current.keys())[0];
+      if (firstModel) {
+        setSelectedComparisonTab(firstModel);
+      }
+      // Clear streaming and ref
+      setParallelStreaming(new Map());
+      parallelResponsesRef.current = new Map();
+      setIsParallelMode(false);
+      // Refresh messages to get the final state (will have first response)
+      tauri.getMessages().then(setMessages).catch(console.error);
+      // Refresh conversations
+      tauri.listConversations().then(setConversations).catch(console.error);
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    tauri.onParallelModelError(({ modelId, error: modelError }) => {
+      appLog.error(`Parallel model error: ${modelId}`, modelError);
+      setError(`${modelId}: ${modelError}`);
+    }).then((unlisten) => unlisteners.push(unlisten));
+
     // Voice events are now handled by the useVoiceInput hook
 
     return () => {
@@ -173,7 +229,17 @@ function App() {
   ) => {
     try {
       setError(null);
-      if (referencedDocuments && referencedDocuments.length > 0) {
+
+      // Check if we have multiple models selected for parallel comparison
+      if (selectedModelsForComparison.length >= 2) {
+        // Clear any previous comparison results
+        setCompletedParallelResponses(new Map());
+        parallelResponsesRef.current = new Map();
+        // Use parallel send - note: attachments/documents not yet supported for parallel
+        await tauri.sendParallelMessage(message, selectedModelsForComparison);
+        // Clear selection after sending
+        setSelectedModelsForComparison([]);
+      } else if (referencedDocuments && referencedDocuments.length > 0) {
         // Send with document context for RAG
         await tauri.sendMessageWithDocuments(message, attachments, referencedDocuments);
       } else if (attachments.length > 0) {
@@ -281,11 +347,9 @@ function App() {
   };
 
   const handleSendToMultipleModels = () => {
-    // TODO: Implement parallel model execution in Phase 3
-    // For now, just log the selected models
-    appLog.info("Send to multiple models", selectedModelsForComparison.join(", "));
-    // Clear selection after sending
-    setSelectedModelsForComparison([]);
+    // The "Send to N models" button is a hint - actual sending happens via the main input
+    // This could be used to focus the input or show a tooltip
+    appLog.info("Send to multiple models - use the chat input to send");
   };
 
 
@@ -466,13 +530,75 @@ function App() {
                         onDocumentClick={setActiveDocumentId}
                       />
                     ))}
-                    {streamingMessage && (
+                    {streamingMessage && !isParallelMode && (
                       <MessageBubble
                         message={streamingMessage}
                         onDocumentClick={setActiveDocumentId}
                       />
                     )}
-                    {isLoading && !streamingMessage && (
+                    {/* Parallel streaming view - shows all models' responses while streaming */}
+                    {isParallelMode && parallelStreaming.size > 0 && (
+                      <div className="mb-4 space-y-2">
+                        <div className="text-xs text-muted mb-2">Comparing {parallelStreaming.size} models...</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {Array.from(parallelStreaming.entries()).map(([modelId, msg]) => (
+                            <div key={modelId} className="bg-surface rounded-lg p-3 border border-gray-700">
+                              <div className="text-xs text-teal-400 mb-2 font-medium">
+                                {modelId.split('/').pop()}
+                              </div>
+                              <MessageBubble
+                                message={msg}
+                                onDocumentClick={setActiveDocumentId}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Completed parallel responses - tabbed comparison after all models finish */}
+                    {!isParallelMode && completedParallelResponses.size > 0 && (
+                      <div className="mb-4">
+                        {/* Tab bar */}
+                        <div className="flex items-center gap-1 mb-3 border-b border-gray-700">
+                          {Array.from(completedParallelResponses.keys()).map((modelId) => (
+                            <button
+                              key={modelId}
+                              onClick={() => setSelectedComparisonTab(modelId)}
+                              className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                                selectedComparisonTab === modelId
+                                  ? "text-teal-400 border-teal-400"
+                                  : "text-muted border-transparent hover:text-foreground hover:border-gray-500"
+                              }`}
+                            >
+                              {modelId.split('/').pop()}
+                            </button>
+                          ))}
+                          <div className="flex-1" />
+                          <button
+                            onClick={() => {
+                              setCompletedParallelResponses(new Map());
+                              setSelectedComparisonTab(null);
+                            }}
+                            className="px-2 py-1 text-xs text-muted hover:text-foreground"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                        {/* Tab content */}
+                        {selectedComparisonTab && completedParallelResponses.get(selectedComparisonTab) && (
+                          <div className="bg-surface rounded-lg p-3 border border-gray-700">
+                            {completedParallelResponses.get(selectedComparisonTab)!.map((msg, idx) => (
+                              <MessageBubble
+                                key={idx}
+                                message={msg}
+                                onDocumentClick={setActiveDocumentId}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {isLoading && !streamingMessage && !isParallelMode && (
                       <div className="flex justify-start mb-4">
                         <div className="bg-surface px-4 py-3 rounded-2xl">
                           <div className="flex gap-1">

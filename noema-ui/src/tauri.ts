@@ -94,6 +94,14 @@ export async function toggleFavoriteModel(modelId: string): Promise<string[]> {
   return invoke<string[]>("toggle_favorite_model", { modelId });
 }
 
+// Parallel model execution
+export async function sendParallelMessage(
+  message: string,
+  modelIds: string[]
+): Promise<void> {
+  return invoke<void>("send_parallel_message", { message, modelIds });
+}
+
 // Event listeners
 export function onUserMessage(
   callback: (message: DisplayMessage) => void
@@ -131,6 +139,65 @@ export function onModelChanged(
 
 export function onHistoryCleared(callback: () => void): Promise<UnlistenFn> {
   return listen<void>("history_cleared", () => callback());
+}
+
+// Parallel execution events
+export interface ParallelStreamingPayload {
+  modelId: string;
+  message: DisplayMessage;
+}
+
+export interface ParallelModelCompletePayload {
+  modelId: string;
+  messages: DisplayMessage[];
+}
+
+export interface ParallelAlternateInfo {
+  modelId: string;
+  modelDisplayName: string;
+  messageCount: number;
+  isSelected: boolean;
+}
+
+export interface ParallelCompletePayload {
+  alternates: ParallelAlternateInfo[];
+}
+
+export interface ParallelModelErrorPayload {
+  modelId: string;
+  error: string;
+}
+
+export function onParallelStreamingMessage(
+  callback: (payload: ParallelStreamingPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ParallelStreamingPayload>("parallel_streaming_message", (event) =>
+    callback(event.payload)
+  );
+}
+
+export function onParallelModelComplete(
+  callback: (payload: ParallelModelCompletePayload) => void
+): Promise<UnlistenFn> {
+  return listen<ParallelModelCompletePayload>("parallel_model_complete", (event) =>
+    callback(event.payload)
+  );
+}
+
+export function onParallelComplete(
+  callback: (payload: ParallelCompletePayload) => void
+): Promise<UnlistenFn> {
+  return listen<ParallelCompletePayload>("parallel_complete", (event) =>
+    callback(event.payload)
+  );
+}
+
+export function onParallelModelError(
+  callback: (payload: ParallelModelErrorPayload) => void
+): Promise<UnlistenFn> {
+  return listen<ParallelModelErrorPayload>("parallel_model_error", (event) =>
+    callback(event.payload)
+  );
 }
 
 // Voice commands
@@ -354,4 +421,32 @@ export async function sendMessageWithDocuments(
     attachments,
     referencedDocuments,
   });
+}
+
+// Span management for parallel model responses
+export interface SpanInfo {
+  id: string;
+  modelId: string | null;
+  messageCount: number;
+  isSelected: boolean;
+  createdAt: number;
+}
+
+export async function getSpanSetAlternates(
+  spanSetId: string
+): Promise<SpanInfo[]> {
+  return invoke<SpanInfo[]>("get_span_set_alternates", { spanSetId });
+}
+
+export async function setSelectedSpan(
+  spanSetId: string,
+  spanId: string
+): Promise<void> {
+  return invoke<void>("set_selected_span", { spanSetId, spanId });
+}
+
+export async function getSpanMessages(
+  spanId: string
+): Promise<DisplayMessage[]> {
+  return invoke<DisplayMessage[]>("get_span_messages", { spanId });
 }

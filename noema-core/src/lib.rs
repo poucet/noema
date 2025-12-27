@@ -26,7 +26,7 @@ pub mod traffic_log;
 pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
-pub use engine::{ChatEngine, EngineCommand, EngineEvent};
+pub use engine::{ChatEngine, EngineCommand, EngineEvent, ParallelAlternateInfo};
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 pub use storage::{MemorySession, MemoryTransaction, SessionStore, StorageTransaction};
 #[cfg(feature = "sqlite")]

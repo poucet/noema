@@ -4,7 +4,6 @@
 //! ~/.local/share/noema/logs/noema.log (or platform equivalent)
 
 use config::PathManager;
-use std::io::Write;
 use std::sync::Once;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -100,23 +99,8 @@ fn init_stderr_logging() {
 /// Log a message to the log file (legacy function for compatibility)
 /// New code should use tracing macros directly
 pub fn log_message(msg: &str) {
-    // First try tracing (if initialized)
+    // Use tracing only - the tracing subscriber already writes to the log file
     tracing::info!("{}", msg);
-
-    // Also write directly to file for backward compatibility
-    if let Some(log_path) = PathManager::log_file_path() {
-        if let Some(parent) = log_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-        {
-            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-            let _ = writeln!(file, "[{}] {}", timestamp, msg);
-        }
-    }
 }
 
 /// Frontend logging command - allows JS to write to the same log file
