@@ -84,27 +84,34 @@ pub async fn start_server() -> anyhow::Result<ServerHandle> {
 /// Start the MCP server on the specified host and port
 ///
 /// Use port 0 to get a random available port.
+///
+/// The server runs as a spawned task on the current runtime.
+/// We rely on the caller to release any locks before awaiting MCP responses.
 pub async fn start_server_on(host: &str, port: u16) -> anyhow::Result<ServerHandle> {
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
+
     let listener = TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
     let actual_port = local_addr.port();
 
     info!("Starting Google Docs MCP server on {}", local_addr);
 
-    let config = StreamableHttpServerConfig::default();
-    let session_manager = Arc::new(LocalSessionManager::default());
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    let mcp_service = StreamableHttpService::new(
-        || Ok(GoogleDocsServer::new()),
-        session_manager,
-        config,
-    );
-
-    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-
-    // Spawn the server task
+    // Spawn the server loop as a task on the current runtime
     tokio::spawn(async move {
+        let config = StreamableHttpServerConfig::default();
+        let session_manager = Arc::new(LocalSessionManager::default());
+
+        let mcp_service = StreamableHttpService::new(
+            || Ok(GoogleDocsServer::new()),
+            session_manager,
+            config,
+        );
+
+        // Convert oneshot receiver for use in select
+        let mut shutdown_rx = shutdown_rx;
+
         loop {
             tokio::select! {
                 _ = &mut shutdown_rx => {
