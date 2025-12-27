@@ -3,17 +3,20 @@
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, ToolResultContent};
 use noema_core::storage::StoredContent;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct ModelInfo {
     pub id: String,
     pub display_name: String,
     pub provider: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct ConversationInfo {
     pub id: String,
     pub name: Option<String>,
@@ -34,8 +37,9 @@ impl From<noema_core::ConversationInfo> for ConversationInfo {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub enum DisplayContent {
     Text(String),
     /// Inline Base64 image
@@ -44,20 +48,22 @@ pub enum DisplayContent {
     Audio { data: String, mime_type: String },
     /// Asset stored in blob storage - client should fetch via asset API
     AssetRef { asset_id: String, mime_type: String, filename: Option<String> },
-    ToolCall { name: String, id: String, arguments: serde_json::Value },
+    ToolCall { name: String, id: String, #[ts(type = "unknown")] arguments: serde_json::Value },
     ToolResult { id: String, content: Vec<DisplayToolResultContent> },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub enum DisplayToolResultContent {
     Text(String),
     Image { data: String, mime_type: String },
     Audio { data: String, mime_type: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct DisplayMessage {
     pub role: String,
     pub content: Vec<DisplayContent>,
@@ -174,8 +180,9 @@ pub fn stored_content_to_display(content: &StoredContent) -> DisplayContent {
 }
 
 // MCP server info for frontend
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct McpServerInfo {
     pub id: String,
     pub name: String,
@@ -192,16 +199,18 @@ pub struct McpServerInfo {
     pub auto_retry: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct McpToolInfo {
     pub name: String,
     pub description: Option<String>,
     pub server_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct AddMcpServerRequest {
     pub id: String,
     pub name: String,
@@ -220,8 +229,9 @@ pub struct AddMcpServerRequest {
 }
 
 /// Attachment from frontend for message sending
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct Attachment {
     #[serde(default)]
     pub name: String,      // filename
@@ -229,4 +239,23 @@ pub struct Attachment {
     pub mime_type: String, // e.g., "image/png", "audio/mp3"
     #[serde(default)]
     pub size: usize,       // size in bytes
+}
+
+#[cfg(test)]
+mod ts_export {
+    use super::*;
+
+    #[test]
+    fn export_types() {
+        ModelInfo::export_all().expect("Failed to export ModelInfo");
+        ConversationInfo::export_all().expect("Failed to export ConversationInfo");
+        DisplayContent::export_all().expect("Failed to export DisplayContent");
+        DisplayToolResultContent::export_all().expect("Failed to export DisplayToolResultContent");
+        DisplayMessage::export_all().expect("Failed to export DisplayMessage");
+        McpServerInfo::export_all().expect("Failed to export McpServerInfo");
+        McpToolInfo::export_all().expect("Failed to export McpToolInfo");
+        AddMcpServerRequest::export_all().expect("Failed to export AddMcpServerRequest");
+        Attachment::export_all().expect("Failed to export Attachment");
+    }
+
 }

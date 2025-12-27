@@ -3,6 +3,7 @@
 use config::Settings;
 use llm::registry::list_providers;
 use std::collections::HashMap;
+use ts_rs::TS;
 
 /// Get the current user email setting
 #[tauri::command]
@@ -57,10 +58,21 @@ pub fn get_provider_info() -> Vec<ProviderInfoResponse> {
         .collect()
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub struct ProviderInfoResponse {
     pub name: String,
     pub requires_api_key: bool,
     pub api_key_env: Option<String>,
+}
+
+#[cfg(test)]
+mod ts_export {
+    use super::*;
+
+    #[test]
+    fn export_types() {
+        ProviderInfoResponse::export_all().expect("Failed to export ProviderInfoResponse");
+    }
 }
