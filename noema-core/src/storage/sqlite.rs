@@ -659,6 +659,48 @@ impl SqliteStore {
         Ok(rows > 0)
     }
 
+    /// Update the parent tab reference for a tab
+    pub fn update_document_tab_parent(&self, id: &str, parent_tab_id: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = unix_timestamp();
+        conn.execute(
+            "UPDATE document_tabs SET parent_tab_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![parent_tab_id, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Search documents by title (case-insensitive)
+    pub fn search_documents(&self, user_id: &str, query: &str, limit: usize) -> Result<Vec<DocumentInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let pattern = format!("%{}%", query);
+        let mut stmt = conn.prepare(
+            "SELECT id, user_id, title, source, source_id, created_at, updated_at
+             FROM documents
+             WHERE user_id = ?1 AND title LIKE ?2 COLLATE NOCASE
+             ORDER BY updated_at DESC
+             LIMIT ?3",
+        )?;
+
+        let docs = stmt
+            .query_map(params![user_id, &pattern, limit as i64], |row| {
+                let source_str: String = row.get(3)?;
+                Ok(DocumentInfo {
+                    id: row.get(0)?,
+                    user_id: row.get(1)?,
+                    title: row.get(2)?,
+                    source: DocumentSource::from_str(&source_str).unwrap_or(DocumentSource::UserCreated),
+                    source_id: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(docs)
+    }
+
     // ========== Document Revision Methods ==========
 
     /// Create a new revision for a tab

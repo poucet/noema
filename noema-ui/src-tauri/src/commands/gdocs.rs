@@ -2,10 +2,13 @@
 //!
 //! Uses the episteme-compatible document model with documents, tabs, and revisions.
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
 use noema_core::storage::{DocumentInfo, DocumentSource, DocumentTabInfo};
+use rmcp::model::RawContent;
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
+use tracing::{debug, info};
 use ts_rs::TS;
 
 use crate::gdocs_server::GDocsServerState;
@@ -307,3 +310,342 @@ pub async fn get_gdocs_server_url(
     let gdocs_state = app.state::<GDocsServerState>();
     Ok(gdocs_state.url().await)
 }
+
+/// Google Doc listing item from Drive
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct GoogleDocListItem {
+    pub id: String,
+    pub name: String,
+    pub modified_time: Option<String>,
+    pub created_time: Option<String>,
+}
+
+/// List Google Docs from Drive via MCP server
+#[tauri::command]
+pub async fn list_google_docs(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<GoogleDocListItem>, String> {
+    // Get a cloneable tool caller so we don't hold the lock during the async call
+    let tool_caller = {
+        let engine_guard = state.engine.lock().await;
+        let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+        let mcp_registry = engine.get_mcp_registry();
+        let registry = mcp_registry.lock().await;
+
+        // Find the gdocs server connection and get a cloneable tool caller
+        registry
+            .get_connection("gdocs")
+            .ok_or("Google Docs server not connected. Please authenticate first.")?
+            .tool_caller()
+        // Locks are dropped here when the block ends
+    };
+
+    // Build arguments for gdocs_list tool
+    let mut args = serde_json::Map::new();
+    if let Some(q) = query {
+        args.insert("query".to_string(), serde_json::Value::String(q));
+    }
+    args.insert(
+        "limit".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(limit.unwrap_or(20))),
+    );
+
+    debug!("Calling gdocs_list with args: {:?}", args);
+
+    // Call the MCP server (without holding any locks)
+    let result = tool_caller
+        .call_tool("gdocs_list".to_string(), Some(args))
+        .await
+        .map_err(|e| format!("Failed to list Google Docs: {}", e))?;
+
+    // Check if the result is an error
+    if result.is_error.unwrap_or(false) {
+        let error_text = result
+            .content
+            .first()
+            .and_then(|c| match &c.raw {
+                RawContent::Text(t) => Some(t.text.as_str()),
+                _ => None,
+            })
+            .unwrap_or("Unknown error");
+        return Err(error_text.to_string());
+    }
+
+    // Parse the result - it's a JSON array of documents
+    let content = result
+        .content
+        .first()
+        .ok_or("Empty response from gdocs_list")?;
+
+    let text = match &content.raw {
+        RawContent::Text(text_content) => &text_content.text,
+        _ => return Err("Invalid response format: expected text".to_string()),
+    };
+
+    let docs: Vec<GoogleDocListItem> =
+        serde_json::from_str(text).map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    Ok(docs)
+}
+
+/// Response from gdocs_extract MCP tool
+#[derive(Debug, Deserialize)]
+struct ExtractResponse {
+    doc_id: String,
+    title: String,
+    tabs: Vec<ExtractedTab>,
+    images: Vec<ExtractedImage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtractedTab {
+    source_tab_id: String,
+    title: String,
+    icon: Option<String>,
+    /// Markdown content for this tab (converted by MCP server from Docs API)
+    content_markdown: String,
+    parent_tab_id: Option<String>,
+    tab_index: i32,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtractedImage {
+    object_id: String,
+    data_base64: String,
+    mime_type: String,
+}
+
+/// Import a Google Doc into local storage
+/// Returns the document ID of the imported document
+#[tauri::command]
+pub async fn import_google_doc(
+    state: State<'_, AppState>,
+    google_doc_id: String,
+) -> Result<DocumentInfoResponse, String> {
+    info!("Importing Google Doc: {}", google_doc_id);
+
+    // First check if this doc is already imported
+    {
+        let store_guard = state.store.lock().await;
+        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+        let user = store
+            .get_or_create_default_user()
+            .map_err(|e| e.to_string())?;
+
+        if let Some(existing) = store
+            .get_document_by_source(&user.id, DocumentSource::GoogleDrive, &google_doc_id)
+            .map_err(|e| e.to_string())?
+        {
+            info!("Document already imported, returning existing: {}", existing.id);
+            return Ok(DocumentInfoResponse::from(existing));
+        }
+    }
+
+    // Get a cloneable tool caller so we don't hold the lock during the async call
+    let tool_caller = {
+        let engine_guard = state.engine.lock().await;
+        let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+        let mcp_registry = engine.get_mcp_registry();
+        let registry = mcp_registry.lock().await;
+
+        registry
+            .get_connection("gdocs")
+            .ok_or("Google Docs server not connected. Please authenticate first.")?
+            .tool_caller()
+        // Locks are dropped here when the block ends
+    };
+
+    // Call the MCP server to extract the document (without holding any locks)
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "doc_id".to_string(),
+        serde_json::Value::String(google_doc_id.clone()),
+    );
+
+    debug!("Calling gdocs_extract for doc: {}", google_doc_id);
+
+    let result = tool_caller
+        .call_tool("gdocs_extract".to_string(), Some(args))
+        .await
+        .map_err(|e| format!("Failed to extract Google Doc: {}", e))?;
+
+    // Check if the result is an error
+    if result.is_error.unwrap_or(false) {
+        let error_text = result
+            .content
+            .first()
+            .and_then(|c| match &c.raw {
+                RawContent::Text(t) => Some(t.text.as_str()),
+                _ => None,
+            })
+            .unwrap_or("Unknown error");
+        return Err(error_text.to_string());
+    }
+
+    let content = result
+        .content
+        .first()
+        .ok_or("Empty response from gdocs_extract")?;
+
+    let text = match &content.raw {
+        RawContent::Text(text_content) => &text_content.text,
+        _ => return Err("Invalid response format: expected text".to_string()),
+    };
+
+    let extract_response: ExtractResponse =
+        serde_json::from_str(text).map_err(|e| format!("Failed to parse extract response: {}", e))?;
+
+    info!(
+        "Extracted doc '{}' with {} tabs and {} images",
+        extract_response.title,
+        extract_response.tabs.len(),
+        extract_response.images.len()
+    );
+
+    // Store the document and its content
+    debug!("Acquiring store lock for document storage...");
+    let store_guard = state.store.lock().await;
+    debug!("Store lock acquired");
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    let user = store
+        .get_or_create_default_user()
+        .map_err(|e| e.to_string())?;
+
+    // Create the document
+    let doc_id = store
+        .create_document(
+            &user.id,
+            &extract_response.title,
+            DocumentSource::GoogleDrive,
+            Some(&google_doc_id),
+        )
+        .map_err(|e| format!("Failed to create document: {}", e))?;
+
+    // Store images first so we can reference them in tabs
+    let blob_store_guard = state.blob_store.lock().await;
+    let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    if let Some(blob_store) = blob_store_guard.as_ref() {
+        for image in &extract_response.images {
+            let data = BASE64
+                .decode(&image.data_base64)
+                .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+            let stored = blob_store
+                .store(&data)
+                .map_err(|e| format!("Failed to store image: {}", e))?;
+
+            // Use the blob hash as the asset ID
+            image_id_map.insert(image.object_id.clone(), stored.hash);
+        }
+    }
+
+    // Build a map of source_tab_id -> internal tab_id for parent references
+    let mut tab_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    // Collect referenced asset IDs once
+    let referenced_assets: Vec<String> = image_id_map.values().cloned().collect();
+
+    // First pass: create all tabs without parent references
+    // Each tab now has its own markdown content from the Docs API structured content
+    // Replace object:OBJECT_ID with asset:BLOB_HASH so frontend can resolve to URLs
+    info!("Processing {} tabs with {} image mappings", extract_response.tabs.len(), image_id_map.len());
+    for tab in &extract_response.tabs {
+        let mut content = tab.content_markdown.clone();
+
+        // Log if this tab has any image references
+        if content.contains("object:") {
+            info!("Tab '{}' contains object: references", tab.title);
+        }
+        if content.contains("![image]") {
+            info!("Tab '{}' contains ![image] markdown, first 200 chars: {}", tab.title, &content.chars().take(200).collect::<String>());
+        }
+
+        for (object_id, blob_hash) in &image_id_map {
+            let object_ref = format!("object:{}", object_id);
+            // Use full noema-asset:// URL so frontend doesn't need to rewrite
+            let asset_url = format!("noema-asset://localhost/{}", blob_hash);
+            if content.contains(&object_ref) {
+                info!("Replacing {} -> {} in tab '{}'", object_ref, asset_url, tab.title);
+            }
+            content = content.replace(&object_ref, &asset_url);
+        }
+
+        // Log final state
+        if content.contains("noema-asset://") {
+            info!("Tab '{}' now contains noema-asset:// URLs", tab.title);
+        } else if content.contains("![image]") {
+            info!("Tab '{}' still has ![image] but no noema-asset:// URLs - content sample: {}", tab.title, &content.chars().take(300).collect::<String>());
+        }
+
+        let tab_id = store
+            .create_document_tab(
+                &doc_id,
+                None, // Set parent in second pass
+                tab.tab_index,
+                &tab.title,
+                tab.icon.as_deref(),
+                Some(&content),
+                &referenced_assets,
+                Some(&tab.source_tab_id),
+            )
+            .map_err(|e| format!("Failed to create tab: {}", e))?;
+
+        tab_id_map.insert(tab.source_tab_id.clone(), tab_id);
+    }
+
+    // Second pass: update parent references
+    for tab in &extract_response.tabs {
+        if let Some(parent_source_id) = &tab.parent_tab_id {
+            if let (Some(tab_id), Some(parent_id)) = (
+                tab_id_map.get(&tab.source_tab_id),
+                tab_id_map.get(parent_source_id),
+            ) {
+                store
+                    .update_document_tab_parent(tab_id, Some(parent_id))
+                    .map_err(|e| format!("Failed to update tab parent: {}", e))?;
+            }
+        }
+    }
+
+    // Fetch and return the created document
+    let doc = store
+        .get_document(&doc_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("Failed to retrieve created document")?;
+
+    info!("Successfully imported Google Doc as: {}", doc_id);
+    Ok(DocumentInfoResponse::from(doc))
+}
+
+/// Search documents by title for autocomplete
+#[tauri::command]
+pub async fn search_documents(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<DocumentInfoResponse>, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    let user = store
+        .get_or_create_default_user()
+        .map_err(|e| e.to_string())?;
+
+    let docs = store
+        .search_documents(&user.id, &query, limit.unwrap_or(10))
+        .map_err(|e| e.to_string())?;
+
+    Ok(docs.into_iter().map(DocumentInfoResponse::from).collect())
+}
+
+// HTML to Markdown conversion is no longer needed!
+// The MCP server now returns markdown directly from the Google Docs API structured content.
+// Each tab has its own content_markdown field with proper per-tab markdown.
