@@ -31,7 +31,7 @@ impl Client {
         }
     }
 
-    #[instrument(level = "info", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub async fn get<U, T>(&self, url: U) -> anyhow::Result<T>
     where
         U: reqwest::IntoUrl + std::fmt::Debug,
@@ -46,12 +46,12 @@ impl Client {
             ));
         }
         let text = response.text().await?;
-        event!(Level::INFO, response = text);
+        event!(Level::TRACE, response = text);
 
         Ok(serde_json::from_str::<T>(&text)?)
     }
 
-    #[instrument(level = "info", skip(self, request), fields(json_request = serde_json::to_string(request).unwrap()))]
+    #[instrument(level = "trace", skip(self, request), fields(json_request = serde_json::to_string(request).unwrap()))]
     pub async fn post<U, S, T>(&self, url: U, request: &S) -> anyhow::Result<T>
     where
         U: reqwest::IntoUrl + std::fmt::Debug,
@@ -69,12 +69,12 @@ impl Client {
             ));
         }
         let text = response.text().await?;
-        event!(Level::INFO, response = text);
+        event!(Level::TRACE, response = text);
 
         Ok(serde_json::from_str::<T>(&text)?)
     }
 
-    #[instrument(level = "info", skip(self, request, process), fields(json_request = serde_json::to_string(request).unwrap()))]
+    #[instrument(level = "trace", skip(self, request, process), fields(json_request = serde_json::to_string(request).unwrap()))]
     pub async fn post_stream<U, S, F, T>(
         &self,
         url: U,
