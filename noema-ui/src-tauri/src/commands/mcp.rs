@@ -608,7 +608,13 @@ async fn save_oauth_tokens(
     registry.add_server(server_id.to_string(), updated_config);
     registry.save_config().map_err(|e| e.to_string())?;
 
-    log_message(&format!("Saved OAuth tokens for server: {}", server_id));
+    // Reconnect to apply the new token
+    if registry.is_connected(server_id) {
+        registry.disconnect(server_id).await.map_err(|e| e.to_string())?;
+    }
+    registry.connect(server_id).await.map_err(|e| e.to_string())?;
+
+    log_message(&format!("Saved OAuth tokens for server: {}, reconnected with new token", server_id));
     Ok(())
 }
 
@@ -725,9 +731,18 @@ pub async fn complete_mcp_oauth(
                 auto_retry: config.auto_retry,
             };
 
-            registry.add_server(server_id, updated_config);
+            registry.add_server(server_id.clone(), updated_config);
             registry.save_config().map_err(|e| e.to_string())?;
 
+            // Reconnect to apply the new token
+            // First disconnect if connected
+            if registry.is_connected(&server_id) {
+                registry.disconnect(&server_id).await.map_err(|e| e.to_string())?;
+            }
+            // Then reconnect with the updated config (which now has the token)
+            registry.connect(&server_id).await.map_err(|e| e.to_string())?;
+
+            tracing::info!("OAuth complete for '{}', reconnected with new token", server_id);
             Ok(())
         }
         _ => Err("Server is not configured for OAuth".to_string()),
@@ -849,6 +864,15 @@ pub async fn complete_oauth_internal(
             registry.add_server(server_id.to_string(), updated_config);
             registry.save_config().map_err(|e| e.to_string())?;
 
+            // Reconnect to apply the new token
+            // First disconnect if connected
+            if registry.is_connected(server_id) {
+                registry.disconnect(server_id).await.map_err(|e| e.to_string())?;
+            }
+            // Then reconnect with the updated config (which now has the token)
+            registry.connect(server_id).await.map_err(|e| e.to_string())?;
+
+            tracing::info!("OAuth complete for '{}', reconnected with new token", server_id);
             Ok(())
         }
         _ => Err("Server is not configured for OAuth".to_string()),

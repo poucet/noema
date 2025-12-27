@@ -4,17 +4,45 @@ use anyhow::Result;
 use llm::{ToolDefinition, ToolResultContent};
 use rmcp::{
     model::{CallToolRequestParam, RawContent, Tool},
-    service::RunningService,
+    service::{Peer, RunningService},
     transport::streamable_http_client::{
         StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
     },
-    ServiceExt,
+    RoleClient, ServiceExt,
 };
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+
+/// A cloneable handle for calling MCP tools without holding registry locks.
+///
+/// This is a lightweight wrapper around the rmcp Peer that can be cloned
+/// and used to make tool calls while not holding locks on the registry.
+#[derive(Clone)]
+pub struct McpToolCaller {
+    peer: Peer<RoleClient>,
+}
+
+impl McpToolCaller {
+    /// Call a tool on this server
+    pub async fn call_tool(
+        &self,
+        name: String,
+        arguments: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<rmcp::model::CallToolResult> {
+        let result = self
+            .peer
+            .call_tool(CallToolRequestParam {
+                name: name.into(),
+                arguments,
+            })
+            .await?;
+        Ok(result)
+    }
+}
 
 /// A connected MCP server with its available tools.
 pub struct ConnectedServer {
@@ -24,6 +52,15 @@ pub struct ConnectedServer {
 }
 
 impl ConnectedServer {
+    /// Get a cloneable tool caller that can be used without holding registry locks.
+    ///
+    /// Use this when you need to make tool calls while releasing the registry lock.
+    pub fn tool_caller(&self) -> McpToolCaller {
+        McpToolCaller {
+            peer: self.service.deref().clone(),
+        }
+    }
+
     /// Call a tool on this server
     pub async fn call_tool(
         &self,
