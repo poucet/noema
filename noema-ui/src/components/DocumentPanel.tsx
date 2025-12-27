@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { DocumentContentResponse, DocumentTabResponse } from "../generated";
@@ -182,7 +183,7 @@ export function DocumentPanel({ documentId, onClose, embedded = false }: Documen
                 <h3 className="text-teal-400 mb-4">{selectedTab.title}</h3>
               )}
               <ReactMarkdown
-                remarkPlugins={[remarkMath]}
+                remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
                 // Allow noema-asset:// protocol URLs to pass through unchanged
                 urlTransform={(url) => url}

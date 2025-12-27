@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { DisplayMessage, DisplayContent, DisplayToolResultContent } from "../types";
@@ -19,7 +20,7 @@ interface MarkdownTextProps {
 function MarkdownText({ text, onDocumentClick }: MarkdownTextProps) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkMath]}
+      remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={{
         a({ href, children }) {

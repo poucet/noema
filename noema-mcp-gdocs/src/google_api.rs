@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::{debug, trace};
 
 const DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
 const DOCS_API_BASE: &str = "https://docs.googleapis.com/v1";
@@ -169,6 +170,9 @@ struct Bullet {
     list_id: Option<String>,
     #[serde(default)]
     nesting_level: i32,
+    /// Text style of the bullet glyph - used for checked checkboxes (strikethrough)
+    #[serde(default)]
+    text_style: Option<TextStyle>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -628,20 +632,58 @@ impl GoogleDocsClient {
         // Check for bullet/list
         if let Some(bullet) = &paragraph.bullet {
             let indent = "  ".repeat(bullet.nesting_level as usize);
+            let list_id = bullet.list_id.as_deref().unwrap_or("<none>");
+
+            debug!(
+                "Found bullet: list_id={}, nesting_level={}, text='{}'",
+                list_id, bullet.nesting_level, text
+            );
 
             // Check if this is a checkbox list
-            let is_checkbox = bullet.list_id.as_ref()
-                .and_then(|id| lists.get(id))
+            let list_def = bullet.list_id.as_ref().and_then(|id| lists.get(id));
+            let nesting_level = list_def
                 .and_then(|list| list.list_properties.as_ref())
-                .and_then(|props| props.nesting_levels.get(bullet.nesting_level as usize))
-                .and_then(|level| level.glyph_type.as_ref())
+                .and_then(|props| props.nesting_levels.get(bullet.nesting_level as usize));
+
+            let glyph_type = nesting_level.and_then(|level| level.glyph_type.as_ref());
+            let is_checkbox = glyph_type
                 .map(|glyph| glyph == "GLYPH_TYPE_UNSPECIFIED")
                 .unwrap_or(false);
 
-            if is_checkbox {
-                return format!("{}- [ ] {}\n", indent, text);
+            debug!(
+                "  list_def exists={}, nesting_level exists={}, glyph_type={:?}, is_checkbox={}",
+                list_def.is_some(),
+                nesting_level.is_some(),
+                glyph_type,
+                is_checkbox
+            );
+
+            // Log the full list definition for debugging
+            if let Some(def) = list_def {
+                trace!("  list_definition: {:?}", def);
             }
-            return format!("{}- {}\n", indent, text);
+
+            if is_checkbox {
+                // Check if checkbox is checked (bullet text_style has strikethrough)
+                let is_checked = bullet.text_style
+                    .as_ref()
+                    .map(|ts| ts.strikethrough)
+                    .unwrap_or(false);
+
+                debug!(
+                    "  checkbox: text_style={:?}, strikethrough={}",
+                    bullet.text_style.as_ref().map(|ts| format!("bold={},italic={},strike={}", ts.bold, ts.italic, ts.strikethrough)),
+                    is_checked
+                );
+
+                let checkbox_marker = if is_checked { "[x]" } else { "[ ]" };
+                let result = format!("{}- {} {}", indent, checkbox_marker, text);
+                debug!("  -> checkbox result (checked={}): '{}'", is_checked, result);
+                return result;
+            }
+            let result = format!("{}- {}", indent, text);
+            debug!("  -> list item result: '{}'", result);
+            return result;
         }
 
         format!("{}\n", text)

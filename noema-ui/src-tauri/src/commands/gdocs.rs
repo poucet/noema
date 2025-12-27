@@ -560,6 +560,11 @@ pub async fn import_google_doc(
     for tab in &extract_response.tabs {
         let mut content = tab.content_markdown.clone();
 
+        // Debug: log first 500 chars of content to see list formatting
+        if content.contains("- ") {
+            debug!("Tab '{}' markdown sample (first 500 chars):\n{}", tab.title, content.chars().take(500).collect::<String>());
+        }
+
         // Log if this tab has any image references
         if content.contains("object:") {
             info!("Tab '{}' contains object: references", tab.title);
