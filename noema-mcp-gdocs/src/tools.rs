@@ -79,7 +79,7 @@ impl GoogleDocsServer {
                 name: "gdocs_extract".into(),
                 title: None,
                 description: Some(
-                    "Extract a Google Doc with all tabs and images. Returns raw tab content (HTML) \
+                    "Extract a Google Doc with all tabs and images. Returns markdown content for each tab \
                     and base64-encoded images for storage by noema-core."
                         .into(),
                 ),
@@ -191,7 +191,8 @@ struct TabResponse {
     source_tab_id: String,
     title: String,
     icon: Option<String>,
-    content_html: String,
+    /// Markdown content for this tab (converted from structured Docs API content)
+    content_markdown: String,
     parent_tab_id: Option<String>,
     tab_index: i32,
 }
@@ -209,7 +210,7 @@ impl From<ExtractedTab> for TabResponse {
             source_tab_id: tab.source_tab_id,
             title: tab.title,
             icon: tab.icon,
-            content_html: tab.content_html,
+            content_markdown: tab.content_markdown,
             parent_tab_id: tab.parent_tab_id,
             tab_index: tab.tab_index,
         }
@@ -267,13 +268,23 @@ impl ServerHandler for GoogleDocsServer {
     fn call_tool(
         &self,
         request: CallToolRequestParam,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<CallToolResult, McpError>> + Send + '_ {
         async move {
             let name = request.name.as_ref();
             let arguments = request.arguments.clone().unwrap_or_default();
 
             info!("Calling tool: {} with args: {:?}", name, arguments);
+
+            // Try to extract Authorization header from HTTP request parts
+            if let Some(parts) = context.extensions.get::<http::request::Parts>() {
+                if let Some(auth_header) = parts.headers.get(http::header::AUTHORIZATION) {
+                    if let Ok(auth_str) = auth_header.to_str() {
+                        debug!("Found Authorization header, setting access token");
+                        self.set_access_token(auth_str.to_string()).await;
+                    }
+                }
+            }
 
             let client = match self.get_client().await {
                 Some(c) => c,
