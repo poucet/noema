@@ -21,5 +21,8 @@ pub use blob::{BlobStore, StoredBlob};
 pub use content::{StoredContent, StoredPayload, UnresolvedBlobError};
 pub use memory::{MemorySession, MemoryTransaction};
 #[cfg(feature = "sqlite")]
-pub use sqlite::{ConversationInfo, SqliteSession, SqliteStore, StoredMessage};
+pub use sqlite::{
+    ConversationInfo, DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
+    SqliteSession, SqliteStore, StoredMessage,
+};
 pub use traits::{SessionStore, StorageTransaction};
