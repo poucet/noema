@@ -8,9 +8,11 @@ import * as tauri from "../tauri";
 interface DocumentPanelProps {
   documentId: string;
   onClose: () => void;
+  /** When true, renders inline in the main content area instead of as an overlay */
+  embedded?: boolean;
 }
 
-export function DocumentPanel({ documentId, onClose }: DocumentPanelProps) {
+export function DocumentPanel({ documentId, onClose, embedded = false }: DocumentPanelProps) {
   const [document, setDocument] = useState<DocumentContentResponse | null>(null);
   const [selectedTabId, setSelectedTabId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,27 +93,34 @@ export function DocumentPanel({ documentId, onClose }: DocumentPanelProps) {
   const rootTabs = document ? buildTabTree(document.tabs, null) : [];
   const hasTabs = document && document.tabs.length > 1;
 
+  // Different container styles for embedded vs overlay mode
+  const containerClass = embedded
+    ? "h-full bg-surface flex flex-col"
+    : "fixed inset-y-0 right-0 w-[600px] bg-surface border-l border-gray-700 flex flex-col shadow-xl z-50";
+
   return (
-    <div className="fixed inset-y-0 right-0 w-[600px] bg-surface border-l border-gray-700 flex flex-col shadow-xl z-50">
+    <div className={containerClass}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-elevated">
         <div className="flex items-center gap-3 min-w-0">
-          <svg className="w-5 h-5 text-teal-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-5 h-5 text-teal-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
           <h2 className="text-lg font-semibold text-foreground truncate">
             {document?.info.title || 'Document'}
           </h2>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 hover:bg-gray-600 rounded transition-colors"
-          aria-label="Close panel"
-        >
-          <svg className="w-5 h-5 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        {!embedded && (
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-gray-600 rounded transition-colors"
+            aria-label="Close panel"
+          >
+            <svg className="w-5 h-5 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -175,6 +184,8 @@ export function DocumentPanel({ documentId, onClose }: DocumentPanelProps) {
               <ReactMarkdown
                 remarkPlugins={[remarkMath]}
                 rehypePlugins={[rehypeKatex]}
+                // Allow noema-asset:// protocol URLs to pass through unchanged
+                urlTransform={(url) => url}
                 components={{
                   code(props) {
                     const { children, className } = props;
@@ -192,6 +203,24 @@ export function DocumentPanel({ documentId, onClose }: DocumentPanelProps) {
                       <pre className="bg-background text-gray-100 p-3 rounded-lg overflow-x-auto text-sm">
                         {props.children}
                       </pre>
+                    );
+                  },
+                  img(props) {
+                    const { src, alt } = props;
+                    if (!src) {
+                      return <span className="text-gray-500">[image]</span>;
+                    }
+                    return (
+                      <img
+                        src={src}
+                        alt={alt || 'Document image'}
+                        className="max-w-full h-auto rounded"
+                        loading="lazy"
+                        onError={(e) => {
+                          console.error('Image load error:', src);
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
                     );
                   },
                 }}
