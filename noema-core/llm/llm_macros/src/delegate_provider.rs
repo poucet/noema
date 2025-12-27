@@ -128,7 +128,7 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
     // Generate available_providers array
     let provider_names: Vec<_> = variant_info.iter().map(|info| &info.name).collect();
 
-    // Generate from_name match arms
+    // Generate from_name match arms (env var only)
     let from_name_arms = variant_info.iter().map(|info| {
         let variant_name = &info.variant_name;
         let name = &info.name;
@@ -148,6 +148,45 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
                 Ok(#enum_name::#variant_name(provider))
             }
         } else {
+            quote! {
+                let provider = match ::std::env::var(#base_url_env).ok() {
+                    Some(url) => <#inner_type>::new(&url),
+                    None => <#inner_type>::default(),
+                };
+                Ok(#enum_name::#variant_name(provider))
+            }
+        };
+
+        quote! {
+            #name => { #create_provider }
+        }
+    });
+
+    // Generate from_name_with_key match arms (settings key takes priority, falls back to env var)
+    let from_name_with_key_arms = variant_info.iter().map(|info| {
+        let variant_name = &info.variant_name;
+        let name = &info.name;
+        let inner_type = &info.inner_type;
+        let api_key_env = &info.api_key_env;
+        let base_url_env = &info.base_url_env;
+
+        let create_provider = if api_key_env.is_some() {
+            let api_key_env_str = api_key_env.as_ref().unwrap();
+            quote! {
+                // Settings API key takes priority, then fall back to env var
+                let api_key = match api_key {
+                    Some(key) => key.to_string(),
+                    None => ::std::env::var(#api_key_env_str)
+                        .map_err(|_| ::anyhow::anyhow!("{} not configured in settings and {} environment variable not set", #name, #api_key_env_str))?,
+                };
+                let provider = match ::std::env::var(#base_url_env).ok() {
+                    Some(url) => <#inner_type>::new(&url, &api_key),
+                    None => <#inner_type>::default(&api_key),
+                };
+                Ok(#enum_name::#variant_name(provider))
+            }
+        } else {
+            // Providers without API keys (like Ollama)
             quote! {
                 let provider = match ::std::env::var(#base_url_env).ok() {
                     Some(url) => <#inner_type>::new(&url),
@@ -243,6 +282,15 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
             pub fn from_name(name: &str) -> ::anyhow::Result<Self> {
                 match name {
                     #(#from_name_arms),*
+                    _ => Err(::anyhow::anyhow!("Unknown provider: {}", name))
+                }
+            }
+
+            /// Create a provider from its name with an optional API key.
+            /// If api_key is Some, it takes priority. Otherwise falls back to env var.
+            pub fn from_name_with_key(name: &str, api_key: Option<&str>) -> ::anyhow::Result<Self> {
+                match name {
+                    #(#from_name_with_key_arms),*
                     _ => Err(::anyhow::anyhow!("Unknown provider: {}", name))
                 }
             }

@@ -199,6 +199,10 @@ pub fn run() {
             // Settings commands
             commands::settings::get_user_email,
             commands::settings::set_user_email,
+            commands::settings::get_api_key_status,
+            commands::settings::set_api_key,
+            commands::settings::remove_api_key,
+            commands::settings::get_provider_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

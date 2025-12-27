@@ -2,9 +2,14 @@
 //!
 //! Clients should only deal with model IDs like "claude/claude-sonnet-4-5-20250929"
 //! and never need to know about provider-specific types.
+//!
+//! API Key Priority:
+//! 1. Settings file (encrypted API keys in settings.toml)
+//! 2. Environment variables (CLAUDE_API_KEY, OPENAI_API_KEY, etc.)
 
 use crate::providers::GeneralModelProvider;
 use crate::{ChatModel, ModelDefinition, ModelProvider};
+use config::Settings;
 use std::sync::Arc;
 
 /// A model identifier in the format "provider/model-name"
@@ -64,11 +69,17 @@ pub fn get_provider_info(name: &str) -> Option<&'static ProviderInfo> {
 }
 
 /// Create a chat model from a model ID string like "claude/claude-sonnet-4-5-20250929"
+///
+/// API keys are loaded with settings taking priority over environment variables.
 pub fn create_model(model_id: &str) -> anyhow::Result<Arc<dyn ChatModel + Send + Sync>> {
     let id = ModelId::parse(model_id)
         .ok_or_else(|| anyhow::anyhow!("Invalid model ID '{}': expected 'provider/model'", model_id))?;
 
-    let provider = GeneralModelProvider::from_name(&id.provider)?;
+    // Load API key from settings (takes priority over env vars)
+    let settings = Settings::load();
+    let api_key = settings.get_api_key(&id.provider);
+
+    let provider = GeneralModelProvider::from_name_with_key(&id.provider, api_key.as_deref())?;
     provider
         .create_chat_model(&id.model)
         .ok_or_else(|| anyhow::anyhow!("Failed to create model '{}' from provider '{}'", id.model, id.provider))
@@ -82,11 +93,15 @@ pub struct ModelInfo {
 }
 
 /// List all available models from all providers
+///
+/// API keys are loaded with settings taking priority over environment variables.
 pub async fn list_all_models() -> Vec<(String, anyhow::Result<Vec<ModelInfo>>)> {
     let mut results = Vec::new();
+    let settings = Settings::load();
 
     for info in list_providers() {
-        let provider_result = GeneralModelProvider::from_name(info.name);
+        let api_key = settings.get_api_key(info.name);
+        let provider_result = GeneralModelProvider::from_name_with_key(info.name, api_key.as_deref());
         let models_result = match provider_result {
             Ok(provider) => match provider.list_models().await {
                 Ok(models) => Ok(models
@@ -107,8 +122,12 @@ pub async fn list_all_models() -> Vec<(String, anyhow::Result<Vec<ModelInfo>>)> 
 }
 
 /// List models from a specific provider
+///
+/// API keys are loaded with settings taking priority over environment variables.
 pub async fn list_models(provider_name: &str) -> anyhow::Result<Vec<ModelInfo>> {
-    let provider = GeneralModelProvider::from_name(provider_name)?;
+    let settings = Settings::load();
+    let api_key = settings.get_api_key(provider_name);
+    let provider = GeneralModelProvider::from_name_with_key(provider_name, api_key.as_deref())?;
     let models = provider.list_models().await?;
 
     Ok(models
@@ -148,10 +167,11 @@ mod tests {
     #[test]
     fn test_list_providers() {
         let providers = list_providers();
-        assert_eq!(providers.len(), 4);
+        assert_eq!(providers.len(), 5);
         assert!(providers.iter().any(|p| p.name == "claude"));
         assert!(providers.iter().any(|p| p.name == "gemini"));
         assert!(providers.iter().any(|p| p.name == "openai"));
         assert!(providers.iter().any(|p| p.name == "ollama"));
+        assert!(providers.iter().any(|p| p.name == "mistral"));
     }
 }

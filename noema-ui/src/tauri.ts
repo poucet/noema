@@ -242,3 +242,26 @@ export async function getUserEmail(): Promise<string | null> {
 export async function setUserEmail(email: string): Promise<void> {
   return invoke<void>("set_user_email", { email });
 }
+
+// API Key Settings
+export interface ProviderInfo {
+  name: string;
+  requiresApiKey: boolean;
+  apiKeyEnv: string | null;
+}
+
+export async function getApiKeyStatus(): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("get_api_key_status");
+}
+
+export async function setApiKey(provider: string, apiKey: string): Promise<void> {
+  return invoke<void>("set_api_key", { provider, apiKey });
+}
+
+export async function removeApiKey(provider: string): Promise<void> {
+  return invoke<void>("remove_api_key", { provider });
+}
+
+export async function getProviderInfo(): Promise<ProviderInfo[]> {
+  return invoke<ProviderInfo[]>("get_provider_info");
+}

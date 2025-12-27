@@ -1,7 +1,8 @@
 //! Application settings management
 
-use crate::PathManager;
+use crate::{crypto, PathManager};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 
 /// Application settings stored in settings.toml
@@ -11,6 +12,9 @@ pub struct Settings {
     pub user_email: Option<String>,
     /// Default model ID (e.g., "claude/models/claude-sonnet-4-5-20250929")
     pub default_model: Option<String>,
+    /// Encrypted API keys (provider name -> encrypted key)
+    #[serde(default)]
+    pub api_keys: HashMap<String, String>,
 }
 
 impl Settings {
@@ -32,11 +36,43 @@ impl Settings {
         let path = PathManager::settings_path().ok_or("Could not determine settings path")?;
 
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config dir: {}", e))?;
         }
 
-        let content = toml::to_string_pretty(self).map_err(|e| format!("Failed to serialize settings: {}", e))?;
+        let content = toml::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize settings: {}", e))?;
         fs::write(&path, content).map_err(|e| format!("Failed to write settings: {}", e))?;
         Ok(())
+    }
+
+    /// Get a decrypted API key for a provider.
+    /// Returns None if not set or decryption fails.
+    pub fn get_api_key(&self, provider: &str) -> Option<String> {
+        self.api_keys
+            .get(provider)
+            .and_then(|encrypted| crypto::decrypt_string(encrypted).ok())
+    }
+
+    /// Set an API key for a provider (encrypts before storing).
+    pub fn set_api_key(&mut self, provider: &str, api_key: &str) -> Result<(), String> {
+        let encrypted = crypto::encrypt_string(api_key)?;
+        self.api_keys.insert(provider.to_string(), encrypted);
+        Ok(())
+    }
+
+    /// Remove an API key for a provider.
+    pub fn remove_api_key(&mut self, provider: &str) {
+        self.api_keys.remove(provider);
+    }
+
+    /// Check if an API key is set for a provider.
+    pub fn has_api_key(&self, provider: &str) -> bool {
+        self.api_keys.contains_key(provider)
+    }
+
+    /// Get the list of providers with configured API keys.
+    pub fn configured_providers(&self) -> Vec<String> {
+        self.api_keys.keys().cloned().collect()
     }
 }
