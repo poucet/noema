@@ -13,7 +13,7 @@ use tauri::http::Response;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
-pub use logging::log_message;
+pub use logging::{init_logging, log_message};
 pub use state::AppState;
 pub use types::*;
 
@@ -100,6 +100,9 @@ pub fn run() {
         PathManager::set_log_file(std::path::PathBuf::from(path));
     }
 
+    // Initialize unified tracing/logging - writes to ~/.local/share/noema/logs/noema.log
+    init_logging();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
@@ -163,6 +166,7 @@ pub fn run() {
             commands::chat::get_messages,
             commands::chat::send_message,
             commands::chat::send_message_with_attachments,
+            commands::chat::send_message_with_documents,
             commands::chat::clear_history,
             commands::chat::set_model,
             commands::chat::list_models,
@@ -218,6 +222,10 @@ pub fn run() {
             commands::gdocs::get_gdocs_oauth_status,
             commands::gdocs::configure_gdocs_oauth,
             commands::gdocs::get_gdocs_server_url,
+            // Google Docs import commands
+            commands::gdocs::list_google_docs,
+            commands::gdocs::import_google_doc,
+            commands::gdocs::search_documents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
