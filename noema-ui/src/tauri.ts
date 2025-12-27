@@ -299,3 +299,50 @@ export async function deleteDocument(docId: string): Promise<boolean> {
 export async function syncGoogleDoc(docId: string): Promise<void> {
   return invoke<void>("sync_google_doc", { docId });
 }
+
+// Google Docs import types
+export interface GoogleDocListItem {
+  id: string;
+  name: string;
+  modifiedTime: string | null;
+  createdTime: string | null;
+}
+
+// Google Docs import commands
+export async function listGoogleDocs(
+  query?: string,
+  limit?: number
+): Promise<GoogleDocListItem[]> {
+  return invoke<GoogleDocListItem[]>("list_google_docs", { query, limit });
+}
+
+export async function importGoogleDoc(
+  googleDocId: string
+): Promise<DocumentInfoResponse> {
+  return invoke<DocumentInfoResponse>("import_google_doc", { googleDocId });
+}
+
+export async function searchDocuments(
+  query: string,
+  limit?: number
+): Promise<DocumentInfoResponse[]> {
+  return invoke<DocumentInfoResponse[]>("search_documents", { query, limit });
+}
+
+// Referenced document for RAG context
+export interface ReferencedDocument {
+  id: string;
+  title: string;
+}
+
+export async function sendMessageWithDocuments(
+  message: string,
+  attachments: Attachment[],
+  referencedDocuments: ReferencedDocument[]
+): Promise<void> {
+  return invoke<void>("send_message_with_documents", {
+    message,
+    attachments,
+    referencedDocuments,
+  });
+}

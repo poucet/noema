@@ -11,6 +11,9 @@ interface SidePanelProps {
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onRenameConversation: (id: string, name: string) => void;
+  // Document props
+  selectedDocumentId?: string | null;
+  onSelectDocument?: (docId: string) => void;
 }
 
 export function SidePanel({
@@ -21,6 +24,8 @@ export function SidePanel({
   onSelectConversation,
   onDeleteConversation,
   onRenameConversation,
+  selectedDocumentId,
+  onSelectDocument,
 }: SidePanelProps) {
   return (
     <div className="w-64 bg-surface border-r border-gray-700 flex flex-col h-full">
@@ -34,7 +39,12 @@ export function SidePanel({
           onRenameConversation={onRenameConversation}
         />
       )}
-      {activeActivity === "documents" && <DocumentsPanel />}
+      {activeActivity === "documents" && (
+        <DocumentsPanel
+          selectedDocumentId={selectedDocumentId}
+          onSelectDocument={onSelectDocument}
+        />
+      )}
     </div>
   );
 }
