@@ -426,6 +426,29 @@ impl SqliteStore {
         Ok(user)
     }
 
+    /// Get or create a user by email
+    pub fn get_or_create_user_by_email(&self, email: &str) -> Result<UserInfo> {
+        // Try to get existing user first
+        if let Some(user) = self.get_user_by_email(email)? {
+            return Ok(user);
+        }
+
+        // Create new user
+        let conn = self.conn.lock().unwrap();
+        let id = Uuid::new_v4().to_string();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+            params![&id, email, now, now],
+        )?;
+
+        Ok(UserInfo {
+            id,
+            email: email.to_string(),
+        })
+    }
+
     /// List all users in the database
     pub fn list_users(&self) -> Result<Vec<UserInfo>> {
         let conn = self.conn.lock().unwrap();

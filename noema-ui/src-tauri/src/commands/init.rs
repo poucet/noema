@@ -188,11 +188,10 @@ async fn init_user(state: &AppState) -> Result<(), String> {
     // First check if user email is explicitly configured in settings
     let settings = config::Settings::load();
     let user = if let Some(email) = settings.user_email {
-        // User has configured a specific email - use that
+        // User has configured a specific email - get or create that user
         store
-            .get_user_by_email(&email)
-            .map_err(|e| format!("Failed to query user: {}", e))?
-            .ok_or_else(|| format!("User not found: {}. Create the user in Episteme first.", email))?
+            .get_or_create_user_by_email(&email)
+            .map_err(|e| format!("Failed to get/create user: {}", e))?
     } else {
         // No email configured - use smart selection logic
         let users = store
