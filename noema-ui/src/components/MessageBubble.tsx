@@ -198,36 +198,65 @@ function ContentBlock({ block, onDocumentClick }: ContentBlockProps) {
   return null;
 }
 
-// Alternates tabs component for assistant messages with multiple model responses
-function AlternatesTabs({
+// Alternates selector component for assistant messages with multiple model responses
+// Separates "viewing" (preview) from "selecting" (committing to database)
+function AlternatesSelector({
   alternates,
   spanSetId,
-  onSwitchAlternate,
+  previewSpanId,
+  onPreview,
+  onConfirmSelection,
 }: {
   alternates: AlternateInfo[];
   spanSetId: string;
-  onSwitchAlternate?: (spanSetId: string, spanId: string) => void;
+  previewSpanId: string | null;
+  onPreview: (spanId: string) => void;
+  onConfirmSelection?: (spanSetId: string, spanId: string) => void;
 }) {
+  // Find which is the saved selection and which is being previewed
+  const savedSelection = alternates.find(a => a.isSelected);
+  const currentlyViewing = previewSpanId
+    ? alternates.find(a => a.spanId === previewSpanId)
+    : savedSelection;
+  const isPreviewingDifferent = previewSpanId && previewSpanId !== savedSelection?.spanId;
+
   return (
-    <div className="flex items-center gap-1 mb-2 pb-2 border-b border-gray-700 overflow-x-auto">
-      {alternates.map((alt) => (
+    <div className="flex flex-wrap items-center gap-2 mb-3 pb-2 border-b border-gray-600">
+      {alternates.map((alt) => {
+        const isViewing = currentlyViewing?.spanId === alt.spanId;
+        const isSaved = alt.isSelected;
+        return (
+          <button
+            key={alt.spanId}
+            onClick={() => onPreview(alt.spanId)}
+            className={`px-3 py-1.5 text-xs rounded-md transition-all whitespace-nowrap flex items-center gap-1.5 border ${
+              isViewing
+                ? "bg-teal-600 text-white font-semibold border-teal-500 shadow-sm"
+                : "bg-elevated text-foreground hover:bg-surface hover:border-gray-500 cursor-pointer border-gray-600"
+            }`}
+            title={isSaved ? `${alt.modelId || "Model"} (saved)` : `Preview ${alt.modelId || "Model"}`}
+          >
+            {isSaved && (
+              <svg className="w-3 h-3 text-teal-300" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+            {alt.modelDisplayName || alt.modelId?.split("/").pop() || "Model"}
+          </button>
+        );
+      })}
+      {/* Confirm selection icon button - only show when previewing a different response */}
+      {isPreviewingDifferent && onConfirmSelection && (
         <button
-          key={alt.spanId}
-          onClick={() => {
-            if (!alt.isSelected && onSwitchAlternate) {
-              onSwitchAlternate(spanSetId, alt.spanId);
-            }
-          }}
-          className={`px-2 py-1 text-xs rounded transition-colors whitespace-nowrap ${
-            alt.isSelected
-              ? "bg-teal-600 text-white"
-              : "bg-elevated text-muted hover:bg-surface hover:text-foreground"
-          }`}
-          title={alt.modelId || "Unknown model"}
+          onClick={() => onConfirmSelection(spanSetId, previewSpanId!)}
+          className="p-1.5 bg-teal-600 text-white rounded hover:bg-teal-500 transition-colors"
+          title="Use this response"
         >
-          {alt.modelDisplayName || alt.modelId?.split("/").pop() || "Model"}
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
         </button>
-      ))}
+      )}
     </div>
   );
 }
@@ -237,12 +266,57 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate }: M
   const isSystem = message.role === "system";
   const hasAlternates = message.alternates && message.alternates.length > 1;
 
+  // Local preview state - which alternate we're viewing (null = show saved selection)
+  const [previewSpanId, setPreviewSpanId] = useState<string | null>(null);
+  const [previewContent, setPreviewContent] = useState<DisplayContent[] | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  // Handle preview - fetch content for the alternate
+  const handlePreview = async (spanId: string) => {
+    // If clicking the saved selection, clear preview
+    const savedSpanId = message.alternates?.find(a => a.isSelected)?.spanId;
+    if (spanId === savedSpanId) {
+      setPreviewSpanId(null);
+      setPreviewContent(null);
+      return;
+    }
+
+    // Otherwise, fetch and preview the alternate
+    setPreviewSpanId(spanId);
+    setIsLoadingPreview(true);
+    try {
+      // Dynamic import to avoid circular dependency
+      const { getSpanMessages } = await import("../tauri");
+      const msgs = await getSpanMessages(spanId);
+      if (msgs.length > 0) {
+        setPreviewContent(msgs[0].content);
+      }
+    } catch (err) {
+      console.error("Failed to load preview:", err);
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  };
+
+  // Handle confirm - commit the selection to database
+  const handleConfirmSelection = async (spanSetId: string, spanId: string) => {
+    if (onSwitchAlternate) {
+      await onSwitchAlternate(spanSetId, spanId);
+    }
+    // Clear preview state after confirming
+    setPreviewSpanId(null);
+    setPreviewContent(null);
+  };
+
+  // Determine which content to show
+  const contentToShow = previewContent || message.content;
+
   return (
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}
     >
       <div
-        className={`max-w-[80%] px-4 py-3 rounded-2xl ${
+        className={`max-w-[85%] px-4 py-3 rounded-2xl ${
           isUser
             ? "bg-teal-600 text-white"
             : isSystem
@@ -250,18 +324,27 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate }: M
             : "bg-surface text-foreground"
         }`}
       >
-        {/* Show alternates tabs for assistant messages with multiple responses */}
+        {/* Show alternates selector for assistant messages with multiple responses */}
         {hasAlternates && message.spanSetId && (
-          <AlternatesTabs
+          <AlternatesSelector
             alternates={message.alternates!}
             spanSetId={message.spanSetId}
-            onSwitchAlternate={onSwitchAlternate}
+            previewSpanId={previewSpanId}
+            onPreview={handlePreview}
+            onConfirmSelection={handleConfirmSelection}
           />
         )}
         <div className="prose prose-sm prose-invert max-w-none">
-          {message.content.map((block, i) => (
-            <ContentBlock key={i} block={block} onDocumentClick={onDocumentClick} />
-          ))}
+          {isLoadingPreview ? (
+            <div className="flex items-center gap-2 text-muted">
+              <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+              Loading preview...
+            </div>
+          ) : (
+            contentToShow.map((block, i) => (
+              <ContentBlock key={i} block={block} onDocumentClick={onDocumentClick} />
+            ))
+          )}
         </div>
       </div>
     </div>

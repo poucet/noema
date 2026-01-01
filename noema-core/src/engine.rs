@@ -36,6 +36,8 @@ pub enum EngineEvent {
     },
     /// All parallel models have completed
     ParallelComplete {
+        /// The span set ID for this parallel response group
+        span_set_id: String,
         /// Info about each model's response for display
         alternates: Vec<ParallelAlternateInfo>,
     },
@@ -49,6 +51,7 @@ pub enum EngineEvent {
 /// Information about a parallel model response (for UI display)
 #[derive(Debug, Clone)]
 pub struct ParallelAlternateInfo {
+    pub span_id: String,
     pub model_id: String,
     pub model_display_name: String,
     pub message_count: usize,
@@ -232,43 +235,52 @@ where
                     // 4. Wait for all models to complete
                     let results = join_all(handles).await;
 
-                    // 5. Collect successful alternates and save first one to session
-                    let mut alternates = Vec::new();
-                    let mut first_successful = true;
-                    let mut first_response_messages: Option<Vec<ChatMessage>> = None;
+                    // 5. Collect successful responses for parallel save
+                    let mut successful_responses: Vec<(String, Vec<ChatMessage>)> = Vec::new();
 
                     for result in results {
                         if let Ok((model_id, Ok(messages))) = result {
-                            let display_name = model_id.split('/').last().unwrap_or(&model_id).to_string();
-                            alternates.push(ParallelAlternateInfo {
-                                model_id,
+                            successful_responses.push((model_id, messages));
+                        }
+                    }
+
+                    // 6. Commit ALL responses as parallel alternates and get span info
+                    // This saves each model's response as a separate span in the same span_set
+                    let mut span_set_id = String::new();
+                    let mut span_ids: Vec<String> = Vec::new();
+
+                    if !successful_responses.is_empty() {
+                        let mut sess = session.lock().await;
+                        match sess.commit_parallel_responses(&successful_responses, 0).await {
+                            Ok((set_id, ids)) => {
+                                span_set_id = set_id;
+                                span_ids = ids;
+                            }
+                            Err(e) => {
+                                let _ = event_tx.send(EngineEvent::Error(format!("Failed to save parallel responses: {}", e)));
+                            }
+                        }
+                    }
+
+                    // 7. Build alternates with span info
+                    let alternates: Vec<ParallelAlternateInfo> = successful_responses
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, (model_id, messages))| {
+                            let display_name = model_id.split('/').last().unwrap_or(model_id).to_string();
+                            let span_id = span_ids.get(idx).cloned().unwrap_or_default();
+                            ParallelAlternateInfo {
+                                span_id,
+                                model_id: model_id.clone(),
                                 model_display_name: display_name,
                                 message_count: messages.len(),
-                                is_selected: first_successful,
-                            });
-                            // Save first successful response for committing to session
-                            if first_successful {
-                                first_response_messages = Some(messages);
+                                is_selected: idx == 0,
                             }
-                            first_successful = false;
-                        }
-                    }
+                        })
+                        .collect();
 
-                    // 6. Commit the first successful response to the session
-                    // This ensures getMessages() returns the conversation with a response
-                    if let Some(response_msgs) = first_response_messages {
-                        let mut sess = session.lock().await;
-                        let mut tx = sess.begin();
-                        for msg in response_msgs {
-                            tx.add(msg);
-                        }
-                        if let Err(e) = sess.commit(tx).await {
-                            let _ = event_tx.send(EngineEvent::Error(format!("Failed to save response: {}", e)));
-                        }
-                    }
-
-                    // 7. Send parallel complete event
-                    let _ = event_tx.send(EngineEvent::ParallelComplete { alternates });
+                    // 8. Send parallel complete event with span info
+                    let _ = event_tx.send(EngineEvent::ParallelComplete { span_set_id, alternates });
                 }
                 EngineCommand::SetModel(new_model) => {
                     let name = new_model.name().to_string();

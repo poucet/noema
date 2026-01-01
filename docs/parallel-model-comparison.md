@@ -107,20 +107,23 @@ This unified model supports:
 
 ---
 
-### Step 4: MessageBubble Alternates Tabs ✅ COMPLETED
-- Add alternates tabs to MessageBubble
-- Switching tabs changes displayed content
-- Add regenerate button (TODO: not yet implemented)
+### Step 4: MessageBubble Alternates UI ✅ COMPLETED
+- Add alternates selector to MessageBubble
+- Separate preview (viewing) from selection (committing to DB)
+- Minimal tab-based UI with confirm button
 
 **What's done:**
 - [x] `AlternateInfo` type in Rust and TypeScript
 - [x] `get_messages_with_alternates` Tauri command loads messages with span awareness
 - [x] `DisplayMessage` extended with `spanSetId` and `alternates` optional fields
-- [x] `AlternatesTabs` component shows model tabs on messages with alternates
-- [x] Tab switching calls `setSelectedSpan` and reloads messages
-- [x] Messages with alternates show tab bar
-- [x] Clicking tab switches displayed content
-- [x] Selected alternate persists (saved to DB)
+- [x] `AlternatesSelector` component with preview/confirm pattern:
+  - Clicking tab previews content (fetches via `getSpanMessages`)
+  - Checkmark icon on the currently saved selection
+  - Small checkmark icon button appears when previewing a different alternate
+  - Clicking icon button commits selection to database
+- [x] Messages with alternates show tab bar (wraps on narrow screens)
+- [x] Preview content fetched dynamically without affecting saved state
+- [x] Selected alternate persists (saved to DB only on confirm)
 
 **Still TODO:**
 - [ ] Regenerate button on assistant messages

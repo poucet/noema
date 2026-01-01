@@ -283,6 +283,7 @@ pub struct Attachment {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ParallelAlternateInfo {
+    pub span_id: String,
     pub model_id: String,
     pub model_display_name: String,
     pub message_count: usize,
@@ -292,6 +293,7 @@ pub struct ParallelAlternateInfo {
 impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
     fn from(info: noema_core::ParallelAlternateInfo) -> Self {
         Self {
+            span_id: info.span_id,
             model_id: info.model_id,
             model_display_name: info.model_display_name,
             message_count: info.message_count,
@@ -323,6 +325,7 @@ pub struct ParallelModelComplete {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ParallelComplete {
+    pub span_set_id: String,
     pub alternates: Vec<ParallelAlternateInfo>,
 }
 

@@ -1633,6 +1633,123 @@ impl SqliteSession {
         Ok(span_id)
     }
 
+    /// Write multiple model responses as alternates in a single span_set
+    /// This is used for parallel model execution where multiple models respond to the same prompt
+    /// Returns (span_set_id, Vec<span_id>) for the created alternates
+    pub fn write_parallel_responses(
+        &mut self,
+        responses: &[(String, Vec<ChatMessage>)], // Vec of (model_id, messages)
+        selected_index: usize, // Which response to mark as selected
+    ) -> Result<(String, Vec<String>)> {
+        if responses.is_empty() {
+            return Err(anyhow::anyhow!("No responses to write"));
+        }
+
+        // Ensure conversation exists
+        if !self.persisted {
+            let conn = self.conn.lock().unwrap();
+            self.create_conversation_record(&conn)?;
+            drop(conn);
+            self.persisted = true;
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let now = unix_timestamp();
+
+        // Get the main thread
+        let thread_id: String = match conn.query_row(
+            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
+            params![&self.conversation_id],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                let thread_id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
+                    params![&thread_id, &self.conversation_id, now],
+                )?;
+                thread_id
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        // Get next sequence number
+        let sequence_number: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
+                params![&thread_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+
+        // Create a single span_set for all alternates
+        let span_set_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, 'assistant', ?4)",
+            params![&span_set_id, &thread_id, sequence_number, now],
+        )?;
+
+        let mut span_ids = Vec::new();
+        let mut selected_span_id = None;
+
+        // Create a span for each model's response
+        for (idx, (model_id, messages)) in responses.iter().enumerate() {
+            let span_id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![&span_id, &span_set_id, model_id, now],
+            )?;
+
+            // Write messages for this span
+            for (msg_idx, msg) in messages.iter().enumerate() {
+                let msg_id = Uuid::new_v4().to_string();
+                let role = match msg.role {
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    Role::System => "system",
+                };
+                let stored_payload: StoredPayload = msg.payload.clone().into();
+                let content_json = serde_json::to_string(&stored_payload)?;
+                let text_content = msg.get_text();
+
+                conn.execute(
+                    "INSERT INTO span_messages (id, span_id, sequence_number, role, content, text_content, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &text_content, now],
+                )?;
+            }
+
+            if idx == selected_index {
+                selected_span_id = Some(span_id.clone());
+            }
+            span_ids.push(span_id);
+        }
+
+        // Set the selected span
+        if let Some(sel_id) = &selected_span_id {
+            conn.execute(
+                "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
+                params![sel_id, &span_set_id],
+            )?;
+        }
+
+        // Update conversation timestamp
+        conn.execute(
+            "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+            params![now, &self.conversation_id],
+        )?;
+
+        drop(conn);
+
+        // Update cache with the selected response messages
+        if selected_index < responses.len() {
+            self.cache.extend(responses[selected_index].1.clone());
+        }
+
+        Ok((span_set_id, span_ids))
+    }
+
     fn create_conversation_record(&self, conn: &Connection) -> Result<()> {
         let now = unix_timestamp();
 
@@ -1711,6 +1828,19 @@ impl SessionStore for SqliteSession {
         }
         self.cache.clear();
         Ok(())
+    }
+
+    /// Override to properly save parallel responses as separate spans
+    async fn commit_parallel_responses(
+        &mut self,
+        responses: &[(String, Vec<ChatMessage>)],
+        selected_index: usize,
+    ) -> Result<(String, Vec<String>)> {
+        if responses.is_empty() {
+            return Ok((String::new(), Vec::new()));
+        }
+        let (span_set_id, span_ids) = self.write_parallel_responses(responses, selected_index)?;
+        Ok((span_set_id, span_ids))
     }
 }
 

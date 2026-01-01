@@ -265,10 +265,11 @@ pub fn start_engine_event_loop(app: AppHandle) {
                         "messages": display_messages
                     }));
                 }
-                Some(EngineEvent::ParallelComplete { alternates }) => {
+                Some(EngineEvent::ParallelComplete { span_set_id, alternates }) => {
                     let alternates_json: Vec<serde_json::Value> = alternates
                         .iter()
                         .map(|a| serde_json::json!({
+                            "spanId": a.span_id,
                             "modelId": a.model_id,
                             "modelDisplayName": a.model_display_name,
                             "messageCount": a.message_count,
@@ -276,6 +277,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                         }))
                         .collect();
                     let _ = app.emit("parallel_complete", serde_json::json!({
+                        "spanSetId": span_set_id,
                         "alternates": alternates_json
                     }));
                     *state.is_processing.lock().await = false;

@@ -29,6 +29,7 @@ function App() {
   const [isParallelMode, setIsParallelMode] = useState(false);
   const [parallelStreaming, setParallelStreaming] = useState<Map<string, DisplayMessage>>(new Map());
   const [parallelAlternates, setParallelAlternates] = useState<tauri.ParallelAlternateInfo[]>([]);
+  const [parallelSpanSetId, setParallelSpanSetId] = useState<string>("");
   // Completed parallel responses (preserved after streaming ends for display)
   const [completedParallelResponses, setCompletedParallelResponses] = useState<Map<string, DisplayMessage[]>>(new Map());
   // Ref to store parallel responses immediately (bypasses React batching)
@@ -186,12 +187,13 @@ function App() {
       }
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onParallelComplete(({ alternates }) => {
+    tauri.onParallelComplete(({ spanSetId, alternates }) => {
       // Skip if ref is empty (duplicate event from React StrictMode)
       if (parallelResponsesRef.current.size === 0) {
         return;
       }
 
+      setParallelSpanSetId(spanSetId);
       setParallelAlternates(alternates);
       setIsLoading(false);
       // Copy from ref (which has complete data) to state for display
@@ -354,11 +356,14 @@ function App() {
   };
 
   const handleSwitchAlternate = async (spanSetId: string, spanId: string) => {
+    appLog.info(`handleSwitchAlternate called: spanSetId=${spanSetId}, spanId=${spanId}`);
     try {
       // Update the selected span in the database
       await tauri.setSelectedSpan(spanSetId, spanId);
+      appLog.info("setSelectedSpan succeeded, reloading messages...");
       // Reload messages to get the updated content
       const msgs = await tauri.getMessagesWithAlternates();
+      appLog.info(`Reloaded ${msgs.length} messages`);
       setMessages(msgs);
     } catch (err) {
       appLog.error("Switch alternate error", String(err));
@@ -569,47 +574,82 @@ function App() {
                         </div>
                       </div>
                     )}
-                    {/* Completed parallel responses - tabbed comparison after all models finish */}
+                    {/* Completed parallel responses - side-by-side comparison after all models finish */}
                     {!isParallelMode && completedParallelResponses.size > 0 && (
                       <div className="mb-4">
-                        {/* Tab bar */}
-                        <div className="flex items-center gap-1 mb-3 border-b border-gray-700">
-                          {Array.from(completedParallelResponses.keys()).map((modelId) => (
-                            <button
-                              key={modelId}
-                              onClick={() => setSelectedComparisonTab(modelId)}
-                              className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                                selectedComparisonTab === modelId
-                                  ? "text-teal-400 border-teal-400"
-                                  : "text-muted border-transparent hover:text-foreground hover:border-gray-500"
-                              }`}
-                            >
-                              {modelId.split('/').pop()}
-                            </button>
-                          ))}
-                          <div className="flex-1" />
-                          <button
-                            onClick={() => {
-                              setCompletedParallelResponses(new Map());
-                              setSelectedComparisonTab(null);
-                            }}
-                            className="px-2 py-1 text-xs text-muted hover:text-foreground"
-                          >
-                            Dismiss
-                          </button>
+                        <div className="text-sm text-muted mb-2">
+                          Compare responses and pick one:
                         </div>
-                        {/* Tab content */}
-                        {selectedComparisonTab && completedParallelResponses.get(selectedComparisonTab) && (
-                          <div className="bg-surface rounded-lg p-3 border border-gray-700">
-                            {completedParallelResponses.get(selectedComparisonTab)!.map((msg, idx) => (
-                              <MessageBubble
-                                key={idx}
-                                message={msg}
-                                onDocumentClick={setActiveDocumentId}
-                              />
-                            ))}
-                          </div>
-                        )}
+                        {/* Side-by-side grid of all responses */}
+                        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${completedParallelResponses.size}, minmax(0, 1fr))` }}>
+                          {Array.from(completedParallelResponses.entries()).map(([modelId, messages], index) => {
+                            const alternate = parallelAlternates.find(a => a.modelId === modelId);
+                            const isSelected = alternate?.isSelected ?? (index === 0);
+                            return (
+                              <div
+                                key={modelId}
+                                className={`bg-surface rounded-lg overflow-hidden ${
+                                  isSelected
+                                    ? "border-2 border-teal-500"
+                                    : "border border-gray-700"
+                                }`}
+                              >
+                                {/* Model header with pick button */}
+                                <div className={`flex items-center justify-between px-3 py-2 border-b ${
+                                  isSelected ? "bg-teal-900/30 border-teal-600" : "bg-elevated border-gray-700"
+                                }`}>
+                                  <span className="text-sm font-medium text-foreground flex items-center gap-1">
+                                    {isSelected && (
+                                      <svg className="w-4 h-4 text-teal-400" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                    )}
+                                    {modelId.split('/').pop()}
+                                    {isSelected && <span className="text-xs text-teal-400 ml-1">(current)</span>}
+                                  </span>
+                                  <button
+                                    onClick={async () => {
+                                      // Find the span_id for this model from parallelAlternates
+                                      const alt = parallelAlternates.find(a => a.modelId === modelId);
+                                      appLog.info(`Use this clicked: modelId=${modelId}, spanSetId=${parallelSpanSetId}, alternate=${JSON.stringify(alt)}, all=${JSON.stringify(parallelAlternates)}`);
+                                      if (alt && parallelSpanSetId) {
+                                        // Set this alternate as the selected one in the database
+                                        await tauri.setSelectedSpan(parallelSpanSetId, alt.spanId);
+                                      } else {
+                                        appLog.warn(`Could not find alternate for modelId=${modelId}`);
+                                      }
+                                      // Clear comparison view and reload messages
+                                      setCompletedParallelResponses(new Map());
+                                      setSelectedComparisonTab(null);
+                                      setParallelSpanSetId("");
+                                      setParallelAlternates([]);
+                                      // Reload to get the persisted state with new selection
+                                      const msgs = await tauri.getMessagesWithAlternates();
+                                      setMessages(msgs);
+                                    }}
+                                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                                      isSelected
+                                        ? "bg-teal-700 text-teal-100 hover:bg-teal-600"
+                                        : "bg-teal-600 text-white hover:bg-teal-500"
+                                    }`}
+                                  >
+                                    {isSelected ? "Keep this" : "Use this"}
+                                  </button>
+                                </div>
+                                {/* Response content */}
+                                <div className="p-3 max-h-96 overflow-y-auto">
+                                  {messages.map((msg, idx) => (
+                                    <MessageBubble
+                                      key={idx}
+                                      message={msg}
+                                      onDocumentClick={setActiveDocumentId}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                     {isLoading && !streamingMessage && !isParallelMode && (

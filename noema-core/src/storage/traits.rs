@@ -71,4 +71,26 @@ pub trait SessionStore: Send {
     fn is_empty(&self) -> bool {
         self.messages().is_empty()
     }
+
+    /// Write multiple model responses as alternates in a single position
+    /// Used for parallel model execution.
+    /// Returns (span_set_id, Vec<span_id>) for each model's response.
+    /// Default implementation falls back to just committing the first response
+    /// and returns empty strings (no span support in default implementation).
+    async fn commit_parallel_responses(
+        &mut self,
+        responses: &[(String, Vec<ChatMessage>)],
+        selected_index: usize,
+    ) -> anyhow::Result<(String, Vec<String>)> {
+        // Default: just commit the selected response using the regular method
+        if let Some((_, messages)) = responses.get(selected_index) {
+            let mut tx = self.begin();
+            for msg in messages {
+                tx.add(msg.clone());
+            }
+            self.commit(tx).await?;
+        }
+        // Return empty span info for non-SQLite implementations
+        Ok((String::new(), vec![String::new(); responses.len()]))
+    }
 }

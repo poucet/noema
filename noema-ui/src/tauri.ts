@@ -153,6 +153,7 @@ export interface ParallelModelCompletePayload {
 }
 
 export interface ParallelAlternateInfo {
+  spanId: string;
   modelId: string;
   modelDisplayName: string;
   messageCount: number;
@@ -160,6 +161,7 @@ export interface ParallelAlternateInfo {
 }
 
 export interface ParallelCompletePayload {
+  spanSetId: string;
   alternates: ParallelAlternateInfo[];
 }
 
