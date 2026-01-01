@@ -1113,6 +1113,20 @@ impl SqliteStore {
         }))
     }
 
+    /// Get the main thread ID for a conversation
+    pub fn get_main_thread_id(&self, conversation_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        match conn.query_row(
+            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
+            params![conversation_id],
+            |row| row.get(0),
+        ) {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Get all SpanSets for a thread in order
     pub fn get_thread_span_sets(&self, thread_id: &str) -> Result<Vec<SpanSetInfo>> {
         let conn = self.conn.lock().unwrap();
@@ -1506,6 +1520,30 @@ impl SqliteSession {
     /// Get the user ID (if set)
     pub fn user_id(&self) -> Option<&str> {
         self.user_id.as_deref()
+    }
+
+    /// Get the main thread ID for this conversation (creates one if it doesn't exist)
+    pub fn get_or_create_thread_id(&self) -> Result<String> {
+        let conn = self.conn.lock().unwrap();
+        let now = unix_timestamp();
+
+        match conn.query_row(
+            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
+            params![&self.conversation_id],
+            |row| row.get(0),
+        ) {
+            Ok(id) => Ok(id),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // Create main thread for new conversation
+                let thread_id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
+                    params![&thread_id, &self.conversation_id, now],
+                )?;
+                Ok(thread_id)
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Write messages as spans to the database

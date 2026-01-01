@@ -107,16 +107,23 @@ This unified model supports:
 
 ---
 
-### Step 4: MessageBubble Alternates Tabs (TODO)
+### Step 4: MessageBubble Alternates Tabs ✅ COMPLETED
 - Add alternates tabs to MessageBubble
 - Switching tabs changes displayed content
-- Add regenerate button
+- Add regenerate button (TODO: not yet implemented)
 
-**Test:**
-- [ ] Messages with alternates show tab bar
-- [ ] Clicking tab switches displayed content
-- [ ] Selected alternate persists (saved to DB)
-- [ ] Regenerate button appears on assistant messages
+**What's done:**
+- [x] `AlternateInfo` type in Rust and TypeScript
+- [x] `get_messages_with_alternates` Tauri command loads messages with span awareness
+- [x] `DisplayMessage` extended with `spanSetId` and `alternates` optional fields
+- [x] `AlternatesTabs` component shows model tabs on messages with alternates
+- [x] Tab switching calls `setSelectedSpan` and reloads messages
+- [x] Messages with alternates show tab bar
+- [x] Clicking tab switches displayed content
+- [x] Selected alternate persists (saved to DB)
+
+**Still TODO:**
+- [ ] Regenerate button on assistant messages
 
 ---
 

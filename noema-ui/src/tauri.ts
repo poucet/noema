@@ -450,3 +450,8 @@ export async function getSpanMessages(
 ): Promise<DisplayMessage[]> {
   return invoke<DisplayMessage[]>("get_span_messages", { spanId });
 }
+
+// Get messages with alternates info (for loading conversations with span awareness)
+export async function getMessagesWithAlternates(): Promise<DisplayMessage[]> {
+  return invoke<DisplayMessage[]>("get_messages_with_alternates");
+}

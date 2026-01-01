@@ -61,12 +61,30 @@ pub enum DisplayToolResultContent {
     Audio { data: String, mime_type: String },
 }
 
+/// Information about an alternate response for a span set
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct AlternateInfo {
+    pub span_id: String,
+    pub model_id: Option<String>,
+    pub model_display_name: Option<String>,
+    pub message_count: usize,
+    pub is_selected: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct DisplayMessage {
     pub role: String,
     pub content: Vec<DisplayContent>,
+    /// Span set ID this message belongs to (for switching alternates)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_set_id: Option<String>,
+    /// Available alternates for this message's span set (only populated for assistant messages with alternatives)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternates: Option<Vec<AlternateInfo>>,
 }
 
 impl DisplayMessage {
@@ -87,6 +105,8 @@ impl DisplayMessage {
         Self {
             role: role.to_string(),
             content,
+            span_set_id: None,
+            alternates: None,
         }
     }
 
@@ -100,6 +120,23 @@ impl DisplayMessage {
         Self {
             role: "user".to_string(),
             content,
+            span_set_id: None,
+            alternates: None,
+        }
+    }
+
+    /// Create a DisplayMessage with alternates info from storage
+    pub fn with_alternates(
+        role: &str,
+        content: Vec<DisplayContent>,
+        span_set_id: String,
+        alternates: Vec<AlternateInfo>,
+    ) -> Self {
+        Self {
+            role: role.to_string(),
+            content,
+            span_set_id: Some(span_set_id),
+            alternates: if alternates.len() > 1 { Some(alternates) } else { None },
         }
     }
 }
@@ -308,6 +345,7 @@ mod ts_export {
         ConversationInfo::export_all().expect("Failed to export ConversationInfo");
         DisplayContent::export_all().expect("Failed to export DisplayContent");
         DisplayToolResultContent::export_all().expect("Failed to export DisplayToolResultContent");
+        AlternateInfo::export_all().expect("Failed to export AlternateInfo");
         DisplayMessage::export_all().expect("Failed to export DisplayMessage");
         McpServerInfo::export_all().expect("Failed to export McpServerInfo");
         McpToolInfo::export_all().expect("Failed to export McpToolInfo");

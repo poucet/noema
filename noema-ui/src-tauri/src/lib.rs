@@ -183,6 +183,7 @@ pub fn run() {
             commands::chat::get_span_set_alternates,
             commands::chat::set_selected_span,
             commands::chat::get_span_messages,
+            commands::chat::get_messages_with_alternates,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,

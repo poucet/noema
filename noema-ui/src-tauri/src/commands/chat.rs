@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{Attachment, ConversationInfo, DisplayMessage, ModelInfo};
+use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, ModelInfo, stored_content_to_display};
 
 /// Referenced document for RAG context
 #[derive(Debug, Clone, Deserialize)]
@@ -617,8 +617,6 @@ pub async fn get_span_messages(
     state: State<'_, AppState>,
     span_id: String,
 ) -> Result<Vec<DisplayMessage>, String> {
-    use crate::types::stored_content_to_display;
-
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
@@ -638,7 +636,88 @@ pub async fn get_span_messages(
             DisplayMessage {
                 role: role.to_string(),
                 content,
+                span_set_id: None,
+                alternates: None,
             }
         })
         .collect())
+}
+
+/// Get all messages for the current conversation with alternates info
+/// This is the main entry point for loading a conversation with full span awareness
+#[tauri::command]
+pub async fn get_messages_with_alternates(state: State<'_, AppState>) -> Result<Vec<DisplayMessage>, String> {
+    let engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+
+    let session_arc = engine.get_session();
+    let session = session_arc.lock().await;
+    let conversation_id = session.conversation_id().to_string();
+    drop(session); // Release session lock before accessing store
+
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    // Get the main thread for this conversation
+    let thread_id = store
+        .get_main_thread_id(&conversation_id)
+        .map_err(|e| format!("Failed to get thread: {}", e))?;
+
+    let thread_id = match thread_id {
+        Some(id) => id,
+        None => return Ok(vec![]), // No thread yet = no messages
+    };
+
+    // Get all span sets for this thread
+    let span_sets = store
+        .get_thread_span_sets(&thread_id)
+        .map_err(|e| format!("Failed to get span sets: {}", e))?;
+
+    let mut result = Vec::new();
+
+    for span_set_info in span_sets {
+        // Get full content for this span set
+        let span_set = store
+            .get_span_set_with_content(&span_set_info.id)
+            .map_err(|e| format!("Failed to get span set content: {}", e))?;
+
+        if let Some(span_set) = span_set {
+            // Convert alternates to AlternateInfo
+            let alternates: Vec<AlternateInfo> = span_set
+                .alternates
+                .iter()
+                .map(|a| {
+                    let model_display_name = a.model_id.as_ref().map(|id| {
+                        id.split('/').last().unwrap_or(id).to_string()
+                    });
+                    AlternateInfo {
+                        span_id: a.id.clone(),
+                        model_id: a.model_id.clone(),
+                        model_display_name,
+                        message_count: a.message_count,
+                        is_selected: a.is_selected,
+                    }
+                })
+                .collect();
+
+            // Convert messages to display content
+            for msg in span_set.messages {
+                let msg_role = match msg.role {
+                    llm::Role::User => "user",
+                    llm::Role::Assistant => "assistant",
+                    llm::Role::System => "system",
+                };
+                let content = msg.payload.content.iter().map(stored_content_to_display).collect();
+
+                result.push(DisplayMessage::with_alternates(
+                    msg_role,
+                    content,
+                    span_set_info.id.clone(),
+                    alternates.clone(),
+                ));
+            }
+        }
+    }
+
+    Ok(result)
 }

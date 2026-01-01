@@ -92,7 +92,8 @@ function App() {
         const convId = await tauri.getCurrentConversationId();
         setCurrentConversationId(convId);
 
-        const msgs = await tauri.getMessages();
+        // Load messages with alternates info for span awareness
+        const msgs = await tauri.getMessagesWithAlternates();
         setMessages(msgs);
 
         // Load models in background
@@ -352,6 +353,18 @@ function App() {
     appLog.info("Send to multiple models - use the chat input to send");
   };
 
+  const handleSwitchAlternate = async (spanSetId: string, spanId: string) => {
+    try {
+      // Update the selected span in the database
+      await tauri.setSelectedSpan(spanSetId, spanId);
+      // Reload messages to get the updated content
+      const msgs = await tauri.getMessagesWithAlternates();
+      setMessages(msgs);
+    } catch (err) {
+      appLog.error("Switch alternate error", String(err));
+      setError(String(err));
+    }
+  };
 
   // Retry initialization after setup
   const retryInit = async () => {
@@ -528,6 +541,7 @@ function App() {
                         key={i}
                         message={msg}
                         onDocumentClick={setActiveDocumentId}
+                        onSwitchAlternate={handleSwitchAlternate}
                       />
                     ))}
                     {streamingMessage && !isParallelMode && (

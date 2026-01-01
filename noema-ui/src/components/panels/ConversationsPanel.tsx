@@ -11,7 +11,8 @@ interface ConversationsPanelProps {
 }
 
 function formatDate(timestamp: number): string {
-  const date = new Date(timestamp);
+  // Backend sends unix seconds, JavaScript expects milliseconds
+  const date = new Date(timestamp * 1000);
   const now = new Date();
   const diffDays = Math.floor(
     (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)

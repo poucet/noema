@@ -3,13 +3,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import type { DisplayMessage, DisplayContent, DisplayToolResultContent } from "../types";
+import type { DisplayMessage, DisplayContent, DisplayToolResultContent, AlternateInfo } from "../types";
 import { AudioPlayer } from "./AudioPlayer";
 import { ImageViewer } from "./ImageViewer";
 
 interface MessageBubbleProps {
   message: DisplayMessage;
   onDocumentClick?: (docId: string) => void;
+  onSwitchAlternate?: (spanSetId: string, spanId: string) => void;
 }
 
 interface MarkdownTextProps {
@@ -197,9 +198,44 @@ function ContentBlock({ block, onDocumentClick }: ContentBlockProps) {
   return null;
 }
 
-export function MessageBubble({ message, onDocumentClick }: MessageBubbleProps) {
+// Alternates tabs component for assistant messages with multiple model responses
+function AlternatesTabs({
+  alternates,
+  spanSetId,
+  onSwitchAlternate,
+}: {
+  alternates: AlternateInfo[];
+  spanSetId: string;
+  onSwitchAlternate?: (spanSetId: string, spanId: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 mb-2 pb-2 border-b border-gray-700 overflow-x-auto">
+      {alternates.map((alt) => (
+        <button
+          key={alt.spanId}
+          onClick={() => {
+            if (!alt.isSelected && onSwitchAlternate) {
+              onSwitchAlternate(spanSetId, alt.spanId);
+            }
+          }}
+          className={`px-2 py-1 text-xs rounded transition-colors whitespace-nowrap ${
+            alt.isSelected
+              ? "bg-teal-600 text-white"
+              : "bg-elevated text-muted hover:bg-surface hover:text-foreground"
+          }`}
+          title={alt.modelId || "Unknown model"}
+        >
+          {alt.modelDisplayName || alt.modelId?.split("/").pop() || "Model"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function MessageBubble({ message, onDocumentClick, onSwitchAlternate }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
+  const hasAlternates = message.alternates && message.alternates.length > 1;
 
   return (
     <div
@@ -214,6 +250,14 @@ export function MessageBubble({ message, onDocumentClick }: MessageBubbleProps) 
             : "bg-surface text-foreground"
         }`}
       >
+        {/* Show alternates tabs for assistant messages with multiple responses */}
+        {hasAlternates && message.spanSetId && (
+          <AlternatesTabs
+            alternates={message.alternates!}
+            spanSetId={message.spanSetId}
+            onSwitchAlternate={onSwitchAlternate}
+          />
+        )}
         <div className="prose prose-sm prose-invert max-w-none">
           {message.content.map((block, i) => (
             <ContentBlock key={i} block={block} onDocumentClick={onDocumentClick} />

@@ -27,9 +27,22 @@ export type DisplayToolResultContent =
   | { image: { data: string; mimeType: string } }
   | { audio: { data: string; mimeType: string } };
 
+// Information about an alternate response for a span set
+export interface AlternateInfo {
+  spanId: string;
+  modelId: string | null;
+  modelDisplayName: string | null;
+  messageCount: number;
+  isSelected: boolean;
+}
+
 export interface DisplayMessage {
   role: "user" | "assistant" | "system";
   content: DisplayContent[];
+  // Span set ID this message belongs to (for switching alternates)
+  spanSetId?: string;
+  // Available alternates for this message's span set (only populated for assistant messages with alternatives)
+  alternates?: AlternateInfo[];
 }
 
 // Helper to extract text from content

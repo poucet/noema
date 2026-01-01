@@ -17,10 +17,10 @@ export function FavoriteModelChips({
   onToggleSelection,
   onSendToModels,
 }: FavoriteModelChipsProps) {
-  // Get full model info for favorites
-  const favoriteModels = models.filter((m) =>
-    favoriteModelIds.includes(`${m.provider}/${m.id}`)
-  );
+  // Get full model info for favorites, preserving the order from favoriteModelIds
+  const favoriteModels = favoriteModelIds
+    .map((favId) => models.find((m) => `${m.provider}/${m.id}` === favId))
+    .filter((m): m is ModelInfo => m !== undefined);
 
   if (favoriteModels.length === 0) {
     return null;
