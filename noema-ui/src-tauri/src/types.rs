@@ -84,6 +84,9 @@ pub struct DisplayMessage {
     /// Span set ID this message belongs to (for switching alternates)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span_set_id: Option<String>,
+    /// Span ID for this specific message (for fork/edit actions)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<String>,
     /// Available alternates for this message's span set (only populated for assistant messages with alternatives)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alternates: Option<Vec<AlternateInfo>>,
@@ -108,6 +111,7 @@ impl DisplayMessage {
             role: role.to_string(),
             content,
             span_set_id: None,
+            span_id: None,
             alternates: None,
         }
     }
@@ -123,6 +127,7 @@ impl DisplayMessage {
             role: "user".to_string(),
             content,
             span_set_id: None,
+            span_id: None,
             alternates: None,
         }
     }
@@ -132,12 +137,14 @@ impl DisplayMessage {
         role: &str,
         content: Vec<DisplayContent>,
         span_set_id: String,
+        span_id: String,
         alternates: Vec<AlternateInfo>,
     ) -> Self {
         Self {
             role: role.to_string(),
             content,
             span_set_id: Some(span_set_id),
+            span_id: Some(span_id),
             alternates: if alternates.len() > 1 { Some(alternates) } else { None },
         }
     }
@@ -304,6 +311,35 @@ impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
     }
 }
 
+/// Information about a thread/branch in a conversation
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ThreadInfoResponse {
+    pub id: String,
+    pub conversation_id: String,
+    pub parent_span_id: Option<String>,
+    pub name: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+    /// Whether this is the main thread (no parent_span_id)
+    pub is_main: bool,
+}
+
+impl From<noema_core::ThreadInfo> for ThreadInfoResponse {
+    fn from(info: noema_core::ThreadInfo) -> Self {
+        Self {
+            id: info.id,
+            conversation_id: info.conversation_id,
+            parent_span_id: info.parent_span_id.clone(),
+            name: info.name,
+            status: info.status,
+            created_at: info.created_at,
+            is_main: info.parent_span_id.is_none(),
+        }
+    }
+}
+
 /// Streaming message from a specific model during parallel execution
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -361,5 +397,6 @@ mod ts_export {
         ParallelModelComplete::export_all().expect("Failed to export ParallelModelComplete");
         ParallelComplete::export_all().expect("Failed to export ParallelComplete");
         ParallelModelError::export_all().expect("Failed to export ParallelModelError");
+        ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");
     }
 }

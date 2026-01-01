@@ -30,4 +30,4 @@ pub use engine::{ChatEngine, EngineCommand, EngineEvent, ParallelAlternateInfo};
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 pub use storage::{MemorySession, MemoryTransaction, SessionStore, StorageTransaction};
 #[cfg(feature = "sqlite")]
-pub use storage::{ConversationInfo, SqliteSession, SqliteStore};
+pub use storage::{ConversationInfo, SqliteSession, SqliteStore, ThreadInfo};

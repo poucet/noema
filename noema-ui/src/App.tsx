@@ -34,8 +34,8 @@ function App() {
   const [completedParallelResponses, setCompletedParallelResponses] = useState<Map<string, DisplayMessage[]>>(new Map());
   // Ref to store parallel responses immediately (bypasses React batching)
   const parallelResponsesRef = useRef<Map<string, DisplayMessage[]>>(new Map());
-  // Selected tab for parallel comparison view
-  const [selectedComparisonTab, setSelectedComparisonTab] = useState<string | null>(null);
+  // Selected tab for parallel comparison view (value currently unused but may be needed)
+  const [_selectedComparisonTab, setSelectedComparisonTab] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [activeActivity, setActiveActivity] = useState<ActivityId>("conversations");
   const [showSettings, setShowSettings] = useState(false);
@@ -43,6 +43,14 @@ function App() {
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   // Document selected in the documents activity (shown in main panel)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  // Current thread ID (null = main thread) - value may be needed later for thread switching
+  const [_currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  // Pending fork: when set, the next message will create a fork from this span
+  // Unlike episteme's complex approach, we keep it simple: just store the spanId,
+  // and when user sends a message, backend creates a new conversation
+  const [pendingForkSpanId, setPendingForkSpanId] = useState<string | null>(null);
+  // Prefilled input text (used when forking from a user message)
+  const [prefilledInput, setPrefilledInput] = useState<string>("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -233,6 +241,23 @@ function App() {
     try {
       setError(null);
 
+      // If we have a pending fork, create the fork first, then send
+      if (pendingForkSpanId) {
+        appLog.info(`Creating fork from spanId=${pendingForkSpanId} before sending`);
+        const forkResult = await tauri.forkFromSpan(pendingForkSpanId);
+        appLog.info(`Fork created: conversationId=${forkResult.conversation_id}, threadId=${forkResult.thread_id}`);
+        // Switch to the new conversation (this loads the forked conversation's messages)
+        const msgs = await tauri.switchConversation(forkResult.conversation_id);
+        setCurrentConversationId(forkResult.conversation_id);
+        setCurrentThreadId(forkResult.thread_id);
+        setMessages(msgs);
+        // Clear the pending fork state
+        setPendingForkSpanId(null);
+        setPrefilledInput("");
+        // Refresh conversations (fork creates a new one)
+        tauri.listConversations().then(setConversations).catch(console.error);
+      }
+
       // Check if we have multiple models selected for parallel comparison
       if (selectedModelsForComparison.length >= 2) {
         // Clear any previous comparison results
@@ -371,6 +396,23 @@ function App() {
     }
   };
 
+  // Fork handler - simple approach: just store the spanId, no UI changes until send
+  // When user sends a message, backend creates a new conversation forked from this point
+  const handleFork = (spanId: string, role: "user" | "assistant", userText?: string) => {
+    appLog.info(`Setting fork point: spanId=${spanId}, role=${role}`);
+    setPendingForkSpanId(spanId);
+    // For user messages, prefill the input with their original text so they can edit it
+    if (role === "user" && userText) {
+      setPrefilledInput(userText);
+    }
+  };
+
+  // Cancel pending fork
+  const handleCancelFork = () => {
+    setPendingForkSpanId(null);
+    setPrefilledInput("");
+  };
+
   // Retry initialization after setup
   const retryInit = async () => {
     setError(null);
@@ -473,6 +515,7 @@ function App() {
         onRenameConversation={handleRenameConversation}
         selectedDocumentId={selectedDocumentId}
         onSelectDocument={setSelectedDocumentId}
+        pendingFork={!!pendingForkSpanId}
       />
 
       {/* Settings Modal */}
@@ -547,6 +590,7 @@ function App() {
                         message={msg}
                         onDocumentClick={setActiveDocumentId}
                         onSwitchAlternate={handleSwitchAlternate}
+                        onFork={handleFork}
                       />
                     ))}
                     {streamingMessage && !isParallelMode && (
@@ -687,6 +731,9 @@ function App() {
               voiceStatus={voice.status}
               voiceBufferedCount={voice.bufferedCount}
               onToggleVoice={voice.toggle}
+              pendingFork={!!pendingForkSpanId}
+              prefilledText={prefilledInput}
+              onCancelFork={handleCancelFork}
             />
           </>
         ) : activeActivity === "documents" ? (

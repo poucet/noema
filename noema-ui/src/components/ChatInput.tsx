@@ -28,6 +28,10 @@ interface ChatInputProps {
   voiceStatus?: VoiceStatus;
   voiceBufferedCount?: number;
   onToggleVoice?: () => void;
+  // Fork mode: when set, shows indicator and prefills input
+  pendingFork?: boolean;
+  prefilledText?: string;
+  onCancelFork?: () => void;
 }
 
 // Get MIME type from file extension
@@ -107,12 +111,26 @@ export function ChatInput({
   voiceStatus = "disabled",
   voiceBufferedCount = 0,
   onToggleVoice,
+  pendingFork = false,
+  prefilledText = "",
+  onCancelFork,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // When prefilledText changes (fork from user message), update the input
+  useEffect(() => {
+    if (prefilledText) {
+      setMessage(prefilledText);
+      // Focus the textarea
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 0);
+    }
+  }, [prefilledText]);
 
   // @ mention autocomplete state
   const [mentionState, setMentionState] = useState<MentionState>({
@@ -536,6 +554,19 @@ export function ChatInput({
         )}
 
         <div className="flex gap-3 items-end max-w-4xl mx-auto">
+          {/* Cancel fork button */}
+          {pendingFork && onCancelFork && (
+            <button
+              type="button"
+              onClick={onCancelFork}
+              className="px-4 py-3 bg-gray-600 hover:bg-gray-500 text-white rounded-2xl transition-colors"
+              title="Cancel fork"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             onClick={onToggleVoice}

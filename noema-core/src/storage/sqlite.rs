@@ -186,6 +186,17 @@ pub struct SpanSetInfo {
     pub created_at: i64,
 }
 
+/// Information about a thread (for listing threads/branches)
+#[derive(Debug, Clone)]
+pub struct ThreadInfo {
+    pub id: String,
+    pub conversation_id: String,
+    pub parent_span_id: Option<String>,
+    pub name: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+}
+
 /// Shared SQLite connection pool
 ///
 /// This is the main entry point for SQLite storage. Create one store
@@ -1153,6 +1164,277 @@ impl SqliteStore {
         Ok(span_sets)
     }
 
+    // ========== Thread/Branch Methods ==========
+
+    /// Create a forked thread from a specific span
+    /// The new thread will share history with the parent up to the fork point
+    pub fn create_fork_thread(
+        &self,
+        conversation_id: &str,
+        parent_span_id: &str,
+        name: Option<&str>,
+    ) -> Result<String> {
+        let conn = self.conn.lock().unwrap();
+        let id = Uuid::new_v4().to_string();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at)
+             VALUES (?1, ?2, ?3, 'active', ?4)",
+            params![&id, conversation_id, parent_span_id, now],
+        )?;
+
+        // Set the name if provided (need to add name column or use a separate table)
+        // For now, we'll store the name in a metadata pattern or add a column
+        // Let's add a simple approach: update status to include name
+        if let Some(n) = name {
+            conn.execute(
+                "UPDATE threads SET status = ?1 WHERE id = ?2",
+                params![format!("active:{}", n), &id],
+            )?;
+        }
+
+        Ok(id)
+    }
+
+    /// Create a forked conversation from a specific span
+    /// Creates a NEW conversation with its main thread pointing to the fork point.
+    /// This makes the fork appear as a separate entry in the conversation list.
+    /// Returns (conversation_id, thread_id)
+    pub fn create_fork_conversation(
+        &self,
+        user_id: &str,
+        parent_span_id: &str,
+        name: Option<&str>,
+    ) -> Result<(String, String)> {
+        let conn = self.conn.lock().unwrap();
+        let conversation_id = Uuid::new_v4().to_string();
+        let thread_id = Uuid::new_v4().to_string();
+        let now = unix_timestamp();
+
+        // Create the new conversation
+        let title = name.unwrap_or("Fork");
+        conn.execute(
+            "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![&conversation_id, user_id, title, now, now],
+        )?;
+
+        // Create the main thread for this conversation, with parent_span_id pointing to fork point
+        conn.execute(
+            "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at)
+             VALUES (?1, ?2, ?3, 'active', ?4)",
+            params![&thread_id, &conversation_id, parent_span_id, now],
+        )?;
+
+        Ok((conversation_id, thread_id))
+    }
+
+    /// List all threads for a conversation
+    pub fn list_conversation_threads(&self, conversation_id: &str) -> Result<Vec<ThreadInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, parent_span_id, status, created_at
+             FROM threads WHERE conversation_id = ?1 ORDER BY created_at",
+        )?;
+
+        let threads = stmt
+            .query_map(params![conversation_id], |row| {
+                let status: String = row.get(3)?;
+                // Parse name from status if present (format: "active:name" or just "active")
+                let (status_str, name) = if let Some(idx) = status.find(':') {
+                    let (s, n) = status.split_at(idx);
+                    (s.to_string(), Some(n[1..].to_string()))
+                } else {
+                    (status.clone(), None)
+                };
+                Ok(ThreadInfo {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    parent_span_id: row.get(2)?,
+                    name,
+                    status: status_str,
+                    created_at: row.get(4)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(threads)
+    }
+
+    /// Get a specific thread's info
+    pub fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let thread = conn
+            .query_row(
+                "SELECT id, conversation_id, parent_span_id, status, created_at
+                 FROM threads WHERE id = ?1",
+                params![thread_id],
+                |row| {
+                    let status: String = row.get(3)?;
+                    let (status_str, name) = if let Some(idx) = status.find(':') {
+                        let (s, n) = status.split_at(idx);
+                        (s.to_string(), Some(n[1..].to_string()))
+                    } else {
+                        (status.clone(), None)
+                    };
+                    Ok(ThreadInfo {
+                        id: row.get(0)?,
+                        conversation_id: row.get(1)?,
+                        parent_span_id: row.get(2)?,
+                        name,
+                        status: status_str,
+                        created_at: row.get(4)?,
+                    })
+                },
+            )
+            .ok();
+        Ok(thread)
+    }
+
+    /// Rename a thread
+    pub fn rename_thread(&self, thread_id: &str, name: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let status = match name {
+            Some(n) => format!("active:{}", n),
+            None => "active".to_string(),
+        };
+        conn.execute(
+            "UPDATE threads SET status = ?1 WHERE id = ?2",
+            params![&status, thread_id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a thread (only non-main threads)
+    pub fn delete_thread(&self, thread_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+
+        // Check if this is the main thread (parent_span_id IS NULL)
+        let is_main: bool = conn
+            .query_row(
+                "SELECT parent_span_id IS NULL FROM threads WHERE id = ?1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(true);
+
+        if is_main {
+            return Err(anyhow::anyhow!("Cannot delete the main thread"));
+        }
+
+        // Delete the thread (span_sets will cascade)
+        let rows = conn.execute("DELETE FROM threads WHERE id = ?1", params![thread_id])?;
+        Ok(rows > 0)
+    }
+
+    /// Get the span that a thread forks from (for walking ancestry)
+    pub fn get_thread_parent_span(&self, thread_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let parent_span_id: Option<String> = conn
+            .query_row(
+                "SELECT parent_span_id FROM threads WHERE id = ?1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+        Ok(parent_span_id)
+    }
+
+    /// Get the span_set that contains a specific span
+    pub fn get_span_parent_span_set(&self, span_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let span_set_id: Option<String> = conn
+            .query_row(
+                "SELECT span_set_id FROM spans WHERE id = ?1",
+                params![span_id],
+                |row| row.get(0),
+            )
+            .ok();
+        Ok(span_set_id)
+    }
+
+    /// Get the thread that a span_set belongs to
+    pub fn get_span_set_thread(&self, span_set_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let thread_id: Option<String> = conn
+            .query_row(
+                "SELECT thread_id FROM span_sets WHERE id = ?1",
+                params![span_set_id],
+                |row| row.get(0),
+            )
+            .ok();
+        Ok(thread_id)
+    }
+
+    /// Get messages for a thread with full ancestry (walks up parent_span_id chain)
+    /// Returns messages in chronological order from earliest ancestor to current thread
+    pub fn get_thread_messages_with_ancestry(&self, thread_id: &str) -> Result<Vec<StoredMessage>> {
+        // First, build the ancestry chain by walking up parent_span_id references
+        let mut ancestry_chain: Vec<(String, Option<String>)> = Vec::new(); // (thread_id, parent_span_id)
+        let mut current_thread_id = thread_id.to_string();
+
+        loop {
+            let thread = self.get_thread(&current_thread_id)?;
+            match thread {
+                Some(t) => {
+                    let parent_span_id = t.parent_span_id.clone();
+                    ancestry_chain.push((current_thread_id.clone(), parent_span_id.clone()));
+
+                    if let Some(ref span_id) = parent_span_id {
+                        // Find which thread this span belongs to
+                        if let Some(span_set_id) = self.get_span_parent_span_set(span_id)? {
+                            if let Some(parent_thread_id) = self.get_span_set_thread(&span_set_id)? {
+                                current_thread_id = parent_thread_id;
+                                continue;
+                            }
+                        }
+                    }
+                    break;
+                }
+                None => break,
+            }
+        }
+
+        // Reverse so we process from root (main thread) to leaf (current thread)
+        ancestry_chain.reverse();
+
+        let mut all_messages: Vec<StoredMessage> = Vec::new();
+
+        for (i, (tid, _parent_span_id)) in ancestry_chain.iter().enumerate() {
+            // Get span_sets for this thread
+            let span_sets = self.get_thread_span_sets(tid)?;
+
+            for span_set_info in span_sets {
+                // If this is not the first thread in ancestry, we need to check
+                // if we should stop at the fork point
+                if i < ancestry_chain.len() - 1 {
+                    // Check if next thread forks from a span in this span_set
+                    if let Some((_, Some(next_parent_span))) = ancestry_chain.get(i + 1) {
+                        // Check if this span_set contains the fork point
+                        let alternates = self.get_span_set_alternates(&span_set_info.id)?;
+                        let contains_fork_point = alternates.iter().any(|a| &a.id == next_parent_span);
+
+                        if contains_fork_point {
+                            // Include this span_set (using the forked-from span) and stop
+                            let messages = self.get_span_messages(next_parent_span)?;
+                            all_messages.extend(messages);
+                            break; // Stop processing this thread's span_sets
+                        }
+                    }
+                }
+
+                // Include messages from the selected span of this span_set
+                if let Some(span_set) = self.get_span_set_with_content(&span_set_info.id)? {
+                    all_messages.extend(span_set.messages);
+                }
+            }
+        }
+
+        Ok(all_messages)
+    }
+
     /// Helper: Create a user SpanSet with a single span and message
     pub fn add_user_span_set(
         &self,
@@ -1232,39 +1514,64 @@ impl SqliteStore {
                 None => anyhow::bail!("Conversation not found: {}", conversation_id),
             };
 
-            // Load messages from span_messages via the main thread's span_sets
-            // Walk through span_sets in order, using selected_span to get messages
-            let query = "SELECT sm.role, sm.content
-                 FROM span_messages sm
-                 JOIN spans s ON sm.span_id = s.id
-                 JOIN span_sets ss ON s.span_set_id = ss.id
-                 JOIN threads t ON ss.thread_id = t.id
-                 WHERE t.conversation_id = ?1 AND t.parent_span_id IS NULL
-                   AND s.id = ss.selected_span_id
-                 ORDER BY ss.sequence_number, sm.sequence_number";
+            // Find the main thread for this conversation
+            let main_thread: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT id, parent_span_id FROM threads WHERE conversation_id = ?1 LIMIT 1",
+                    params![conversation_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .ok();
 
-            let mut stmt = conn.prepare(query)?;
+            let (thread_id, parent_span_id) = match main_thread {
+                Some(t) => t,
+                None => anyhow::bail!("No thread found for conversation: {}", conversation_id),
+            };
 
-            let messages: Vec<StoredMessage> = stmt
-                .query_map(params![conversation_id], |row| {
-                    let role_str: String = row.get(0)?;
-                    let payload_json: String = row.get(1)?;
-                    Ok((role_str, payload_json))
-                })?
-                .filter_map(|r| r.ok())
-                .filter_map(|(role_str, payload_json)| {
-                    let role = match role_str.as_str() {
-                        "user" => Role::User,
-                        "assistant" => Role::Assistant,
-                        "system" => Role::System,
-                        _ => return None,
-                    };
-                    let payload: StoredPayload = serde_json::from_str(&payload_json).ok()?;
-                    Some(StoredMessage { role, payload })
-                })
-                .collect();
+            // Check if this is a forked conversation (has parent_span_id)
+            let is_forked = parent_span_id.is_some();
 
-            (messages, user_id)
+            // For forked conversations, we need to drop the lock and load via ancestry
+            // For normal conversations, load directly
+            if is_forked {
+                drop(conn);
+                let messages = self.get_thread_messages_with_ancestry(&thread_id)?;
+                (messages, user_id)
+            } else {
+                // Load messages from span_messages via the main thread's span_sets
+                // Walk through span_sets in order, using selected_span to get messages
+                let query = "SELECT sm.role, sm.content
+                     FROM span_messages sm
+                     JOIN spans s ON sm.span_id = s.id
+                     JOIN span_sets ss ON s.span_set_id = ss.id
+                     JOIN threads t ON ss.thread_id = t.id
+                     WHERE t.conversation_id = ?1 AND t.parent_span_id IS NULL
+                       AND s.id = ss.selected_span_id
+                     ORDER BY ss.sequence_number, sm.sequence_number";
+
+                let mut stmt = conn.prepare(query)?;
+
+                let messages: Vec<StoredMessage> = stmt
+                    .query_map(params![conversation_id], |row| {
+                        let role_str: String = row.get(0)?;
+                        let payload_json: String = row.get(1)?;
+                        Ok((role_str, payload_json))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .filter_map(|(role_str, payload_json)| {
+                        let role = match role_str.as_str() {
+                            "user" => Role::User,
+                            "assistant" => Role::Assistant,
+                            "system" => Role::System,
+                            _ => return None,
+                        };
+                        let payload: StoredPayload = serde_json::from_str(&payload_json).ok()?;
+                        Some(StoredMessage { role, payload })
+                    })
+                    .collect();
+
+                (messages, user_id)
+            }
         };
 
         // Resolve asset refs to inline base64 data

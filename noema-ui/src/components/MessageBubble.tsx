@@ -11,6 +11,8 @@ interface MessageBubbleProps {
   message: DisplayMessage;
   onDocumentClick?: (docId: string) => void;
   onSwitchAlternate?: (spanSetId: string, spanId: string) => void;
+  // Fork handler: spanId, role, and optionally the user's text (for user messages)
+  onFork?: (spanId: string, role: "user" | "assistant", userText?: string) => void;
 }
 
 interface MarkdownTextProps {
@@ -261,7 +263,20 @@ function AlternatesSelector({
   );
 }
 
-export function MessageBubble({ message, onDocumentClick, onSwitchAlternate }: MessageBubbleProps) {
+// Fork icon component - git branch style
+function ForkIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      {/* Git branch/fork icon: vertical line with a branch splitting off */}
+      <circle cx="6" cy="6" r="2" strokeWidth={2} />
+      <circle cx="6" cy="18" r="2" strokeWidth={2} />
+      <circle cx="18" cy="12" r="2" strokeWidth={2} />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8v8M6 8c0 2 2 4 6 4h4" />
+    </svg>
+  );
+}
+
+export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onFork }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const hasAlternates = message.alternates && message.alternates.length > 1;
@@ -308,15 +323,35 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate }: M
     setPreviewContent(null);
   };
 
+  // Handle fork click
+  const handleForkClick = () => {
+    if (!onFork || !message.spanId) return;
+
+    if (isUser) {
+      // For user messages: extract text and pass to fork handler
+      const userText = message.content
+        .filter((c): c is { text: string } => "text" in c)
+        .map((c) => c.text)
+        .join("\n");
+      onFork(message.spanId, "user", userText);
+    } else {
+      // For assistant messages: just pass the spanId
+      onFork(message.spanId, "assistant");
+    }
+  };
+
   // Determine which content to show
   const contentToShow = previewContent || message.content;
 
+  // Can fork if we have a spanId and fork handler
+  const canFork = onFork && message.spanId && !isSystem;
+
   return (
     <div
-      className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}
+      className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4 group`}
     >
       <div
-        className={`max-w-[85%] px-4 py-3 rounded-2xl ${
+        className={`max-w-[85%] px-4 py-3 rounded-2xl relative ${
           isUser
             ? "bg-teal-600 text-white"
             : isSystem
@@ -334,6 +369,7 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate }: M
             onConfirmSelection={handleConfirmSelection}
           />
         )}
+        {/* Message content */}
         <div className="prose prose-sm prose-invert max-w-none">
           {isLoadingPreview ? (
             <div className="flex items-center gap-2 text-muted">
@@ -346,6 +382,20 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate }: M
             ))
           )}
         </div>
+        {/* Fork button - shown at bottom right of every message on hover */}
+        {canFork && (
+          <button
+            onClick={handleForkClick}
+            className={`absolute bottom-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+              isUser
+                ? "text-teal-200 hover:text-white hover:bg-teal-500"
+                : "text-muted hover:text-purple-400 hover:bg-purple-900/30"
+            }`}
+            title={isUser ? "Fork with this message" : "Fork from this response"}
+          >
+            <ForkIcon />
+          </button>
+        )}
       </div>
     </div>
   );

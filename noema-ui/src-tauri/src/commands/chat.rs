@@ -654,6 +654,7 @@ pub async fn get_span_messages(
                 role: role.to_string(),
                 content,
                 span_set_id: None,
+                span_id: None,
                 alternates: None,
             }
         })
@@ -699,6 +700,15 @@ pub async fn get_messages_with_alternates(state: State<'_, AppState>) -> Result<
             .map_err(|e| format!("Failed to get span set content: {}", e))?;
 
         if let Some(span_set) = span_set {
+            // Get the selected span_id (the one we're showing messages from)
+            let selected_span_id = span_set
+                .alternates
+                .iter()
+                .find(|a| a.is_selected)
+                .map(|a| a.id.clone())
+                .or_else(|| span_set.alternates.first().map(|a| a.id.clone()))
+                .unwrap_or_default();
+
             // Convert alternates to AlternateInfo
             let alternates: Vec<AlternateInfo> = span_set
                 .alternates
@@ -730,6 +740,7 @@ pub async fn get_messages_with_alternates(state: State<'_, AppState>) -> Result<
                     msg_role,
                     content,
                     span_set_info.id.clone(),
+                    selected_span_id.clone(),
                     alternates.clone(),
                 ));
             }
@@ -737,4 +748,295 @@ pub async fn get_messages_with_alternates(state: State<'_, AppState>) -> Result<
     }
 
     Ok(result)
+}
+
+// ========== Thread/Fork Commands ==========
+
+use crate::types::ThreadInfoResponse;
+
+/// List all threads (branches) for a conversation
+#[tauri::command]
+pub async fn list_conversation_threads(
+    state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Vec<ThreadInfoResponse>, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    let threads = store
+        .list_conversation_threads(&conversation_id)
+        .map_err(|e| format!("Failed to list threads: {}", e))?;
+
+    Ok(threads.into_iter().map(ThreadInfoResponse::from).collect())
+}
+
+/// Fork result containing both conversation and thread IDs
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct ForkResult {
+    pub conversation_id: String,
+    pub thread_id: String,
+}
+
+/// Fork a conversation from a specific span
+/// Creates a NEW CONVERSATION that shares history up to the fork point
+/// Returns both conversation_id and thread_id so the frontend can switch to it
+#[tauri::command]
+pub async fn fork_from_span(
+    state: State<'_, AppState>,
+    span_id: String,
+    name: Option<String>,
+) -> Result<ForkResult, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let user_id = state.user_id.lock().await.clone();
+
+    // Create a new forked conversation (this creates both conversation and thread)
+    let (conversation_id, thread_id) = store
+        .create_fork_conversation(&user_id, &span_id, name.as_deref())
+        .map_err(|e| format!("Failed to create fork: {}", e))?;
+
+    Ok(ForkResult {
+        conversation_id,
+        thread_id,
+    })
+}
+
+/// Switch to a different thread in the current conversation
+#[tauri::command]
+pub async fn switch_thread(
+    state: State<'_, AppState>,
+    thread_id: String,
+) -> Result<Vec<DisplayMessage>, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    // Get thread info to verify it exists
+    let thread = store
+        .get_thread(&thread_id)
+        .map_err(|e| format!("Failed to get thread: {}", e))?
+        .ok_or("Thread not found")?;
+
+    // Update current thread in state
+    *state.current_thread_id.lock().await = Some(thread_id.clone());
+
+    // Convert to DisplayMessage
+    // For forked threads, we need to walk through span_sets properly
+    let span_sets = store
+        .get_thread_span_sets(&thread_id)
+        .map_err(|e| format!("Failed to get span sets: {}", e))?;
+
+    let mut result = Vec::new();
+
+    // If this is a forked thread, first get ancestry messages
+    if thread.parent_span_id.is_some() {
+        let ancestry_messages = store
+            .get_thread_messages_with_ancestry(&thread_id)
+            .map_err(|e| format!("Failed to get ancestry messages: {}", e))?;
+
+        for msg in ancestry_messages {
+            let msg_role = match msg.role {
+                llm::Role::User => "user",
+                llm::Role::Assistant => "assistant",
+                llm::Role::System => "system",
+            };
+            let content = msg.payload.content.iter().map(stored_content_to_display).collect();
+            result.push(DisplayMessage {
+                role: msg_role.to_string(),
+                content,
+                span_set_id: None,
+                span_id: None,
+                alternates: None,
+            });
+        }
+    } else {
+        // Main thread - just get span_sets directly
+        for span_set_info in span_sets {
+            let span_set = store
+                .get_span_set_with_content(&span_set_info.id)
+                .map_err(|e| format!("Failed to get span set content: {}", e))?;
+
+            if let Some(span_set) = span_set {
+                let selected_span_id = span_set
+                    .alternates
+                    .iter()
+                    .find(|a| a.is_selected)
+                    .map(|a| a.id.clone())
+                    .or_else(|| span_set.alternates.first().map(|a| a.id.clone()))
+                    .unwrap_or_default();
+
+                let alternates: Vec<AlternateInfo> = span_set
+                    .alternates
+                    .iter()
+                    .map(|a| {
+                        let model_display_name = a.model_id.as_ref().map(|id| {
+                            id.split('/').last().unwrap_or(id).to_string()
+                        });
+                        AlternateInfo {
+                            span_id: a.id.clone(),
+                            model_id: a.model_id.clone(),
+                            model_display_name,
+                            message_count: a.message_count,
+                            is_selected: a.is_selected,
+                        }
+                    })
+                    .collect();
+
+                for msg in span_set.messages {
+                    let msg_role = match msg.role {
+                        llm::Role::User => "user",
+                        llm::Role::Assistant => "assistant",
+                        llm::Role::System => "system",
+                    };
+                    let content = msg.payload.content.iter().map(stored_content_to_display).collect();
+
+                    result.push(DisplayMessage::with_alternates(
+                        msg_role,
+                        content,
+                        span_set_info.id.clone(),
+                        selected_span_id.clone(),
+                        alternates.clone(),
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Rename a thread
+#[tauri::command]
+pub async fn rename_thread(
+    state: State<'_, AppState>,
+    thread_id: String,
+    name: String,
+) -> Result<(), String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    let name_opt = if name.trim().is_empty() {
+        None
+    } else {
+        Some(name.as_str())
+    };
+
+    store
+        .rename_thread(&thread_id, name_opt)
+        .map_err(|e| format!("Failed to rename thread: {}", e))
+}
+
+/// Delete a thread (cannot delete main thread)
+#[tauri::command]
+pub async fn delete_thread(
+    state: State<'_, AppState>,
+    thread_id: String,
+) -> Result<(), String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    store
+        .delete_thread(&thread_id)
+        .map_err(|e| format!("Failed to delete thread: {}", e))?;
+
+    Ok(())
+}
+
+/// Get the current thread ID
+#[tauri::command]
+pub async fn get_current_thread_id(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    Ok(state.current_thread_id.lock().await.clone())
+}
+
+/// Edit a user message by creating a fork with the new content
+/// Returns the new thread ID
+#[tauri::command]
+pub async fn edit_user_message(
+    state: State<'_, AppState>,
+    span_id: String,
+    new_content: String,
+) -> Result<String, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+
+    // Get the span_set this span belongs to
+    let span_set_id = store
+        .get_span_parent_span_set(&span_id)
+        .map_err(|e| format!("Failed to get span's span_set: {}", e))?
+        .ok_or("Span not found")?;
+
+    // Get the thread this span_set belongs to
+    let thread_id = store
+        .get_span_set_thread(&span_set_id)
+        .map_err(|e| format!("Failed to get span_set's thread: {}", e))?
+        .ok_or("Thread not found")?;
+
+    // Get the thread to find its conversation_id
+    let thread = store
+        .get_thread(&thread_id)
+        .map_err(|e| format!("Failed to get thread: {}", e))?
+        .ok_or("Thread not found")?;
+
+    // Get span_set info to find the previous span_set (we fork from the span before the edited one)
+    let span_sets = store
+        .get_thread_span_sets(&thread_id)
+        .map_err(|e| format!("Failed to get span sets: {}", e))?;
+
+    // Find the span_set that contains our span and the one before it
+    let mut parent_span_id: Option<String> = None;
+    for (i, ss) in span_sets.iter().enumerate() {
+        if ss.id == span_set_id {
+            // If this is the first span_set, we fork from the thread's parent (if any) or start fresh
+            if i > 0 {
+                // Get the selected span from the previous span_set
+                let prev_ss = &span_sets[i - 1];
+                if let Some(ref selected) = prev_ss.selected_span_id {
+                    parent_span_id = Some(selected.clone());
+                }
+            }
+            break;
+        }
+    }
+
+    // Create the forked thread
+    let new_thread_id = if let Some(ref parent_id) = parent_span_id {
+        store
+            .create_fork_thread(&thread.conversation_id, parent_id, Some("Edited"))
+            .map_err(|e| format!("Failed to create fork: {}", e))?
+    } else {
+        // No previous message to fork from - create a fresh thread
+        // This shouldn't happen in normal usage (editing the first message)
+        store
+            .create_fork_thread(&thread.conversation_id, &span_id, Some("Edited"))
+            .map_err(|e| format!("Failed to create fork: {}", e))?
+    };
+
+    // Write the edited message as a new span in the forked thread
+    use llm::Role;
+    use noema_core::storage::{SpanType, StoredContent, StoredPayload};
+
+    // Create a span_set for the user message in the new thread
+    let span_set_id = store
+        .create_span_set(&new_thread_id, SpanType::User)
+        .map_err(|e| format!("Failed to create span_set: {}", e))?;
+
+    // Create a span within the span_set
+    let span_id = store
+        .create_span(&span_set_id, None)
+        .map_err(|e| format!("Failed to create span: {}", e))?;
+
+    // Create the stored payload with the edited text
+    let content = StoredPayload::new(vec![StoredContent::Text {
+        text: new_content,
+    }]);
+
+    // Add the message to the span
+    store
+        .add_span_message(&span_id, Role::User, &content)
+        .map_err(|e| format!("Failed to write edited message: {}", e))?;
+
+    // Update current thread in state
+    *state.current_thread_id.lock().await = Some(new_thread_id.clone());
+
+    Ok(new_thread_id)
 }

@@ -14,6 +14,8 @@ interface SidePanelProps {
   // Document props
   selectedDocumentId?: string | null;
   onSelectDocument?: (docId: string) => void;
+  // Fork indicator
+  pendingFork?: boolean;
 }
 
 export function SidePanel({
@@ -26,6 +28,7 @@ export function SidePanel({
   onRenameConversation,
   selectedDocumentId,
   onSelectDocument,
+  pendingFork,
 }: SidePanelProps) {
   return (
     <div className="w-64 bg-surface border-r border-gray-700 flex flex-col h-full">
@@ -37,6 +40,7 @@ export function SidePanel({
           onSelectConversation={onSelectConversation}
           onDeleteConversation={onDeleteConversation}
           onRenameConversation={onRenameConversation}
+          pendingFork={pendingFork}
         />
       )}
       {activeActivity === "documents" && (

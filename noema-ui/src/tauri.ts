@@ -457,3 +457,60 @@ export async function getSpanMessages(
 export async function getMessagesWithAlternates(): Promise<DisplayMessage[]> {
   return invoke<DisplayMessage[]>("get_messages_with_alternates");
 }
+
+// Thread/Fork management
+export interface ThreadInfo {
+  id: string;
+  conversationId: string;
+  parentSpanId: string | null;
+  name: string | null;
+  status: string;
+  createdAt: number;
+  isMain: boolean;
+}
+
+export async function listConversationThreads(
+  conversationId: string
+): Promise<ThreadInfo[]> {
+  return invoke<ThreadInfo[]>("list_conversation_threads", { conversationId });
+}
+
+export interface ForkResult {
+  conversation_id: string;
+  thread_id: string;
+}
+
+export async function forkFromSpan(
+  spanId: string,
+  name?: string
+): Promise<ForkResult> {
+  return invoke<ForkResult>("fork_from_span", { spanId, name });
+}
+
+export async function switchThread(
+  threadId: string
+): Promise<DisplayMessage[]> {
+  return invoke<DisplayMessage[]>("switch_thread", { threadId });
+}
+
+export async function renameThread(
+  threadId: string,
+  name: string
+): Promise<void> {
+  return invoke<void>("rename_thread", { threadId, name });
+}
+
+export async function deleteThread(threadId: string): Promise<void> {
+  return invoke<void>("delete_thread", { threadId });
+}
+
+export async function getCurrentThreadId(): Promise<string | null> {
+  return invoke<string | null>("get_current_thread_id");
+}
+
+export async function editUserMessage(
+  spanId: string,
+  newContent: string
+): Promise<string> {
+  return invoke<string>("edit_user_message", { spanId, newContent });
+}

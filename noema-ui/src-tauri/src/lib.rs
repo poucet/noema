@@ -184,6 +184,14 @@ pub fn run() {
             commands::chat::set_selected_span,
             commands::chat::get_span_messages,
             commands::chat::get_messages_with_alternates,
+            // Thread/Fork commands
+            commands::chat::list_conversation_threads,
+            commands::chat::fork_from_span,
+            commands::chat::switch_thread,
+            commands::chat::rename_thread,
+            commands::chat::delete_thread,
+            commands::chat::get_current_thread_id,
+            commands::chat::edit_user_message,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,

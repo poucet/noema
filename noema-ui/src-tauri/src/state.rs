@@ -12,6 +12,8 @@ pub struct AppState {
     pub store: Mutex<Option<SqliteStore>>,
     pub engine: Mutex<Option<ChatEngine<SqliteSession>>>,
     pub current_conversation_id: Mutex<String>,
+    /// Current thread ID within the conversation (None = main thread)
+    pub current_thread_id: Mutex<Option<String>>,
     /// Current user ID (from database)
     pub user_id: Mutex<String>,
     /// Full model ID in "provider/model" format
@@ -39,6 +41,7 @@ impl AppState {
             store: Mutex::new(None),
             engine: Mutex::new(None),
             current_conversation_id: Mutex::new(String::new()),
+            current_thread_id: Mutex::new(None),
             user_id: Mutex::new(String::new()),
             model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),

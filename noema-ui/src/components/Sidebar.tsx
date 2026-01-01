@@ -153,7 +153,7 @@ export function Sidebar({
                         </div>
                       </div>
                       <span className="text-xs text-muted">
-                        {formatDate(conv.updatedAt)}
+                        {formatDate(Number(conv.updatedAt))}
                       </span>
                     </button>
                   )}

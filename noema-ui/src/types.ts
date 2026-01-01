@@ -31,6 +31,8 @@ export interface DisplayMessage {
   content: DisplayContent[];
   // Span set ID this message belongs to (for switching alternates)
   spanSetId?: string;
+  // Span ID for this specific message (for fork/edit actions)
+  spanId?: string;
   // Available alternates for this message's span set (only populated for assistant messages with alternatives)
   alternates?: AlternateInfo[];
 }

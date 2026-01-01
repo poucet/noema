@@ -8,6 +8,7 @@ interface ConversationsPanelProps {
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onRenameConversation: (id: string, name: string) => void;
+  pendingFork?: boolean;
 }
 
 function formatDate(timestamp: number): string {
@@ -31,6 +32,7 @@ export function ConversationsPanel({
   onSelectConversation,
   onDeleteConversation,
   onRenameConversation,
+  pendingFork,
 }: ConversationsPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -67,6 +69,23 @@ export function ConversationsPanel({
           </p>
         ) : (
           <ul className="py-2">
+            {/* Show draft fork entry when pending */}
+            {pendingFork && (
+              <li className="px-2">
+                <div className="p-3 rounded-lg bg-purple-900/30 border border-purple-500/50 border-dashed">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <circle cx="6" cy="6" r="2" strokeWidth={2} />
+                      <circle cx="6" cy="18" r="2" strokeWidth={2} />
+                      <circle cx="18" cy="12" r="2" strokeWidth={2} />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8v8M6 8c0 2 2 4 6 4h4" />
+                    </svg>
+                    <span className="text-sm text-purple-300 font-medium">New Fork</span>
+                  </div>
+                  <span className="text-xs text-purple-400/70">Send a message to create</span>
+                </div>
+              </li>
+            )}
             {conversations.map((conv) => {
               const isCurrent = conv.id === currentConversationId;
               const displayName =
@@ -102,7 +121,7 @@ export function ConversationsPanel({
                         <span className="truncate font-medium text-sm">
                           {displayName}
                         </span>
-                        <div className="opacity-0 group-hover:opacity-100 flex gap-1">
+                        <div className="opacity-0 group-hover:opacity-100 flex gap-1 flex-shrink-0">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -150,7 +169,7 @@ export function ConversationsPanel({
                         </div>
                       </div>
                       <span className="text-xs text-muted">
-                        {formatDate(conv.updatedAt)}
+                        {formatDate(Number(conv.updatedAt))}
                       </span>
                     </button>
                   )}

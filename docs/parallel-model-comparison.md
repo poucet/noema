@@ -142,17 +142,52 @@ This unified model supports:
 
 ---
 
-### Step 6: Fork from Alternate (TODO)
+### Step 6: Fork from Alternate ✅ COMPLETED
 - Fork command + storage logic
-- BranchSwitcher component
-- Branch management commands
+- Branch list in sidebar (under conversations)
+- Thread management commands (rename, delete)
+
+**What's done:**
+- [x] `ThreadInfo` struct in storage layer
+- [x] `create_fork_thread` - creates new thread with `parent_span_id` pointing to fork point
+- [x] `list_conversation_threads` - lists all threads for a conversation
+- [x] `get_thread_messages_with_ancestry` - walks ancestry chain to build full message history
+- [x] `rename_thread` / `delete_thread` - thread management
+- [x] Tauri commands: `fork_from_span`, `list_conversation_threads`, `switch_thread`, `rename_thread`, `delete_thread`
+- [x] TypeScript bindings for all thread operations
+- [x] `spanId` added to `DisplayMessage` for fork actions
+- [x] Branch list UI in ConversationsPanel (shows under each conversation when forked)
+- [x] Fork button on assistant messages (and alternates) - purple fork icon
+- [x] App.tsx handlers for thread switching, renaming, deleting, forking
 
 **Test:**
-- [ ] Can fork from any alternate
-- [ ] New branch appears in BranchSwitcher
+- [ ] Can fork from any alternate (click fork icon)
+- [ ] New branch appears in sidebar under conversation
 - [ ] Can switch between branches
 - [ ] Conversation continues correctly on each branch
 - [ ] Can rename/delete branches
+
+---
+
+### Step 7: Edit User Message (Creates Fork) ✅ COMPLETED
+- Add edit capability to user messages
+- Editing creates a new fork automatically
+- Wire up with fork infrastructure from Step 6
+
+**What's done:**
+- [x] `edit_user_message` Tauri command creates fork from point before edited message
+- [x] TypeScript binding `editUserMessage()` in tauri.ts
+- [x] Edit button appears on hover for user messages (pencil icon)
+- [x] Edit UI: textarea with Save & Fork / Cancel buttons
+- [x] Cmd+Enter to save, Escape to cancel
+- [x] UI hint: "Editing creates a new branch from this point"
+- [x] App.tsx handler: `handleEditUserMessage` switches to new thread after edit
+
+**Test:**
+- [ ] Can edit a user message by clicking edit icon
+- [ ] After editing, a new fork is created
+- [ ] Original message is preserved on main branch
+- [ ] Edited message appears on new fork
 
 ---
 
@@ -161,12 +196,15 @@ This unified model supports:
 | File | Changes |
 |------|---------|
 | [settings.rs](../config/src/settings.rs) | Add `favorite_models: Vec<String>` |
-| [sqlite.rs](../noema-core/src/storage/sqlite.rs) | Span-based schema, removed messages table |
+| [sqlite.rs](../noema-core/src/storage/sqlite.rs) | Span-based schema, removed messages table, fork/thread methods |
 | [engine.rs](../noema-core/src/engine.rs) | Add parallel execution logic, new events |
-| [chat.rs](../noema-ui/src-tauri/src/commands/chat.rs) | Add parallel commands |
-| [App.tsx](../noema-ui/src/App.tsx) | Add parallel state, event listeners |
+| [chat.rs](../noema-ui/src-tauri/src/commands/chat.rs) | Add parallel, fork, thread, and edit commands |
+| [App.tsx](../noema-ui/src/App.tsx) | Add parallel state, thread state, fork/edit handlers |
 | [ModelSelector.tsx](../noema-ui/src/components/ModelSelector.tsx) | Add favorites section, star toggle |
-| [tauri.ts](../noema-ui/src/tauri.ts) | Add new command bindings and event types |
+| [tauri.ts](../noema-ui/src/tauri.ts) | Add command bindings for parallel, threads, fork, edit |
+| [MessageBubble.tsx](../noema-ui/src/components/MessageBubble.tsx) | Add alternates UI, fork button, edit user message |
+| [ConversationsPanel.tsx](../noema-ui/src/components/panels/ConversationsPanel.tsx) | Add thread/branch list under conversations |
+| [SidePanel.tsx](../noema-ui/src/components/SidePanel.tsx) | Pass thread props to ConversationsPanel |
 | [logging.rs](../noema-ui/src-tauri/src/logging.rs) | Fix duplicate logging |
 | [init.rs](../noema-ui/src-tauri/src/commands/init.rs) | Auto-create user by email |
 | [STORAGE.md](./STORAGE.md) | Updated schema documentation |
