@@ -3,4 +3,4 @@
 /**
  * Information about a parallel model response (for UI display)
  */
-export type ParallelAlternateInfo = { modelId: string, modelDisplayName: string, messageCount: number, isSelected: boolean, };
+export type ParallelAlternateInfo = { spanId: string, modelId: string, modelDisplayName: string, messageCount: number, isSelected: boolean, };

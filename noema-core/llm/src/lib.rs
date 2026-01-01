@@ -31,6 +31,7 @@ pub struct ModelDefinition {
     pub id: String,
     pub display_name: Option<String>,
     pub capabilities: Vec<ModelCapability>,
+    pub context_window: Option<u32>,
 }
 
 impl ModelDefinition {
@@ -39,6 +40,7 @@ impl ModelDefinition {
             id: id.into(),
             display_name: None,
             capabilities,
+            context_window: None,
         }
     }
 
@@ -51,7 +53,13 @@ impl ModelDefinition {
             id: id.into(),
             display_name: Some(display_name.into()),
             capabilities,
+            context_window: None,
         }
+    }
+
+    pub fn with_context_window(mut self, context_window: u32) -> Self {
+        self.context_window = Some(context_window);
+        self
     }
 
     pub fn text_model(id: impl Into<String>) -> Self {

@@ -58,10 +58,8 @@ impl From<ModelDefinition> for crate::ModelDefinition {
             }
         }
 
-        // Fallback: if no supported methods found, assume text generation
-        if capabilities.is_empty() {
-            capabilities.push(crate::ModelCapability::Text);
-        }
+        // No fallback - if no supported methods found, capabilities will be empty
+        // and the model will be filtered out by list_models
 
         match model.display_name {
             Some(display_name) => {

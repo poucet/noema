@@ -370,7 +370,7 @@ impl From<Model> for crate::ModelDefinition {
     fn from(model: Model) -> Self {
         let mut capabilities = Vec::new();
 
-        // Check if Azure OpenAI capabilities field is present
+        // Check if Azure OpenAI capabilities field is present (Azure provides explicit capability metadata)
         if let Some(caps) = &model.capabilities {
             if caps.chat_completion == Some(true) || caps.completion == Some(true) {
                 capabilities.push(crate::ModelCapability::Text);
@@ -381,14 +381,10 @@ impl From<Model> for crate::ModelDefinition {
             // Note: Azure capabilities doesn't have explicit vision field
             // Vision support is not indicated in the capabilities object
         } else {
-            // Standard OpenAI API doesn't provide capability fields
-            // This is a limitation of the OpenAI API - there's no explicit capability metadata
-            // All we can do is assume text capability as default
-            capabilities.push(crate::ModelCapability::Text);
-        }
-
-        // Fallback: if no capabilities determined, assume text
-        if capabilities.is_empty() {
+            // Standard OpenAI API doesn't provide capability fields in the /models endpoint.
+            // Default to Text - the model will fail at runtime if it's not a chat model,
+            // but this is better than hardcoding model name patterns which break with new models.
+            // Users will get a clear error message if they try to use an incompatible model.
             capabilities.push(crate::ModelCapability::Text);
         }
 

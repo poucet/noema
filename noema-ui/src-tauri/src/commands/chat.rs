@@ -346,15 +346,30 @@ pub async fn set_model(
 /// List available models from all providers
 #[tauri::command]
 pub async fn list_models(_state: State<'_, AppState>) -> Result<Vec<ModelInfo>, String> {
+    use llm::ModelCapability;
+
     let mut all_models = Vec::new();
 
     for (provider_name, result) in list_all_models().await {
         if let Ok(models) = result {
             for m in models {
+                // Only include models that support text/chat (exclude embedding-only models)
+                if !m.definition.has_capability(&ModelCapability::Text) {
+                    continue;
+                }
+
+                let capabilities: Vec<String> = m
+                    .definition
+                    .capabilities
+                    .iter()
+                    .map(|c| format!("{:?}", c))
+                    .collect();
                 all_models.push(ModelInfo {
                     id: m.definition.id.clone(),
                     display_name: m.definition.name().to_string(),
                     provider: provider_name.clone(),
+                    capabilities,
+                    context_window: m.definition.context_window,
                 });
             }
         }

@@ -1,18 +1,8 @@
 // Types matching the Rust backend
-
-export interface ModelInfo {
-  id: string;
-  displayName: string;
-  provider: string;
-}
-
-export interface ConversationInfo {
-  id: string;
-  name: string | null;
-  messageCount: number;
-  createdAt: number;
-  updatedAt: number;
-}
+// NOTE: Types with ts-rs are auto-generated in ./generated/
+// Re-export commonly used generated types here for convenience
+export type { ModelInfo } from "./generated/ModelInfo";
+export type { ConversationInfo } from "./generated/ConversationInfo";
 
 // Note: Rust uses #[serde(rename_all = "camelCase")] so variant names are lowercase
 export type DisplayContent =

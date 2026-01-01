@@ -4,4 +4,4 @@ import type { ParallelAlternateInfo } from "./ParallelAlternateInfo";
 /**
  * All parallel models have completed
  */
-export type ParallelComplete = { alternates: Array<ParallelAlternateInfo>, };
+export type ParallelComplete = { spanSetId: string, alternates: Array<ParallelAlternateInfo>, };

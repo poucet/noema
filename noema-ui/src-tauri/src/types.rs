@@ -12,6 +12,8 @@ pub struct ModelInfo {
     pub id: String,
     pub display_name: String,
     pub provider: String,
+    pub capabilities: Vec<String>,
+    pub context_window: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
