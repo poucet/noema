@@ -79,6 +79,8 @@ pub enum ContentBlock {
     Text { text: String },
     Image { data: String, mime_type: String },
     Audio { data: String, mime_type: String },
+    /// Reference to a document - stored as-is, resolved to full content before sending to LLM
+    DocumentRef { id: String, title: String },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
 }
@@ -120,6 +122,61 @@ impl From<&str> for ChatPayload {
 impl ChatPayload {
     pub fn new(content: Vec<ContentBlock>) -> Self {
         ChatPayload { content }
+    }
+
+    /// Check if this payload contains any DocumentRef blocks
+    pub fn has_document_refs(&self) -> bool {
+        self.content.iter().any(|block| matches!(block, ContentBlock::DocumentRef { .. }))
+    }
+
+    /// Get all document IDs referenced in this payload
+    pub fn get_document_refs(&self) -> Vec<(&str, &str)> {
+        self.content
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::DocumentRef { id, title } => Some((id.as_str(), title.as_str())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Resolve all DocumentRef blocks using a resolver function.
+    /// The resolver takes (id, title) and returns the resolved text content.
+    /// DocumentRefs are replaced with Text blocks containing the resolved content.
+    pub fn resolve_document_refs<F>(&mut self, resolver: F)
+    where
+        F: Fn(&str, &str) -> Option<String>,
+    {
+        let mut resolved_content = Vec::new();
+        let mut doc_texts = Vec::new();
+
+        for block in std::mem::take(&mut self.content) {
+            match block {
+                ContentBlock::DocumentRef { id, title } => {
+                    if let Some(text) = resolver(&id, &title) {
+                        doc_texts.push(format!(
+                            "<document id=\"{}\" title=\"{}\">\n{}\n</document>",
+                            id, title, text
+                        ));
+                    }
+                }
+                other => resolved_content.push(other),
+            }
+        }
+
+        // If we resolved any documents, add them as a single text block at the start
+        if !doc_texts.is_empty() {
+            let combined = format!(
+                "<referenced_documents>\n{}\n</referenced_documents>\n\n\
+                When referring to information from these documents in your response, \
+                use markdown links in the format [relevant text](noema://doc/DOCUMENT_ID) \
+                where DOCUMENT_ID is the document's id from the document tags above.",
+                doc_texts.join("\n\n")
+            );
+            resolved_content.insert(0, ContentBlock::Text { text: combined });
+        }
+
+        self.content = resolved_content;
     }
 
     pub fn text(text: impl Into<String>) -> Self {
@@ -335,6 +392,32 @@ impl ChatRequest {
             messages: messages.into_iter().cloned().collect(),
             tools: Some(tools),
         }
+    }
+
+    /// Resolve all DocumentRef blocks in the request messages using the provided resolver.
+    /// Call this before sending to an LLM provider.
+    pub fn resolve_document_refs<F>(&mut self, resolver: F)
+    where
+        F: Fn(&str, &str) -> Option<String>,
+    {
+        for msg in &mut self.messages {
+            msg.payload.resolve_document_refs(&resolver);
+        }
+    }
+
+    /// Check if any messages contain DocumentRef blocks that need resolution
+    pub fn has_document_refs(&self) -> bool {
+        self.messages.iter().any(|msg| msg.payload.has_document_refs())
+    }
+
+    /// Get a reference to the messages
+    pub fn messages(&self) -> &[ChatMessage] {
+        &self.messages
+    }
+
+    /// Get a mutable reference to the messages (for external resolution)
+    pub fn messages_mut(&mut self) -> &mut Vec<ChatMessage> {
+        &mut self.messages
     }
 }
 
