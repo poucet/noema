@@ -10,6 +10,7 @@ export type DisplayContent =
   | { image: { data: string; mimeType: string } }
   | { audio: { data: string; mimeType: string } }
   | { assetRef: { assetId: string; mimeType: string; filename: string | null } }
+  | { documentRef: { id: string; title: string } }
   | { toolCall: { name: string; id: string; arguments: unknown } }
   | { toolResult: { id: string; content: DisplayToolResultContent[] } };
 

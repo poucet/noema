@@ -155,16 +155,17 @@ export function ChatInput({
 
   // Search for documents when mention query changes
   useEffect(() => {
-    if (!mentionState.isActive || mentionState.query.length === 0) {
+    if (!mentionState.isActive) {
       setMentionResults([]);
       return;
     }
 
-    // Debounce the search
+    // Debounce the search (shorter delay for empty query to feel more responsive)
     if (mentionDebounceRef.current) {
       clearTimeout(mentionDebounceRef.current);
     }
 
+    const delay = mentionState.query.length === 0 ? 50 : 150;
     mentionDebounceRef.current = setTimeout(async () => {
       try {
         const results = await tauri.searchDocuments(mentionState.query, 5);
@@ -174,7 +175,7 @@ export function ChatInput({
         console.error("Failed to search documents:", err);
         setMentionResults([]);
       }
-    }, 150);
+    }, delay);
 
     return () => {
       if (mentionDebounceRef.current) {
@@ -217,20 +218,19 @@ export function ChatInput({
     }
   }, [mentionState.isActive]);
 
-  // Insert a document mention
+  // Insert a document mention (removes the @query text, adds doc as attachment chip)
   const insertMention = useCallback((doc: DocumentInfoResponse) => {
+    // Remove the @query from the message text
     const beforeMention = message.substring(0, mentionState.startPosition);
     const afterMention = message.substring(
       mentionState.startPosition + mentionState.query.length + 1
     );
-    // Insert a visual @title marker in the message
-    const mentionText = `@${doc.title} `;
-    const newMessage = beforeMention + mentionText + afterMention;
+    const newMessage = beforeMention + afterMention;
     setMessage(newMessage);
     setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
     setMentionResults([]);
 
-    // Add to referenced documents (for RAG) if not already present
+    // Add to referenced documents (shown as attachment chip) if not already present
     setReferencedDocs(prev => {
       if (prev.some(d => d.id === doc.id)) {
         return prev;
@@ -238,12 +238,11 @@ export function ChatInput({
       return [...prev, { id: doc.id, title: doc.title }];
     });
 
-    // Focus and position cursor after the mention
+    // Focus and position cursor
     setTimeout(() => {
       if (textareaRef.current) {
-        const newCursorPos = beforeMention.length + mentionText.length;
         textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+        textareaRef.current.setSelectionRange(beforeMention.length, beforeMention.length);
       }
     }, 0);
   }, [message, mentionState.startPosition, mentionState.query]);
