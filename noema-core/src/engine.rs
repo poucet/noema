@@ -1,4 +1,4 @@
-use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry, SessionStore, StorageTransaction};
+use crate::{Agent, ConversationContext, DocumentResolver, McpAgent, McpRegistry, McpToolRegistry, SessionStore, StorageTransaction};
 use llm::{create_model, ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -69,16 +69,26 @@ pub struct ChatEngine<S: SessionStore + 'static> {
     model: Arc<dyn ChatModel + Send + Sync>,
     #[allow(dead_code)]
     processor_handle: JoinHandle<()>,
+    #[allow(dead_code)]
+    document_resolver: Arc<dyn DocumentResolver>,
 }
 
 impl<S: SessionStore + 'static> ChatEngine<S>
 where
     S::Transaction: Send + 'static,
 {
+    /// Create a new chat engine
+    ///
+    /// # Arguments
+    /// * `session` - The session store for conversation history
+    /// * `model` - The LLM model to use
+    /// * `mcp_registry` - Registry of MCP servers for tool access
+    /// * `document_resolver` - Resolver for document references (required for RAG)
     pub fn new(
         session: S,
         model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: McpRegistry,
+        document_resolver: Arc<dyn DocumentResolver>,
     ) -> Self {
         let session = Arc::new(Mutex::new(session));
         let mcp_registry = Arc::new(Mutex::new(mcp_registry));
@@ -88,12 +98,14 @@ where
         let session_clone = Arc::clone(&session);
         let mcp_registry_clone = Arc::clone(&mcp_registry);
         let initial_model = Arc::clone(&model);
+        let resolver_clone = Arc::clone(&document_resolver);
 
         let processor_handle = tokio::spawn(async move {
             Self::processor_loop(
                 session_clone,
                 initial_model,
                 mcp_registry_clone,
+                resolver_clone,
                 cmd_rx,
                 event_tx,
             )
@@ -107,6 +119,7 @@ where
             event_rx,
             model,
             processor_handle,
+            document_resolver,
         }
     }
 
@@ -114,13 +127,14 @@ where
         session: Arc<Mutex<S>>,
         mut model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
+        document_resolver: Arc<dyn DocumentResolver>,
         mut cmd_rx: mpsc::UnboundedReceiver<EngineCommand>,
         event_tx: mpsc::UnboundedSender<EngineEvent>,
     ) {
         // Create dynamic tool registry that queries MCP servers on each call
         let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
-        // Agent is stateless regarding model, but holds tool registry
-        let agent = McpAgent::new(Arc::new(tool_registry), 10);
+        // Agent with document resolver for RAG support
+        let agent = McpAgent::new(Arc::new(tool_registry), 10, Arc::clone(&document_resolver));
 
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
@@ -186,6 +200,7 @@ where
                         let event_tx = event_tx.clone();
                         let history = history.clone();
                         let mcp_registry = Arc::clone(&mcp_registry);
+                        let resolver = Arc::clone(&document_resolver);
 
                         let handle = tokio::spawn(async move {
                             // Create model for this parallel request
@@ -202,7 +217,7 @@ where
 
                             // Create a temporary in-memory context for this model's execution
                             let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
-                            let agent = McpAgent::new(Arc::new(tool_registry), 10);
+                            let agent = McpAgent::new(Arc::new(tool_registry), 10, resolver);
 
                             // Create a minimal transaction with history
                             let mut messages = history.clone();

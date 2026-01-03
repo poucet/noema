@@ -1,5 +1,6 @@
 //! Agent with dynamic MCP tool support
 
+use crate::document_resolver::{self, DocumentInjectionConfig, DocumentResolver};
 use crate::mcp::McpToolRegistry;
 use crate::traffic_log;
 use crate::Agent;
@@ -29,6 +30,8 @@ use std::sync::Arc;
 pub struct McpAgent {
     tools: Arc<McpToolRegistry>,
     max_iterations: usize,
+    document_resolver: Arc<dyn DocumentResolver>,
+    document_injection_config: DocumentInjectionConfig,
 }
 
 impl McpAgent {
@@ -38,11 +41,24 @@ impl McpAgent {
     ///
     /// * `tools` - Dynamic MCP tool registry
     /// * `max_iterations` - Maximum number of turn cycles before stopping
-    pub fn new(tools: Arc<McpToolRegistry>, max_iterations: usize) -> Self {
+    /// * `document_resolver` - Resolver for document references (required for RAG support)
+    pub fn new(
+        tools: Arc<McpToolRegistry>,
+        max_iterations: usize,
+        document_resolver: Arc<dyn DocumentResolver>,
+    ) -> Self {
         Self {
             tools,
             max_iterations,
+            document_resolver,
+            document_injection_config: DocumentInjectionConfig::default(),
         }
+    }
+
+    /// Set the document injection configuration
+    pub fn with_document_injection_config(mut self, config: DocumentInjectionConfig) -> Self {
+        self.document_injection_config = config;
+        self
     }
 
     /// Get reference to the tool registry
@@ -53,6 +69,11 @@ impl McpAgent {
     /// Get maximum iterations
     pub fn max_iterations(&self) -> usize {
         self.max_iterations
+    }
+
+    /// Resolve document refs in a request
+    async fn resolve_documents(&self, request: &mut ChatRequest) {
+        document_resolver::resolve_request(request, self.document_resolver.as_ref(), &self.document_injection_config).await;
     }
 
     /// Process tool calls and add results to context
@@ -88,7 +109,10 @@ impl Agent for McpAgent {
             let tool_definitions = self.tools.get_all_definitions().await;
 
             // Make request with tools
-            let request = ChatRequest::with_tools(context.iter(), tool_definitions);
+            let mut request = ChatRequest::with_tools(context.iter(), tool_definitions);
+
+            // Resolve any document refs before sending to LLM
+            self.resolve_documents(&mut request).await;
 
             let response = model.chat(&request).await?;
             let tool_calls = response.get_tool_calls();
@@ -127,7 +151,10 @@ impl Agent for McpAgent {
             // Get current tool definitions dynamically
             let tool_definitions = self.tools.get_all_definitions().await;
 
-            let request = ChatRequest::with_tools(context.iter(), tool_definitions);
+            let mut request = ChatRequest::with_tools(context.iter(), tool_definitions);
+
+            // Resolve any document refs before sending to LLM
+            self.resolve_documents(&mut request).await;
 
             // Stream the response
             let mut stream = model.stream_chat(&request).await?;
