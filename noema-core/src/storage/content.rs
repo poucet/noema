@@ -24,6 +24,11 @@ pub enum StoredContent {
         #[serde(skip_serializing_if = "Option::is_none")]
         filename: Option<String>,
     },
+    /// Reference to a document (for RAG) - displayed as chip, content injected to LLM separately
+    DocumentRef {
+        id: String,
+        title: String,
+    },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
 }
@@ -63,6 +68,7 @@ impl From<ContentBlock> for StoredContent {
             ContentBlock::Text { text } => StoredContent::Text { text },
             ContentBlock::Image { data, mime_type } => StoredContent::Image { data, mime_type },
             ContentBlock::Audio { data, mime_type } => StoredContent::Audio { data, mime_type },
+            ContentBlock::DocumentRef { id, title } => StoredContent::DocumentRef { id, title },
             ContentBlock::ToolCall(call) => StoredContent::ToolCall(call),
             ContentBlock::ToolResult(result) => StoredContent::ToolResult(result),
         }
@@ -71,34 +77,39 @@ impl From<ContentBlock> for StoredContent {
 
 /// Convert from StoredContent to LLM ContentBlock
 ///
-/// This conversion fails if the content is an asset reference.
-/// Use `StoredPayload::resolve()` to resolve refs before conversion.
+/// This conversion fails if the content is an asset reference (needs blob resolution).
+/// DocumentRef converts directly since ContentBlock now supports it.
 impl TryFrom<StoredContent> for ContentBlock {
-    type Error = UnresolvedBlobError;
+    type Error = UnresolvedAssetError;
 
     fn try_from(stored: StoredContent) -> Result<Self, Self::Error> {
         match stored {
             StoredContent::Text { text } => Ok(ContentBlock::Text { text }),
             StoredContent::Image { data, mime_type } => Ok(ContentBlock::Image { data, mime_type }),
             StoredContent::Audio { data, mime_type } => Ok(ContentBlock::Audio { data, mime_type }),
+            StoredContent::DocumentRef { id, title } => Ok(ContentBlock::DocumentRef { id, title }),
             StoredContent::ToolCall(call) => Ok(ContentBlock::ToolCall(call)),
             StoredContent::ToolResult(result) => Ok(ContentBlock::ToolResult(result)),
-            StoredContent::AssetRef { asset_id, .. } => Err(UnresolvedBlobError(asset_id)),
+            StoredContent::AssetRef { asset_id, .. } => Err(UnresolvedAssetError(asset_id)),
         }
     }
 }
 
-/// Error when trying to convert an unresolved blob reference
+/// Error when trying to convert an unresolved asset reference
 #[derive(Debug, Clone)]
-pub struct UnresolvedBlobError(pub String);
+pub struct UnresolvedAssetError(pub String);
 
-impl std::fmt::Display for UnresolvedBlobError {
+impl std::fmt::Display for UnresolvedAssetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Unresolved blob reference: {}", self.0)
+        write!(f, "Unresolved asset reference: {}", self.0)
     }
 }
 
-impl std::error::Error for UnresolvedBlobError {}
+impl std::error::Error for UnresolvedAssetError {}
+
+/// Legacy aliases for backwards compatibility
+pub type UnresolvedRefError = UnresolvedAssetError;
+pub type UnresolvedBlobError = UnresolvedAssetError;
 
 /// Stored payload with blob reference support
 ///
