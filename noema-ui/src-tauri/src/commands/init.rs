@@ -4,7 +4,7 @@ use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::BlobStore;
-use noema_core::{ChatEngine, McpRegistry, SqliteSession, SqliteStore};
+use noema_core::{ChatEngine, DocumentResolver, McpRegistry, SqliteDocumentResolver, SqliteSession, SqliteStore};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -166,8 +166,8 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     std::fs::create_dir_all(&blob_dir)
         .map_err(|e| format!("Failed to create blob storage dir: {}", e))?;
 
-    let store = SqliteStore::open(&db_path)
-        .map_err(|e| format!("Failed to open database: {}", e))?;
+    let store = Arc::new(SqliteStore::open(&db_path)
+        .map_err(|e| format!("Failed to open database: {}", e))?);
 
     let blob_store = Arc::new(BlobStore::new(blob_dir));
 
@@ -295,7 +295,14 @@ async fn init_engine(
     *state.model_id.lock().await = model_id;
     *state.model_name.lock().await = model_display_name.clone();
 
-    let engine = ChatEngine::new(session, model, mcp_registry);
+    // Create document resolver for RAG support (required)
+    let document_resolver: Arc<dyn DocumentResolver> = {
+        let store_guard = state.store.lock().await;
+        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+        Arc::new(SqliteDocumentResolver::new(Arc::clone(store)))
+    };
+
+    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
     *state.engine.lock().await = Some(engine);
 
     Ok(model_display_name)

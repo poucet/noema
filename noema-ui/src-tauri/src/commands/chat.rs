@@ -1,7 +1,8 @@
 //! Chat-related Tauri commands
 
 use llm::{create_model, list_all_models, ChatPayload, ContentBlock};
-use noema_core::{ChatEngine, EngineEvent, McpRegistry, SessionStore};
+use noema_core::{ChatEngine, DocumentResolver, EngineEvent, McpRegistry, SessionStore, SqliteDocumentResolver};
+use std::sync::Arc;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -85,7 +86,7 @@ pub async fn send_message_with_attachments(
 }
 
 /// Send a message with document references for RAG
-/// The document content is prepended to provide context to the LLM
+/// Document refs are stored as-is and resolved to full content before sending to LLM
 #[tauri::command]
 pub async fn send_message_with_documents(
     app: AppHandle,
@@ -94,57 +95,19 @@ pub async fn send_message_with_documents(
     attachments: Vec<Attachment>,
     referenced_documents: Vec<ReferencedDocument>,
 ) -> Result<(), String> {
-    // Build content blocks
+    // Build content with DocumentRefs (will be stored and resolved before LLM)
     let mut content = Vec::new();
 
-    // Fetch document content for RAG context
-    let mut doc_context_parts = Vec::new();
-    {
-        let store_guard = state.store.lock().await;
-        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-
-        for doc_ref in &referenced_documents {
-            // Get document tabs to extract content
-            let tabs = store
-                .list_document_tabs(&doc_ref.id)
-                .map_err(|e| format!("Failed to get document tabs: {}", e))?;
-
-            // Collect markdown content from all tabs
-            let mut doc_content = String::new();
-            let tab_count = tabs.len();
-            for tab in tabs {
-                if let Some(markdown) = tab.content_markdown {
-                    if !doc_content.is_empty() {
-                        doc_content.push_str("\n\n");
-                    }
-                    if tab_count > 1 {
-                        doc_content.push_str(&format!("## {}\n\n", tab.title));
-                    }
-                    doc_content.push_str(&markdown);
-                }
-            }
-
-            if !doc_content.is_empty() {
-                doc_context_parts.push(format!(
-                    "<document id=\"{}\" title=\"{}\">\n{}\n</document>",
-                    doc_ref.id, doc_ref.title, doc_content
-                ));
-            }
-        }
+    // Add document refs - these get stored and resolved before sending to LLM
+    for doc_ref in &referenced_documents {
+        content.push(ContentBlock::DocumentRef {
+            id: doc_ref.id.clone(),
+            title: doc_ref.title.clone(),
+        });
     }
 
-    // Build the message with document context
-    if !doc_context_parts.is_empty() {
-        let doc_context = format!(
-            "<referenced_documents>\n{}\n</referenced_documents>\n\n\
-            When referring to information from these documents in your response, \
-            use markdown links in the format [relevant text](noema://doc/DOCUMENT_ID) \
-            where DOCUMENT_ID is the document's id from the document tags above.\n\n{}",
-            doc_context_parts.join("\n\n"),
-            message
-        );
-        content.push(ContentBlock::Text { text: doc_context });
-    } else if !message.trim().is_empty() {
+    // Add text message
+    if !message.trim().is_empty() {
         content.push(ContentBlock::Text { text: message });
     }
 
@@ -167,6 +130,7 @@ pub async fn send_message_with_documents(
         return Err("Message must have text, documents, or attachments".to_string());
     }
 
+    // Send through normal flow - DocumentRefs will be resolved before LLM
     let payload = ChatPayload { content };
     send_message_internal(app, state, payload).await
 }
@@ -446,7 +410,14 @@ pub async fn switch_conversation(
         .collect();
     eprintln!("switch_conversation: converted to {} display messages", messages.len());
 
-    let engine = ChatEngine::new(session, model, mcp_registry);
+    // Create document resolver
+    let document_resolver: Arc<dyn DocumentResolver> = {
+        let store_guard = state.store.lock().await;
+        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+        Arc::new(SqliteDocumentResolver::new(Arc::clone(store)))
+    };
+
+    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
     *state.engine.lock().await = Some(engine);
     *state.current_conversation_id.lock().await = conversation_id;
@@ -474,7 +445,14 @@ pub async fn new_conversation(state: State<'_, AppState>) -> Result<String, Stri
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
-    let engine = ChatEngine::new(session, model, mcp_registry);
+    // Create document resolver
+    let document_resolver: Arc<dyn DocumentResolver> = {
+        let store_guard = state.store.lock().await;
+        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+        Arc::new(SqliteDocumentResolver::new(Arc::clone(store)))
+    };
+
+    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
     *state.engine.lock().await = Some(engine);
     *state.current_conversation_id.lock().await = conversation_id.clone();

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct AppState {
-    pub store: Mutex<Option<SqliteStore>>,
+    pub store: Mutex<Option<Arc<SqliteStore>>>,
     pub engine: Mutex<Option<ChatEngine<SqliteSession>>>,
     pub current_conversation_id: Mutex<String>,
     /// Current thread ID within the conversation (None = main thread)

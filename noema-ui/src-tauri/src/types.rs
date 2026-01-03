@@ -56,6 +56,11 @@ pub enum DisplayContent {
         mime_type: String,
         filename: Option<String>
     },
+    /// Reference to a document (shown as chip in UI, content injected to LLM separately)
+    DocumentRef {
+        id: String,
+        title: String,
+    },
     ToolCall { name: String, id: String, #[ts(type = "unknown")] arguments: serde_json::Value },
     ToolResult { id: String, content: Vec<DisplayToolResultContent> },
 }
@@ -180,6 +185,10 @@ fn content_block_to_display(block: &ContentBlock) -> DisplayContent {
                 .map(tool_result_content_to_display)
                 .collect(),
         },
+        ContentBlock::DocumentRef { id, title } => DisplayContent::DocumentRef {
+            id: id.clone(),
+            title: title.clone(),
+        },
     }
 }
 
@@ -214,6 +223,10 @@ pub fn stored_content_to_display(content: &StoredContent) -> DisplayContent {
             asset_id: asset_id.clone(),
             mime_type: mime_type.clone(),
             filename: filename.clone(),
+        },
+        StoredContent::DocumentRef { id, title } => DisplayContent::DocumentRef {
+            id: id.clone(),
+            title: title.clone(),
         },
         StoredContent::ToolCall(call) => DisplayContent::ToolCall {
             name: call.name.clone(),
