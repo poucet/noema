@@ -54,6 +54,26 @@ impl McpAgent {
     pub fn max_iterations(&self) -> usize {
         self.max_iterations
     }
+
+    /// Process tool calls and add results to context
+    async fn process_tool_calls(
+        &self,
+        context: &mut (impl ConversationContext + Send),
+        tool_calls: Vec<&llm::ToolCall>,
+    ) {
+        for tool_call in tool_calls {
+            let result_content = self
+                .tools
+                .call(&tool_call.name, tool_call.arguments.clone())
+                .await
+                .unwrap_or_else(|e| vec![ToolResultContent::text(format!("Error: {}", e))]);
+
+            let result_msg =
+                ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result_content));
+
+            context.add(result_msg);
+        }
+    }
 }
 
 #[async_trait]
@@ -82,18 +102,7 @@ impl Agent for McpAgent {
             }
 
             // Execute all tool calls and add results to context
-            for tool_call in tool_calls {
-                let result_content = self
-                    .tools
-                    .call(&tool_call.name, tool_call.arguments.clone())
-                    .await
-                    .unwrap_or_else(|e| vec![ToolResultContent::text(format!("Error: {}", e))]);
-
-                let result_msg =
-                    ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result_content));
-
-                context.add(result_msg);
-            }
+            self.process_tool_calls(context, tool_calls).await;
 
             // Check if we've hit max iterations
             if iteration == self.max_iterations - 1 {
@@ -165,18 +174,7 @@ impl Agent for McpAgent {
             }
 
             // Execute tools and add results to context
-            for tool_call in tool_calls {
-                let result_content = self
-                    .tools
-                    .call(&tool_call.name, tool_call.arguments.clone())
-                    .await
-                    .unwrap_or_else(|e| vec![ToolResultContent::text(format!("Error: {}", e))]);
-
-                let result_msg =
-                    ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result_content));
-
-                context.add(result_msg);
-            }
+            self.process_tool_calls(context, tool_calls).await;
 
             if iteration == self.max_iterations - 1 {
                 tracing::warn!(
