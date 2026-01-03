@@ -1514,10 +1514,10 @@ impl SqliteStore {
                 None => anyhow::bail!("Conversation not found: {}", conversation_id),
             };
 
-            // Find the main thread for this conversation
+            // Find the main thread for this conversation (parent_span_id IS NULL means it's the main/original thread)
             let main_thread: Option<(String, Option<String>)> = conn
                 .query_row(
-                    "SELECT id, parent_span_id FROM threads WHERE conversation_id = ?1 LIMIT 1",
+                    "SELECT id, parent_span_id FROM threads WHERE conversation_id = ?1 ORDER BY parent_span_id IS NOT NULL, created_at ASC LIMIT 1",
                     params![conversation_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )

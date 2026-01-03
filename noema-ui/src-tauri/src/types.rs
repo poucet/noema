@@ -41,15 +41,21 @@ impl From<noema_core::ConversationInfo> for ConversationInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
+#[ts(export, export_to = "../../src/generated/", rename_all = "camelCase")]
 pub enum DisplayContent {
     Text(String),
     /// Inline Base64 image
-    Image { data: String, mime_type: String },
+    Image { data: String, #[serde(rename = "mimeType")] mime_type: String },
     /// Inline Base64 audio
-    Audio { data: String, mime_type: String },
+    Audio { data: String, #[serde(rename = "mimeType")] mime_type: String },
     /// Asset stored in blob storage - client should fetch via asset API
-    AssetRef { asset_id: String, mime_type: String, filename: Option<String> },
+    AssetRef {
+        #[serde(rename = "assetId")]
+        asset_id: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+        filename: Option<String>
+    },
     ToolCall { name: String, id: String, #[ts(type = "unknown")] arguments: serde_json::Value },
     ToolResult { id: String, content: Vec<DisplayToolResultContent> },
 }

@@ -167,6 +167,19 @@ function ToolResultBlock({ content }: { content: DisplayToolResultContent[] }) {
   );
 }
 
+// Component for displaying images loaded from asset storage via the noema-asset protocol
+function AssetImage({ src, alt }: { src: string; alt: string }) {
+  return (
+    <div className="relative group">
+      <img
+        src={src}
+        alt={alt}
+        className="max-w-full rounded-lg"
+      />
+    </div>
+  );
+}
+
 interface ContentBlockProps {
   block: DisplayContent;
   onDocumentClick?: (docId: string) => void;
@@ -180,6 +193,17 @@ function ContentBlock({ block, onDocumentClick }: ContentBlockProps) {
   if ("image" in block) {
     return (
       <ImageViewer data={block.image.data} mimeType={block.image.mimeType} alt="Message attachment" />
+    );
+  }
+
+  if ("assetRef" in block) {
+    // Load image from asset protocol - assets are served at noema-asset://localhost/{assetId}
+    const assetUrl = `noema-asset://localhost/${block.assetRef.assetId}?mime_type=${encodeURIComponent(block.assetRef.mimeType)}`;
+    return (
+      <AssetImage
+        src={assetUrl}
+        alt={block.assetRef.filename || "Image"}
+      />
     );
   }
 

@@ -9,6 +9,7 @@ export type DisplayContent =
   | { text: string }
   | { image: { data: string; mimeType: string } }
   | { audio: { data: string; mimeType: string } }
+  | { assetRef: { assetId: string; mimeType: string; filename: string | null } }
   | { toolCall: { name: string; id: string; arguments: unknown } }
   | { toolResult: { id: string; content: DisplayToolResultContent[] } };
 
