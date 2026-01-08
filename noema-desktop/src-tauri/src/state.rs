@@ -2,8 +2,9 @@
 
 use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
-use noema_core::storage::BlobStore;
-use noema_core::{ChatEngine, SqliteSession, SqliteStore};
+use noema_core::storage::blob::BlobStore;
+use noema_core::{ChatEngine};
+use noema_core::storage::session::{SqliteStore, SqliteSession};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

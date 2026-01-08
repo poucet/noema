@@ -1,4 +1,5 @@
-use crate::{Agent, ConversationContext, DocumentResolver, McpAgent, McpRegistry, McpToolRegistry, SessionStore, StorageTransaction};
+use crate::{Agent, ConversationContext, DocumentResolver, McpAgent, McpRegistry, McpToolRegistry};
+use crate::storage::session::{SessionStore, StorageTransaction};
 use llm::{create_model, ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -362,7 +363,7 @@ async fn run_single_model_agent(
     event_tx: &mpsc::UnboundedSender<EngineEvent>,
     model_id: &str,
 ) -> Result<Vec<ChatMessage>, String> {
-    use crate::MemorySession;
+    use crate::storage::session::MemorySession;
 
     // Create a temporary in-memory session with the conversation history
     let mut temp_session = MemorySession::new();

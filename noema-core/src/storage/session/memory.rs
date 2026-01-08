@@ -2,7 +2,7 @@
 //!
 //! This is the default storage backend - fast but not persistent.
 
-use super::traits::{SessionStore, StorageTransaction};
+use super::{SessionStore, StorageTransaction};
 use crate::ConversationContext;
 use async_trait::async_trait;
 use llm::{ChatMessage, ChatPayload};

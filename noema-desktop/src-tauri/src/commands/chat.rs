@@ -1,7 +1,11 @@
 //! Chat-related Tauri commands
 
-use llm::{ChatMessage, ChatPayload, ContentBlock, create_model, list_all_models};
-use noema_core::{ChatEngine, DocumentResolver, EngineEvent, McpRegistry, SessionStore, SqliteDocumentResolver};
+use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
+use noema_core::{ChatEngine, DocumentResolver, EngineEvent, McpRegistry};
+use noema_core::document_resolver::SqliteDocumentResolver;
+use noema_core::storage::conversation::{ConversationStore, SpanType};
+use noema_core::storage::content::{StoredContent, StoredPayload};
+use noema_core::storage::session::SessionStore;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -285,6 +289,7 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
 
     store
         .list_conversations(&user_id)
+        .await
         .map(|convos| convos.into_iter().map(ConversationInfo::from).collect())
         .map_err(|e| format!("Failed to list conversations: {}", e))
 }
@@ -295,8 +300,6 @@ pub async fn switch_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> Result<Vec<DisplayMessage>, String> {
-    use noema_core::SessionStore;
-
     // Get blob store for resolving asset refs
     let blob_store = {
         let blob_guard = state.blob_store.lock().await;
@@ -411,6 +414,7 @@ pub async fn delete_conversation(
 
     store
         .delete_conversation(&conversation_id)
+        .await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
 
@@ -432,6 +436,7 @@ pub async fn rename_conversation(
 
     store
         .rename_conversation(&conversation_id, name_opt)
+        .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
 
@@ -512,6 +517,7 @@ pub async fn get_span_set_alternates(
 
     let alternates = store
         .get_span_set_alternates(&span_set_id)
+        .await
         .map_err(|e| format!("Failed to get alternates: {}", e))?;
 
     Ok(alternates
@@ -538,6 +544,7 @@ pub async fn set_selected_span(
 
     store
         .set_selected_span(&span_set_id, &span_id)
+        .await
         .map_err(|e| format!("Failed to set selected span: {}", e))
 }
 
@@ -552,6 +559,7 @@ pub async fn get_span_messages(
 
     let messages = store
         .get_span_messages(&span_id)
+        .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
 
     Ok(messages
@@ -587,6 +595,7 @@ pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Re
     // Get the main thread for this conversation
     let thread_id = store
         .get_main_thread_id(&conversation_id)
+        .await
         .map_err(|e| format!("Failed to get thread: {}", e))?;
 
     let thread_id = match thread_id {
@@ -597,6 +606,7 @@ pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Re
     // Get all span sets for this thread
     let span_sets = store
         .get_thread_span_sets(&thread_id)
+        .await
         .map_err(|e| format!("Failed to get span sets: {}", e))?;
 
     let mut result = Vec::new();
@@ -605,6 +615,7 @@ pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Re
         // Get full content for this span set
         let span_set = store
             .get_span_set_with_content(&span_set_info.id)
+            .await
             .map_err(|e| format!("Failed to get span set content: {}", e))?;
 
         if let Some(span_set) = span_set {
@@ -668,6 +679,7 @@ pub async fn list_conversation_threads(
 
     let threads = store
         .list_conversation_threads(&conversation_id)
+        .await
         .map_err(|e| format!("Failed to list threads: {}", e))?;
 
     Ok(threads.into_iter().map(ThreadInfoResponse::from).collect())
@@ -697,6 +709,7 @@ pub async fn fork_from_span(
     // Create a new forked conversation (this creates both conversation and thread)
     let (conversation_id, thread_id) = store
         .create_fork_conversation(&user_id, &span_id, name.as_deref())
+        .await
         .map_err(|e| format!("Failed to create fork: {}", e))?;
 
     Ok(ForkResult {
@@ -717,6 +730,7 @@ pub async fn switch_thread(
     // Get thread info to verify it exists
     let thread = store
         .get_thread(&thread_id)
+        .await
         .map_err(|e| format!("Failed to get thread: {}", e))?
         .ok_or("Thread not found")?;
 
@@ -727,6 +741,7 @@ pub async fn switch_thread(
     // For forked threads, we need to walk through span_sets properly
     let span_sets = store
         .get_thread_span_sets(&thread_id)
+        .await
         .map_err(|e| format!("Failed to get span sets: {}", e))?;
 
     let mut result = Vec::new();
@@ -735,6 +750,7 @@ pub async fn switch_thread(
     if thread.parent_span_id.is_some() {
         let ancestry_messages = store
             .get_thread_messages_with_ancestry(&thread_id)
+            .await
             .map_err(|e| format!("Failed to get ancestry messages: {}", e))?;
 
         for msg in ancestry_messages {
@@ -752,6 +768,7 @@ pub async fn switch_thread(
         for span_set_info in span_sets {
             let span_set = store
                 .get_span_set_with_content(&span_set_info.id)
+                .await
                 .map_err(|e| format!("Failed to get span set content: {}", e))?;
 
             if let Some(span_set) = span_set {
@@ -816,6 +833,7 @@ pub async fn rename_thread(
 
     store
         .rename_thread(&thread_id, name_opt)
+        .await
         .map_err(|e| format!("Failed to rename thread: {}", e))
 }
 
@@ -830,6 +848,7 @@ pub async fn delete_thread(
 
     store
         .delete_thread(&thread_id)
+        .await
         .map_err(|e| format!("Failed to delete thread: {}", e))?;
 
     Ok(())
@@ -855,24 +874,28 @@ pub async fn edit_user_message(
     // Get the span_set this span belongs to
     let span_set_id = store
         .get_span_parent_span_set(&span_id)
+        .await
         .map_err(|e| format!("Failed to get span's span_set: {}", e))?
         .ok_or("Span not found")?;
 
     // Get the thread this span_set belongs to
     let thread_id = store
         .get_span_set_thread(&span_set_id)
+        .await
         .map_err(|e| format!("Failed to get span_set's thread: {}", e))?
         .ok_or("Thread not found")?;
 
     // Get the thread to find its conversation_id
     let thread = store
         .get_thread(&thread_id)
+        .await
         .map_err(|e| format!("Failed to get thread: {}", e))?
         .ok_or("Thread not found")?;
 
     // Get span_set info to find the previous span_set (we fork from the span before the edited one)
     let span_sets = store
         .get_thread_span_sets(&thread_id)
+        .await
         .map_err(|e| format!("Failed to get span sets: {}", e))?;
 
     // Find the span_set that contains our span and the one before it
@@ -895,27 +918,28 @@ pub async fn edit_user_message(
     let new_thread_id = if let Some(ref parent_id) = parent_span_id {
         store
             .create_fork_thread(&thread.conversation_id, parent_id, Some("Edited"))
+            .await
             .map_err(|e| format!("Failed to create fork: {}", e))?
     } else {
         // No previous message to fork from - create a fresh thread
         // This shouldn't happen in normal usage (editing the first message)
         store
             .create_fork_thread(&thread.conversation_id, &span_id, Some("Edited"))
+            .await
             .map_err(|e| format!("Failed to create fork: {}", e))?
     };
 
-    // Write the edited message as a new span in the forked thread
-    use llm::Role;
-    use noema_core::storage::{SpanType, StoredContent, StoredPayload};
 
     // Create a span_set for the user message in the new thread
     let span_set_id = store
         .create_span_set(&new_thread_id, SpanType::User)
+        .await
         .map_err(|e| format!("Failed to create span_set: {}", e))?;
 
     // Create a span within the span_set
     let span_id = store
         .create_span(&span_set_id, None)
+        .await
         .map_err(|e| format!("Failed to create span: {}", e))?;
 
     // Create the stored payload with the edited text
@@ -926,6 +950,7 @@ pub async fn edit_user_message(
     // Add the message to the span
     store
         .add_span_message(&span_id, Role::User, &content)
+        .await
         .map_err(|e| format!("Failed to write edited message: {}", e))?;
 
     // Update current thread in state

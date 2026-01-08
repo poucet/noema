@@ -4,7 +4,8 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
-use noema_core::storage::{DocumentInfo, DocumentSource, DocumentTabInfo};
+use noema_core::storage::document::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo};
+use noema_core::storage::user::UserStore;
 use rmcp::model::RawContent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -99,10 +100,12 @@ pub async fn list_documents(state: State<'_, Arc<AppState>>) -> Result<Vec<Docum
     // Get default user
     let user = store
         .get_or_create_default_user()
+        .await
         .map_err(|e| e.to_string())?;
 
     let docs = store
         .list_documents(&user.id)
+        .await
         .map_err(|e| e.to_string())?;
     Ok(docs.into_iter().map(DocumentInfoResponse::from).collect())
 }
@@ -116,7 +119,7 @@ pub async fn get_document(
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
-    let doc = store.get_document(&doc_id).map_err(|e| e.to_string())?;
+    let doc = store.get_document(&doc_id).await.map_err(|e| e.to_string())?;
     Ok(doc.map(DocumentInfoResponse::from))
 }
 
@@ -131,10 +134,12 @@ pub async fn get_document_by_google_id(
 
     let user = store
         .get_or_create_default_user()
+        .await
         .map_err(|e| e.to_string())?;
 
     let doc = store
         .get_document_by_source(&user.id, DocumentSource::GoogleDrive, &google_doc_id)
+        .await
         .map_err(|e| e.to_string())?;
     Ok(doc.map(DocumentInfoResponse::from))
 }
@@ -151,12 +156,14 @@ pub async fn get_document_content(
     // Get document metadata
     let doc = store
         .get_document(&doc_id)
+        .await
         .map_err(|e| e.to_string())?
         .ok_or("Document not found")?;
 
     // Get all tabs for this document
     let tabs = store
         .list_document_tabs(&doc_id)
+        .await
         .map_err(|e| e.to_string())?;
 
     Ok(DocumentContentResponse {
@@ -176,6 +183,7 @@ pub async fn get_document_tab(
 
     let tab = store
         .get_document_tab(&tab_id)
+        .await
         .map_err(|e| e.to_string())?;
     Ok(tab.map(DocumentTabResponse::from))
 }
@@ -186,7 +194,7 @@ pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: String) ->
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
-    store.delete_document(&doc_id).map_err(|e| e.to_string())
+    store.delete_document(&doc_id).await.map_err(|e| e.to_string())
 }
 
 /// Sync a Google Doc (trigger refresh from MCP server)
@@ -436,10 +444,12 @@ pub async fn import_google_doc(
         let store = store_guard.as_ref().ok_or("Storage not initialized")?;
         let user = store
             .get_or_create_default_user()
+            .await
             .map_err(|e| e.to_string())?;
 
         if let Some(existing) = store
             .get_document_by_source(&user.id, DocumentSource::GoogleDrive, &google_doc_id)
+            .await
             .map_err(|e| e.to_string())?
         {
             info!("Document already imported, returning existing: {}", existing.id);
@@ -517,6 +527,7 @@ pub async fn import_google_doc(
 
     let user = store
         .get_or_create_default_user()
+        .await
         .map_err(|e| e.to_string())?;
 
     // Create the document
@@ -527,6 +538,7 @@ pub async fn import_google_doc(
             DocumentSource::GoogleDrive,
             Some(&google_doc_id),
         )
+        .await
         .map_err(|e| format!("Failed to create document: {}", e))?;
 
     // Store images first so we can reference them in tabs
@@ -603,6 +615,7 @@ pub async fn import_google_doc(
                 &referenced_assets,
                 Some(&tab.source_tab_id),
             )
+            .await
             .map_err(|e| format!("Failed to create tab: {}", e))?;
 
         tab_id_map.insert(tab.source_tab_id.clone(), tab_id);
@@ -617,6 +630,7 @@ pub async fn import_google_doc(
             ) {
                 store
                     .update_document_tab_parent(tab_id, Some(parent_id))
+                    .await
                     .map_err(|e| format!("Failed to update tab parent: {}", e))?;
             }
         }
@@ -625,6 +639,7 @@ pub async fn import_google_doc(
     // Fetch and return the created document
     let doc = store
         .get_document(&doc_id)
+        .await
         .map_err(|e| e.to_string())?
         .ok_or("Failed to retrieve created document")?;
 
@@ -644,10 +659,12 @@ pub async fn search_documents(
 
     let user = store
         .get_or_create_default_user()
+        .await
         .map_err(|e| e.to_string())?;
 
     let docs = store
         .search_documents(&user.id, &query, limit.unwrap_or(10))
+        .await
         .map_err(|e| e.to_string())?;
 
     Ok(docs.into_iter().map(DocumentInfoResponse::from).collect())

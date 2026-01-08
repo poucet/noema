@@ -1,12 +1,30 @@
-//! Traits for session storage backends
+//! Session storage traits and implementations
 //!
-//! These traits define the interface that both in-memory and SQLite
-//! implementations must satisfy.
+//! This module provides:
+//! - `SessionStore` trait for session management with transactions
+//! - `StorageTransaction` trait for transaction semantics
+//! - `MemorySession` / `MemoryTransaction` - in-memory session implementations
+//! - `SqliteStore` - the main SQLite storage backend (requires `sqlite` feature)
+//! - `SqliteSession` / `SqliteTransaction` - SQLite session implementations
+
+mod memory;
+
+#[cfg(feature = "sqlite")]
+mod sqlite;
 
 use async_trait::async_trait;
 use llm::ChatMessage;
 
 use crate::ConversationContext;
+
+pub use memory::{MemorySession, MemoryTransaction};
+
+#[cfg(feature = "sqlite")]
+pub use sqlite::{SqliteSession, SqliteStore, SqliteTransaction};
+
+// ============================================================================
+// Traits
+// ============================================================================
 
 /// A transaction that can be committed or rolled back
 ///

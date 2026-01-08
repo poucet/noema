@@ -6,6 +6,9 @@
 use async_trait::async_trait;
 use futures::future::join_all;
 use llm::{ChatMessage, ChatPayload, ChatRequest, ContentBlock};
+use std::sync::Arc;
+
+use crate::storage::document::DocumentStore;
 
 /// A resolved document with its content
 #[derive(Debug, Clone)]
@@ -22,13 +25,40 @@ pub trait DocumentResolver: Send + Sync {
     async fn resolve(&self, doc_id: &str) -> Option<ResolvedDocument>;
 }
 
-/// No-op document resolver that doesn't resolve anything
-pub struct NoOpDocumentResolver;
+/// Document resolver backed by any DocumentStore implementation
+pub struct StoreDocumentResolver<S> {
+    store: Arc<S>,
+}
+
+impl<S: DocumentStore> StoreDocumentResolver<S> {
+    /// Create a new resolver with the given store
+    pub fn new(store: Arc<S>) -> Self {
+        Self { store }
+    }
+}
 
 #[async_trait]
-impl DocumentResolver for NoOpDocumentResolver {
-    async fn resolve(&self, _doc_id: &str) -> Option<ResolvedDocument> {
-        None
+impl<S: DocumentStore> DocumentResolver for StoreDocumentResolver<S> {
+    async fn resolve(&self, doc_id: &str) -> Option<ResolvedDocument> {
+        // Get document metadata
+        let doc_info = self.store.get_document(doc_id).await.ok()??;
+
+        // Get all tabs for this document
+        let tabs = self.store.list_document_tabs(doc_id).await.ok()?;
+
+        // Concatenate all tab content
+        let content: String = tabs
+            .iter()
+            .filter_map(|tab| tab.content_markdown.as_ref())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n---------\n");
+
+        Some(ResolvedDocument {
+            id: doc_id.to_string(),
+            title: doc_info.title,
+            content,
+        })
     }
 }
 
@@ -179,58 +209,12 @@ pub fn request_has_document_refs(request: &ChatRequest) -> bool {
 }
 
 // ============================================================================
-// SQLite Document Resolver
+// Backwards Compatibility
 // ============================================================================
 
+/// Type alias for backwards compatibility
 #[cfg(feature = "sqlite")]
-mod sqlite_resolver {
-    use super::*;
-    use crate::storage::SqliteStore;
-    use std::sync::Arc;
-
-    /// Document resolver that fetches documents from SQLite storage
-    ///
-    /// This resolver looks up documents by ID and returns their content
-    /// by concatenating all tabs' markdown content.
-    pub struct SqliteDocumentResolver {
-        store: Arc<SqliteStore>,
-    }
-
-    impl SqliteDocumentResolver {
-        /// Create a new resolver with the given SQLite store
-        pub fn new(store: Arc<SqliteStore>) -> Self {
-            Self { store }
-        }
-    }
-
-    #[async_trait]
-    impl DocumentResolver for SqliteDocumentResolver {
-        async fn resolve(&self, doc_id: &str) -> Option<ResolvedDocument> {
-            // Get document metadata
-            let doc_info = self.store.get_document(doc_id).ok()??;
-
-            // Get all tabs for this document
-            let tabs = self.store.list_document_tabs(doc_id).ok()?;
-
-            // Concatenate all tab content
-            let content: String = tabs
-                .iter()
-                .filter_map(|tab| tab.content_markdown.as_ref())
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("\n\n");
-
-            Some(ResolvedDocument {
-                id: doc_id.to_string(),
-                title: doc_info.title,
-                content,
-            })
-        }
-    }
-}
-
-#[cfg(feature = "sqlite")]
-pub use sqlite_resolver::SqliteDocumentResolver;
+pub type SqliteDocumentResolver = StoreDocumentResolver<crate::storage::session::SqliteStore>;
 
 #[cfg(test)]
 mod tests {

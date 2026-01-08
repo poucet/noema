@@ -26,8 +26,8 @@ pub struct ConversationInfo {
     pub updated_at: i64,
 }
 
-impl From<noema_core::ConversationInfo> for ConversationInfo {
-    fn from(info: noema_core::ConversationInfo) -> Self {
+impl From<noema_core::storage::conversation::ConversationInfo> for ConversationInfo {
+    fn from(info: noema_core::storage::conversation::ConversationInfo) -> Self {
         Self {
             id: info.id,
             name: info.name,
@@ -190,9 +190,9 @@ impl From<&ToolResultContent> for DisplayToolResultContent {
     }
 }
 
-impl From<noema_core::storage::StoredContent> for DisplayContent {
-    fn from(content: noema_core::storage::StoredContent) -> Self {
-        use noema_core::storage::StoredContent;
+impl From<noema_core::storage::content::StoredContent> for DisplayContent {
+    fn from(content: noema_core::storage::content::StoredContent) -> Self {
+        use noema_core::storage::content::StoredContent;
         match content {
             StoredContent::Text { text } => DisplayContent::Text(text.clone()),
             StoredContent::Image { data, mime_type } => DisplayContent::Image {
@@ -350,8 +350,8 @@ pub struct ThreadInfoResponse {
     pub is_main: bool,
 }
 
-impl From<noema_core::ThreadInfo> for ThreadInfoResponse {
-    fn from(info: noema_core::ThreadInfo) -> Self {
+impl From<noema_core::storage::conversation::ThreadInfo> for ThreadInfoResponse {
+    fn from(info: noema_core::storage::conversation::ThreadInfo) -> Self {
         Self {
             id: info.id,
             conversation_id: info.conversation_id,

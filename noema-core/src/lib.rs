@@ -28,12 +28,8 @@ pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
 pub use document_resolver::{
-    DocumentInjectionConfig, DocumentResolver, NoOpDocumentResolver, ResolvedDocument,
+    DocumentInjectionConfig, DocumentResolver, ResolvedDocument,
 };
-#[cfg(feature = "sqlite")]
-pub use document_resolver::SqliteDocumentResolver;
+
 pub use engine::{ChatEngine, EngineCommand, EngineEvent, ParallelAlternateInfo};
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
-pub use storage::{MemorySession, MemoryTransaction, SessionStore, StorageTransaction};
-#[cfg(feature = "sqlite")]
-pub use storage::{ConversationInfo, SqliteSession, SqliteStore, ThreadInfo};

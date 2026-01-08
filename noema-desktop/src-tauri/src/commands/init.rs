@@ -3,9 +3,12 @@
 use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
-use noema_core::storage::FsBlobStore;
-use noema_core::storage::BlobStore;
-use noema_core::{ChatEngine, DocumentResolver, McpRegistry, SqliteDocumentResolver, SqliteSession, SqliteStore};
+use noema_core::storage::blob::{BlobStore, FsBlobStore};
+use noema_core::storage::conversation::ConversationStore;
+use noema_core::storage::user::UserStore;
+use noema_core::{ChatEngine, DocumentResolver, McpRegistry};
+use noema_core::document_resolver::SqliteDocumentResolver;
+use noema_core::storage::session::{SqliteSession, SqliteStore};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -192,11 +195,13 @@ async fn init_user(state: &AppState) -> Result<(), String> {
         // User has configured a specific email - get or create that user
         store
             .get_or_create_user_by_email(&email)
+            .await
             .map_err(|e| format!("Failed to get/create user: {}", e))?
     } else {
         // No email configured - use smart selection logic
         let users = store
             .list_users()
+            .await
             .map_err(|e| format!("Failed to list users: {}", e))?;
 
         match users.len() {
@@ -204,6 +209,7 @@ async fn init_user(state: &AppState) -> Result<(), String> {
                 // No users exist - create default user
                 store
                     .get_or_create_default_user()
+                    .await
                     .map_err(|e| format!("Failed to create default user: {}", e))?
             }
             1 => {
@@ -231,6 +237,7 @@ async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
     // Try to open the most recent conversation, or create a new one if none exist
     let conversations = store
         .list_conversations(&user_id)
+        .await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
     let session = if let Some(most_recent) = conversations.first() {
