@@ -8,10 +8,10 @@ mod state;
 mod types;
 
 use config::PathManager;
-use noema_core::storage::BlobStore;
 use tauri::http::Response;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
+use std::sync::Arc;
 
 pub use logging::{init_logging, log_message};
 pub use state::AppState;
@@ -26,7 +26,10 @@ pub use commands::*;
 
 /// Handle requests to noema-asset://localhost/{asset_id}
 /// Returns the asset with proper caching headers
-fn handle_asset_request(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec<u8>> {
+async fn handle_asset_request(
+    request: &tauri::http::Request<Vec<u8>>,
+    app_state: Arc<AppState>,
+) -> Response<Vec<u8>> {
     // Parse asset_id from path: /asset_id or /{asset_id}
     let path = request.uri().path();
     let asset_id = path.trim_start_matches('/');
@@ -39,22 +42,22 @@ fn handle_asset_request(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec
             .unwrap();
     }
 
-    // Get blob storage directory
-    let blob_dir = match PathManager::blob_storage_dir() {
-        Some(dir) => dir,
+    // Get blob store from app state
+    let blob_store_guard = app_state.blob_store.lock().await;
+    let blob_store = match blob_store_guard.as_ref() {
+        Some(store) => store.clone(),
         None => {
             return Response::builder()
                 .status(500)
                 .header("Content-Type", "text/plain")
-                .body("Blob storage not configured".as_bytes().to_vec())
+                .body("Blob storage not initialized".as_bytes().to_vec())
                 .unwrap();
         }
     };
-
-    let blob_store = BlobStore::new(blob_dir);
+    drop(blob_store_guard);
 
     // Read the asset
-    let data = match blob_store.get(asset_id) {
+    let data = match blob_store.get(asset_id).await {
         Ok(data) => data,
         Err(_) => {
             return Response::builder()
@@ -103,6 +106,8 @@ pub fn run() {
     // Initialize unified tracing/logging - writes to ~/.local/share/noema/logs/noema.log
     init_logging();
 
+    let app_state = Arc::new(AppState::new());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
@@ -112,11 +117,15 @@ pub fn run() {
         // Custom protocol for serving assets from blob storage
         // Assets are served at: noema-asset://localhost/{asset_id}
         // Browser can cache these using standard HTTP caching
-        .register_asynchronous_uri_scheme_protocol("noema-asset", |_ctx, request, responder| {
-            std::thread::spawn(move || {
-                let response = handle_asset_request(&request);
-                responder.respond(response);
-            });
+        .register_asynchronous_uri_scheme_protocol("noema-asset", {
+            let app_state = app_state.clone();
+            move |_ctx, request, responder| {
+                let app_state = app_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let response = handle_asset_request(&request, app_state).await;
+                    responder.respond(response);
+                });
+            }
         })
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // When a second instance is launched, this callback receives the args
@@ -137,7 +146,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .manage(AppState::new())
+        .manage(app_state.clone())
         .manage(gdocs_server::GDocsServerState::default())
         .setup(|app| {
             #[cfg(any(target_os = "android", target_os = "ios"))]

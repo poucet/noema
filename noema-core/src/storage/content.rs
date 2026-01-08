@@ -107,8 +107,6 @@ impl std::fmt::Display for UnresolvedAssetError {
 
 impl std::error::Error for UnresolvedAssetError {}
 
-/// Legacy aliases for backwards compatibility
-pub type UnresolvedRefError = UnresolvedAssetError;
 pub type UnresolvedBlobError = UnresolvedAssetError;
 
 /// Stored payload with blob reference support

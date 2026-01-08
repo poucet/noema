@@ -20,7 +20,7 @@ pub struct ReferencedDocument {
 
 /// Get current messages in the conversation
 #[tauri::command]
-pub async fn get_messages(state: State<'_, AppState>) -> Result<Vec<DisplayMessage>, String> {
+pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<DisplayMessage>, String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
 
@@ -38,7 +38,7 @@ pub async fn get_messages(state: State<'_, AppState>) -> Result<Vec<DisplayMessa
 #[tauri::command]
 pub async fn send_message(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     message: String,
 ) -> Result<(), String> {
     let payload = ChatPayload::text(message);
@@ -49,7 +49,7 @@ pub async fn send_message(
 #[tauri::command]
 pub async fn send_message_with_attachments(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     message: String,
     attachments: Vec<Attachment>,
 ) -> Result<(), String> {
@@ -90,7 +90,7 @@ pub async fn send_message_with_attachments(
 #[tauri::command]
 pub async fn send_message_with_documents(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     message: String,
     attachments: Vec<Attachment>,
     referenced_documents: Vec<ReferencedDocument>,
@@ -138,7 +138,7 @@ pub async fn send_message_with_documents(
 /// Internal helper for sending messages
 async fn send_message_internal(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     payload: ChatPayload,
 ) -> Result<(), String> {
     // Emit user message immediately
@@ -262,7 +262,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
 
 /// Clear conversation history
 #[tauri::command]
-pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
     engine.clear_history();
@@ -272,7 +272,7 @@ pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
 /// Set the current model
 #[tauri::command]
 pub async fn set_model(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     model_id: String,
     provider: String,
 ) -> Result<String, String> {
@@ -309,7 +309,7 @@ pub async fn set_model(
 
 /// List available models from all providers
 #[tauri::command]
-pub async fn list_models(_state: State<'_, AppState>) -> Result<Vec<ModelInfo>, String> {
+pub async fn list_models(_state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInfo>, String> {
     use llm::ModelCapability;
 
     let mut all_models = Vec::new();
@@ -344,7 +344,7 @@ pub async fn list_models(_state: State<'_, AppState>) -> Result<Vec<ModelInfo>, 
 
 /// List all conversations for the current user
 #[tauri::command]
-pub async fn list_conversations(state: State<'_, AppState>) -> Result<Vec<ConversationInfo>, String> {
+pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
     let user_id = state.user_id.lock().await.clone();
@@ -358,7 +358,7 @@ pub async fn list_conversations(state: State<'_, AppState>) -> Result<Vec<Conver
 /// Switch to a different conversation
 #[tauri::command]
 pub async fn switch_conversation(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> Result<Vec<DisplayMessage>, String> {
     use noema_core::SessionStore;
@@ -382,6 +382,7 @@ pub async fn switch_conversation(
                 let blob = blob.clone();
                 async move {
                     blob.get(&asset_id)
+                        .await
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
                 }
             }
@@ -427,7 +428,7 @@ pub async fn switch_conversation(
 
 /// Create a new conversation
 #[tauri::command]
-pub async fn new_conversation(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let session = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("App not initialized")?;
@@ -463,7 +464,7 @@ pub async fn new_conversation(state: State<'_, AppState>) -> Result<String, Stri
 /// Delete a conversation
 #[tauri::command]
 pub async fn delete_conversation(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> Result<(), String> {
     let current_id = state.current_conversation_id.lock().await.clone();
@@ -482,7 +483,7 @@ pub async fn delete_conversation(
 /// Rename a conversation
 #[tauri::command]
 pub async fn rename_conversation(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     conversation_id: String,
     name: String,
 ) -> Result<(), String> {
@@ -502,13 +503,13 @@ pub async fn rename_conversation(
 
 /// Get current model name
 #[tauri::command]
-pub async fn get_model_name(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state.model_name.lock().await.clone())
 }
 
 /// Get current conversation ID
 #[tauri::command]
-pub async fn get_current_conversation_id(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn get_current_conversation_id(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state.current_conversation_id.lock().await.clone())
 }
 
@@ -532,7 +533,7 @@ pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, Stri
 #[tauri::command]
 pub async fn send_parallel_message(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     message: String,
     model_ids: Vec<String>,
 ) -> Result<(), String> {
@@ -569,7 +570,7 @@ pub struct SpanInfoResponse {
 /// Get all alternates (spans) for a SpanSet
 #[tauri::command]
 pub async fn get_span_set_alternates(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     span_set_id: String,
 ) -> Result<Vec<SpanInfoResponse>, String> {
     let store_guard = state.store.lock().await;
@@ -594,7 +595,7 @@ pub async fn get_span_set_alternates(
 /// Set the selected span for a SpanSet (switch active alternate)
 #[tauri::command]
 pub async fn set_selected_span(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     span_set_id: String,
     span_id: String,
 ) -> Result<(), String> {
@@ -609,7 +610,7 @@ pub async fn set_selected_span(
 /// Get messages from a specific span
 #[tauri::command]
 pub async fn get_span_messages(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     span_id: String,
 ) -> Result<Vec<DisplayMessage>, String> {
     let store_guard = state.store.lock().await;
@@ -642,7 +643,7 @@ pub async fn get_span_messages(
 /// Get all messages for the current conversation with alternates info
 /// This is the main entry point for loading a conversation with full span awareness
 #[tauri::command]
-pub async fn get_messages_with_alternates(state: State<'_, AppState>) -> Result<Vec<DisplayMessage>, String> {
+pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Result<Vec<DisplayMessage>, String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
 
@@ -735,7 +736,7 @@ use crate::types::ThreadInfoResponse;
 /// List all threads (branches) for a conversation
 #[tauri::command]
 pub async fn list_conversation_threads(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> Result<Vec<ThreadInfoResponse>, String> {
     let store_guard = state.store.lock().await;
@@ -761,7 +762,7 @@ pub struct ForkResult {
 /// Returns both conversation_id and thread_id so the frontend can switch to it
 #[tauri::command]
 pub async fn fork_from_span(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     span_id: String,
     name: Option<String>,
 ) -> Result<ForkResult, String> {
@@ -783,7 +784,7 @@ pub async fn fork_from_span(
 /// Switch to a different thread in the current conversation
 #[tauri::command]
 pub async fn switch_thread(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     thread_id: String,
 ) -> Result<Vec<DisplayMessage>, String> {
     let store_guard = state.store.lock().await;
@@ -886,7 +887,7 @@ pub async fn switch_thread(
 /// Rename a thread
 #[tauri::command]
 pub async fn rename_thread(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     thread_id: String,
     name: String,
 ) -> Result<(), String> {
@@ -907,7 +908,7 @@ pub async fn rename_thread(
 /// Delete a thread (cannot delete main thread)
 #[tauri::command]
 pub async fn delete_thread(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     thread_id: String,
 ) -> Result<(), String> {
     let store_guard = state.store.lock().await;
@@ -922,7 +923,7 @@ pub async fn delete_thread(
 
 /// Get the current thread ID
 #[tauri::command]
-pub async fn get_current_thread_id(state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub async fn get_current_thread_id(state: State<'_, Arc<AppState>>) -> Result<Option<String>, String> {
     Ok(state.current_thread_id.lock().await.clone())
 }
 
@@ -930,7 +931,7 @@ pub async fn get_current_thread_id(state: State<'_, AppState>) -> Result<Option<
 /// Returns the new thread ID
 #[tauri::command]
 pub async fn edit_user_message(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     span_id: String,
     new_content: String,
 ) -> Result<String, String> {

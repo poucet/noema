@@ -12,7 +12,7 @@ use crate::types::{AddMcpServerRequest, McpServerInfo, McpToolInfo};
 
 /// List all configured MCP servers
 #[tauri::command]
-pub async fn list_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServerInfo>, String> {
+pub async fn list_mcp_servers(state: State<'_, Arc<AppState>>) -> Result<Vec<McpServerInfo>, String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
 
@@ -64,7 +64,7 @@ pub async fn list_mcp_servers(state: State<'_, AppState>) -> Result<Vec<McpServe
 /// If auth_type is not specified or is "auto", probe .well-known to detect OAuth
 #[tauri::command]
 pub async fn add_mcp_server(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     request: AddMcpServerRequest,
 ) -> Result<(), String> {
     let auth = match request.auth_type.as_str() {
@@ -140,7 +140,7 @@ pub async fn add_mcp_server(
 
 /// Remove an MCP server configuration
 #[tauri::command]
-pub async fn remove_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
+pub async fn remove_mcp_server(state: State<'_, Arc<AppState>>, server_id: String) -> Result<(), String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
 
@@ -157,7 +157,7 @@ pub async fn remove_mcp_server(state: State<'_, AppState>, server_id: String) ->
 
 /// Connect to an MCP server
 #[tauri::command]
-pub async fn connect_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<usize, String> {
+pub async fn connect_mcp_server(state: State<'_, Arc<AppState>>, server_id: String) -> Result<usize, String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
 
@@ -175,7 +175,7 @@ pub async fn connect_mcp_server(state: State<'_, AppState>, server_id: String) -
 /// Disconnect from an MCP server
 #[tauri::command]
 pub async fn disconnect_mcp_server(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<(), String> {
     let engine_guard = state.engine.lock().await;
@@ -194,7 +194,7 @@ pub async fn disconnect_mcp_server(
 /// Get tools from a connected MCP server
 #[tauri::command]
 pub async fn get_mcp_server_tools(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<Vec<McpToolInfo>, String> {
     let engine_guard = state.engine.lock().await;
@@ -222,7 +222,7 @@ pub async fn get_mcp_server_tools(
 
 /// Test connection to an MCP server (connect and immediately disconnect)
 #[tauri::command]
-pub async fn test_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<usize, String> {
+pub async fn test_mcp_server(state: State<'_, Arc<AppState>>, server_id: String) -> Result<usize, String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
 
@@ -318,7 +318,7 @@ async fn register_oauth_client(
 #[tauri::command]
 pub async fn start_mcp_oauth(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<String, String> {
     let engine_guard = state.engine.lock().await;
@@ -621,7 +621,7 @@ async fn save_oauth_tokens(
 /// Complete OAuth flow with authorization code
 #[tauri::command]
 pub async fn complete_mcp_oauth(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     server_id: String,
     code: String,
 ) -> Result<(), String> {
@@ -883,7 +883,7 @@ pub async fn complete_oauth_internal(
 #[tauri::command]
 pub async fn update_mcp_server_settings(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     server_id: String,
     auto_connect: bool,
     auto_retry: bool,
@@ -958,7 +958,7 @@ pub async fn update_mcp_server_settings(
 
 /// Stop retry attempts for an MCP server
 #[tauri::command]
-pub async fn stop_mcp_retry(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
+pub async fn stop_mcp_retry(state: State<'_, Arc<AppState>>, server_id: String) -> Result<(), String> {
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
 
@@ -980,7 +980,7 @@ pub async fn stop_mcp_retry(state: State<'_, AppState>, server_id: String) -> Re
 #[tauri::command]
 pub async fn start_mcp_retry(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<(), String> {
     let engine_guard = state.engine.lock().await;

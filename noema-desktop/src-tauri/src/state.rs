@@ -27,7 +27,7 @@ pub struct AppState {
     /// Browser voice controller for WebAudio-based input
     pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
     /// Content-addressable blob storage for assets
-    pub blob_store: Mutex<Option<Arc<BlobStore>>>,
+    pub blob_store: Mutex<Option<Arc<dyn BlobStore>>>,
     /// Lock to prevent concurrent initialization (React StrictMode calls init twice)
     pub init_lock: std::sync::Mutex<bool>,
 }

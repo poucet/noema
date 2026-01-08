@@ -3063,6 +3063,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "noema-backend"
+version = "0.1.0"
+
+[[package]]
 name = "noema-core"
 version = "0.1.0"
 dependencies = [

@@ -6,7 +6,7 @@
 //! - `MemorySession` - In-memory storage (default, no persistence)
 //! - `SqliteSession` - SQLite-backed storage (requires `sqlite` feature)
 //!
-//! Both implement the same `SessionStore` trait, making them interchangeable.
+//! Both implement the `SessionStore` trait, making them interchangeable.
 //!
 //! Additionally, `BlobStore` provides content-addressable storage for binary assets.
 
@@ -17,13 +17,14 @@ mod memory;
 mod sqlite;
 mod traits;
 
-pub use blob::{BlobStore, StoredBlob};
+pub use blob::FsBlobStore;
 pub use content::{StoredContent, StoredPayload, UnresolvedBlobError};
 pub use memory::{MemorySession, MemoryTransaction};
+
 #[cfg(feature = "sqlite")]
 pub use sqlite::{
     ConversationInfo, DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
     SpanInfo, SpanSetInfo, SpanSetWithContent, SpanType, ThreadInfo,
     SqliteSession, SqliteStore, StoredMessage,
 };
-pub use traits::{SessionStore, StorageTransaction};
+pub use traits::{BlobStore, SessionStore, StorageTransaction, StoredBlob};

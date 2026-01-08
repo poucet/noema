@@ -2,6 +2,7 @@
 
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
+use std::sync::Arc;
 
 use crate::logging::log_message;
 use crate::state::AppState;
@@ -73,7 +74,7 @@ pub async fn save_file(
 /// Returns the asset ID (SHA-256 hash) for referencing in messages.
 #[tauri::command]
 pub async fn store_asset(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     data: String,      // base64 encoded
     mime_type: String,
     filename: Option<String>,
@@ -92,6 +93,7 @@ pub async fn store_asset(
     // Store in blob storage
     let stored = blob_store
         .store(&bytes)
+        .await
         .map_err(|e| format!("Failed to store blob: {}", e))?;
 
     // Register metadata in SQLite

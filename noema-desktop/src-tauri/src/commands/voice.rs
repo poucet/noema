@@ -9,6 +9,8 @@ use noema_audio::StreamingAudioCapture;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use std::path::PathBuf;
+use std::sync::Arc;
+
 use tokio::io::AsyncWriteExt;
 
 use crate::logging::log_message;
@@ -134,7 +136,7 @@ fn spawn_voice_loop(app: AppHandle) {
 
 /// Toggle voice input on/off (Native)
 #[tauri::command]
-pub async fn toggle_voice(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn toggle_voice(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<bool, String> {
     let mut coordinator_guard = state.voice_coordinator.lock().await;
 
     if coordinator_guard.is_some() {
@@ -180,7 +182,7 @@ pub async fn toggle_voice(app: AppHandle, state: State<'_, AppState>) -> Result<
 
 /// Get current voice status
 #[tauri::command]
-pub async fn get_voice_status(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn get_voice_status(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let coordinator_guard = state.voice_coordinator.lock().await;
     if let Some(coordinator) = coordinator_guard.as_ref() {
         if coordinator.is_listening() {
@@ -201,7 +203,7 @@ pub async fn get_voice_status(state: State<'_, AppState>) -> Result<String, Stri
 
 /// Start a browser voice session
 #[tauri::command]
-pub async fn start_voice_session(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
     // Ensure no existing session
     {
         let coordinator = state.voice_coordinator.lock().await;
@@ -249,7 +251,7 @@ pub async fn start_voice_session(app: AppHandle, state: State<'_, AppState>) -> 
 #[tauri::command]
 pub async fn process_audio_chunk(
     _app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     samples: Vec<f32>,
 ) -> Result<(), String> {
     let controller_guard = state.browser_audio_controller.lock().await;
@@ -266,7 +268,7 @@ pub async fn process_audio_chunk(
 #[tauri::command]
 pub async fn stop_voice_session(
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<Option<String>, String> {
     // 1. Finish the controller (flush VAD)
     {

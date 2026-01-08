@@ -3,6 +3,7 @@
 use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
+use noema_core::storage::FsBlobStore;
 use noema_core::storage::BlobStore;
 use noema_core::{ChatEngine, DocumentResolver, McpRegistry, SqliteDocumentResolver, SqliteSession, SqliteStore};
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use crate::logging::log_message;
 use crate::state::AppState;
 
 #[tauri::command]
-pub async fn init_app(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {
     // Check and set init flag atomically using std::sync::Mutex
     // We need to drop the guard before any .await points
     let already_initialized = {
@@ -169,7 +170,7 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     let store = Arc::new(SqliteStore::open(&db_path)
         .map_err(|e| format!("Failed to open database: {}", e))?);
 
-    let blob_store = Arc::new(BlobStore::new(blob_dir));
+    let blob_store = Arc::new(FsBlobStore::new(blob_dir)) as Arc<dyn BlobStore>;
 
     *state.store.lock().await = Some(store);
     *state.blob_store.lock().await = Some(blob_store);
@@ -247,6 +248,7 @@ async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
                 let blob_store = blob_store.clone();
                 async move {
                     blob_store.get(&asset_id)
+                        .await
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
                 }
             })

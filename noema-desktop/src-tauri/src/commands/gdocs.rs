@@ -7,6 +7,7 @@ use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
 use noema_core::storage::{DocumentInfo, DocumentSource, DocumentTabInfo};
 use rmcp::model::RawContent;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tauri::{Manager, State};
 use tracing::{debug, info};
 use ts_rs::TS;
@@ -91,7 +92,7 @@ pub struct DocumentContentResponse {
 
 /// List all documents for the current user
 #[tauri::command]
-pub async fn list_documents(state: State<'_, AppState>) -> Result<Vec<DocumentInfoResponse>, String> {
+pub async fn list_documents(state: State<'_, Arc<AppState>>) -> Result<Vec<DocumentInfoResponse>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
@@ -109,7 +110,7 @@ pub async fn list_documents(state: State<'_, AppState>) -> Result<Vec<DocumentIn
 /// Get a single document by ID
 #[tauri::command]
 pub async fn get_document(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     doc_id: String,
 ) -> Result<Option<DocumentInfoResponse>, String> {
     let store_guard = state.store.lock().await;
@@ -122,7 +123,7 @@ pub async fn get_document(
 /// Get document by Google Doc ID (source_id)
 #[tauri::command]
 pub async fn get_document_by_google_id(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     google_doc_id: String,
 ) -> Result<Option<DocumentInfoResponse>, String> {
     let store_guard = state.store.lock().await;
@@ -141,7 +142,7 @@ pub async fn get_document_by_google_id(
 /// Get document content with all tabs
 #[tauri::command]
 pub async fn get_document_content(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     doc_id: String,
 ) -> Result<DocumentContentResponse, String> {
     let store_guard = state.store.lock().await;
@@ -167,7 +168,7 @@ pub async fn get_document_content(
 /// Get a single tab's content
 #[tauri::command]
 pub async fn get_document_tab(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     tab_id: String,
 ) -> Result<Option<DocumentTabResponse>, String> {
     let store_guard = state.store.lock().await;
@@ -181,7 +182,7 @@ pub async fn get_document_tab(
 
 /// Delete a document and all its tabs/revisions
 #[tauri::command]
-pub async fn delete_document(state: State<'_, AppState>, doc_id: String) -> Result<bool, String> {
+pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: String) -> Result<bool, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
@@ -192,7 +193,7 @@ pub async fn delete_document(state: State<'_, AppState>, doc_id: String) -> Resu
 /// This will call the MCP server to refresh the document
 #[tauri::command]
 pub async fn sync_google_doc(
-    _state: State<'_, AppState>,
+    _state: State<'_, Arc<AppState>>,
     _doc_id: String,
 ) -> Result<(), String> {
     // TODO: Call the MCP server to refresh the document
@@ -254,7 +255,7 @@ pub async fn get_gdocs_oauth_status(
 #[tauri::command]
 pub async fn configure_gdocs_oauth(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     client_id: String,
     client_secret: Option<String>,
 ) -> Result<(), String> {
@@ -325,7 +326,7 @@ pub struct GoogleDocListItem {
 /// List Google Docs from Drive via MCP server
 #[tauri::command]
 pub async fn list_google_docs(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     query: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<GoogleDocListItem>, String> {
@@ -424,7 +425,7 @@ struct ExtractedImage {
 /// Returns the document ID of the imported document
 #[tauri::command]
 pub async fn import_google_doc(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     google_doc_id: String,
 ) -> Result<DocumentInfoResponse, String> {
     info!("Importing Google Doc: {}", google_doc_id);
@@ -540,6 +541,7 @@ pub async fn import_google_doc(
 
             let stored = blob_store
                 .store(&data)
+                .await
                 .map_err(|e| format!("Failed to store image: {}", e))?;
 
             // Use the blob hash as the asset ID
@@ -633,7 +635,7 @@ pub async fn import_google_doc(
 /// Search documents by title for autocomplete
 #[tauri::command]
 pub async fn search_documents(
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<DocumentInfoResponse>, String> {
