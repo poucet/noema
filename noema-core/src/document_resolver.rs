@@ -4,6 +4,7 @@
 //! to their full content before sending to LLM providers.
 
 use async_trait::async_trait;
+use futures::future::join_all;
 use llm::{ChatMessage, ChatPayload, ChatRequest, ContentBlock};
 
 /// A resolved document with its content
@@ -96,7 +97,6 @@ pub async fn resolve_payload(
     resolver: &dyn DocumentResolver,
     config: &DocumentInjectionConfig,
 ) {
-    use futures::future::join_all;
 
     let mut doc_refs: Vec<(String, String)> = Vec::new();
     let mut other_content = Vec::new();
