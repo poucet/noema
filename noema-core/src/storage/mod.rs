@@ -13,13 +13,17 @@
 mod blob;
 mod content;
 mod memory;
+
 #[cfg(feature = "sqlite")]
 mod sqlite;
+
 mod traits;
 
-pub use blob::FsBlobStore;
+pub use blob::{BlobStore, StoredBlob};
 pub use content::{StoredContent, StoredPayload, UnresolvedBlobError};
 pub use memory::{MemorySession, MemoryTransaction};
+
+pub use blob::FsBlobStore;
 
 #[cfg(feature = "sqlite")]
 pub use sqlite::{
@@ -27,4 +31,4 @@ pub use sqlite::{
     SpanInfo, SpanSetInfo, SpanSetWithContent, SpanType, ThreadInfo,
     SqliteSession, SqliteStore, StoredMessage,
 };
-pub use traits::{BlobStore, SessionStore, StorageTransaction, StoredBlob};
+pub use traits::{SessionStore, StorageTransaction};
