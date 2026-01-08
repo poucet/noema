@@ -1,9 +1,9 @@
 //! Chat-related Tauri commands
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
-use noema_core::{ChatEngine, DocumentResolver, EngineEvent, McpRegistry};
-use noema_core::document_resolver::SqliteDocumentResolver;
+use noema_core::{ChatEngine, EngineEvent, McpRegistry};
 use noema_core::storage::conversation::{ConversationStore, SpanType};
+use noema_core::storage::document::resolver::DocumentResolver;
 use noema_core::storage::content::{StoredContent, StoredPayload};
 use noema_core::storage::session::SessionStore;
 use std::sync::Arc;
@@ -348,11 +348,11 @@ pub async fn switch_conversation(
         .collect();
     eprintln!("switch_conversation: converted to {} display messages", messages.len());
 
-    // Create document resolver
+    // Get document resolver (store implements DocumentResolver directly)
     let document_resolver: Arc<dyn DocumentResolver> = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-        Arc::new(SqliteDocumentResolver::new(Arc::clone(store)))
+        Arc::clone(store) as Arc<dyn DocumentResolver>
     };
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
@@ -383,11 +383,11 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
-    // Create document resolver
+    // Get document resolver (store implements DocumentResolver directly)
     let document_resolver: Arc<dyn DocumentResolver> = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-        Arc::new(SqliteDocumentResolver::new(Arc::clone(store)))
+        Arc::clone(store) as Arc<dyn DocumentResolver>
     };
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);

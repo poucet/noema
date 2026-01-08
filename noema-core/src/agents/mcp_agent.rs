@@ -1,6 +1,6 @@
 //! Agent with dynamic MCP tool support
 
-use crate::document_resolver::{self, DocumentInjectionConfig, DocumentResolver};
+use crate::storage::document::resolver::{DocumentInjectionConfig, DocumentResolver};
 use crate::mcp::McpToolRegistry;
 use crate::traffic_log;
 use crate::Agent;
@@ -73,7 +73,7 @@ impl McpAgent {
 
     /// Resolve document refs in a request
     async fn resolve_documents(&self, request: &mut ChatRequest) {
-        document_resolver::resolve_request(request, self.document_resolver.as_ref(), &self.document_injection_config).await;
+        self.document_resolver.resolve_request(request, &self.document_injection_config).await;
     }
 
     /// Process tool calls and add results to context

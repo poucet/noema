@@ -4,10 +4,10 @@ use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::blob::{BlobStore, FsBlobStore};
+use noema_core::storage::document::resolver::DocumentResolver;
 use noema_core::storage::conversation::ConversationStore;
 use noema_core::storage::user::UserStore;
-use noema_core::{ChatEngine, DocumentResolver, McpRegistry};
-use noema_core::document_resolver::SqliteDocumentResolver;
+use noema_core::{ChatEngine, McpRegistry};
 use noema_core::storage::session::{SqliteSession, SqliteStore};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -304,11 +304,11 @@ async fn init_engine(
     *state.model_id.lock().await = model_id;
     *state.model_name.lock().await = model_display_name.clone();
 
-    // Create document resolver for RAG support (required)
+    // Get document resolver (store implements DocumentResolver directly)
     let document_resolver: Arc<dyn DocumentResolver> = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-        Arc::new(SqliteDocumentResolver::new(Arc::clone(store)))
+        Arc::clone(store) as Arc<dyn DocumentResolver>
     };
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);

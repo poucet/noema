@@ -6,7 +6,6 @@
 use async_trait::async_trait;
 use futures::future::join_all;
 use llm::{ChatMessage, ChatPayload, ChatRequest, ContentBlock};
-use std::sync::Arc;
 
 use crate::storage::document::DocumentStore;
 
@@ -22,29 +21,94 @@ pub struct ResolvedDocument {
 #[async_trait]
 pub trait DocumentResolver: Send + Sync {
     /// Resolve a document by ID, returning its content
-    async fn resolve(&self, doc_id: &str) -> Option<ResolvedDocument>;
-}
+    async fn resolve_doc(&self, doc_id: &str) -> Option<ResolvedDocument>;
 
-/// Document resolver backed by any DocumentStore implementation
-pub struct StoreDocumentResolver<S> {
-    store: Arc<S>,
-}
+    /// Resolve all DocumentRef blocks in a ChatPayload
+    async fn resolve_payload(
+        &self,
+        payload: &mut ChatPayload,
+        config: &DocumentInjectionConfig,
+    ) {
+        let mut doc_refs: Vec<(String, String)> = Vec::new();
+        let mut other_content = Vec::new();
+        let mut user_text = String::new();
 
-impl<S: DocumentStore> StoreDocumentResolver<S> {
-    /// Create a new resolver with the given store
-    pub fn new(store: Arc<S>) -> Self {
-        Self { store }
+        // Separate DocumentRefs from other content, collect user text
+        for block in std::mem::take(&mut payload.content) {
+            match block {
+                ContentBlock::DocumentRef { id, title } => {
+                    doc_refs.push((id, title));
+                }
+                ContentBlock::Text { text } => {
+                    if !user_text.is_empty() {
+                        user_text.push_str("\n\n");
+                    }
+                    user_text.push_str(&text);
+                }
+                other => other_content.push(other),
+            }
+        }
+
+        // Resolve all documents in parallel
+        let resolve_futures = doc_refs.iter().map(|(id, title)| async {
+            let id = id.clone();
+            let title = title.clone();
+            match self.resolve_doc(&id).await {
+                Some(doc) => doc,
+                None => ResolvedDocument {
+                    id,
+                    title: title.clone(),
+                    content: format!("[Document '{}' could not be loaded]", title),
+                },
+            }
+        });
+        let resolved_docs: Vec<ResolvedDocument> = join_all(resolve_futures).await;
+
+        // Build new content
+        let mut new_content = Vec::new();
+
+        // Add resolved documents + user message as a single text block
+        if !resolved_docs.is_empty() || !user_text.is_empty() {
+            let combined_text = config.format_with_documents(&resolved_docs, &user_text);
+            new_content.push(ContentBlock::Text { text: combined_text });
+        }
+
+        // Add any other content (images, audio, tool calls, etc.)
+        new_content.extend(other_content);
+
+        payload.content = new_content;
+    }
+
+    /// Resovle all DocumentRef blocks in a ChatMesssage
+    async fn resolve_message(
+        &self,
+        message: &mut ChatMessage,
+        config: &DocumentInjectionConfig,
+    ) {
+        self.resolve_payload(&mut message.payload, config).await;
+    }   
+    
+    /// Resolve all DocumentRef blocks in a ChatRequest
+    async fn resolve_request(
+        &self,
+        request: &mut ChatRequest,
+        config: &DocumentInjectionConfig,
+    ) {
+        for msg in request.messages_mut() {
+            self.resolve_message(msg, config).await;
+        }
     }
 }
 
+/// Implement DocumentResolver for any DocumentStore
 #[async_trait]
-impl<S: DocumentStore> DocumentResolver for StoreDocumentResolver<S> {
-    async fn resolve(&self, doc_id: &str) -> Option<ResolvedDocument> {
+impl<S: DocumentStore> DocumentResolver for S {
+    async fn resolve_doc(&self, doc_id: &str) -> Option<ResolvedDocument> {
         // Get document metadata
-        let doc_info = self.store.get_document(doc_id).await.ok()??;
+        let doc_info = self.get_document(doc_id).await.ok()??;
 
         // Get all tabs for this document
-        let tabs = self.store.list_document_tabs(doc_id).await.ok()?;
+        let tabs = self.list_document_tabs(doc_id).await.ok()?;
 
         // Concatenate all tab content
         let content: String = tabs
@@ -52,7 +116,7 @@ impl<S: DocumentStore> DocumentResolver for StoreDocumentResolver<S> {
             .filter_map(|tab| tab.content_markdown.as_ref())
             .cloned()
             .collect::<Vec<_>>()
-            .join("\n---------\n");
+            .join("\n\n");
 
         Some(ResolvedDocument {
             id: doc_id.to_string(),
@@ -120,101 +184,6 @@ impl DocumentInjectionConfig {
         format!("{}{}", wrapped, with_instructions)
     }
 }
-
-/// Resolve all DocumentRef blocks in a ChatPayload
-pub async fn resolve_payload(
-    payload: &mut ChatPayload,
-    resolver: &dyn DocumentResolver,
-    config: &DocumentInjectionConfig,
-) {
-
-    let mut doc_refs: Vec<(String, String)> = Vec::new();
-    let mut other_content = Vec::new();
-    let mut user_text = String::new();
-
-    // Separate DocumentRefs from other content, collect user text
-    for block in std::mem::take(&mut payload.content) {
-        match block {
-            ContentBlock::DocumentRef { id, title } => {
-                doc_refs.push((id, title));
-            }
-            ContentBlock::Text { text } => {
-                if !user_text.is_empty() {
-                    user_text.push_str("\n\n");
-                }
-                user_text.push_str(&text);
-            }
-            other => other_content.push(other),
-        }
-    }
-
-    // Resolve all documents in parallel
-    let resolve_futures = doc_refs.iter().map(|(id, title)| async {
-        let id = id.clone();
-        let title = title.clone();
-        match resolver.resolve(&id).await {
-            Some(doc) => doc,
-            None => ResolvedDocument {
-                id,
-                title: title.clone(),
-                content: format!("[Document '{}' could not be loaded]", title),
-            },
-        }
-    });
-    let resolved_docs: Vec<ResolvedDocument> = join_all(resolve_futures).await;
-
-    // Build new content
-    let mut new_content = Vec::new();
-
-    // Add resolved documents + user message as a single text block
-    if !resolved_docs.is_empty() || !user_text.is_empty() {
-        let combined_text = config.format_with_documents(&resolved_docs, &user_text);
-        new_content.push(ContentBlock::Text { text: combined_text });
-    }
-
-    // Add any other content (images, audio, tool calls, etc.)
-    new_content.extend(other_content);
-
-    payload.content = new_content;
-}
-
-/// Resolve all DocumentRef blocks in a ChatMessage
-pub async fn resolve_message(
-    message: &mut ChatMessage,
-    resolver: &dyn DocumentResolver,
-    config: &DocumentInjectionConfig,
-) {
-    resolve_payload(&mut message.payload, resolver, config).await;
-}
-
-/// Resolve all DocumentRef blocks in a ChatRequest
-pub async fn resolve_request(
-    request: &mut ChatRequest,
-    resolver: &dyn DocumentResolver,
-    config: &DocumentInjectionConfig,
-) {
-    for msg in request.messages_mut() {
-        resolve_message(msg, resolver, config).await;
-    }
-}
-
-/// Check if a ChatPayload contains any DocumentRef blocks
-pub fn payload_has_document_refs(payload: &ChatPayload) -> bool {
-    payload.content.iter().any(|block| matches!(block, ContentBlock::DocumentRef { .. }))
-}
-
-/// Check if a ChatRequest contains any DocumentRef blocks
-pub fn request_has_document_refs(request: &ChatRequest) -> bool {
-    request.messages().iter().any(|msg| payload_has_document_refs(&msg.payload))
-}
-
-// ============================================================================
-// Backwards Compatibility
-// ============================================================================
-
-/// Type alias for backwards compatibility
-#[cfg(feature = "sqlite")]
-pub type SqliteDocumentResolver = StoreDocumentResolver<crate::storage::session::SqliteStore>;
 
 #[cfg(test)]
 mod tests {

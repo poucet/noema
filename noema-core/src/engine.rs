@@ -1,4 +1,5 @@
-use crate::{Agent, ConversationContext, DocumentResolver, McpAgent, McpRegistry, McpToolRegistry};
+use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry};
+use crate::storage::document::resolver::DocumentResolver;
 use crate::storage::session::{SessionStore, StorageTransaction};
 use llm::{create_model, ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;

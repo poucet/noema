@@ -189,5 +189,7 @@ pub trait DocumentStore: Send + Sync {
     async fn list_document_revisions(&self, tab_id: &str) -> Result<Vec<DocumentRevisionInfo>>;
 }
 
+pub mod resolver;
+
 #[cfg(feature = "sqlite")]
 pub (crate) mod sqlite;

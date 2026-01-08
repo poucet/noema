@@ -18,7 +18,6 @@
 pub mod agent;
 pub mod agents;
 pub mod context;
-pub mod document_resolver;
 pub mod engine;
 pub mod mcp;
 pub mod storage;
@@ -27,9 +26,6 @@ pub mod traffic_log;
 pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
-pub use document_resolver::{
-    DocumentInjectionConfig, DocumentResolver, ResolvedDocument,
-};
 
 pub use engine::{ChatEngine, EngineCommand, EngineEvent, ParallelAlternateInfo};
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
