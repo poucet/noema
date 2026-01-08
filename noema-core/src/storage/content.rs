@@ -3,7 +3,7 @@
 //! These types are used for serialization to the database. They extend the LLM
 //! content types with blob references for Content-Addressable Storage (CAS).
 
-use llm::{ContentBlock, ToolCall, ToolResult};
+use llm::{ContentBlock, Role, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 
 /// Content block with blob reference support for storage
@@ -193,6 +193,14 @@ impl From<llm::ChatPayload> for StoredPayload {
             content: payload.content.into_iter().map(StoredContent::from).collect(),
         }
     }
+}
+
+/// A message with StoredPayload (preserves asset refs)
+/// Used for sending to UI where refs should be fetched separately
+#[derive(Debug, Clone)]
+pub struct StoredMessage {
+    pub role: Role,
+    pub payload: StoredPayload,
 }
 
 #[cfg(test)]

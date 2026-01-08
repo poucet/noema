@@ -20,7 +20,7 @@ mod sqlite;
 mod traits;
 
 pub use blob::{BlobStore, StoredBlob};
-pub use content::{StoredContent, StoredPayload, UnresolvedBlobError};
+pub use content::{StoredContent, StoredMessage, StoredPayload, UnresolvedBlobError};
 pub use memory::{MemorySession, MemoryTransaction};
 
 pub use blob::FsBlobStore;
@@ -29,6 +29,6 @@ pub use blob::FsBlobStore;
 pub use sqlite::{
     ConversationInfo, DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
     SpanInfo, SpanSetInfo, SpanSetWithContent, SpanType, ThreadInfo,
-    SqliteSession, SqliteStore, StoredMessage,
+    SqliteSession, SqliteStore,
 };
 pub use traits::{SessionStore, StorageTransaction};

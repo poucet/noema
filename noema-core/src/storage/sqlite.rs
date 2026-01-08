@@ -3,7 +3,7 @@
 //! Persistent storage using SQLite with the unified schema.
 //! Supports users, threads, messages, and blob asset references.
 
-use super::content::StoredPayload;
+use super::content::{StoredMessage, StoredPayload};
 use super::traits::{SessionStore, StorageTransaction};
 use crate::ConversationContext;
 use anyhow::{Context, Result};
@@ -35,14 +35,6 @@ pub struct ConversationInfo {
     pub created_at: i64,
     /// Unix timestamp when last updated
     pub updated_at: i64,
-}
-
-/// A message with StoredPayload (preserves asset refs)
-/// Used for sending to UI where refs should be fetched separately
-#[derive(Debug, Clone)]
-pub struct StoredMessage {
-    pub role: Role,
-    pub payload: StoredPayload,
 }
 
 /// Information about a user
@@ -991,17 +983,12 @@ impl SqliteStore {
             )
             .unwrap_or(1);
 
-        let role_str = match role {
-            Role::User => "user",
-            Role::Assistant => "assistant",
-            Role::System => "system",
-        };
         let content_json = serde_json::to_string(content)?;
 
         conn.execute(
             "INSERT INTO span_messages (id, span_id, sequence_number, role, content, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![&id, span_id, sequence_number, role_str, &content_json, now],
+            params![&id, span_id, sequence_number, role.to_string(), &content_json, now],
         )?;
 
         Ok(id)
