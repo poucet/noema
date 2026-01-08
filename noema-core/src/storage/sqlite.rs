@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use llm::{api::Role, ChatMessage};
 use rusqlite::{params, Connection};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -62,21 +63,25 @@ pub enum DocumentSource {
     UserCreated,
 }
 
-impl DocumentSource {
-    pub fn as_str(&self) -> &'static str {
+impl ToString for DocumentSource {
+    fn to_string(&self) -> String {
         match self {
-            DocumentSource::GoogleDrive => "google_drive",
-            DocumentSource::AiGenerated => "ai_generated",
-            DocumentSource::UserCreated => "user_created",
+            DocumentSource::GoogleDrive => "google_drive".to_string(),
+            DocumentSource::AiGenerated => "ai_generated".to_string(),
+            DocumentSource::UserCreated => "user_created".to_string(),
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for DocumentSource {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "google_drive" => Some(DocumentSource::GoogleDrive),
-            "ai_generated" => Some(DocumentSource::AiGenerated),
-            "user_created" => Some(DocumentSource::UserCreated),
-            _ => None,
+            "google_drive" => Ok(DocumentSource::GoogleDrive),
+            "ai_generated" => Ok(DocumentSource::AiGenerated),
+            "user_created" => Ok(DocumentSource::UserCreated),
+            _ => Err(format!("{s} is not a valid DocumentSource")),
         }
     }
 }
@@ -131,20 +136,24 @@ pub enum SpanType {
     Assistant,
 }
 
-impl SpanType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SpanType::User => "user",
-            SpanType::Assistant => "assistant",
+impl ToString for SpanType {
+    fn to_string(&self) -> String {
+         match self {
+            SpanType::User => "user".to_string(),
+            SpanType::Assistant => "assistant".to_string(),
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for SpanType {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "user" => Some(SpanType::User),
-            "assistant" => Some(SpanType::Assistant),
-            _ => None,
-        }
+            "user" => Ok(SpanType::User),
+            "assistant" => Ok(SpanType::Assistant),
+            _ => Err(format!("{s} is not a valid SpanType"))
+        } 
     }
 }
 
@@ -524,7 +533,7 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO documents (id, user_id, title, source, source_id, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![&id, user_id, title, source.as_str(), source_id, now, now],
+            params![&id, user_id, title, source.to_string(), source_id, now, now],
         )?;
 
         Ok(id)
@@ -544,7 +553,7 @@ impl SqliteStore {
                         id: row.get(0)?,
                         user_id: row.get(1)?,
                         title: row.get(2)?,
-                        source: DocumentSource::from_str(&source_str).unwrap_or(DocumentSource::UserCreated),
+                        source: source_str.parse::<DocumentSource>().unwrap_or(DocumentSource::UserCreated),
                         source_id: row.get(4)?,
                         created_at: row.get(5)?,
                         updated_at: row.get(6)?,
@@ -562,14 +571,14 @@ impl SqliteStore {
             .query_row(
                 "SELECT id, user_id, title, source, source_id, created_at, updated_at
                  FROM documents WHERE user_id = ?1 AND source = ?2 AND source_id = ?3",
-                params![user_id, source.as_str(), source_id],
+                params![user_id, source.to_string(), source_id],
                 |row| {
                     let source_str: String = row.get(3)?;
                     Ok(DocumentInfo {
                         id: row.get(0)?,
                         user_id: row.get(1)?,
                         title: row.get(2)?,
-                        source: DocumentSource::from_str(&source_str).unwrap_or(DocumentSource::UserCreated),
+                        source: source_str.parse::<DocumentSource>().unwrap_or(DocumentSource::UserCreated),
                         source_id: row.get(4)?,
                         created_at: row.get(5)?,
                         updated_at: row.get(6)?,
@@ -595,7 +604,7 @@ impl SqliteStore {
                     id: row.get(0)?,
                     user_id: row.get(1)?,
                     title: row.get(2)?,
-                    source: DocumentSource::from_str(&source_str).unwrap_or(DocumentSource::UserCreated),
+                    source: source_str.parse::<DocumentSource>().unwrap_or(DocumentSource::UserCreated),
                     source_id: row.get(4)?,
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
@@ -789,7 +798,7 @@ impl SqliteStore {
                     id: row.get(0)?,
                     user_id: row.get(1)?,
                     title: row.get(2)?,
-                    source: DocumentSource::from_str(&source_str).unwrap_or(DocumentSource::UserCreated),
+                    source: source_str.parse::<DocumentSource>().unwrap_or(DocumentSource::UserCreated),
                     source_id: row.get(4)?,
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
@@ -931,7 +940,7 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![&id, thread_id, sequence_number, span_type.as_str(), now],
+            params![&id, thread_id, sequence_number, span_type.to_string(), now],
         )?;
 
         Ok(id)
@@ -1058,12 +1067,7 @@ impl SqliteStore {
             })?
             .filter_map(|r| r.ok())
             .filter_map(|(role_str, content_json)| {
-                let role = match role_str.as_str() {
-                    "user" => Role::User,
-                    "assistant" => Role::Assistant,
-                    "system" => Role::System,
-                    _ => return None,
-                };
+                let role = role_str.parse::<Role>().ok()?;
                 let payload: StoredPayload = serde_json::from_str(&content_json).ok()?;
                 Some(StoredMessage { role, payload })
             })
@@ -1090,7 +1094,7 @@ impl SqliteStore {
             None => return Ok(None),
         };
 
-        let span_type = SpanType::from_str(&span_type_str).unwrap_or(SpanType::User);
+        let span_type = span_type_str.parse::<SpanType>().unwrap_or(SpanType::User);
         drop(conn); // Release lock before calling other methods
 
         // Get alternates
@@ -1140,7 +1144,7 @@ impl SqliteStore {
                     id: row.get(0)?,
                     thread_id: row.get(1)?,
                     sequence_number: row.get(2)?,
-                    span_type: SpanType::from_str(&span_type_str).unwrap_or(SpanType::User),
+                    span_type: span_type_str.parse::<SpanType>().unwrap_or(SpanType::User),
                     selected_span_id: row.get(4)?,
                     created_at: row.get(5)?,
                 })
@@ -1546,12 +1550,7 @@ impl SqliteStore {
                     })?
                     .filter_map(|r| r.ok())
                     .filter_map(|(role_str, payload_json)| {
-                        let role = match role_str.as_str() {
-                            "user" => Role::User,
-                            "assistant" => Role::Assistant,
-                            "system" => Role::System,
-                            _ => return None,
-                        };
+                        let role = role_str.parse::<Role>().ok()?;
                         let payload: StoredPayload = serde_json::from_str(&payload_json).ok()?;
                         Some(StoredMessage { role, payload })
                     })
@@ -1675,12 +1674,7 @@ impl SqliteStore {
             })?
             .filter_map(|r| r.ok())
             .filter_map(|(role_str, payload_json)| {
-                let role = match role_str.as_str() {
-                    "user" => Role::User,
-                    "assistant" => Role::Assistant,
-                    "system" => Role::System,
-                    _ => return None,
-                };
+                let role = role_str.parse::<Role>().ok()?;
                 let payload: StoredPayload = serde_json::from_str(&payload_json).ok()?;
                 Some(StoredMessage { role, payload })
             })
@@ -1902,11 +1896,7 @@ impl SqliteSession {
         // Write span_messages
         for (i, msg) in messages.iter().enumerate() {
             let msg_id = Uuid::new_v4().to_string();
-            let role = match msg.role {
-                Role::User => "user",
-                Role::Assistant => "assistant",
-                Role::System => "system",
-            };
+            let role = msg.role.to_string();
             let stored_payload: StoredPayload = msg.payload.clone().into();
             let content_json = serde_json::to_string(&stored_payload)?;
             let text_content = msg.get_text();
@@ -1998,11 +1988,7 @@ impl SqliteSession {
             // Write messages for this span
             for (msg_idx, msg) in messages.iter().enumerate() {
                 let msg_id = Uuid::new_v4().to_string();
-                let role = match msg.role {
-                    Role::User => "user",
-                    Role::Assistant => "assistant",
-                    Role::System => "system",
-                };
+                let role = msg.role.to_string();
                 let stored_payload: StoredPayload = msg.payload.clone().into();
                 let content_json = serde_json::to_string(&stored_payload)?;
                 let text_content = msg.get_text();
@@ -2097,13 +2083,13 @@ impl SessionStore for SqliteSession {
 
         // Determine span type based on first message role
         let span_type = match messages.first().map(|m| &m.role) {
-            Some(Role::User) => "user",
-            Some(Role::Assistant) | Some(Role::System) => "assistant",
+            Some(Role::User) => SpanType::User,
+            Some(Role::Assistant) | Some(Role::System) => SpanType::Assistant,
             None => return Ok(()),
         };
 
         // Write as span to database
-        self.write_as_span(&messages, span_type, None)?;
+        self.write_as_span(&messages, &span_type.to_string(), None)?;
 
         // Update cache
         self.cache.extend(messages);

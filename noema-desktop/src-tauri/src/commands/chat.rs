@@ -623,11 +623,7 @@ pub async fn get_span_messages(
     Ok(messages
         .into_iter()
         .map(|m| {
-            let role = match m.role {
-                llm::Role::User => "user",
-                llm::Role::Assistant => "assistant",
-                llm::Role::System => "system",
-            };
+            let role = m.role.to_string();
             let content = m.payload.content.iter().map(stored_content_to_display).collect();
             DisplayMessage {
                 role: role.to_string(),
@@ -708,15 +704,11 @@ pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Re
 
             // Convert messages to display content
             for msg in span_set.messages {
-                let msg_role = match msg.role {
-                    llm::Role::User => "user",
-                    llm::Role::Assistant => "assistant",
-                    llm::Role::System => "system",
-                };
+                let msg_role = msg.role.to_string();
                 let content = msg.payload.content.iter().map(stored_content_to_display).collect();
 
                 result.push(DisplayMessage::with_alternates(
-                    msg_role,
+                    &msg_role,
                     content,
                     span_set_info.id.clone(),
                     selected_span_id.clone(),
@@ -814,11 +806,7 @@ pub async fn switch_thread(
             .map_err(|e| format!("Failed to get ancestry messages: {}", e))?;
 
         for msg in ancestry_messages {
-            let msg_role = match msg.role {
-                llm::Role::User => "user",
-                llm::Role::Assistant => "assistant",
-                llm::Role::System => "system",
-            };
+            let msg_role = msg.role.to_string();
             let content = msg.payload.content.iter().map(stored_content_to_display).collect();
             result.push(DisplayMessage {
                 role: msg_role.to_string(),
@@ -862,15 +850,11 @@ pub async fn switch_thread(
                     .collect();
 
                 for msg in span_set.messages {
-                    let msg_role = match msg.role {
-                        llm::Role::User => "user",
-                        llm::Role::Assistant => "assistant",
-                        llm::Role::System => "system",
-                    };
+                    let msg_role = msg.role.to_string();
                     let content = msg.payload.content.iter().map(stored_content_to_display).collect();
 
                     result.push(DisplayMessage::with_alternates(
-                        msg_role,
+                        &msg_role,
                         content,
                         span_set_info.id.clone(),
                         selected_span_id.clone(),

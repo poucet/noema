@@ -35,7 +35,7 @@ impl From<DocumentInfo> for DocumentInfoResponse {
             id: info.id,
             user_id: info.user_id,
             title: info.title,
-            source: info.source.as_str().to_string(),
+            source: info.source.to_string(),
             source_id: info.source_id,
             created_at: info.created_at,
             updated_at: info.updated_at,

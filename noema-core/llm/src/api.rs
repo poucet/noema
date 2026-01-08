@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Eq, Serialize, Default)]
@@ -17,6 +19,18 @@ impl ToString for Role {
             Role::System => "system".to_string(),
         }
     }
+}
+
+impl FromStr for Role {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+       match s {
+            "user" => Ok(Role::User),
+            "assistant" => Ok(Role::Assistant),
+            "system" => Ok(Role::System),
+            _ => Err(format!("{s} is not a valid role")),
+        }
+      }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

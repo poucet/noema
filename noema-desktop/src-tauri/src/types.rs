@@ -105,11 +105,7 @@ pub struct DisplayMessage {
 
 impl DisplayMessage {
     pub fn from_chat_message(msg: &ChatMessage) -> Self {
-        let role = match msg.role {
-            Role::User => "user",
-            Role::Assistant => "assistant",
-            Role::System => "system",
-        };
+        let role = msg.role.to_string();
 
         let content = msg
             .payload
