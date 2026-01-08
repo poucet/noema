@@ -24,23 +24,23 @@ noema_gui() {
     # Export the log file path as an environment variable
     export NOEMA_LOG_FILE="$LOG_FILE"
 
-    cd "$REPO_ROOT/noema-ui" && npm run tauri dev "$@"
+    cd "$REPO_ROOT/noema-desktop" && npm run tauri dev "$@"
 }
 
 noema_build() {
     echo "Building Tauri GUI..."
-    cd "$REPO_ROOT/noema-ui" && npm run tauri build
+    cd "$REPO_ROOT/noema-desktop" && npm run tauri build
     echo ""
     echo "Binaries available at:"
-    echo "  $REPO_ROOT/noema-ui/src-tauri/target/release/bundle/"
+    echo "  $REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/"
 }
 
 noema_install() {
     echo "Building Noema..."
-    cd "$REPO_ROOT/noema-ui" && npm run tauri build
+    cd "$REPO_ROOT/noema-desktop" && npm run tauri build
 
     echo "Opening Noema installer..."
-    open "$REPO_ROOT/noema-ui/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
+    open "$REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
 }
 
 noema_help() {

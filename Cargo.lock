@@ -3089,43 +3089,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "noema-ext"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "flate2",
- "image",
- "llm",
- "lopdf",
- "pdf-extract",
- "pdfium-render",
-]
-
-[[package]]
-name = "noema-mcp-gdocs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "clap",
- "html2md",
- "http",
- "http-body-util",
- "hyper",
- "hyper-util",
- "reqwest",
- "rmcp",
- "serde",
- "serde_json",
- "tokio",
- "tower-service",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "noema-ui"
+name = "noema-desktop"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
@@ -3159,6 +3123,42 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "noema-ext"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "image",
+ "llm",
+ "lopdf",
+ "pdf-extract",
+ "pdfium-render",
+]
+
+[[package]]
+name = "noema-mcp-gdocs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "html2md",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

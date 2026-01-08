@@ -1,5 +1,5 @@
 #!/bin/bash
 
-pushd noema-ui
+pushd noema-desktop
 npm install
 popd

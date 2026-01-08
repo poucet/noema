@@ -1,5 +1,5 @@
 [package]
-name = "noema-ui"
+name = "noema-desktop"
 version = "0.1.0"
 description = "Noema AI Chat Application"
 authors = ["Chris"]
