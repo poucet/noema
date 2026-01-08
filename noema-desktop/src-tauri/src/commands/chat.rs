@@ -30,7 +30,7 @@ pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<Display
     Ok(session
         .messages()
         .iter()
-        .map(DisplayMessage::from_chat_message)
+        .map(DisplayMessage::from)
         .collect())
 }
 
@@ -143,7 +143,7 @@ async fn send_message_internal(
 ) -> Result<(), String> {
     let message = ChatMessage::user(payload);
     // Emit user message immediately
-    let user_msg = DisplayMessage::from_chat_message(&message);
+    let user_msg = DisplayMessage::from(&message);
     app.emit("user_message", &user_msg)
         .map_err(|e| e.to_string())?;
 
@@ -178,7 +178,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                 Some(EngineEvent::Message(msg)) => {
                     // Mark as processing when we start receiving message chunks
                     *state.is_processing.lock().await = true;
-                    let display_msg = DisplayMessage::from_chat_message(&msg);
+                    let display_msg = DisplayMessage::from(&msg);
                     let _ = app.emit("streaming_message", &display_msg);
                 }
                 Some(EngineEvent::MessageComplete) => {
@@ -191,7 +191,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                             session
                                 .messages()
                                 .iter()
-                                .map(DisplayMessage::from_chat_message)
+                                .map(DisplayMessage::from)
                                 .collect::<Vec<_>>()
                         } else {
                             vec![]
@@ -214,7 +214,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                 // Parallel execution events
                 Some(EngineEvent::ParallelStreamingMessage { model_id, message }) => {
                     *state.is_processing.lock().await = true;
-                    let display_msg = DisplayMessage::from_chat_message(&message);
+                    let display_msg = DisplayMessage::from(&message);
                     let _ = app.emit("parallel_streaming_message", serde_json::json!({
                         "modelId": model_id,
                         "message": display_msg
@@ -223,7 +223,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                 Some(EngineEvent::ParallelModelComplete { model_id, messages }) => {
                     let display_messages: Vec<DisplayMessage> = messages
                         .iter()
-                        .map(DisplayMessage::from_chat_message)
+                        .map(DisplayMessage::from)
                         .collect();
                     let _ = app.emit("parallel_model_complete", serde_json::json!({
                         "modelId": model_id,
@@ -408,7 +408,7 @@ pub async fn switch_conversation(
     eprintln!("switch_conversation: got {} messages from session", chat_messages.len());
     let messages: Vec<DisplayMessage> = chat_messages
         .iter()
-        .map(DisplayMessage::from_chat_message)
+        .map(DisplayMessage::from)
         .collect();
     eprintln!("switch_conversation: converted to {} display messages", messages.len());
 
@@ -545,7 +545,7 @@ pub async fn send_parallel_message(
     let message = ChatMessage::user(llm::ChatPayload::text(message));
 
     // Emit user message immediately
-    let user_msg = DisplayMessage::from_chat_message(&message);
+    let user_msg = DisplayMessage::from(&message);
     app.emit("user_message", &user_msg)
         .map_err(|e| e.to_string())?;
 

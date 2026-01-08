@@ -104,8 +104,8 @@ pub struct DisplayMessage {
     pub alternates: Option<Vec<AlternateInfo>>,
 }
 
-impl DisplayMessage {
-    pub fn from_chat_message(msg: &ChatMessage) -> Self {
+impl From<&ChatMessage> for DisplayMessage {
+    fn from(msg: &ChatMessage) -> Self {
         let content = msg
             .payload
             .content
@@ -121,7 +121,9 @@ impl DisplayMessage {
             alternates: None,
         }
     }
+}
 
+impl DisplayMessage {
     /// Create a DisplayMessage with alternates info from storage
     pub fn with_alternates(
         role: Role,
