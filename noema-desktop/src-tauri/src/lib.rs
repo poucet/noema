@@ -174,8 +174,6 @@ pub fn run() {
             commands::init::init_app,
             commands::chat::get_messages,
             commands::chat::send_message,
-            commands::chat::send_message_with_attachments,
-            commands::chat::send_message_with_documents,
             commands::chat::clear_history,
             commands::chat::set_model,
             commands::chat::list_models,

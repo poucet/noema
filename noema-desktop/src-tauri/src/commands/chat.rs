@@ -35,72 +35,19 @@ pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<Display
         .collect())
 }
 
-/// Send a message and get streaming responses via events
 #[tauri::command]
 pub async fn send_message(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     message: String,
-) -> Result<(), String> {
-    let payload = ChatPayload::text(message);
-    send_message_internal(app, state, payload).await
-}
-
-/// Send a message with attachments
-#[tauri::command]
-pub async fn send_message_with_attachments(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    message: String,
     attachments: Vec<Attachment>,
-) -> Result<(), String> {
-    // Build content blocks from message and attachments
-    let mut content = Vec::new();
-
-    // Add text if non-empty
-    if !message.trim().is_empty() {
-        content.push(ContentBlock::Text { text: message });
-    }
-
-    // Add attachments
-    for attachment in attachments {
-        // Map crate::types::Attachment to noema_ext::Attachment
-        let ext_attachment = noema_ext::Attachment {
-            name: attachment.name.clone(),
-            mime_type: attachment.mime_type.clone(),
-            data: attachment.data.clone(),
-            size: attachment.size,
-        };
-
-        match noema_ext::process_attachment(&ext_attachment) {
-            Ok(blocks) => content.extend(blocks),
-            Err(e) => return Err(e),
-        }
-    }
-
-    if content.is_empty() {
-        return Err("Message must have text or attachments".to_string());
-    }
-
-    let payload = ChatPayload { content };
-    send_message_internal(app, state, payload).await
-}
-
-/// Send a message with document references for RAG
-/// Document refs are stored as-is and resolved to full content before sending to LLM
-#[tauri::command]
-pub async fn send_message_with_documents(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    message: String,
-    attachments: Vec<Attachment>,
-    referenced_documents: Vec<ReferencedDocument>,
+    documents: Vec<ReferencedDocument>,
 ) -> Result<(), String> {
     // Build content with DocumentRefs (will be stored and resolved before LLM)
     let mut content = Vec::new();
 
     // Add document refs - these get stored and resolved before sending to LLM
-    for doc_ref in &referenced_documents {
+    for doc_ref in &documents {
         content.push(ContentBlock::DocumentRef {
             id: doc_ref.id.clone(),
             title: doc_ref.title.clone(),

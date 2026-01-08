@@ -24,16 +24,18 @@ export async function getMessages(): Promise<DisplayMessage[]> {
   return invoke<DisplayMessage[]>("get_messages");
 }
 
-export async function sendMessage(message: string): Promise<void> {
-  return invoke<void>("send_message", { message });
+export async function sendMessage(
+  message: string,
+  attachments: Attachment[] = [],
+  documents: ReferencedDocument[] = []
+): Promise<void> {
+  return invoke<void>("send_message", {
+    message,
+    attachments,
+    documents,
+  });
 }
 
-export async function sendMessageWithAttachments(
-  message: string,
-  attachments: Attachment[]
-): Promise<void> {
-  return invoke<void>("send_message_with_attachments", { message, attachments });
-}
 
 export async function clearHistory(): Promise<void> {
   return invoke<void>("clear_history");
@@ -411,18 +413,6 @@ export async function searchDocuments(
 export interface ReferencedDocument {
   id: string;
   title: string;
-}
-
-export async function sendMessageWithDocuments(
-  message: string,
-  attachments: Attachment[],
-  referencedDocuments: ReferencedDocument[]
-): Promise<void> {
-  return invoke<void>("send_message_with_documents", {
-    message,
-    attachments,
-    referencedDocuments,
-  });
 }
 
 // Span management for parallel model responses

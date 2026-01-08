@@ -236,7 +236,7 @@ function App() {
   const handleSendMessage = async (
     message: string,
     attachments: Attachment[] = [],
-    referencedDocuments?: ReferencedDocument[]
+    documents: ReferencedDocument[] = [],
   ) => {
     try {
       setError(null);
@@ -267,13 +267,8 @@ function App() {
         await tauri.sendParallelMessage(message, selectedModelsForComparison);
         // Clear selection after sending
         setSelectedModelsForComparison([]);
-      } else if (referencedDocuments && referencedDocuments.length > 0) {
-        // Send with document context for RAG
-        await tauri.sendMessageWithDocuments(message, attachments, referencedDocuments);
-      } else if (attachments.length > 0) {
-        await tauri.sendMessageWithAttachments(message, attachments);
       } else {
-        await tauri.sendMessage(message);
+        await tauri.sendMessage(message, attachments, documents);
       }
     } catch (err) {
       appLog.error("Send message error", String(err));
