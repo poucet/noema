@@ -115,7 +115,7 @@ impl DisplayMessage {
             .collect();
 
         Self {
-            role: role.to_string(),
+            role: role,
             content,
             span_set_id: None,
             span_id: None,
