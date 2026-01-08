@@ -6,9 +6,10 @@ use std::sync::Arc;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::DisplayContent;
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, ModelInfo, stored_content_to_display};
+use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, ModelInfo};
 
 /// Referenced document for RAG context
 #[derive(Debug, Clone, Deserialize)]
@@ -624,7 +625,7 @@ pub async fn get_span_messages(
     Ok(messages
         .into_iter()
         .map(|m| {
-            let content = m.payload.content.iter().map(stored_content_to_display).collect();
+            let content = m.payload.content.into_iter().map(DisplayContent::from).collect();
             DisplayMessage {
                 role: m.role,
                 content,
@@ -704,7 +705,7 @@ pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Re
 
             // Convert messages to display content
             for msg in span_set.messages {
-                let content = msg.payload.content.iter().map(stored_content_to_display).collect();
+                let content = msg.payload.content.into_iter().map(DisplayContent::from).collect();
 
                 result.push(DisplayMessage::with_alternates(
                     msg.role,
@@ -805,7 +806,7 @@ pub async fn switch_thread(
             .map_err(|e| format!("Failed to get ancestry messages: {}", e))?;
 
         for msg in ancestry_messages {
-            let content = msg.payload.content.iter().map(stored_content_to_display).collect();
+            let content = msg.payload.content.into_iter().map(DisplayContent::from).collect();
             result.push(DisplayMessage {
                 role: msg.role,
                 content,
@@ -848,7 +849,7 @@ pub async fn switch_thread(
                     .collect();
 
                 for msg in span_set.messages {
-                    let content = msg.payload.content.iter().map(stored_content_to_display).collect();
+                    let content = msg.payload.content.into_iter().map(DisplayContent::from).collect();
 
                     result.push(DisplayMessage::with_alternates(
                         msg.role,

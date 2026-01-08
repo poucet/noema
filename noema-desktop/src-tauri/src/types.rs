@@ -1,7 +1,6 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
-use noema_core::storage::StoredContent;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -110,7 +109,7 @@ impl From<&ChatMessage> for DisplayMessage {
             .payload
             .content
             .iter()
-            .map(content_block_to_display)
+            .map(DisplayContent::from)
             .collect();
 
         Self {
@@ -142,86 +141,91 @@ impl DisplayMessage {
     }
 }
 
-fn content_block_to_display(block: &ContentBlock) -> DisplayContent {
-    match block {
-        ContentBlock::Text { text } => DisplayContent::Text(text.clone()),
-        ContentBlock::Image { data, mime_type } => DisplayContent::Image {
-            data: data.clone(),
-            mime_type: mime_type.clone(),
-        },
-        ContentBlock::Audio { data, mime_type } => DisplayContent::Audio {
-            data: data.clone(),
-            mime_type: mime_type.clone(),
-        },
-        ContentBlock::ToolCall(call) => DisplayContent::ToolCall {
-            name: call.name.clone(),
-            id: call.id.clone(),
-            arguments: call.arguments.clone(),
-        },
-        ContentBlock::ToolResult(result) => DisplayContent::ToolResult {
-            id: result.tool_call_id.clone(),
-            content: result
-                .content
-                .iter()
-                .map(tool_result_content_to_display)
-                .collect(),
-        },
-        ContentBlock::DocumentRef { id, title } => DisplayContent::DocumentRef {
-            id: id.clone(),
-            title: title.clone(),
-        },
+impl From<&ContentBlock> for DisplayContent {
+    fn from(block: &ContentBlock) -> Self {
+        match block {
+            ContentBlock::Text { text } => DisplayContent::Text(text.clone()),
+            ContentBlock::Image { data, mime_type } => DisplayContent::Image {
+                data: data.clone(),
+                mime_type: mime_type.clone(),
+            },
+            ContentBlock::Audio { data, mime_type } => DisplayContent::Audio {
+                data: data.clone(),
+                mime_type: mime_type.clone(),
+            },
+            ContentBlock::ToolCall(call) => DisplayContent::ToolCall {
+                name: call.name.clone(),
+                id: call.id.clone(),
+                arguments: call.arguments.clone(),
+            },
+            ContentBlock::ToolResult(result) => DisplayContent::ToolResult {
+                id: result.tool_call_id.clone(),
+                content: result
+                    .content
+                    .iter()
+                    .map(DisplayToolResultContent::from)
+                    .collect(),
+            },
+            ContentBlock::DocumentRef { id, title } => DisplayContent::DocumentRef {
+                id: id.clone(),
+                title: title.clone(),
+            },
+        }
     }
 }
 
-fn tool_result_content_to_display(c: &ToolResultContent) -> DisplayToolResultContent {
-    match c {
-        ToolResultContent::Text { text } => DisplayToolResultContent::Text(text.clone()),
-        ToolResultContent::Image { data, mime_type } => DisplayToolResultContent::Image {
-            data: data.clone(),
-            mime_type: mime_type.clone(),
-        },
-        ToolResultContent::Audio { data, mime_type } => DisplayToolResultContent::Audio {
-            data: data.clone(),
-            mime_type: mime_type.clone(),
-        },
+impl From<&ToolResultContent> for DisplayToolResultContent {
+    fn from(c: &ToolResultContent) -> Self {
+        match c {
+            ToolResultContent::Text { text } => DisplayToolResultContent::Text(text.clone()),
+            ToolResultContent::Image { data, mime_type } => DisplayToolResultContent::Image {
+                data: data.clone(),
+                mime_type: mime_type.clone(),
+            },
+            ToolResultContent::Audio { data, mime_type } => DisplayToolResultContent::Audio {
+                data: data.clone(),
+                mime_type: mime_type.clone(),
+            },
+        }
     }
 }
 
-/// Convert StoredContent (with blob refs) to DisplayContent
-/// Used when sending messages to the frontend - refs are preserved so client can fetch them
-pub fn stored_content_to_display(content: &StoredContent) -> DisplayContent {
-    match content {
-        StoredContent::Text { text } => DisplayContent::Text(text.clone()),
-        StoredContent::Image { data, mime_type } => DisplayContent::Image {
-            data: data.clone(),
-            mime_type: mime_type.clone(),
-        },
-        StoredContent::Audio { data, mime_type } => DisplayContent::Audio {
-            data: data.clone(),
-            mime_type: mime_type.clone(),
-        },
-        StoredContent::AssetRef { asset_id, mime_type, filename } => DisplayContent::AssetRef {
-            asset_id: asset_id.clone(),
-            mime_type: mime_type.clone(),
-            filename: filename.clone(),
-        },
-        StoredContent::DocumentRef { id, title } => DisplayContent::DocumentRef {
-            id: id.clone(),
-            title: title.clone(),
-        },
-        StoredContent::ToolCall(call) => DisplayContent::ToolCall {
-            name: call.name.clone(),
-            id: call.id.clone(),
-            arguments: call.arguments.clone(),
-        },
-        StoredContent::ToolResult(result) => DisplayContent::ToolResult {
-            id: result.tool_call_id.clone(),
-            content: result
-                .content
-                .iter()
-                .map(tool_result_content_to_display)
-                .collect(),
-        },
+impl From<noema_core::storage::StoredContent> for DisplayContent {
+    fn from(content: noema_core::storage::StoredContent) -> Self {
+        use noema_core::storage::StoredContent;
+        match content {
+            StoredContent::Text { text } => DisplayContent::Text(text.clone()),
+            StoredContent::Image { data, mime_type } => DisplayContent::Image {
+                data: data,
+                mime_type: mime_type,
+            },
+            StoredContent::Audio { data, mime_type } => DisplayContent::Audio {
+                data: data.clone(),
+                mime_type: mime_type.clone(),
+            },
+            StoredContent::AssetRef { asset_id, mime_type, filename } => DisplayContent::AssetRef {
+                asset_id: asset_id.clone(),
+                mime_type: mime_type.clone(),
+                filename: filename.clone(),
+            },
+            StoredContent::DocumentRef { id, title } => DisplayContent::DocumentRef {
+                id: id.clone(),
+                title: title.clone(),
+            },
+            StoredContent::ToolCall(call) => DisplayContent::ToolCall {
+                name: call.name.clone(),
+                id: call.id.clone(),
+                arguments: call.arguments.clone(),
+            },
+            StoredContent::ToolResult(result) => DisplayContent::ToolResult {
+                id: result.tool_call_id.clone(),
+                content: result
+                    .content
+                    .iter()
+                    .map(DisplayToolResultContent::from)
+                    .collect(),
+            },
+        }
     }
 }
 
