@@ -3,21 +3,13 @@
 use llm::{ChatMessage, ChatPayload, ContentBlock, create_model, list_all_models};
 use noema_core::{ChatEngine, DocumentResolver, EngineEvent, McpRegistry, SessionStore, SqliteDocumentResolver};
 use std::sync::Arc;
-use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::DisplayContent;
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, ModelInfo};
+use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, ModelInfo, ReferencedDocument};
 
-/// Referenced document for RAG context
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReferencedDocument {
-    pub id: String,
-    pub title: String,
-}
 
 /// Get current messages in the conversation
 #[tauri::command]
@@ -61,14 +53,7 @@ pub async fn send_message(
 
     // Add attachments
     for attachment in attachments {
-        let ext_attachment = noema_ext::Attachment {
-            name: attachment.name.clone(),
-            mime_type: attachment.mime_type.clone(),
-            data: attachment.data.clone(),
-            size: attachment.size,
-        };
-
-        match noema_ext::process_attachment(&ext_attachment) {
+        match noema_ext::process_attachment(&attachment.into()) {
             Ok(blocks) => content.extend(blocks),
             Err(e) => return Err(e),
         }

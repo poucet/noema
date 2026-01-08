@@ -291,6 +291,26 @@ pub struct Attachment {
     pub size: usize,       // size in bytes
 }
 
+impl Into<noema_ext::Attachment> for Attachment {
+    fn into(self) -> noema_ext::Attachment {
+        noema_ext::Attachment {
+            name: self.name,
+            data: self.data,
+            mime_type: self.mime_type,
+            size: self.size,
+        }
+    }
+}
+
+/// Referenced document for RAG context
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ReferencedDocument {
+    pub id: String,
+    pub title: String,
+}
+
 /// Information about a parallel model response (for UI display)
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -401,6 +421,7 @@ mod ts_export {
         ParallelModelComplete::export_all().expect("Failed to export ParallelModelComplete");
         ParallelComplete::export_all().expect("Failed to export ParallelComplete");
         ParallelModelError::export_all().expect("Failed to export ParallelModelError");
+        ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
         ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");
     }
 }

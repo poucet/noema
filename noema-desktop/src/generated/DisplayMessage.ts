@@ -8,6 +8,10 @@ export type DisplayMessage = { role: string, content: Array<DisplayContent>,
  */
 spanSetId: string | null, 
 /**
+ * Span ID for this specific message (for fork/edit actions)
+ */
+spanId: string | null, 
+/**
  * Available alternates for this message's span set (only populated for assistant messages with alternatives)
  */
 alternates: Array<AlternateInfo> | null, };

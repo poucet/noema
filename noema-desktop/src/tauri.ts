@@ -13,6 +13,7 @@ import type {
   DocumentInfoResponse,
   DocumentContentResponse,
   DocumentTabResponse,
+  ReferencedDocument,
 } from "./generated";
 
 // Tauri commands
@@ -407,12 +408,6 @@ export async function searchDocuments(
   limit?: number
 ): Promise<DocumentInfoResponse[]> {
   return invoke<DocumentInfoResponse[]>("search_documents", { query, limit });
-}
-
-// Referenced document for RAG context
-export interface ReferencedDocument {
-  id: string;
-  title: string;
 }
 
 // Span management for parallel model responses
