@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::Receiver;
 
 use crate::traits::AudioStreamer;
 use crate::types::SpeechEvent;

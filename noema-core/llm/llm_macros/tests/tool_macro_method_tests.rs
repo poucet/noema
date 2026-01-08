@@ -3,7 +3,7 @@
 // This uses the tool_methods macro which processes an entire impl block
 // and generates Args structs at module level.
 
-use llm_macros::{tool, tool_methods};
+use llm_macros::{tool_methods};
 
 struct Calculator {
     base_value: i32,
