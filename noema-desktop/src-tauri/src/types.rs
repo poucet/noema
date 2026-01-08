@@ -1,6 +1,6 @@
 //! Types for frontend communication
 
-use llm::{ChatMessage, ChatPayload, ContentBlock, Role, ToolResultContent};
+use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
 use noema_core::storage::StoredContent;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -90,7 +90,8 @@ pub struct AlternateInfo {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct DisplayMessage {
-    pub role: String,
+    #[ts(type = "string")]
+    pub role: Role,
     pub content: Vec<DisplayContent>,
     /// Span set ID this message belongs to (for switching alternates)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,8 +106,6 @@ pub struct DisplayMessage {
 
 impl DisplayMessage {
     pub fn from_chat_message(msg: &ChatMessage) -> Self {
-        let role = msg.role.to_string();
-
         let content = msg
             .payload
             .content
@@ -115,23 +114,7 @@ impl DisplayMessage {
             .collect();
 
         Self {
-            role: role,
-            content,
-            span_set_id: None,
-            span_id: None,
-            alternates: None,
-        }
-    }
-
-    pub fn from_payload(payload: &ChatPayload) -> Self {
-        let content = payload
-            .content
-            .iter()
-            .map(content_block_to_display)
-            .collect();
-
-        Self {
-            role: "user".to_string(),
+            role: msg.role,
             content,
             span_set_id: None,
             span_id: None,
@@ -141,14 +124,14 @@ impl DisplayMessage {
 
     /// Create a DisplayMessage with alternates info from storage
     pub fn with_alternates(
-        role: &str,
+        role: Role,
         content: Vec<DisplayContent>,
         span_set_id: String,
         span_id: String,
         alternates: Vec<AlternateInfo>,
     ) -> Self {
         Self {
-            role: role.to_string(),
+            role: role,
             content,
             span_set_id: Some(span_set_id),
             span_id: Some(span_id),

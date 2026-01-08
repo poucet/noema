@@ -1,6 +1,6 @@
 //! Chat-related Tauri commands
 
-use llm::{create_model, list_all_models, ChatPayload, ContentBlock};
+use llm::{ChatMessage, ChatPayload, ContentBlock, create_model, list_all_models};
 use noema_core::{ChatEngine, DocumentResolver, EngineEvent, McpRegistry, SessionStore, SqliteDocumentResolver};
 use std::sync::Arc;
 use serde::Deserialize;
@@ -141,15 +141,16 @@ async fn send_message_internal(
     state: State<'_, Arc<AppState>>,
     payload: ChatPayload,
 ) -> Result<(), String> {
+    let message = ChatMessage::user(payload);
     // Emit user message immediately
-    let user_msg = DisplayMessage::from_payload(&payload);
+    let user_msg = DisplayMessage::from_chat_message(&message);
     app.emit("user_message", &user_msg)
         .map_err(|e| e.to_string())?;
 
     // Send to engine - the event loop (started at init) will handle the response
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-    engine.send_message(payload);
+    engine.send_message(message);
 
     Ok(())
 }
@@ -541,17 +542,17 @@ pub async fn send_parallel_message(
         return Err("At least one model must be selected".to_string());
     }
 
-    let payload = llm::ChatPayload::text(message);
+    let message = ChatMessage::user(llm::ChatPayload::text(message));
 
     // Emit user message immediately
-    let user_msg = DisplayMessage::from_payload(&payload);
+    let user_msg = DisplayMessage::from_chat_message(&message);
     app.emit("user_message", &user_msg)
         .map_err(|e| e.to_string())?;
 
     // Send to engine for parallel processing
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-    engine.send_parallel_message(payload, model_ids);
+    engine.send_parallel_message(message, model_ids);
 
     Ok(())
 }
@@ -623,10 +624,9 @@ pub async fn get_span_messages(
     Ok(messages
         .into_iter()
         .map(|m| {
-            let role = m.role.to_string();
             let content = m.payload.content.iter().map(stored_content_to_display).collect();
             DisplayMessage {
-                role: role.to_string(),
+                role: m.role,
                 content,
                 span_set_id: None,
                 span_id: None,
@@ -704,11 +704,10 @@ pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Re
 
             // Convert messages to display content
             for msg in span_set.messages {
-                let msg_role = msg.role.to_string();
                 let content = msg.payload.content.iter().map(stored_content_to_display).collect();
 
                 result.push(DisplayMessage::with_alternates(
-                    &msg_role,
+                    msg.role,
                     content,
                     span_set_info.id.clone(),
                     selected_span_id.clone(),
@@ -806,10 +805,9 @@ pub async fn switch_thread(
             .map_err(|e| format!("Failed to get ancestry messages: {}", e))?;
 
         for msg in ancestry_messages {
-            let msg_role = msg.role.to_string();
             let content = msg.payload.content.iter().map(stored_content_to_display).collect();
             result.push(DisplayMessage {
-                role: msg_role.to_string(),
+                role: msg.role,
                 content,
                 span_set_id: None,
                 span_id: None,
@@ -850,11 +848,10 @@ pub async fn switch_thread(
                     .collect();
 
                 for msg in span_set.messages {
-                    let msg_role = msg.role.to_string();
                     let content = msg.payload.content.iter().map(stored_content_to_display).collect();
 
                     result.push(DisplayMessage::with_alternates(
-                        &msg_role,
+                        msg.role,
                         content,
                         span_set_info.id.clone(),
                         selected_span_id.clone(),

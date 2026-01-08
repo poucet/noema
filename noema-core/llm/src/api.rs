@@ -143,6 +143,12 @@ impl From<&str> for ChatPayload {
     }
 }
 
+impl From<ChatMessage> for ChatPayload {
+    fn from(msg: ChatMessage) -> Self {
+        msg.payload
+    }
+}
+
 impl ChatPayload {
     pub fn new(content: Vec<ContentBlock>) -> Self {
         ChatPayload { content }
