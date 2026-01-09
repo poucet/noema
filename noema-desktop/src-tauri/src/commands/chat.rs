@@ -104,7 +104,7 @@ async fn send_message_internal(
 /// Start the engine event polling loop - runs continuously from app init
 pub fn start_engine_event_loop(app: AppHandle) {
     tokio::spawn(async move {
-        let state = app.state::<AppState>();
+        let state = app.state::<Arc<AppState>>();
 
         loop {
             let event = {
