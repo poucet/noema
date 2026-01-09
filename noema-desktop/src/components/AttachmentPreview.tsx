@@ -1,4 +1,5 @@
-import { isImageType, isAudioType, type Attachment } from "../types";
+import type { Attachment } from "../generated";
+import { isImageType, isAudioType, } from "../mime_types";
 
 interface AttachmentPreviewProps {
   attachments: Attachment[];

@@ -3,14 +3,15 @@ import * as tauri from "../tauri";
 import { audioLog } from "../utils/log";
 
 interface AudioPlayerProps {
-  data: string; // base64 encoded audio data
+  data?: string; // base64 encoded audio data
+  src?: string;  // URL to audio file (e.g., asset:// protocol)
   mimeType: string;
 }
 
 // Number of bars in the waveform visualization
 const WAVEFORM_BARS = 50;
 
-export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
+export function AudioPlayer({ data, src, mimeType }: AudioPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
@@ -23,6 +24,24 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
   const durationRef = useRef<number>(0);
   const animationRef = useRef<number | null>(null);
 
+  // Helper to get audio bytes from either data or src
+  const getAudioBytes = useCallback(async (): Promise<ArrayBuffer> => {
+    if (data) {
+      // Decode base64 to binary
+      const binaryString = atob(data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes.buffer.slice(0);
+    } else if (src) {
+      // Fetch from URL
+      const response = await fetch(src);
+      return await response.arrayBuffer();
+    }
+    throw new Error("No audio data or src provided");
+  }, [data, src]);
+
   // Decode audio and extract waveform on mount
   useEffect(() => {
     const extractWaveform = async () => {
@@ -30,15 +49,10 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
         // Create a temporary audio context for decoding
         const audioContext = new AudioContext();
 
-        // Decode base64 to binary
-        const binaryString = atob(data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
+        const bytes = await getAudioBytes();
 
         // Decode audio data
-        const audioBuffer = await audioContext.decodeAudioData(bytes.buffer.slice(0));
+        const audioBuffer = await audioContext.decodeAudioData(bytes);
         audioBufferRef.current = audioBuffer;
         setDuration(audioBuffer.duration);
 
@@ -73,7 +87,7 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
     };
 
     extractWaveform();
-  }, [data]);
+  }, [data, src, getAudioBytes]);
 
   const stopPlayback = useCallback(() => {
     if (sourceRef.current) {
@@ -123,15 +137,11 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
         await audioContext.resume();
       }
 
-      // Decode base64 to binary
-      const binaryString = atob(data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      // Get audio bytes from data or src
+      const bytes = await getAudioBytes();
 
       // Decode audio data
-      const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
+      const audioBuffer = await audioContext.decodeAudioData(bytes);
 
       // Create and configure source node
       const source = audioContext.createBufferSource();
@@ -165,7 +175,7 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
       setError(`Failed to play audio: ${message}`);
       console.error("Audio playback error:", err);
     }
-  }, [data, stopPlayback, updateProgress]);
+  }, [getAudioBytes, stopPlayback, updateProgress]);
 
   const toggle = useCallback(() => {
     if (isPlaying) {
@@ -188,12 +198,25 @@ export function AudioPlayer({ data, mimeType }: AudioPlayerProps) {
     audioLog.info("Download requested", { filename, mimeType: safeMimeType });
 
     try {
-      const result = await tauri.saveFile(data, filename, safeMimeType);
-      audioLog.info("Download result", { result });
+      if (data) {
+        const result = await tauri.saveFile(data, filename, safeMimeType);
+        audioLog.info("Download result", { result });
+      } else if (src) {
+        // For src URLs, fetch and convert to base64
+        const response = await fetch(src);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const base64 = (reader.result as string).split(",")[1];
+          const result = await tauri.saveFile(base64, filename, safeMimeType);
+          audioLog.info("Download result", { result });
+        };
+        reader.readAsDataURL(blob);
+      }
     } catch (err) {
       audioLog.error("Failed to save file", { err });
     }
-  }, [data, mimeType]);
+  }, [data, src, mimeType]);
 
   // Format duration as mm:ss
   const formatTime = (seconds: number) => {

@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { AttachmentPreview } from "./AttachmentPreview";
-import { isSupportedAttachmentType, type Attachment } from "../types";
-import type { DocumentInfoResponse } from "../generated";
+import { isSupportedAttachmentType} from "../mime_types";
+import type { Attachment, DocumentInfoResponse, InputContentBlock } from "../generated";
 import * as tauri from "../tauri";
 
 export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing" | "buffering";
@@ -15,14 +15,14 @@ interface MentionState {
   selectedIndex: number;
 }
 
-// Referenced document for RAG
-export interface ReferencedDocument {
+// Referenced document for chip display
+interface ReferencedDocument {
   id: string;
   title: string;
 }
 
 interface ChatInputProps {
-  onSend: (message: string, attachments: Attachment[], referencedDocuments?: ReferencedDocument[]) => void;
+  onSend: (content: InputContentBlock[]) => void;
   disabled?: boolean;
   voiceAvailable?: boolean;
   voiceStatus?: VoiceStatus;
@@ -32,6 +32,43 @@ interface ChatInputProps {
   pendingFork?: boolean;
   prefilledText?: string;
   onCancelFork?: () => void;
+}
+
+// Parse message text with embedded [title](noema://doc/id) links into content blocks
+function parseMessageToContentBlocks(text: string): InputContentBlock[] {
+  const blocks: InputContentBlock[] = [];
+  // Match markdown links with noema://doc/ URLs
+  const docLinkRegex = /\[([^\]]+)\]\(noema:\/\/doc\/([^)]+)\)/g;
+
+  let lastIndex = 0;
+  let match;
+
+  while ((match = docLinkRegex.exec(text)) !== null) {
+    // Add text before this match
+    if (match.index > lastIndex) {
+      const textBefore = text.slice(lastIndex, match.index);
+      if (textBefore) {
+        blocks.push({ type: "text", text: textBefore });
+      }
+    }
+
+    // Add document reference
+    const title = match[1];
+    const id = match[2];
+    blocks.push({ type: "documentRef", id, title });
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add remaining text after last match
+  if (lastIndex < text.length) {
+    const textAfter = text.slice(lastIndex);
+    if (textAfter) {
+      blocks.push({ type: "text", text: textAfter });
+    }
+  }
+
+  return blocks;
 }
 
 // Get MIME type from file extension
@@ -218,19 +255,22 @@ export function ChatInput({
     }
   }, [mentionState.isActive]);
 
-  // Insert a document mention (removes the @query text, adds doc as attachment chip)
+  // Insert a document mention as a markdown link inline in the text
   const insertMention = useCallback((doc: DocumentInfoResponse) => {
-    // Remove the @query from the message text
+    // Replace the @query with a markdown link
     const beforeMention = message.substring(0, mentionState.startPosition);
     const afterMention = message.substring(
       mentionState.startPosition + mentionState.query.length + 1
     );
-    const newMessage = beforeMention + afterMention;
+    // Insert markdown link: [title](noema://doc/id)
+    const docLink = `[${doc.title}](noema://doc/${doc.id})`;
+    const newMessage = beforeMention + docLink + afterMention;
+    const newCursorPos = beforeMention.length + docLink.length;
     setMessage(newMessage);
     setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
     setMentionResults([]);
 
-    // Add to referenced documents (shown as attachment chip) if not already present
+    // Also track in referencedDocs for the chip display (backwards compat + visual indicator)
     setReferencedDocs(prev => {
       if (prev.some(d => d.id === doc.id)) {
         return prev;
@@ -238,11 +278,11 @@ export function ChatInput({
       return [...prev, { id: doc.id, title: doc.title }];
     });
 
-    // Focus and position cursor
+    // Focus and position cursor after the inserted link
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(beforeMention.length, beforeMention.length);
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
       }
     }, 0);
   }, [message, mentionState.startPosition, mentionState.query]);
@@ -316,11 +356,31 @@ export function ChatInput({
 
   const handleSubmit = () => {
     const trimmed = message.trim();
-    if ((trimmed || attachments.length > 0 || referencedDocs.length > 0) && !disabled) {
-      onSend(trimmed, attachments, referencedDocs.length > 0 ? referencedDocs : undefined);
-      setMessage("");
-      setAttachments([]);
-      setReferencedDocs([]);
+    if ((trimmed || attachments.length > 0) && !disabled) {
+      // Build content blocks array preserving inline positions
+      const contentBlocks: InputContentBlock[] = [];
+
+      // Parse message text to extract inline document references
+      if (trimmed) {
+        const textBlocks = parseMessageToContentBlocks(trimmed);
+        contentBlocks.push(...textBlocks);
+      }
+
+      // Add attachments as image/audio blocks
+      for (const attachment of attachments) {
+        if (attachment.mimeType.startsWith("image/")) {
+          contentBlocks.push({ type: "image", data: attachment.data, mimeType: attachment.mimeType });
+        } else if (attachment.mimeType.startsWith("audio/")) {
+          contentBlocks.push({ type: "audio", data: attachment.data, mimeType: attachment.mimeType });
+        }
+      }
+
+      if (contentBlocks.length > 0) {
+        onSend(contentBlocks);
+        setMessage("");
+        setAttachments([]);
+        setReferencedDocs([]);
+      }
     }
   };
 

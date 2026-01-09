@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::DisplayContent;
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, ModelInfo, ReferencedDocument};
+use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ReferencedDocument};
 
 
 /// Get current messages in the conversation
@@ -31,44 +31,53 @@ pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<Display
         .collect())
 }
 
+/// Send a message with structured content blocks.
+/// Content blocks preserve the exact inline position of text, document references, and attachments.
 #[tauri::command]
 pub async fn send_message(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
-    message: String,
-    attachments: Vec<Attachment>,
-    documents: Vec<ReferencedDocument>,
+    content: Vec<InputContentBlock>,
 ) -> Result<(), String> {
-    // Build content with DocumentRefs (will be stored and resolved before LLM)
-    let mut content = Vec::new();
-
-    // Add document refs - these get stored and resolved before sending to LLM
-    for doc_ref in &documents {
-        content.push(ContentBlock::DocumentRef {
-            id: doc_ref.id.clone(),
-            title: doc_ref.title.clone(),
-        });
+    if content.is_empty() {
+        return Err("Message must have content".to_string());
     }
 
-    // Add text message
-    if !message.trim().is_empty() {
-        content.push(ContentBlock::Text { text: message });
-    }
-
-    // Add attachments
-    for attachment in attachments {
-        match noema_ext::process_attachment(&attachment.into()) {
-            Ok(blocks) => content.extend(blocks),
-            Err(e) => return Err(e),
+    // Convert InputContentBlock to ContentBlock, preserving order
+    let mut llm_content = Vec::new();
+    for block in content {
+        match block {
+            InputContentBlock::Text { text } => {
+                if !text.is_empty() {
+                    llm_content.push(ContentBlock::Text { text });
+                }
+            }
+            InputContentBlock::DocumentRef { id, title } => {
+                llm_content.push(ContentBlock::DocumentRef { id, title });
+            }
+            InputContentBlock::Image { data, mime_type } => {
+                llm_content.push(ContentBlock::Image { data, mime_type });
+            }
+            InputContentBlock::Audio { data, mime_type } => {
+                llm_content.push(ContentBlock::Audio { data, mime_type });
+            }
+            InputContentBlock::AssetRef { asset_id, mime_type } => {
+                // For AssetRef, we need to load the data from blob storage
+                // For now, store as-is and resolve later (similar to DocumentRef)
+                // TODO: Resolve asset refs before sending to LLM
+                llm_content.push(ContentBlock::Image {
+                    data: format!("asset://{}", asset_id),
+                    mime_type,
+                });
+            }
         }
     }
 
-    if content.is_empty() {
+    if llm_content.is_empty() {
         return Err("Message must have text, documents, or attachments".to_string());
     }
 
-    // Send through normal flow - DocumentRefs will be resolved before LLM
-    let payload = ChatPayload { content };
+    let payload = ChatPayload { content: llm_content };
     send_message_internal(app, state, payload).await
 }
 

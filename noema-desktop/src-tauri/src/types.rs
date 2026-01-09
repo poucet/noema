@@ -40,13 +40,21 @@ impl From<noema_core::storage::conversation::ConversationInfo> for ConversationI
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/", rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
 pub enum DisplayContent {
     Text(String),
     /// Inline Base64 image
-    Image { data: String, #[serde(rename = "mimeType")] mime_type: String },
+    Image { 
+        data: String, 
+        #[serde(rename = "mimeType")] 
+        mime_type: String 
+    },
     /// Inline Base64 audio
-    Audio { data: String, #[serde(rename = "mimeType")] mime_type: String },
+    Audio { 
+        data: String, 
+        #[serde(rename = "mimeType")] 
+        mime_type: String
+    },
     /// Asset stored in blob storage - client should fetch via asset API
     AssetRef {
         #[serde(rename = "assetId")]
@@ -60,8 +68,16 @@ pub enum DisplayContent {
         id: String,
         title: String,
     },
-    ToolCall { name: String, id: String, #[ts(type = "unknown")] arguments: serde_json::Value },
-    ToolResult { id: String, content: Vec<DisplayToolResultContent> },
+    ToolCall { 
+        name: String, 
+        id: String, 
+        #[ts(type = "unknown")] 
+        arguments: serde_json::Value 
+    },
+    ToolResult { 
+        id: String, 
+        content: Vec<DisplayToolResultContent> 
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -69,8 +85,16 @@ pub enum DisplayContent {
 #[ts(export, export_to = "../../src/generated/")]
 pub enum DisplayToolResultContent {
     Text(String),
-    Image { data: String, mime_type: String },
-    Audio { data: String, mime_type: String },
+    Image { 
+        data: String, 
+        #[serde(rename = "mimeType")]
+        mime_type: String 
+    },
+    Audio { 
+        data: String, 
+        #[serde(rename = "mimeType")]
+        mime_type: String 
+    },
 }
 
 /// Information about an alternate response for a span set
@@ -283,32 +307,64 @@ pub struct AddMcpServerRequest {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct Attachment {
-    #[serde(default)]
-    pub name: String,      // filename
     pub data: String,      // base64 encoded
+
     pub mime_type: String, // e.g., "image/png", "audio/mp3"
-    #[serde(default)]
-    pub size: usize,       // size in bytes
 }
 
 impl Into<noema_ext::Attachment> for Attachment {
     fn into(self) -> noema_ext::Attachment {
         noema_ext::Attachment {
-            name: self.name,
             data: self.data,
             mime_type: self.mime_type,
-            size: self.size,
         }
     }
 }
 
-/// Referenced document for RAG context
+/// Referenced document for RAG context (legacy - use InputContentBlock::DocumentRef instead)
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ReferencedDocument {
     pub id: String,
     pub title: String,
+}
+
+/// Input content block from frontend - structured content for user messages.
+/// This preserves the exact position of document references and attachments inline with text.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+
+#[ts(export, export_to = "../../src/generated/")]
+pub enum InputContentBlock {
+    /// Plain text segment
+    Text { 
+        text: String 
+    },
+    /// Reference to a document (inline position preserved)
+    DocumentRef { 
+        id: String, title: 
+        String 
+    },
+    /// Inline base64 image (for new uploads)
+    Image { 
+        data: String,  
+        #[serde(rename = "mimeType")] 
+        mime_type: String 
+    },
+    /// Inline base64 audio (for new uploads)
+    Audio { 
+        data: String, 
+        #[serde(rename = "mimeType")] 
+        mime_type: String 
+    },
+    /// Reference to already-stored asset in blob storage
+    AssetRef { 
+        #[serde(rename = "assetId")]
+        asset_id: String, 
+        #[serde(rename = "mimeType")] 
+        mime_type: String 
+    },
 }
 
 /// Information about a parallel model response (for UI display)
@@ -422,6 +478,7 @@ mod ts_export {
         ParallelComplete::export_all().expect("Failed to export ParallelComplete");
         ParallelModelError::export_all().expect("Failed to export ParallelModelError");
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
+        InputContentBlock::export_all().expect("Failed to export InputContentBlock");
         ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");
     }
 }

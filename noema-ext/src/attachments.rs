@@ -4,10 +4,8 @@ use llm::ContentBlock;
 
 #[derive(Debug, Clone)]
 pub struct Attachment {
-    pub name: String,
     pub mime_type: String,
     pub data: String, // base64 encoded data
-    pub size: usize,
 }
 
 pub fn process_attachment(attachment: &Attachment) -> Result<Vec<ContentBlock>, String> {

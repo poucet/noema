@@ -1,4 +1,4 @@
-import type { AlternateInfo } from "../../types";
+import type { AlternateInfo } from "../../generated";
 
 // Alternates selector component for assistant messages with multiple model responses
 // Separates "viewing" (preview) from "selecting" (committing to database)

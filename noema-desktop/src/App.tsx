@@ -7,8 +7,7 @@ import { ModelSelector } from "./components/ModelSelector";
 import { FavoriteModelChips } from "./components/FavoriteModelChips";
 import { Settings } from "./components/Settings";
 import { DocumentPanel } from "./components/DocumentPanel";
-import type { DisplayMessage, ModelInfo, ConversationInfo, Attachment } from "./types";
-import type { ReferencedDocument } from "./components/ChatInput";
+import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock } from "./generated";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
 import { appLog } from "./utils/log";
@@ -57,7 +56,7 @@ function App() {
 
   // Voice input hook - handles browser audio capture and Whisper transcription
   const handleVoiceTranscription = (text: string) => {
-    handleSendMessage(text);
+    handleSendMessage([{ type: "text", text }]);
   };
 
   const handleVoiceError = (err: string) => {
@@ -233,11 +232,7 @@ function App() {
     };
   }, []);
 
-  const handleSendMessage = async (
-    message: string,
-    attachments: Attachment[] = [],
-    documents: ReferencedDocument[] = [],
-  ) => {
+  const handleSendMessage = async (content: InputContentBlock[]) => {
     try {
       setError(null);
 
@@ -263,12 +258,16 @@ function App() {
         // Clear any previous comparison results
         setCompletedParallelResponses(new Map());
         parallelResponsesRef.current = new Map();
-        // Use parallel send - note: attachments/documents not yet supported for parallel
-        await tauri.sendParallelMessage(message, selectedModelsForComparison);
+        // Extract text for parallel send (parallel mode doesn't support full content blocks yet)
+        const textContent = content
+          .filter((block): block is { type: "text"; text: string } => block.type === "text")
+          .map(block => block.text)
+          .join("");
+        await tauri.sendParallelMessage(textContent, selectedModelsForComparison);
         // Clear selection after sending
         setSelectedModelsForComparison([]);
       } else {
-        await tauri.sendMessage(message, attachments, documents);
+        await tauri.sendMessage(content);
       }
     } catch (err) {
       appLog.error("Send message error", String(err));

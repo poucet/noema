@@ -3,4 +3,4 @@
 /**
  * Attachment from frontend for message sending
  */
-export type Attachment = { name: string, data: string, mimeType: string, size: number, };
+export type Attachment = { data: string, mimeType: string, };

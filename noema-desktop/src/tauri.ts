@@ -1,19 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type {
-  DisplayMessage,
-  ModelInfo,
-  ConversationInfo,
+  AddMcpServerRequest,
   McpServerInfo,
   McpToolInfo,
-  AddMcpServerRequest,
-  Attachment,
-} from "./types";
-import type {
+  ModelInfo,
+  ConversationInfo,
   DocumentInfoResponse,
   DocumentContentResponse,
   DocumentTabResponse,
-  ReferencedDocument,
+  DisplayMessage,
+  DisplayContent,
+  InputContentBlock,
 } from "./generated";
 
 // Tauri commands
@@ -26,15 +24,9 @@ export async function getMessages(): Promise<DisplayMessage[]> {
 }
 
 export async function sendMessage(
-  message: string,
-  attachments: Attachment[] = [],
-  documents: ReferencedDocument[] = []
+  content: InputContentBlock[]
 ): Promise<void> {
-  return invoke<void>("send_message", {
-    message,
-    attachments,
-    documents,
-  });
+  return invoke<void>("send_message", { content });
 }
 
 
