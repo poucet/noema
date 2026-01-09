@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { AttachmentPreview } from "./AttachmentPreview";
-import { isSupportedAttachmentType} from "../mime_types";
+import { isSupportedAttachmentType } from "../mime_types";
 import type { Attachment, DocumentInfoResponse, InputContentBlock } from "../generated";
 import * as tauri from "../tauri";
 
@@ -15,11 +15,8 @@ interface MentionState {
   selectedIndex: number;
 }
 
-// Referenced document for chip display
-interface ReferencedDocument {
-  id: string;
-  title: string;
-}
+// Subset of InputContentBlock that can appear in the editor (text and documentRef)
+type EditorBlock = Extract<InputContentBlock, { type: "text" } | { type: "documentRef" }>;
 
 interface ChatInputProps {
   onSend: (content: InputContentBlock[]) => void;
@@ -28,70 +25,28 @@ interface ChatInputProps {
   voiceStatus?: VoiceStatus;
   voiceBufferedCount?: number;
   onToggleVoice?: () => void;
-  // Fork mode: when set, shows indicator and prefills input
   pendingFork?: boolean;
   prefilledText?: string;
   onCancelFork?: () => void;
-}
-
-// Parse message text with embedded [title](noema://doc/id) links into content blocks
-function parseMessageToContentBlocks(text: string): InputContentBlock[] {
-  const blocks: InputContentBlock[] = [];
-  // Match markdown links with noema://doc/ URLs
-  const docLinkRegex = /\[([^\]]+)\]\(noema:\/\/doc\/([^)]+)\)/g;
-
-  let lastIndex = 0;
-  let match;
-
-  while ((match = docLinkRegex.exec(text)) !== null) {
-    // Add text before this match
-    if (match.index > lastIndex) {
-      const textBefore = text.slice(lastIndex, match.index);
-      if (textBefore) {
-        blocks.push({ type: "text", text: textBefore });
-      }
-    }
-
-    // Add document reference
-    const title = match[1];
-    const id = match[2];
-    blocks.push({ type: "documentRef", id, title });
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Add remaining text after last match
-  if (lastIndex < text.length) {
-    const textAfter = text.slice(lastIndex);
-    if (textAfter) {
-      blocks.push({ type: "text", text: textAfter });
-    }
-  }
-
-  return blocks;
 }
 
 // Get MIME type from file extension
 function getMimeType(filePath: string): string | null {
   const ext = filePath.split(".").pop()?.toLowerCase();
   const mimeTypes: Record<string, string> = {
-    // Images
     png: "image/png",
     jpg: "image/jpeg",
     jpeg: "image/jpeg",
     gif: "image/gif",
     webp: "image/webp",
-    // Audio
     mp3: "audio/mpeg",
     m4a: "audio/mp4",
     wav: "audio/wav",
     webm: "audio/webm",
     ogg: "audio/ogg",
-    // Text
     txt: "text/plain",
     md: "text/markdown",
     markdown: "text/markdown",
-    // Documents
     pdf: "application/pdf",
   };
   return ext ? mimeTypes[ext] || null : null;
@@ -106,7 +61,6 @@ async function fileToAttachment(file: File): Promise<Attachment | null> {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      // Remove the data URL prefix (e.g., "data:image/png;base64,")
       const base64 = result.split(",")[1];
       resolve({
         data: base64,
@@ -118,7 +72,6 @@ async function fileToAttachment(file: File): Promise<Attachment | null> {
   });
 }
 
-// Convert file path to attachment using Tauri's fs plugin
 async function filePathToAttachment(filePath: string): Promise<Attachment | null> {
   const mimeType = getMimeType(filePath);
   if (!mimeType || !isSupportedAttachmentType(mimeType)) {
@@ -128,7 +81,6 @@ async function filePathToAttachment(filePath: string): Promise<Attachment | null
 
   try {
     const contents = await readFile(filePath);
-    // Convert Uint8Array to base64
     const base64 = btoa(
       Array.from(contents)
         .map((byte) => String.fromCharCode(byte))
@@ -139,6 +91,19 @@ async function filePathToAttachment(filePath: string): Promise<Attachment | null
     console.error("Failed to read file:", filePath, err);
     return null;
   }
+}
+
+// Check if blocks have any content
+function hasContent(blocks: EditorBlock[]): boolean {
+  return blocks.some((b) => {
+    if (b.type === "text") return b.text.trim().length > 0;
+    return true; // documentRef always counts as content
+  });
+}
+
+// Get referenced documents from blocks
+function getReferencedDocs(blocks: EditorBlock[]): { id: string; title: string }[] {
+  return blocks.filter((b): b is EditorBlock & { type: "documentRef" } => b.type === "documentRef");
 }
 
 export function ChatInput({
@@ -152,19 +117,26 @@ export function ChatInput({
   prefilledText = "",
   onCancelFork,
 }: ChatInputProps) {
-  const [message, setMessage] = useState("");
+  // Store content as structured blocks instead of a string
+  const [blocks, setBlocks] = useState<EditorBlock[]>([{ type: "text", text: "" }]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // When prefilledText changes (fork from user message), update the input
   useEffect(() => {
     if (prefilledText) {
-      setMessage(prefilledText);
-      // Focus the textarea
+      needsDomSyncRef.current = true;
+      setBlocks([{ type: "text", text: prefilledText }]);
       setTimeout(() => {
-        textareaRef.current?.focus();
+        editorRef.current?.focus();
+        // Move cursor to end
+        const selection = window.getSelection();
+        if (selection && editorRef.current) {
+          selection.selectAllChildren(editorRef.current);
+          selection.collapseToEnd();
+        }
       }, 0);
     }
   }, [prefilledText]);
@@ -178,17 +150,15 @@ export function ChatInput({
   });
   const [mentionResults, setMentionResults] = useState<DocumentInfoResponse[]>([]);
   const mentionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Track documents referenced via @ mentions for RAG
-  const [referencedDocs, setReferencedDocs] = useState<ReferencedDocument[]>([]);
 
-  // Auto-resize textarea
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = "auto";
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-    }
-  }, [message]);
+  // Track which text block and position within it the cursor is at
+  const [cursorPosition, setCursorPosition] = useState<{ blockIndex: number; offset: number }>({
+    blockIndex: 0,
+    offset: 0,
+  });
+
+  // Flag to indicate when we need to force a DOM rebuild (e.g., after chip insert/remove)
+  const needsDomSyncRef = useRef(true);
 
   // Search for documents when mention query changes
   useEffect(() => {
@@ -197,7 +167,6 @@ export function ChatInput({
       return;
     }
 
-    // Debounce the search (shorter delay for empty query to feel more responsive)
     if (mentionDebounceRef.current) {
       clearTimeout(mentionDebounceRef.current);
     }
@@ -207,7 +176,7 @@ export function ChatInput({
       try {
         const results = await tauri.searchDocuments(mentionState.query, 5);
         setMentionResults(results);
-        setMentionState(prev => ({ ...prev, selectedIndex: 0 }));
+        setMentionState((prev) => ({ ...prev, selectedIndex: 0 }));
       } catch (err) {
         console.error("Failed to search documents:", err);
         setMentionResults([]);
@@ -221,79 +190,232 @@ export function ChatInput({
     };
   }, [mentionState.isActive, mentionState.query]);
 
-  // Handle message changes to detect @ mentions
-  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newValue = e.target.value;
-    const cursorPos = e.target.selectionStart;
-    setMessage(newValue);
+  // Sync the DOM with our blocks state - only when explicitly needed
+  useEffect(() => {
+    if (!needsDomSyncRef.current) return;
+    needsDomSyncRef.current = false;
 
-    // Check if we should activate or update mention mode
-    const textBeforeCursor = newValue.substring(0, cursorPos);
-    const atIndex = textBeforeCursor.lastIndexOf("@");
+    const editor = editorRef.current;
+    if (!editor) return;
 
-    if (atIndex >= 0) {
-      // Check if @ is at start or preceded by whitespace
-      const charBefore = atIndex > 0 ? textBeforeCursor[atIndex - 1] : " ";
-      if (charBefore === " " || charBefore === "\n" || atIndex === 0) {
-        const query = textBeforeCursor.substring(atIndex + 1);
-        // Only activate if query doesn't contain whitespace (still typing the mention)
-        if (!query.includes(" ") && !query.includes("\n")) {
-          setMentionState({
-            isActive: true,
-            query,
-            startPosition: atIndex,
-            selectedIndex: 0,
-          });
-          return;
+    // Build the expected DOM structure
+    const fragment = document.createDocumentFragment();
+
+    blocks.forEach((block, index) => {
+      if (block.type === "text") {
+        // Create a text span
+        const span = document.createElement("span");
+        span.setAttribute("data-block-type", "text");
+        span.setAttribute("data-block-index", String(index));
+        span.textContent = block.text || "\u200B"; // Zero-width space for empty text
+        fragment.appendChild(span);
+      } else {
+        // Create a chip for document reference
+        const chip = document.createElement("span");
+        chip.setAttribute("data-block-type", "documentRef");
+        chip.setAttribute("data-block-index", String(index));
+        chip.setAttribute("data-doc-id", block.id);
+        chip.contentEditable = "false";
+        chip.className =
+          "inline-flex items-center gap-1 px-2 py-0.5 mx-0.5 bg-teal-900/50 text-teal-300 rounded-full text-sm align-middle select-none";
+        chip.innerHTML = `
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span>${block.title}</span>
+        `;
+        fragment.appendChild(chip);
+      }
+    });
+
+    editor.innerHTML = "";
+    editor.appendChild(fragment);
+  }, [blocks]);
+
+  // Handle input in the contenteditable
+  const handleInput = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    // Parse the DOM back into blocks
+    const newBlocks: EditorBlock[] = [];
+    const children = Array.from(editor.childNodes);
+
+    for (const child of children) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        // Plain text node (shouldn't happen often with our structure, but handle it)
+        const text = child.textContent || "";
+        if (text && text !== "\u200B") {
+          newBlocks.push({ type: "text", text });
+        }
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const el = child as HTMLElement;
+        const blockType = el.getAttribute("data-block-type");
+
+        if (blockType === "text") {
+          let text = el.textContent || "";
+          // Remove zero-width spaces
+          text = text.replace(/\u200B/g, "");
+          newBlocks.push({ type: "text", text });
+        } else if (blockType === "documentRef") {
+          const docId = el.getAttribute("data-doc-id");
+          const title = el.querySelector("span")?.textContent || "";
+          if (docId) {
+            newBlocks.push({ type: "documentRef", id: docId, title });
+          }
         }
       }
     }
 
-    // Deactivate mention mode if conditions not met
-    if (mentionState.isActive) {
-      setMentionState(prev => ({ ...prev, isActive: false }));
+    // Ensure we always have at least one text block
+    if (newBlocks.length === 0) {
+      newBlocks.push({ type: "text", text: "" });
+    }
+
+    // Merge adjacent text blocks
+    const mergedBlocks: EditorBlock[] = [];
+    for (const block of newBlocks) {
+      const last = mergedBlocks[mergedBlocks.length - 1];
+      if (block.type === "text" && last?.type === "text") {
+        last.text += block.text;
+      } else {
+        mergedBlocks.push(block);
+      }
+    }
+
+    setBlocks(mergedBlocks);
+
+    // Check for @ mention trigger
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const container = range.startContainer;
+
+      if (container.nodeType === Node.TEXT_NODE) {
+        const text = container.textContent || "";
+        const offset = range.startOffset;
+        const textBeforeCursor = text.substring(0, offset);
+        const atIndex = textBeforeCursor.lastIndexOf("@");
+
+        if (atIndex >= 0) {
+          const charBefore = atIndex > 0 ? textBeforeCursor[atIndex - 1] : " ";
+          if (charBefore === " " || charBefore === "\n" || atIndex === 0) {
+            const query = textBeforeCursor.substring(atIndex + 1);
+            if (!query.includes(" ") && !query.includes("\n")) {
+              // Find which block this text node belongs to
+              let blockIndex = 0;
+              const parent = container.parentElement;
+              if (parent) {
+                const idx = parent.getAttribute("data-block-index");
+                if (idx !== null) blockIndex = parseInt(idx, 10);
+              }
+
+              setMentionState({
+                isActive: true,
+                query,
+                startPosition: atIndex,
+                selectedIndex: 0,
+              });
+              setCursorPosition({ blockIndex, offset });
+              return;
+            }
+          }
+        }
+      }
+
+      // Deactivate mention if conditions not met
+      if (mentionState.isActive) {
+        setMentionState((prev) => ({ ...prev, isActive: false }));
+      }
     }
   }, [mentionState.isActive]);
 
-  // Insert a document mention as a markdown link inline in the text
-  const insertMention = useCallback((doc: DocumentInfoResponse) => {
-    // Replace the @query with a markdown link
-    const beforeMention = message.substring(0, mentionState.startPosition);
-    const afterMention = message.substring(
-      mentionState.startPosition + mentionState.query.length + 1
-    );
-    // Insert markdown link: [title](noema://doc/id)
-    const docLink = `[${doc.title}](noema://doc/${doc.id})`;
-    const newMessage = beforeMention + docLink + afterMention;
-    const newCursorPos = beforeMention.length + docLink.length;
-    setMessage(newMessage);
-    setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
-    setMentionResults([]);
+  // Insert a document reference at the current position
+  const insertMention = useCallback(
+    (doc: DocumentInfoResponse) => {
+      const { blockIndex, offset } = cursorPosition;
 
-    // Also track in referencedDocs for the chip display (backwards compat + visual indicator)
-    setReferencedDocs(prev => {
-      if (prev.some(d => d.id === doc.id)) {
-        return prev;
+      needsDomSyncRef.current = true;
+      setBlocks((prevBlocks) => {
+        const newBlocks: EditorBlock[] = [];
+
+        for (let i = 0; i < prevBlocks.length; i++) {
+          const block = prevBlocks[i];
+
+          if (i === blockIndex && block.type === "text") {
+            // Split this text block at the @ position
+            const textBeforeAt = block.text.substring(0, mentionState.startPosition);
+            const textAfterQuery = block.text.substring(offset);
+
+            // Add text before @
+            if (textBeforeAt) {
+              newBlocks.push({ type: "text", text: textBeforeAt });
+            }
+
+            // Add the document reference
+            newBlocks.push({ type: "documentRef", id: doc.id, title: doc.title });
+
+            // Add text after the query (with a space for comfortable typing)
+            newBlocks.push({ type: "text", text: " " + textAfterQuery });
+          } else {
+            newBlocks.push(block);
+          }
+        }
+
+        return newBlocks;
+      });
+
+      setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
+      setMentionResults([]);
+
+      // Focus and position cursor after the chip
+      setTimeout(() => {
+        const editor = editorRef.current;
+        if (editor) {
+          editor.focus();
+          // Find the text span after the chip and position cursor at start
+          const textSpans = editor.querySelectorAll('[data-block-type="text"]');
+          const lastTextSpan = textSpans[textSpans.length - 1];
+          if (lastTextSpan && lastTextSpan.firstChild) {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.setStart(lastTextSpan.firstChild, 1); // After the space
+            range.collapse(true);
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          }
+        }
+      }, 0);
+    },
+    [cursorPosition, mentionState.startPosition]
+  );
+
+  // Remove a document reference by id
+  const removeDocRef = useCallback((docId: string) => {
+    needsDomSyncRef.current = true;
+    setBlocks((prevBlocks) => {
+      const newBlocks = prevBlocks.filter(
+        (b) => !(b.type === "documentRef" && b.id === docId)
+      );
+      // Ensure at least one text block
+      if (newBlocks.length === 0 || !newBlocks.some((b) => b.type === "text")) {
+        newBlocks.push({ type: "text", text: "" });
       }
-      return [...prev, { id: doc.id, title: doc.title }];
+      // Merge adjacent text blocks
+      const merged: EditorBlock[] = [];
+      for (const block of newBlocks) {
+        const last = merged[merged.length - 1];
+        if (block.type === "text" && last?.type === "text") {
+          last.text += block.text;
+        } else {
+          merged.push(block);
+        }
+      }
+      return merged;
     });
-
-    // Focus and position cursor after the inserted link
-    setTimeout(() => {
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
-      }
-    }, 0);
-  }, [message, mentionState.startPosition, mentionState.query]);
-
-  // Remove a referenced document
-  const removeReferencedDoc = useCallback((docId: string) => {
-    setReferencedDocs(prev => prev.filter(d => d.id !== docId));
   }, []);
 
   // Set up Tauri drag-drop event listener
-  // Track last processed drop to avoid duplicates (Tauri bug: https://github.com/tauri-apps/tauri/issues/14134)
   const lastDropRef = useRef<{ paths: string[]; time: number } | null>(null);
 
   useEffect(() => {
@@ -311,7 +433,6 @@ export function ChatInput({
             setIsDragOver(false);
             const paths = event.payload.paths;
 
-            // Deduplicate: skip if same paths were dropped within 500ms
             const now = Date.now();
             const lastDrop = lastDropRef.current;
             if (
@@ -354,73 +475,100 @@ export function ChatInput({
     };
   }, []);
 
-  const handleSubmit = () => {
-    const trimmed = message.trim();
-    if ((trimmed || attachments.length > 0) && !disabled) {
-      // Build content blocks array preserving inline positions
-      const contentBlocks: InputContentBlock[] = [];
+  const handleSubmit = useCallback(() => {
+    if (!hasContent(blocks) && attachments.length === 0) return;
+    if (disabled) return;
 
-      // Parse message text to extract inline document references
-      if (trimmed) {
-        const textBlocks = parseMessageToContentBlocks(trimmed);
-        contentBlocks.push(...textBlocks);
+    // Build content blocks: filter empty text blocks, trim text, and add attachments
+    const contentBlocks: InputContentBlock[] = blocks
+      .map((block) =>
+        block.type === "text" ? { ...block, text: block.text.trim() } : block
+      )
+      .filter((block) => block.type !== "text" || block.text.length > 0);
+
+    // Add attachments as image/audio blocks
+    for (const attachment of attachments) {
+      if (attachment.mimeType.startsWith("image/")) {
+        contentBlocks.push({ type: "image", data: attachment.data, mimeType: attachment.mimeType });
+      } else if (attachment.mimeType.startsWith("audio/")) {
+        contentBlocks.push({ type: "audio", data: attachment.data, mimeType: attachment.mimeType });
       }
+    }
 
-      // Add attachments as image/audio blocks
-      for (const attachment of attachments) {
-        if (attachment.mimeType.startsWith("image/")) {
-          contentBlocks.push({ type: "image", data: attachment.data, mimeType: attachment.mimeType });
-        } else if (attachment.mimeType.startsWith("audio/")) {
-          contentBlocks.push({ type: "audio", data: attachment.data, mimeType: attachment.mimeType });
+    if (contentBlocks.length > 0) {
+      onSend(contentBlocks);
+      needsDomSyncRef.current = true;
+      setBlocks([{ type: "text", text: "" }]);
+      setAttachments([]);
+    }
+  }, [blocks, attachments, disabled, onSend]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Handle mention navigation
+      if (mentionState.isActive && mentionResults.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setMentionState((prev) => ({
+            ...prev,
+            selectedIndex: Math.min(prev.selectedIndex + 1, mentionResults.length - 1),
+          }));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setMentionState((prev) => ({
+            ...prev,
+            selectedIndex: Math.max(prev.selectedIndex - 1, 0),
+          }));
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          insertMention(mentionResults[mentionState.selectedIndex]);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
+          return;
         }
       }
 
-      if (contentBlocks.length > 0) {
-        onSend(contentBlocks);
-        setMessage("");
-        setAttachments([]);
-        setReferencedDocs([]);
-      }
-    }
-  };
+      // Handle backspace on chip - check if we're right after a chip
+      if (e.key === "Backspace") {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          if (range.collapsed) {
+            const container = range.startContainer;
+            const offset = range.startOffset;
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Handle mention navigation
-    if (mentionState.isActive && mentionResults.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setMentionState(prev => ({
-          ...prev,
-          selectedIndex: Math.min(prev.selectedIndex + 1, mentionResults.length - 1),
-        }));
-        return;
+            // If at start of a text node, check previous sibling
+            if (offset === 0 || (container.textContent?.charAt(offset - 1) === "\u200B" && offset <= 1)) {
+              const parent = container.parentElement;
+              const prevSibling = parent?.previousElementSibling;
+              if (prevSibling?.getAttribute("data-block-type") === "documentRef") {
+                e.preventDefault();
+                const docId = prevSibling.getAttribute("data-doc-id");
+                if (docId) {
+                  removeDocRef(docId);
+                }
+                return;
+              }
+            }
+          }
+        }
       }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setMentionState(prev => ({
-          ...prev,
-          selectedIndex: Math.max(prev.selectedIndex - 1, 0),
-        }));
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        insertMention(mentionResults[mentionState.selectedIndex]);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setMentionState({ isActive: false, query: "", startPosition: 0, selectedIndex: 0 });
-        return;
-      }
-    }
 
-    // Normal submit on Enter
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
+      // Submit on Enter (without Shift)
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    },
+    [mentionState, mentionResults, insertMention, handleSubmit, removeDocRef]
+  );
 
   const handleRemoveAttachment = (index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
@@ -445,8 +593,6 @@ export function ChatInput({
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    console.log("dragEnter", e.dataTransfer.types);
-    // Check if files are being dragged
     if (e.dataTransfer.types.includes("Files")) {
       setIsDragOver(true);
     }
@@ -455,7 +601,6 @@ export function ChatInput({
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Check if files are being dragged
     if (e.dataTransfer.types.includes("Files")) {
       e.dataTransfer.dropEffect = "copy";
       setIsDragOver(true);
@@ -465,7 +610,6 @@ export function ChatInput({
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // Only set isDragOver to false if we're leaving the container entirely
     const relatedTarget = e.relatedTarget as Node | null;
     if (!relatedTarget || !containerRef.current?.contains(relatedTarget)) {
       setIsDragOver(false);
@@ -478,19 +622,14 @@ export function ChatInput({
       e.stopPropagation();
       setIsDragOver(false);
 
-      console.log("drop", e.dataTransfer.files.length, "files");
       const files = e.dataTransfer.files;
       if (files.length > 0) {
-        for (let i = 0; i < files.length; i++) {
-          console.log("file", i, files[i].name, files[i].type);
-        }
         await processFiles(files);
       }
     },
     [processFiles]
   );
 
-  // Handle paste events for images
   const handlePaste = useCallback(
     async (e: React.ClipboardEvent) => {
       const items = e.clipboardData.items;
@@ -529,6 +668,9 @@ export function ChatInput({
     }
   };
 
+  const referencedDocs = getReferencedDocs(blocks);
+  const isEmpty = !hasContent(blocks);
+
   return (
     <div
       ref={containerRef}
@@ -552,33 +694,6 @@ export function ChatInput({
       {/* Attachment preview */}
       <AttachmentPreview attachments={attachments} onRemove={handleRemoveAttachment} />
 
-      {/* Referenced documents chips */}
-      {referencedDocs.length > 0 && (
-        <div className="px-4 pt-2 max-w-4xl mx-auto">
-          <div className="flex flex-wrap gap-2">
-            {referencedDocs.map(doc => (
-              <span
-                key={doc.id}
-                className="inline-flex items-center gap-1 px-2 py-1 bg-teal-900/50 text-teal-300 rounded-full text-sm"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                {doc.title}
-                <button
-                  onClick={() => removeReferencedDoc(doc.id)}
-                  className="ml-1 hover:text-red-400"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Input area */}
       <div className="p-4 relative">
         {/* Mention autocomplete dropdown */}
@@ -600,8 +715,18 @@ export function ChatInput({
                           : "hover:bg-gray-700/50 text-foreground"
                       }`}
                     >
-                      <svg className="w-4 h-4 text-teal-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      <svg
+                        className="w-4 h-4 text-teal-400 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
                       </svg>
                       <span className="truncate">{doc.title}</span>
                     </button>
@@ -622,7 +747,12 @@ export function ChatInput({
               title="Cancel fork"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           )}
@@ -635,74 +765,61 @@ export function ChatInput({
               !voiceAvailable
                 ? "Voice input not available"
                 : voiceStatus === "disabled"
-                ? "Enable voice input"
-                : voiceStatus === "listening"
-                ? "Listening..."
-                : voiceStatus === "transcribing"
-                ? "Transcribing..."
-                : voiceStatus === "buffering"
-                ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? 's' : ''} queued`
-                : "Voice enabled (click to disable)"
+                  ? "Enable voice input"
+                  : voiceStatus === "listening"
+                    ? "Listening..."
+                    : voiceStatus === "transcribing"
+                      ? "Transcribing..."
+                      : voiceStatus === "buffering"
+                        ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? "s" : ""} queued`
+                        : "Voice enabled (click to disable)"
             }
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              {voiceStatus === "disabled" || !voiceAvailable ? (
-                // Microphone off icon
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                />
-              ) : (
-                // Microphone on icon
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                />
-              )}
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+              />
             </svg>
           </button>
-          <textarea
-            ref={textareaRef}
-            value={message}
-            onChange={handleMessageChange}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder={
-              voiceStatus === "listening"
-                ? "Listening... speak now"
-                : voiceStatus === "transcribing"
-                ? "Transcribing..."
-                : voiceStatus === "buffering"
-                ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? 's' : ''} queued while thinking...`
-                : attachments.length > 0 || referencedDocs.length > 0
-                ? "Add a message..."
-                : "Type a message, @ to reference docs..."
-            }
-            disabled={disabled}
-            rows={1}
-            className="flex-1 px-4 py-3 border border-gray-600 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-surface text-foreground placeholder-muted disabled:opacity-50 overflow-hidden"
-          />
+
+          {/* Rich text editor with inline chips */}
+          <div className="flex-1 relative">
+            <div
+              ref={editorRef}
+              contentEditable={!disabled}
+              onInput={handleInput}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              className="min-h-12 max-h-[200px] overflow-y-auto px-4 py-3 border border-gray-600 rounded-2xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-surface text-foreground disabled:opacity-50"
+              style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+              suppressContentEditableWarning
+            />
+            {/* Placeholder */}
+            {isEmpty && (
+              <div className="absolute left-4 top-3 text-muted pointer-events-none">
+                {voiceStatus === "listening"
+                  ? "Listening... speak now"
+                  : voiceStatus === "transcribing"
+                    ? "Transcribing..."
+                    : voiceStatus === "buffering"
+                      ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? "s" : ""} queued while thinking...`
+                      : attachments.length > 0 || referencedDocs.length > 0
+                        ? "Add a message..."
+                        : "Type a message, @ to reference docs..."}
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={disabled || (!message.trim() && attachments.length === 0 && referencedDocs.length === 0)}
+            disabled={disabled || (isEmpty && attachments.length === 0)}
             className="px-4 py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-2xl transition-colors"
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
