@@ -3,233 +3,124 @@
 //! This module provides the `DocumentResolver` trait for resolving document references
 //! to their full content before sending to LLM providers.
 
+use std::collections::{HashMap, HashSet};
+
+use askama::Template;
 use async_trait::async_trait;
 use futures::future::join_all;
-use llm::{ChatMessage, ChatPayload, ChatRequest, ContentBlock};
+use llm::{ChatRequest, ContentBlock};
 
-use crate::storage::document::DocumentStore;
-
-/// A resolved document with its content
-#[derive(Debug, Clone)]
-pub struct ResolvedDocument {
-    pub id: String,
-    pub title: String,
-    pub content: String,
-}
+use crate::storage::document::{DocumentStore, FullDocumentInfo};
 
 /// Trait for resolving document references to their content
 #[async_trait]
 pub trait DocumentResolver: Send + Sync {
-    /// Resolve a document by ID, returning its content
-    async fn resolve_doc(&self, doc_id: &str) -> Option<ResolvedDocument>;
-
-    /// Resolve all DocumentRef blocks in a ChatPayload
-    async fn resolve_payload(
-        &self,
-        payload: &mut ChatPayload,
-        config: &DocumentInjectionConfig,
-    ) {
-        let mut doc_refs: Vec<(String, String)> = Vec::new();
-        let mut other_content = Vec::new();
-        let mut user_text = String::new();
-
-        // Separate DocumentRefs from other content, collect user text
-        for block in std::mem::take(&mut payload.content) {
-            match block {
-                ContentBlock::DocumentRef { id, title } => {
-                    doc_refs.push((id, title));
-                }
-                ContentBlock::Text { text } => {
-                    if !user_text.is_empty() {
-                        user_text.push_str("\n\n");
-                    }
-                    user_text.push_str(&text);
-                }
-                other => other_content.push(other),
-            }
-        }
-
-        // Resolve all documents in parallel
-        let resolve_futures = doc_refs.iter().map(|(id, title)| async {
-            let id = id.clone();
-            let title = title.clone();
-            match self.resolve_doc(&id).await {
-                Some(doc) => doc,
-                None => ResolvedDocument {
-                    id,
-                    title: title.clone(),
-                    content: format!("[Document '{}' could not be loaded]", title),
-                },
-            }
-        });
-        let resolved_docs: Vec<ResolvedDocument> = join_all(resolve_futures).await;
-
-        // Build new content
-        let mut new_content = Vec::new();
-
-        // Add resolved documents + user message as a single text block
-        if !resolved_docs.is_empty() || !user_text.is_empty() {
-            let combined_text = config.format_with_documents(&resolved_docs, &user_text);
-            new_content.push(ContentBlock::Text { text: combined_text });
-        }
-
-        // Add any other content (images, audio, tool calls, etc.)
-        new_content.extend(other_content);
-
-        payload.content = new_content;
-    }
-
-    /// Resovle all DocumentRef blocks in a ChatMesssage
-    async fn resolve_message(
-        &self,
-        message: &mut ChatMessage,
-        config: &DocumentInjectionConfig,
-    ) {
-        self.resolve_payload(&mut message.payload, config).await;
-    }   
-    
-    /// Resolve all DocumentRef blocks in a ChatRequest
-    async fn resolve_request(
-        &self,
-        request: &mut ChatRequest,
-        config: &DocumentInjectionConfig,
-    ) {
-        for msg in request.messages_mut() {
-            self.resolve_message(msg, config).await;
-        }
-    }
+    /// Resolve all document IDs to their full content
+    async fn resolve_documents(&self, doc_ids: &[String]) -> HashMap<String, FullDocumentInfo>;
 }
 
-/// Implement DocumentResolver for any DocumentStore
 #[async_trait]
 impl<S: DocumentStore> DocumentResolver for S {
-    async fn resolve_doc(&self, doc_id: &str) -> Option<ResolvedDocument> {
-        // Get document metadata
-        let doc_info = self.get_document(doc_id).await.ok()??;
-
-        // Get all tabs for this document
-        let tabs = self.list_document_tabs(doc_id).await.ok()?;
-
-        // Concatenate all tab content
-        let content: String = tabs
-            .iter()
-            .filter_map(|tab| tab.content_markdown.as_ref())
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        Some(ResolvedDocument {
-            id: doc_id.to_string(),
-            title: doc_info.title,
-            content,
-        })
+    async fn resolve_documents(&self, doc_ids: &[String]) -> HashMap<String, FullDocumentInfo> {
+        join_all(doc_ids.iter().map(|id| async move {
+            (
+                id.clone(),
+                self.fetch_full_document(id).await.ok().flatten(),
+            )
+        }))
+        .await
+        .into_iter()
+        .filter_map(|(id, doc_opt)| doc_opt.map(|doc| (id, doc)))
+        .collect()
     }
 }
 
-/// Configuration for how documents are formatted when injected into the LLM context
-#[derive(Debug, Clone)]
-pub struct DocumentInjectionConfig {
-    /// Template for wrapping a single document. Placeholders: {id}, {title}, {content}
-    pub document_template: String,
-    /// Template for wrapping all documents. Placeholder: {documents}
-    pub wrapper_template: String,
-    /// Instructions appended after the documents. Placeholder: {user_message}
-    pub instructions_template: String,
+/// Tab data for the document template
+struct TabData<'a> {
+    icon: &'a str,
+    title: &'a str,
+    content: &'a str,
 }
 
-impl Default for DocumentInjectionConfig {
-    fn default() -> Self {
-        Self {
-            document_template: r#"<document id="{id}" title="{title}">
-{content}
-</document>"#.to_string(),
-            wrapper_template: r#"<referenced_documents>
-{documents}
-</referenced_documents>"#.to_string(),
-            instructions_template: r#"
+/// Template for rendering a full document
+#[derive(Template)]
+#[template(path = "document.txt")]
+struct DocumentTemplate<'a> {
+    id: &'a str,
+    title: &'a str,
+    tabs: Vec<TabData<'a>>,
+}
 
-When referring to information from these documents in your response, use markdown links in the format [relevant text](noema://doc/DOCUMENT_ID) where DOCUMENT_ID is the document's id from the document tags above.
+/// Template for rendering a shorthand document reference
+#[derive(Template)]
+#[template(path = "document_shorthand.txt")]
+struct DocumentShorthandTemplate<'a> {
+    id: &'a str,
+    title: &'a str,
+}
 
-{user_message}"#.to_string(),
+/// Formats documents for injection into LLM context
+#[derive(Debug, Clone, Default)]
+pub struct DocumentFormatter;
+
+impl DocumentFormatter {
+    /// Inject resolved documents into a ChatRequest, replacing DocumentRef blocks with formatted text
+    pub fn inject_documents(
+        &self,
+        request: &mut ChatRequest,
+        resolved_docs: &HashMap<String, FullDocumentInfo>,
+    ) {
+        // Track which documents have already been expanded (first reference gets full content)
+        let mut expanded_docs: HashSet<String> = HashSet::new();
+
+        for msg in request.messages_mut() {
+            for block in &mut msg.payload.content {
+                if let ContentBlock::DocumentRef { id, title } = block {
+                    if let Some(doc) = resolved_docs.get(id.as_str()) {
+                        let formatted = if expanded_docs.insert(id.clone()) {
+                            // First reference: include full content
+                            self.format_document(doc)
+                        } else {
+                            // Subsequent references: use shorthand
+                            self.format_document_shorthand(doc, title)
+                        };
+                        *block = ContentBlock::Text { text: formatted };
+                    }
+                }
+            }
         }
     }
-}
 
-impl DocumentInjectionConfig {
-    /// Format a single document using the template
-    pub fn format_document(&self, doc: &ResolvedDocument) -> String {
-        self.document_template
-            .replace("{id}", &doc.id)
-            .replace("{title}", &doc.title)
-            .replace("{content}", &doc.content)
-    }
-
-    /// Format all documents and combine with user message
-    pub fn format_with_documents(&self, documents: &[ResolvedDocument], user_message: &str) -> String {
-        if documents.is_empty() {
-            return user_message.to_string();
-        }
-
-        let formatted_docs: Vec<String> = documents
+    /// Format a single document as markdown with full content (for first reference)
+    pub fn format_document(&self, doc: &FullDocumentInfo) -> String {
+        let tabs: Vec<TabData> = doc
+            .tabs
             .iter()
-            .map(|doc| self.format_document(doc))
+            .map(|tab| TabData {
+                icon: tab.icon.as_deref().unwrap_or("📄"),
+                title: &tab.title,
+                content: tab.content_markdown.as_deref().unwrap_or(""),
+            })
             .collect();
 
-        let wrapped = self.wrapper_template
-            .replace("{documents}", &formatted_docs.join("\n\n"));
-
-        let with_instructions = self.instructions_template
-            .replace("{user_message}", user_message);
-
-        format!("{}{}", wrapped, with_instructions)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_config_format() {
-        let config = DocumentInjectionConfig::default();
-        let doc = ResolvedDocument {
-            id: "doc-123".to_string(),
-            title: "Test Document".to_string(),
-            content: "This is the document content.".to_string(),
+        let template = DocumentTemplate {
+            id: &doc.document.id,
+            title: &doc.document.title,
+            tabs,
         };
 
-        let formatted = config.format_document(&doc);
-        assert!(formatted.contains("doc-123"));
-        assert!(formatted.contains("Test Document"));
-        assert!(formatted.contains("This is the document content."));
+        template.render().expect("document template should render")
     }
 
-    #[test]
-    fn test_format_with_multiple_documents() {
-        let config = DocumentInjectionConfig::default();
-        let docs = vec![
-            ResolvedDocument {
-                id: "doc-1".to_string(),
-                title: "First Doc".to_string(),
-                content: "Content 1".to_string(),
-            },
-            ResolvedDocument {
-                id: "doc-2".to_string(),
-                title: "Second Doc".to_string(),
-                content: "Content 2".to_string(),
-            },
-        ];
+    /// Format a shorthand reference (for subsequent mentions of the same document)
+    pub fn format_document_shorthand(&self, doc: &FullDocumentInfo, _title: &str) -> String {
+        let template = DocumentShorthandTemplate {
+            id: &doc.document.id,
+            title: &doc.document.title,
+        };
 
-        let result = config.format_with_documents(&docs, "What do these documents say?");
-        assert!(result.contains("doc-1"));
-        assert!(result.contains("doc-2"));
-        assert!(result.contains("What do these documents say?"));
-    }
-
-    #[test]
-    fn test_format_empty_documents() {
-        let config = DocumentInjectionConfig::default();
-        let result = config.format_with_documents(&[], "Just a user message");
-        assert_eq!(result, "Just a user message");
+        template
+            .render()
+            .expect("shorthand template should render")
     }
 }

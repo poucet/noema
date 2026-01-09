@@ -1,6 +1,6 @@
 //! Agent with dynamic MCP tool support
 
-use crate::storage::document::resolver::{DocumentInjectionConfig, DocumentResolver};
+use crate::storage::document::resolver::{DocumentFormatter, DocumentResolver};
 use crate::mcp::McpToolRegistry;
 use crate::traffic_log;
 use crate::Agent;
@@ -31,7 +31,7 @@ pub struct McpAgent {
     tools: Arc<McpToolRegistry>,
     max_iterations: usize,
     document_resolver: Arc<dyn DocumentResolver>,
-    document_injection_config: DocumentInjectionConfig,
+    document_formatter: DocumentFormatter,
 }
 
 impl McpAgent {
@@ -51,14 +51,8 @@ impl McpAgent {
             tools,
             max_iterations,
             document_resolver,
-            document_injection_config: DocumentInjectionConfig::default(),
+            document_formatter: DocumentFormatter,
         }
-    }
-
-    /// Set the document injection configuration
-    pub fn with_document_injection_config(mut self, config: DocumentInjectionConfig) -> Self {
-        self.document_injection_config = config;
-        self
     }
 
     /// Get reference to the tool registry
@@ -73,7 +67,22 @@ impl McpAgent {
 
     /// Resolve document refs in a request
     async fn resolve_documents(&self, request: &mut ChatRequest) {
-        self.document_resolver.resolve_request(request, &self.document_injection_config).await;
+        // Extract doc IDs from the request
+        let doc_ids: Vec<String> = request
+            .get_document_refs()
+            .into_iter()
+            .map(|(id, _)| id.to_string())
+            .collect();
+
+        if doc_ids.is_empty() {
+            return;
+        }
+
+        // Resolve documents
+        let resolved = self.document_resolver.resolve_documents(&doc_ids).await;
+
+        // Inject formatted documents into the request
+        self.document_formatter.inject_documents(request, &resolved);
     }
 
     /// Process tool calls and add results to context

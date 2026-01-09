@@ -1,0 +1,16 @@
+<document id="{{ id }}">
+# {{ title }}
+
+**Document Metadata**
+- **ID:** `{{ id }}`
+- **Link format:** `[text](noema://doc/{{ id }})`
+
+{% for tab in tabs %}
+<tab icon="{{ tab.icon }}" title="{{ tab.title }}">
+{{ tab.content }}
+</tab>
+{% if !loop.last %}
+
+{% endif %}
+{% endfor %}
+</document>

@@ -304,6 +304,10 @@ impl ChatMessage {
     pub fn get_text(&self) -> String {
         self.payload.get_text()
     }
+    
+    pub fn get_document_refs(&self) -> Vec<(&str, &str)> {
+        self.payload.get_document_refs()
+    }
 
     pub fn get_tool_calls(&self) -> Vec<&ToolCall> {
         self.payload.get_tool_calls()
@@ -393,6 +397,15 @@ impl ChatRequest {
     /// Get a mutable reference to the messages (for external resolution)
     pub fn messages_mut(&mut self) -> &mut Vec<ChatMessage> {
         &mut self.messages
+    }
+
+
+    /// Get all document IDs referenced in this payload
+    pub fn get_document_refs(&self) -> Vec<(&str, &str)> {
+        self.messages
+            .iter()
+            .flat_map(|msg| msg.get_document_refs())
+            .collect()
     }
 }
 
