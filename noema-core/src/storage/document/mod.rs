@@ -42,7 +42,6 @@ impl FromStr for DocumentSource {
     }
 }
 
-/// Document metadata (episteme-compatible)
 #[derive(Debug, Clone)]
 pub struct DocumentInfo {
     pub id: String,
@@ -54,7 +53,6 @@ pub struct DocumentInfo {
     pub updated_at: i64,
 }
 
-/// Document tab (episteme-compatible)
 #[derive(Debug, Clone)]
 pub struct DocumentTabInfo {
     pub id: String,
@@ -71,7 +69,6 @@ pub struct DocumentTabInfo {
     pub updated_at: i64,
 }
 
-/// Document revision (episteme-compatible)
 #[derive(Debug, Clone)]
 pub struct DocumentRevisionInfo {
     pub id: String,
@@ -85,6 +82,11 @@ pub struct DocumentRevisionInfo {
     pub created_by: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct FullDocumentInfo {
+    pub document: DocumentInfo,
+    pub tabs: Vec<DocumentTabInfo>,
+}
 // ============================================================================
 // Trait
 // ============================================================================
@@ -169,6 +171,19 @@ pub trait DocumentStore: Send + Sync {
 
     /// Delete a document tab
     async fn delete_document_tab(&self, id: &str) -> Result<bool>;
+
+    // ========== Full Document Fetch Method =========
+    /// Fetch the entire content of the document along with the tabs.
+    async fn fetch_full_document(&self, doc_id: &str) -> Result<Option<FullDocumentInfo>> {
+        let document = match self.get_document(doc_id).await? {
+            Some(doc) => doc,
+            None => return Ok(None),
+        };
+
+        let tabs = self.list_document_tabs(doc_id).await?;
+
+        Ok(Some(FullDocumentInfo { document, tabs }))
+    }
 
     // ========== Document Revision Methods ==========
 
