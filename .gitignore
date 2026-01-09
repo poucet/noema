@@ -7,3 +7,4 @@ models/
 noema.log
 node_modules/
 TODO.md
+*.swp
