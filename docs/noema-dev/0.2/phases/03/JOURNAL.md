@@ -60,3 +60,21 @@ Reviewed new IDEAS (#1, #4-12) against existing designs:
 **Conclusion:** UCM and Hook System designs are already future-proof for all new IDEAS. No changes needed to Phase 3 scope.
 
 ---
+
+## 2026-01-10: Microtasks Format Finalized
+
+Restructured TASKS.md microtasks for clarity:
+
+1. **Compact tables** - Removed verbose per-task tables, kept simple `| Status | # | Task |` format
+2. **Emoji prefixes** for commit categorization:
+   - 🏗️ types/traits
+   - 📦 schema/migration
+   - ⚡ implementation
+   - ✅ tests
+   - 🔧 integration
+   - 🧹 cleanup
+3. **Detailed DoD** moved under Feature Details section with Create/Update/Implement/SQL/Test columns
+
+Total: 77 microtasks across 10 features.
+
+---
