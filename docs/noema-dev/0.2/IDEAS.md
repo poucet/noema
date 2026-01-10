@@ -12,6 +12,10 @@ Lightweight inbox for ideas not yet in the roadmap.
 | 6 | Proactive AI check-ins | AI initiates conversations after inactivity with check-in prompts. Templatizable check-in patterns for different contexts (e.g. project status, mood, goals). | 2026-01-10 |
 | 7 | Endless conversation as main entry point | Single continuous conversation that manages context history in the background. No explicit session boundaries. | 2026-01-10 |
 | 8 | Auto-journaling from interactions | Log/journal entries automatically appended based on chats and document interactions. Passive capture of activity and insights. | 2026-01-10 |
+| 9 | Active Context / Feedback Engine | Shift from "passive storage" to "active shaping". System responds to input with behavioral nudges rather than sitting inert. Core problem: "Dead Text" (notes apps do nothing) vs "Straitjacket" (habit trackers are rigid). Goal: loose coupling between content and process. | 2026-01-10 |
+| 10 | Reflexes (lightweight process hooks) | Small rules attached to contexts that fire automatically. Input Reflexes ("type X, ask Y"), Time Reflexes ("no log by 10am, nudge"), Context Reflexes ("enter Deep Work, mute other inputs"). Fast, automatic, trained—like habits. | 2026-01-10 |
+| 11 | Soft Schemas / Loose Hierarchy | Hierarchy as View, not Prison. Tag inheritance (#pullups inherits #gym properties). Ad-hoc nesting that can be restructured tomorrow. Contexts are fluid and can overlap. | 2026-01-10 |
+| 12 | Neuro nomenclature for Noema | Traces (raw input), Associations (loose hierarchical links), Reflexes (hooks), Signals (system prompts). Aligns with "Noema" (Greek: object of thought). | 2026-01-10 |
 
 ## Triaged
 
