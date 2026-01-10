@@ -1,14 +1,13 @@
-# Simply-Dev
+# Simply
 
-Development workflow system. This is the single source of truth.
+Development workflow system.
 
 ## Current State
 
-```yaml
-project: "docs/noema-dev"
-version: "0.2"
-phase: "01"
-```
+Read from `docs/simply.yaml`:
+- `project` - project directory under docs/
+- `version` - current version
+- `phase` - current phase
 
 ## Directory Structure
 
@@ -26,17 +25,19 @@ simply/                       # The system (reusable)
         ├── SCRATCHPAD.md
         └── CARRYOVER.md
 
-{project}/                    # Project-specific content
-└── {version}/
-    ├── ROADMAP.md
-    ├── IDEAS.md              # Inbox for ideas not yet in roadmap
-    └── phases/
-        └── {phase}/
-            ├── TASKS.md
-            ├── DEVLOG.md
-            ├── OBSERVATIONS.md
-            ├── SCRATCHPAD.md
-            └── CARRYOVER.md
+docs/
+├── simply.yaml               # Current state (project, version, phase)
+└── {project}/                # Project-specific content
+    └── {version}/
+        ├── ROADMAP.md
+        ├── IDEAS.md          # Inbox for ideas not yet in roadmap
+        └── phases/
+            └── {phase}/
+                ├── TASKS.md
+                ├── DEVLOG.md
+                ├── OBSERVATIONS.md
+                ├── SCRATCHPAD.md
+                └── CARRYOVER.md
 ```
 
 ## Phase Files
@@ -53,9 +54,10 @@ simply/                       # The system (reusable)
 
 | Resource | Path |
 |----------|------|
-| Roadmap | `{project}/{version}/ROADMAP.md` |
-| Ideas | `{project}/{version}/IDEAS.md` |
-| Phase dir | `{project}/{version}/phases/{phase}/` |
+| State | `docs/simply.yaml` |
+| Roadmap | `docs/{project}/{version}/ROADMAP.md` |
+| Ideas | `docs/{project}/{version}/IDEAS.md` |
+| Phase dir | `docs/{project}/{version}/phases/{phase}/` |
 | Version templates | `simply/templates/version/` |
 | Phase templates | `simply/templates/phase/` |
 
@@ -104,7 +106,7 @@ Generate CARRYOVER.md for phase end.
 
 Switch to different phase.
 1. Create phase dir if needed (from templates)
-2. Update "Current State" in this file
+2. Update `docs/simply.yaml`
 3. Load new phase context
 
 ---
@@ -121,11 +123,11 @@ Before compacting, update current phase docs:
 
 ## Starting a New Phase
 
-1. Create `{project}/{version}/phases/{NN}/`
+1. Create `docs/{project}/{version}/phases/{NN}/`
 2. Copy templates from `simply/templates/phase/`
 3. Copy phase overview from ROADMAP.md to TASKS.md
 4. Read previous CARRYOVER.md for context
-5. Update "Current State" above
+5. Update `docs/simply.yaml`
 
 ## Phase Transitions
 
