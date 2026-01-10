@@ -140,41 +140,56 @@ All three reference the same content layer. Cross-references link between any en
 
 ---
 
-## Structure Type 1: Sequence + Alternatives (Conversations)
+## Structure Type 1: Turn Sequences (Conversations)
 
 ### Model
 
+A conversation is a sequence of **turns**. Each turn has a role (user/assistant) and one or more **alternatives**. An alternative is a **span of messages** (not a single message).
+
 ```
 Conversation
-  └── Position (ordered slot in sequence)
-        └── Alternative (one option at this position)
-              └── Message → ContentBlock
+  └── Turn (user or assistant turn)
+        └── Alternative (one possible response span)
+              └── [Message, Message, ...] → each Message has ContentBlockRef
 
-View (named path through positions)
-  └── selects one alternative at each position
+View (named path through conversation)
+  └── selects one alternative at each turn
 ```
+
+### Why Alternatives are Spans
+
+Different models (or regenerations) produce different numbers of messages for the same turn:
+
+```
+Turn 3 (assistant):
+  ├── Alt A (claude):  [thinking] → [tool_call] → [tool_result] → [response]  (4 messages)
+  ├── Alt B (gpt-4):   [tool_call] → [tool_result] → [response]               (3 messages)
+  └── Alt C (gemini):  [response]                                              (1 message)
+```
+
+All three are valid alternatives for the same assistant turn, despite having different lengths.
 
 ### Key Insight: Alternatives are Shared
 
-Views don't own alternatives—they **select** them. Multiple views can select the same alternative, or different alternatives at the same position.
+Views don't own alternatives—they **select** them. Multiple views can select the same alternative, or different alternatives at the same turn.
 
 ```
-View A: [pos1:alt1] → [pos2:alt1] → [pos3:alt1] → [pos4:alt1]
-                                         ↗
-View B: [pos1:alt1] → [pos2:alt1] → [pos3:alt2] → [pos4:alt1]  ← reuses pos4:alt1!
+View A: [turn1:alt1] → [turn2:alt1] → [turn3:alt1] → [turn4:alt1]
+                                           ↗
+View B: [turn1:alt1] → [turn2:alt1] → [turn3:alt2] → [turn4:alt1]  ← reuses turn4:alt1!
 ```
 
-This enables splice: edit position 3, but keep position 4 from original.
+This enables splice: edit turn 3, but keep turn 4 from original.
 
 ### Operations
 
 | Operation | Description |
 |-----------|-------------|
-| `add_position()` | Append new position to conversation |
-| `add_alternative(position, model)` | Add alternative at position |
-| `select(view, position, alternative)` | View selects which alternative |
-| `fork(view, position)` | New view sharing selections up to position |
-| `spawn_child(view, position)` | New conversation inheriting context |
+| `add_turn(role)` | Append new turn to conversation |
+| `add_alternative(turn, model)` | Generate alternative span at turn |
+| `select(view, turn, alternative)` | View selects which alternative |
+| `fork(view, turn)` | New view sharing selections up to turn |
+| `spawn_child(view, turn)` | New conversation inheriting context |
 
 ---
 
@@ -239,22 +254,29 @@ Collection
 Parent spawns child conversation. Child works with scoped context. Result summarized back.
 
 ```
-Parent:  P1 → P2 → P3 → [spawn] ─────────────────→ P4(summary)
-                    │                                   ▲
-                    ▼                                   │
-Child:            C1 → C2 → C3 → [result] ─────────────┘
-                  (inherits P1-P3 context)
+Parent:  T1 → T2 → T3 ─────────────────────────────→ T4(with summary)
+                    │                                      ▲
+                    └─ Alt A contains child span:          │
+                         [spawn] → [child work...] → [summary]
+                                        │
+                                        ▼
+Child:                                C1 → C2 → C3
+                                   (inherits T1-T2 context)
 ```
+
+**Key insight:** The subagent call is part of the parent's turn alternative. The child conversation is a separate entity, but its summary becomes part of the parent's message span.
 
 **Structure needed:**
 - Parent-child relationship between conversations
-- Child inherits context (positions/alternatives) up to spawn point
-- Summary content flows back as new content in parent
+- Child inherits context (turns/alternatives) up to spawn point
+- Child span embedded within parent's alternative
+- Summary content flows back as message in parent's span
 
 **Operations:**
-- `spawn_child(parent_view, position)` → new conversation
+- `spawn_child(parent_view, turn)` → new conversation
 - Child sees parent's context as read-only prefix
-- `summarize()` → ContentBlock injected into parent's next position
+- Child messages form nested span within parent's alternative
+- `summarize()` → ContentBlock added to parent's current span
 
 ---
 
@@ -286,23 +308,26 @@ Human approves: A3→B2, B3→A4
 
 ### 3. Parallel Models + Chaining
 
-Multiple alternatives at a position. User selects. Chain continues from selection.
+Multiple alternatives at a turn. User selects. Chain continues from selection.
 
 ```
-Position 3:
+Turn 3 (assistant):
   ├── Alt A (claude) ← selected
+  │     └── [thinking] → [tool_call] → [result] → [response]
   ├── Alt B (gpt-4)
+  │     └── [response]
   └── Alt C (gemini)
+        └── [tool_call] → [result] → [response]
 
-Position 4 continues from Alt A's context
+Turn 4 continues from Alt A's context
 ```
 
-**Structure:** Multiple alternatives at position. View selection determines path.
+**Structure:** Multiple alternatives at turn. Each alternative is a span of messages. View selection determines path.
 
 **Operations:**
-- `add_alternative(position, model)` → generate with model
-- `select(view, position, alternative)` → choose winner
-- Selection change = context change for subsequent positions
+- `add_alternative(turn, model)` → generate with model
+- `select(view, turn, alternative)` → choose winner
+- Selection change = context change for subsequent turns
 
 **UI consideration:**
 - Short alternatives → tabs inline
@@ -315,19 +340,19 @@ Position 4 continues from Alt A's context
 Branch from any point. Paths diverge independently.
 
 ```
-Original: P1 → P2 → P3 → P4 → P5
+Original: T1 → T2 → T3 → T4 → T5
                     │
                     ▼
-Forked:   P1 → P2 → P3 → F4 → F5
-          (shared)    (new positions)
+Forked:   T1 → T2 → T3 → F4 → F5
+          (shared)    (new turns)
 ```
 
-**Structure:** New view sharing positions up to fork point. New positions after.
+**Structure:** New view sharing turns up to fork point. New turns after.
 
 **Operations:**
-- `fork(view, position)` → new view
-- Positions 1-3 shared (same alternatives selected)
-- Position 4+ are new positions in conversation
+- `fork(view, turn)` → new view
+- Turns 1-3 shared (same alternatives selected)
+- Turn 4+ are new turns in conversation
 
 **UI consideration:**
 - Show fork relationship in conversation list
@@ -338,27 +363,27 @@ Forked:   P1 → P2 → P3 → F4 → F5
 
 ### 5. Edit & Splice
 
-Edit a position. Optionally keep subsequent positions from original.
+Edit a turn. Optionally keep subsequent turns from original.
 
 ```
-Original: P1 → P2 → P3 → P4 → P5
+Original: T1 → T2 → T3 → T4 → T5
                     │
                     ▼
-Edited:   P1 → P2 → P3' → P4 → P5
+Edited:   T1 → T2 → T3' → T4 → T5
                (new alt)  (reused!)
 ```
 
 **Key insight:** This is NOT a fork. It's:
-1. New alternative at position 3
+1. New alternative at turn 3
 2. New view selecting: [alt1, alt1, alt_new, alt1, alt1]
 
-The original P4, P5 are reused because alternatives are shared across views.
+The original T4, T5 are reused because alternatives are shared across views.
 
 **Operations:**
-- `add_alternative(position_3, edited_content)`
+- `add_alternative(turn_3, edited_content)`
 - `create_view(selections)` with mix of original and new alternatives
 
-**Constraint:** Reusing P4/P5 only makes sense if they don't depend on P3's specific content. May need to regenerate.
+**Constraint:** Reusing T4/T5 only makes sense if they don't depend on T3's specific content. May need to regenerate.
 
 ---
 
@@ -475,11 +500,12 @@ Collection "Research" (tree)
 
 ## Open Questions
 
-1. **Regeneration on splice:** If P4 depends on P3, does edit invalidate it?
+1. **Regeneration on splice:** If T4 depends on T3, does editing T3 invalidate T4?
 2. **Context inheritance:** How much parent context does subagent see?
 3. **Approval workflow:** How does supervised agent communication flow?
 4. **GC:** When is content orphaned?
 5. **Large alternatives:** When do tabs become unwieldy?
+6. **Span boundaries:** When does a new message start vs continue same span?
 
 ---
 
@@ -487,8 +513,25 @@ Collection "Research" (tree)
 
 | Structure | Core abstraction | Key operation |
 |-----------|------------------|---------------|
-| Conversation | Positions + alternatives + views | View selects path |
+| Conversation | Turns + alternatives (spans) + views | View selects path through spans |
 | Document | Revision chain | Commit creates version |
 | Collection | Tree + ordering + tags | Items reference anything |
 | Content | Immutable blocks | Shared across structures |
 | Links | Cross-references | Connect any entities |
+
+### Alternative as Span
+
+The key insight for conversations: an **alternative is a span of messages**, not a single message. This handles:
+- Tool call iterations (model does N tool calls before responding)
+- Subagent work (spawn → child messages → summary)
+- Thinking/reasoning chains (thinking → response)
+
+```
+Alternative {
+    id: AlternativeId
+    turn_id: TurnId
+    model_id: Option<ModelId>
+    messages: [Message]           // ordered span of messages
+    child_conversations: [ConversationRef]  // if spawned subagents
+}
+```
