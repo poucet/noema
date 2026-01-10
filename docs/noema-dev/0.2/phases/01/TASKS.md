@@ -8,13 +8,13 @@ Phase 1 consists of "Quick Wins" features focused on model display and privacy.
 
 | Status | Pri | # | Feature | Files |
 |--------|-----|---|---------|-------|
-| done | P1 | 4 | Local vs non-local model icon | ModelSelector.tsx, lib.rs |
-| done | P1 | 3 | Model metadata display | ModelSelector.tsx |
-| todo | P2 | 2 | Truncate long model names | ModelSelector.tsx |
-| done | P1 | 31 | Copy raw markdown | MessageBubble.tsx |
-| todo | P0 | 32 | Private content flag | Settings.tsx, engine.rs, types |
-| done | P1 | 33 | Toggle to disable tools | ChatInput.tsx, App.tsx, types.rs, tauri.ts |
-| todo | P1 | 34 | Toggle to disable audio/image input | ChatInput.tsx |
+| ✅ | P1 | 4 | Local vs non-local model icon | ModelSelector.tsx, lib.rs |
+| ✅ | P1 | 3 | Model metadata display | ModelSelector.tsx |
+| ⬜ | P2 | 2 | Truncate long model names | ModelSelector.tsx |
+| ✅ | P1 | 31 | Copy raw markdown | MessageBubble.tsx |
+| ⬜ | P0 | 32 | Private content flag | Settings.tsx, engine.rs, types |
+| ✅ | P1 | 33 | Toggle to disable tools | ChatInput.tsx, App.tsx, types.rs, tauri.ts |
+| ⬜ | P1 | 34 | Toggle to disable audio/image input | ChatInput.tsx |
 
 ---
 

@@ -8,10 +8,10 @@
 
 | Status | Pri | # | Feature | Files |
 |--------|-----|---|---------|-------|
-| todo | P0 | | | |
-| todo | P1 | | | |
+| ⬜ | P0 | | | |
+| ⬜ | P1 | | | |
 
-Status: `todo`, `in-progress`, `done`, `blocked`, `deferred`
+Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
 
 ---
 
