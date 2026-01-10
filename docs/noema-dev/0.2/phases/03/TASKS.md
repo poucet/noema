@@ -10,7 +10,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 
 | Status | Pri | # | Feature | Description |
 |--------|-----|---|---------|-------------|
-| ⬜ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
+| 🔄 | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ⬜ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ⬜ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
 | ⬜ | P0 | 3.3 | Views and forking | Named paths through conversations, fork support |
@@ -35,13 +35,13 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.1.1 | 🏗️ Define type-safe IDs module (`storage/ids.rs`) |
-| ⬜ | 3.1.2 | 🏗️ Create ContentOrigin and OriginKind types |
-| ⬜ | 3.1.3 | 🏗️ Define ContentBlockStore trait |
-| ⬜ | 3.1.4 | 📦 Add content_blocks table migration |
-| ⬜ | 3.1.5 | ⚡ Implement SqliteContentBlockStore |
+| ✅ | 3.1.1 | 🏗️ Define type-safe IDs module (`storage/ids.rs`) |
+| ✅ | 3.1.2 | 🏗️ Create ContentOrigin and OriginKind types |
+| ✅ | 3.1.3 | 🏗️ Define ContentBlockStore trait |
+| ✅ | 3.1.4 | 📦 Add content_blocks table migration |
+| ✅ | 3.1.5 | ⚡ Implement SqliteContentBlockStore |
 | ⬜ | 3.1.6 | 📦 Add content_block_tags table |
-| ⬜ | 3.1.7 | ✅ Unit tests for content block store |
+| ✅ | 3.1.7 | ✅ Unit tests for content block store |
 
 ### 3.1b Asset Storage (6 tasks)
 

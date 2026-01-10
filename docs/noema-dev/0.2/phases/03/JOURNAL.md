@@ -78,3 +78,49 @@ Restructured TASKS.md microtasks for clarity:
 Total: 77 microtasks across 10 features.
 
 ---
+
+## 2026-01-10: Feature 3.1 Content Blocks Implementation
+
+Started implementation of Content Block storage.
+
+### Commits
+
+1. **🏗️ Add storage/ids.rs with typed ID newtypes** (3.1.1)
+   - Created `define_id!` macro for consistent ID newtype pattern
+   - Defined all UCM IDs: ContentBlockId, AssetId, ConversationId, TurnId, SpanId, MessageId, ViewId, DocumentId, TabId, RevisionId, CollectionId, CollectionItemId, ReferenceId, UserId
+   - Includes serde, Display, Hash, From impls
+
+2. **🏗️ Add content origin types for provenance tracking** (3.1.2)
+   - `OriginKind` enum: User, Assistant, System, Import
+   - `ContentOrigin` struct with user_id, model_id, source_id, parent_id
+   - `ContentType` enum: Plain, Markdown, Typst
+   - Builder methods for each origin type
+
+3. **🏗️ Add ContentBlockStore trait with async methods** (3.1.3)
+   - `ContentBlock` - input struct with text, content_type, is_private, origin
+   - `StoredContentBlock` - wraps ContentBlock + id, hash, created_at
+   - `StoreResult` - id, hash, is_new flag for dedup feedback
+   - `ContentBlockStore` trait: store(), get(), get_text(), exists(), find_by_hash()
+   - User feedback led to shared schema between input/stored forms
+
+4. **📦 Add content_blocks schema with hash, origin, privacy** (3.1.4)
+   - Table with origin fields flattened (origin_kind, origin_user_id, origin_model_id, etc.)
+   - Indexes: hash (dedup), origin (queries), private (filter), created (temporal)
+
+5. **⚡ Implement SqliteContentBlockStore with SHA-256 deduplication** (3.1.5 + 3.1.7)
+   - Full trait implementation for SqliteStore
+   - SHA-256 hashing moved to `helper::content_hash()` for reuse
+   - Hash-based deduplication on store()
+   - Comprehensive unit tests: store/get, deduplication, origin, privacy
+
+### Design Decisions
+
+- **ContentBlock vs StoredContentBlock**: User feedback that "NewContentBlock" naming was confusing. Refactored to share schema - `ContentBlock` is input, `StoredContentBlock` wraps it with metadata.
+
+- **content_hash in helper module**: Initially in sqlite.rs, moved to helper.rs since SHA-256 hashing isn't sqlite-specific.
+
+### Remaining for 3.1
+
+- 3.1.6: content_block_tags table (tagging support)
+
+---
