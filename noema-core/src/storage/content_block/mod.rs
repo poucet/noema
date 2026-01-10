@@ -5,6 +5,7 @@
 //! with deduplication via SHA-256 hashing.
 
 mod types;
+pub(crate) mod sqlite;
 
 pub use types::{ContentOrigin, ContentType, OriginKind};
 

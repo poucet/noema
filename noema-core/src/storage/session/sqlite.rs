@@ -59,6 +59,7 @@ impl SqliteStore {
         crate::storage::conversation::sqlite::init_schema(&conn)?;
         crate::storage::asset::sqlite::init_schema(&conn)?;
         crate::storage::document::sqlite::init_schema(&conn)?;
+        crate::storage::content_block::sqlite::init_schema(&conn)?;
 
         Ok(())
     }
