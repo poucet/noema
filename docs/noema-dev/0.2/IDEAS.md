@@ -6,7 +6,7 @@ Lightweight inbox for ideas not yet in the roadmap.
 
 | # | Idea | Notes | Added |
 |---|------|-------|-------|
-| | | | |
+| 1 | Access control model for resources | Different people accessing different models, tools, contexts, conversations, documents, assets. Not just is_private but proper ACL/permissions. | 2026-01-10 |
 
 ## Triaged
 
