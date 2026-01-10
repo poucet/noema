@@ -80,6 +80,67 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_span_messages_span ON span_messages(span_id, sequence_number);
         CREATE INDEX IF NOT EXISTS idx_span_messages_content ON span_messages(content_id);
+
+        -- ============================================================================
+        -- UCM Tables: Turn/Span/Message structure (Phase 3)
+        -- These coexist with the legacy tables during migration
+        -- ============================================================================
+
+        -- Turns: positions in conversation sequence (replaces span_sets)
+        CREATE TABLE IF NOT EXISTS turns (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role TEXT CHECK(role IN ('user', 'assistant')) NOT NULL,
+            sequence_number INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE (conversation_id, sequence_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_turns_conversation ON turns(conversation_id, sequence_number);
+
+        -- UCM Spans: alternative responses at a turn (replaces spans)
+        -- Named ucm_spans to avoid conflict with existing spans table during migration
+        CREATE TABLE IF NOT EXISTS ucm_spans (
+            id TEXT PRIMARY KEY,
+            turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+            model_id TEXT,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ucm_spans_turn ON ucm_spans(turn_id);
+
+        -- UCM Messages: individual messages within a span (replaces span_messages)
+        CREATE TABLE IF NOT EXISTS ucm_messages (
+            id TEXT PRIMARY KEY,
+            span_id TEXT NOT NULL REFERENCES ucm_spans(id) ON DELETE CASCADE,
+            sequence_number INTEGER NOT NULL,
+            role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
+            content_id TEXT REFERENCES content_blocks(id),
+            tool_calls TEXT,
+            tool_results TEXT,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ucm_messages_span ON ucm_messages(span_id, sequence_number);
+        CREATE INDEX IF NOT EXISTS idx_ucm_messages_content ON ucm_messages(content_id);
+
+        -- Views: named paths through conversation (replaces threads)
+        CREATE TABLE IF NOT EXISTS views (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            name TEXT,
+            is_main INTEGER NOT NULL DEFAULT 0,
+            forked_from_view_id TEXT REFERENCES views(id),
+            forked_at_turn_id TEXT REFERENCES turns(id),
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_views_conversation ON views(conversation_id);
+
+        -- View selections: which span is selected at each turn for a view
+        CREATE TABLE IF NOT EXISTS view_selections (
+            view_id TEXT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
+            turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+            span_id TEXT NOT NULL REFERENCES ucm_spans(id) ON DELETE CASCADE,
+            PRIMARY KEY (view_id, turn_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_view_selections_span ON view_selections(span_id);
         "#,
     )
     .context("Failed to initialize conversation schema")?;
