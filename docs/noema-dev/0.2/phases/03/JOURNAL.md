@@ -290,4 +290,42 @@ Updated design doc and TASKS.md to use consistent terminology:
 
 This aligns the design doc with the existing codebase naming (we already have `SpanInfo`).
 
+### Schema Added (3.2.2-3.2.5)
+
+Added new tables to sqlite schema (coexist with legacy):
+- `turns` - positions in conversation sequence
+- `ucm_spans` - alternative responses at a turn
+- `ucm_messages` - individual messages within a span
+- `views` - named paths through conversation
+- `view_selections` - which span is selected at each turn
+
+Tables use `ucm_` prefix to avoid conflict with existing `spans` table.
+
+### TurnStore Trait and Implementation (3.2.6-3.2.9)
+
+Created `TurnStore` trait in `types.rs` with methods for:
+- Turn management: `add_turn`, `get_turns`, `get_turn`
+- Span management: `add_span`, `get_spans`, `get_span`
+- Message management: `add_message`, `get_messages`, `get_message`
+- View management: `create_view`, `get_views`, `get_main_view`, `select_span`, `get_selected_span`, `get_view_path`, `fork_view`
+- Convenience: `add_user_turn`, `add_assistant_turn`
+
+Full SQLite implementation added. Messages store text in `content_blocks` table for searchability.
+
+### Unit Tests (3.2.10)
+
+Comprehensive tests added:
+- Schema creation verification
+- Turn sequencing
+- Span creation with models
+- Multi-message spans
+- Multiple spans at same turn (parallel responses)
+- View creation and span selection
+- Convenience methods
+
+### Next Steps
+
+- 3.2.11: Wire existing write paths to TurnStore (dual-write)
+- 3.2.12-13: User verification in app and SQL
+
 ---
