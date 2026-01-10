@@ -1250,6 +1250,56 @@ Collections are a **structural layer over any entity** (documents, conversations
 - LLM edits document text → frontmatter changes → index updates
 - UI edits field → updates document frontmatter → new content block revision
 
+### Content-Derived UI Hints
+
+Structure embedded in content should drive UI affordances without requiring LLM calls at render time.
+
+**Example: Emoji columns in markdown tables**
+
+```markdown
+| Done | Task |
+|------|------|
+| ✅ | Implement content blocks |
+| 🔄 | Add conversation structure |
+| ⬜ | Build views UI |
+```
+
+**Flow**:
+1. **LLM edits markdown** → table content changes
+2. **Parser extracts column values** → Done column has `["✅", "🔄", "⬜"]`
+3. **Cache as column hint** → stored in `content_block_hints` table
+4. **UI renders picker** → shows only those 3 emojis for Done column edits
+
+**Schema addition**:
+```sql
+CREATE TABLE content_block_hints (
+    content_id TEXT NOT NULL REFERENCES content_blocks(id) ON DELETE CASCADE,
+    hint_type TEXT NOT NULL,       -- table_column, heading_level, link_target, etc.
+    hint_key TEXT NOT NULL,        -- column name, heading text, etc.
+    hint_value TEXT NOT NULL,      -- JSON: unique values, inferred type, etc.
+    PRIMARY KEY (content_id, hint_type, hint_key)
+);
+```
+
+**Hint types**:
+- `table_column`: Unique values per column, inferred type (emoji, text, number, date)
+- `heading_structure`: Document outline for navigation
+- `link_targets`: Referenced documents for quick-add UI
+- `code_blocks`: Languages used for syntax highlighting preload
+
+**Key principles**:
+- **Derived, not declared**: Hints are computed from content, not manually specified
+- **Cached, not computed**: Regenerated on content change, not on every render
+- **Advisory, not enforced**: UI uses hints but accepts any valid input
+- **Efficient**: No LLM call needed to render edit affordances
+
+**Reindex trigger**: When `content_blocks` row is created/updated, background job:
+1. Parse content by type (markdown, typst, etc.)
+2. Extract structural hints
+3. Upsert into `content_block_hints`
+
+This generalizes the frontmatter → `item_fields` pattern to any structured content.
+
 ---
 
 ## Future Extension Points
