@@ -29,132 +29,710 @@ Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
 
 Each microtask is a single atomic commit. Complete in order within each feature.
 
+---
+
 ### 3.1 Content Blocks
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.1.1 Define type-safe IDs module | `Add storage/ids.rs with typed ID newtypes` |
-| ⬜ | 3.1.2 Create ContentOrigin and OriginKind types | `Add content origin types for provenance tracking` |
-| ⬜ | 3.1.3 Define ContentBlockStore trait | `Add ContentBlockStore trait with async methods` |
-| ⬜ | 3.1.4 Add content_blocks table migration | `Add content_blocks schema with hash, origin, privacy` |
-| ⬜ | 3.1.5 Implement SqliteContentBlockStore | `Implement ContentBlockStore for SQLite` |
-| ⬜ | 3.1.6 Add content_block_tags table | `Add tag support for content scoping` |
-| ⬜ | 3.1.7 Unit tests for content block store | `Add tests for content block CRUD and dedup` |
+#### 3.1.1 Define type-safe IDs module
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add storage/ids.rs with typed ID newtypes` |
+| **Create** | `noema-core/src/storage/ids.rs` |
+| **Implement** | `define_id!` macro, `ContentBlockId`, `AssetId`, `ConversationId`, `TurnId`, `SpanId`, `MessageId`, `ViewId`, `DocumentId`, `TabId`, `RevisionId`, `CollectionId`, `CollectionItemId`, `ReferenceId`, `UserId` |
+| **Update** | `noema-core/src/storage/mod.rs` - add `pub mod ids` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1.2 Create ContentOrigin and OriginKind types
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add content origin types for provenance tracking` |
+| **Create** | `noema-core/src/storage/content_block/types.rs` |
+| **Implement** | `OriginKind` enum (User, Assistant, System, Import), `ContentOrigin` struct with `kind`, `user_id`, `model_id`, `source_id`, `parent_id`, `is_private` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1.3 Define ContentBlockStore trait
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add ContentBlockStore trait with async methods` |
+| **Create** | `noema-core/src/storage/content_block/mod.rs` |
+| **Implement** | `ContentBlockStore` trait with `store()`, `get()`, `get_text()`, `exists()`, `find_by_hash()` |
+| **Implement** | `ContentBlockInfo` struct for query results |
+| **Update** | `noema-core/src/storage/mod.rs` - add `pub mod content_block` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1.4 Add content_blocks table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add content_blocks schema with hash, origin, privacy` |
+| **Update** | `noema-core/src/storage/sqlite/schema.rs` or migrations |
+| **SQL** | `CREATE TABLE content_blocks (id, content_hash, content_type, text, is_private, origin_kind, origin_user_id, origin_model_id, origin_source_id, origin_parent_id, created_at)` |
+| **SQL** | `CREATE INDEX idx_content_blocks_hash`, `idx_content_blocks_origin`, `idx_content_blocks_private` |
+| **Verify** | Fresh DB creates table, `cargo build` compiles |
+
+#### 3.1.5 Implement SqliteContentBlockStore
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement ContentBlockStore for SQLite` |
+| **Create** | `noema-core/src/storage/content_block/sqlite.rs` |
+| **Implement** | `SqliteContentBlockStore` with all trait methods |
+| **Implement** | SHA-256 hashing on store, dedup check via hash lookup |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1.6 Add content_block_tags table
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tag support for content scoping` |
+| **Update** | Schema with `CREATE TABLE content_block_tags (content_id, tag, PRIMARY KEY)` |
+| **Implement** | `tag()`, `untag()`, `get_tags()`, `find_by_tag()` methods |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1.7 Unit tests for content block store
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for content block CRUD and dedup` |
+| **Create** | `noema-core/src/storage/content_block/tests.rs` |
+| **Test** | Store text → get UUID → retrieve text → verify match |
+| **Test** | Store same text twice → same hash returned |
+| **Test** | Store with origin → retrieve → origin preserved |
+| **Test** | Tag content → find by tag → verify found |
+| **Verify** | `cargo test -p noema-core content_block` passes |
+
+---
 
 ### 3.1b Asset Storage
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.1b.1 Define AssetStore trait | `Add AssetStore trait for binary blobs` |
-| ⬜ | 3.1b.2 Add assets table migration | `Add assets schema with hash, mime, privacy` |
-| ⬜ | 3.1b.3 Implement SqliteAssetStore | `Implement AssetStore for SQLite with blob storage` |
-| ⬜ | 3.1b.4 Add AssetRef to StoredContent enum | `Extend StoredContent with AssetRef variant` |
-| ⬜ | 3.1b.5 Implement asset resolution in payload | `Resolve AssetRef to inline base64 for LLM` |
-| ⬜ | 3.1b.6 Unit tests for asset store | `Add tests for asset storage and resolution` |
+#### 3.1b.1 Define AssetStore trait
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add AssetStore trait for binary blobs` |
+| **Create** | `noema-core/src/storage/asset/mod.rs` |
+| **Implement** | `AssetStore` trait with `store()`, `get()`, `get_data()`, `exists()` |
+| **Implement** | `AssetInfo` struct with `id`, `mime_type`, `filename`, `size_bytes`, `is_private` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1b.2 Add assets table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add assets schema with hash, mime, privacy` |
+| **SQL** | `CREATE TABLE assets (id, mime_type, original_filename, file_size_bytes, is_private, metadata_json, local_path, created_at)` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.1b.3 Implement SqliteAssetStore
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement AssetStore for SQLite with blob storage` |
+| **Create** | `noema-core/src/storage/asset/sqlite.rs` |
+| **Implement** | SHA-256 hash as ID, store bytes to `blob_storage/{hash[0:2]}/{hash}` |
+| **Implement** | Dedup: if hash exists, return existing ID |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1b.4 Add AssetRef to StoredContent enum
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Extend StoredContent with AssetRef variant` |
+| **Update** | `noema-core/src/storage/payload.rs` (or equivalent) |
+| **Add** | `AssetRef { asset_id: String, mime_type: String, filename: Option<String> }` variant |
+| **Verify** | `cargo build -p noema-core` compiles, existing code still works |
+
+#### 3.1b.5 Implement asset resolution in payload
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Resolve AssetRef to inline base64 for LLM` |
+| **Update** | `StoredPayload::resolve()` or equivalent |
+| **Implement** | When resolving, fetch asset data via `AssetStore::get_data()`, convert to base64, return as `Image` or `Audio` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.1b.6 Unit tests for asset store
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for asset storage and resolution` |
+| **Test** | Store image bytes → get hash ID → retrieve bytes → verify match |
+| **Test** | Store same bytes twice → same hash returned (dedup) |
+| **Test** | Create message with AssetRef → resolve → verify inline base64 |
+| **Test** | Private asset + cloud model context → verify excluded |
+| **Verify** | `cargo test -p noema-core asset` passes |
+
+---
 
 ### 3.2 Conversation Structure
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.2.1 Define Turn, Span, Message types | `Add conversation structure types` |
-| ⬜ | 3.2.2 Add conversations table migration | `Add conversations schema with parent_span_id` |
-| ⬜ | 3.2.3 Add turns table migration | `Add turns schema with sequence ordering` |
-| ⬜ | 3.2.4 Add spans table migration | `Add spans schema with role and model_id` |
-| ⬜ | 3.2.5 Add messages table migration | `Add messages schema referencing content_blocks` |
-| ⬜ | 3.2.6 Define ConversationStore trait | `Add ConversationStore trait for turn/span/message ops` |
-| ⬜ | 3.2.7 Implement add_turn and get_turns | `Implement turn management in SqliteConversationStore` |
-| ⬜ | 3.2.8 Implement add_span and get_spans | `Implement span management with role tracking` |
-| ⬜ | 3.2.9 Implement add_message and get_messages | `Implement message management with content refs` |
-| ⬜ | 3.2.10 Unit tests for conversation structure | `Add tests for turn/span/message CRUD` |
+#### 3.2.1 Define Turn, Span, Message types
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add conversation structure types` |
+| **Create** | `noema-core/src/storage/conversation/types.rs` |
+| **Implement** | `TurnInfo`, `SpanInfo`, `MessageInfo` structs |
+| **Implement** | `SpanRole` enum (User, Assistant) |
+| **Implement** | `NewMessage` input struct |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.2.2 Add conversations table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add conversations schema with parent_span_id` |
+| **SQL** | `CREATE TABLE conversations (id, user_id, title, system_prompt, is_private, parent_span_id, created_at, updated_at)` |
+| **SQL** | `CREATE INDEX idx_conversations_parent` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.2.3 Add turns table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add turns schema with sequence ordering` |
+| **SQL** | `CREATE TABLE turns (id, conversation_id, sequence_number, created_at)` |
+| **SQL** | `UNIQUE (conversation_id, sequence_number)`, `CREATE INDEX idx_turns_conversation` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.2.4 Add spans table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add spans schema with role and model_id` |
+| **SQL** | `CREATE TABLE spans (id, turn_id, role, model_id, parent_span_id, created_at)` |
+| **SQL** | `CHECK(role IN ('user', 'assistant'))`, indexes |
+| **Verify** | Fresh DB creates table |
+
+#### 3.2.5 Add messages table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add messages schema referencing content_blocks` |
+| **SQL** | `CREATE TABLE messages (id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at)` |
+| **SQL** | `FOREIGN KEY (content_id) REFERENCES content_blocks(id)` |
+| **Verify** | Fresh DB creates table with FK constraint |
+
+#### 3.2.6 Define ConversationStore trait
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add ConversationStore trait for turn/span/message ops` |
+| **Create** | `noema-core/src/storage/conversation/mod.rs` |
+| **Implement** | Trait with turn, span, message methods (signatures only) |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.2.7 Implement add_turn and get_turns
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement turn management in SqliteConversationStore` |
+| **Create** | `noema-core/src/storage/conversation/sqlite.rs` |
+| **Implement** | `add_turn()` - auto-increment sequence_number |
+| **Implement** | `get_turns()` - ordered by sequence_number |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.2.8 Implement add_span and get_spans
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement span management with role tracking` |
+| **Implement** | `add_span(turn_id, role, model_id)` |
+| **Implement** | `add_child_span(parent_span_id, role, model_id)` for sub-conversations |
+| **Implement** | `get_spans(turn_id)`, `get_child_spans(span_id)` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.2.9 Implement add_message and get_messages
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement message management with content refs` |
+| **Implement** | `add_message(span_id, NewMessage)` - stores text via ContentBlockStore, saves content_id |
+| **Implement** | `get_messages(span_id)` - ordered by sequence_number, joins content_blocks for text |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.2.10 Unit tests for conversation structure
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for turn/span/message CRUD` |
+| **Test** | Create conversation → add turn → add span → add message → verify chain |
+| **Test** | Add multiple spans to same turn → verify both exist |
+| **Test** | Span with multiple messages (tool flow) → verify order preserved |
+| **Test** | Message text stored in content_blocks → verify searchable |
+| **Verify** | `cargo test -p noema-core conversation` passes |
+
+---
 
 ### 3.3 Views and Forking
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.3.1 Add views table migration | `Add views schema with fork tracking` |
-| ⬜ | 3.3.2 Add view_selections table migration | `Add view_selections for span choices per turn` |
-| ⬜ | 3.3.3 Implement create_view | `Implement view creation with main flag` |
-| ⬜ | 3.3.4 Implement select_span | `Implement span selection for views` |
-| ⬜ | 3.3.5 Implement get_view_path | `Implement path traversal through selected spans` |
-| ⬜ | 3.3.6 Implement fork_view | `Implement view forking with shared prefix` |
-| ⬜ | 3.3.7 Implement edit_turn (splice) | `Implement turn editing with new span creation` |
-| ⬜ | 3.3.8 Unit tests for views and forking | `Add tests for view CRUD and fork operations` |
+#### 3.3.1 Add views table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add views schema with fork tracking` |
+| **SQL** | `CREATE TABLE views (id, conversation_id, name, is_main, forked_from_view_id, forked_at_turn_id, created_at)` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.3.2 Add view_selections table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add view_selections for span choices per turn` |
+| **SQL** | `CREATE TABLE view_selections (view_id, turn_id, span_id, PRIMARY KEY (view_id, turn_id))` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.3.3 Implement create_view
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement view creation with main flag` |
+| **Implement** | `create_view(conversation_id, name, is_main)` |
+| **Implement** | Auto-create main view when conversation created |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.3.4 Implement select_span
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement span selection for views` |
+| **Implement** | `select_span(view_id, turn_id, span_id)` - upsert into view_selections |
+| **Implement** | Auto-select first span when turn added (for main view) |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.3.5 Implement get_view_path
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement path traversal through selected spans` |
+| **Implement** | `get_view_path(view_id)` → `Vec<(Turn, Span, Vec<Message>)>` |
+| **Implement** | Join turns → view_selections → spans → messages, ordered |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.3.6 Implement fork_view
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement view forking with shared prefix` |
+| **Implement** | `fork_view(view_id, at_turn_id)` |
+| **Implement** | Copy selections for turns before fork point |
+| **Implement** | Set `forked_from_view_id` and `forked_at_turn_id` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.3.7 Implement edit_turn (splice)
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement turn editing with new span creation` |
+| **Implement** | `edit_turn(view_id, turn_id, new_content)` → creates new span at turn |
+| **Implement** | `fork_view_with_selections(view_id, selections)` → custom span choices |
+| **Implement** | `get_view_context_at(view_id, turn_id)` → messages up to turn |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.3.8 Unit tests for views and forking
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for view CRUD and fork operations` |
+| **Test** | Create view → select spans → get path → verify correct messages |
+| **Test** | Fork at turn 3 → verify turns 1-2 shared, turn 3+ independent |
+| **Test** | Edit turn 2 → create new span → fork with splice → verify mixed old/new |
+| **Test** | Two views select different spans at same turn → verify both paths work |
+| **Verify** | `cargo test -p noema-core view` passes |
+
+---
 
 ### 3.4 Document Structure
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.4.1 Define Document, Tab, Revision types | `Add document structure types` |
-| ⬜ | 3.4.2 Add documents table migration | `Add documents schema with source tracking` |
-| ⬜ | 3.4.3 Add document_tabs table migration | `Add tabs schema with hierarchy and position` |
-| ⬜ | 3.4.4 Add revisions table migration | `Add revisions schema referencing content_blocks` |
-| ⬜ | 3.4.5 Define DocumentStore trait | `Add DocumentStore trait for doc/tab/revision ops` |
-| ⬜ | 3.4.6 Implement document CRUD | `Implement document creation and retrieval` |
-| ⬜ | 3.4.7 Implement tab management | `Implement tab add/move/get with hierarchy` |
-| ⬜ | 3.4.8 Implement revision commit/checkout | `Implement revision chain with branching` |
-| ⬜ | 3.4.9 Implement promote_from_message | `Implement message-to-document promotion` |
-| ⬜ | 3.4.10 Unit tests for document structure | `Add tests for doc/tab/revision CRUD` |
+#### 3.4.1 Define Document, Tab, Revision types
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add document structure types` |
+| **Create** | `noema-core/src/storage/document/types.rs` |
+| **Implement** | `DocumentInfo`, `TabInfo`, `RevisionInfo` structs |
+| **Implement** | `DocumentSource` enum (UserCreated, AiGenerated, GoogleDrive, Import, Promoted) |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.4.2 Add documents table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add documents schema with source tracking` |
+| **SQL** | `CREATE TABLE documents (id, user_id, title, source, source_id, created_at, updated_at)` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.4.3 Add document_tabs table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tabs schema with hierarchy and position` |
+| **SQL** | `CREATE TABLE document_tabs (id, document_id, parent_tab_id, title, icon, position, current_revision_id, created_at, updated_at)` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.4.4 Add revisions table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add revisions schema referencing content_blocks` |
+| **SQL** | `CREATE TABLE revisions (id, tab_id, content_id, parent_revision_id, revision_number, created_at)` |
+| **SQL** | `FOREIGN KEY (content_id) REFERENCES content_blocks(id)` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.4.5 Define DocumentStore trait
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add DocumentStore trait for doc/tab/revision ops` |
+| **Create** | `noema-core/src/storage/document/mod.rs` |
+| **Implement** | Trait with document, tab, revision methods |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.4.6 Implement document CRUD
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement document creation and retrieval` |
+| **Create** | `noema-core/src/storage/document/sqlite.rs` |
+| **Implement** | `create()`, `get()`, `find_by_source()`, `list()`, `delete()` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.4.7 Implement tab management
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement tab add/move/get with hierarchy` |
+| **Implement** | `add_tab(document_id, parent_tab_id, title, content)` |
+| **Implement** | `add_tab_from_content(document_id, parent_tab_id, title, content_id)` |
+| **Implement** | `get_tabs(document_id)` - returns tree structure |
+| **Implement** | `move_tab(tab_id, new_parent, position)` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.4.8 Implement revision commit/checkout
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement revision chain with branching` |
+| **Implement** | `commit(tab_id, content)` - creates revision, updates current_revision_id |
+| **Implement** | `branch(tab_id, from_revision_id, content)` - creates revision with different parent |
+| **Implement** | `checkout(tab_id, revision_id)` - moves current pointer |
+| **Implement** | `get_revisions(tab_id)`, `get_content(revision_id)` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.4.9 Implement promote_from_message
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement message-to-document promotion` |
+| **Implement** | `promote_from_message(user_id, title, message_id, content_id)` |
+| **Implement** | Creates document with `source: Promoted { message_id }` |
+| **Implement** | First revision reuses existing content_id (no copy) |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.4.10 Unit tests for document structure
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for doc/tab/revision CRUD` |
+| **Test** | Create document → add tab → verify hierarchy |
+| **Test** | Add sub-tabs → verify tree structure |
+| **Test** | Commit multiple revisions → verify chain |
+| **Test** | Branch from rev 2 → checkout branch → verify content |
+| **Test** | Promote message → verify content_id reused |
+| **Verify** | `cargo test -p noema-core document` passes |
+
+---
 
 ### 3.5 Collections
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.5.1 Define Collection, Item, View types | `Add collection structure types` |
-| ⬜ | 3.5.2 Add collections table migration | `Add collections schema with schema_hint` |
-| ⬜ | 3.5.3 Add collection_items table migration | `Add items schema with target polymorphism` |
-| ⬜ | 3.5.4 Add item_fields table migration | `Add fields as cached index from frontmatter` |
-| ⬜ | 3.5.5 Add item_tags table migration | `Add tags for cross-cutting organization` |
-| ⬜ | 3.5.6 Add collection_views table migration | `Add saved views with sort/filter config` |
-| ⬜ | 3.5.7 Define CollectionStore trait | `Add CollectionStore trait` |
-| ⬜ | 3.5.8 Implement collection CRUD | `Implement collection creation and schema` |
-| ⬜ | 3.5.9 Implement item management | `Implement item add/move/remove with tree` |
-| ⬜ | 3.5.10 Implement field and tag operations | `Implement field caching and tag management` |
-| ⬜ | 3.5.11 Implement view creation and query | `Implement saved views with filter/sort` |
-| ⬜ | 3.5.12 Unit tests for collections | `Add tests for collection CRUD and queries` |
+#### 3.5.1 Define Collection, Item, View types
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add collection structure types` |
+| **Create** | `noema-core/src/storage/collection/types.rs` |
+| **Implement** | `CollectionInfo`, `ItemInfo`, `CollectionViewInfo` structs |
+| **Implement** | `ItemTarget` enum (Document, Conversation, ContentBlock, Collection) |
+| **Implement** | `FieldDefinition`, `ViewConfig`, `ViewType` types |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.5.2 Add collections table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add collections schema with schema_hint` |
+| **SQL** | `CREATE TABLE collections (id, user_id, name, description, schema_hint, created_at, updated_at)` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.5.3 Add collection_items table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add items schema with target polymorphism` |
+| **SQL** | `CREATE TABLE collection_items (id, collection_id, target_type, target_id, parent_item_id, position, created_at)` |
+| **SQL** | Indexes on collection_id, target, parent |
+| **Verify** | Fresh DB creates table |
+
+#### 3.5.4 Add item_fields table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add fields as cached index from frontmatter` |
+| **SQL** | `CREATE TABLE item_fields (item_id, field_name, field_value, PRIMARY KEY)` |
+| **SQL** | `CREATE INDEX idx_item_fields_field` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.5.5 Add item_tags table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tags for cross-cutting organization` |
+| **SQL** | `CREATE TABLE item_tags (item_id, tag, PRIMARY KEY)` |
+| **SQL** | `CREATE INDEX idx_item_tags_tag` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.5.6 Add collection_views table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add saved views with sort/filter config` |
+| **SQL** | `CREATE TABLE collection_views (id, collection_id, name, view_type, config, is_default, created_at)` |
+| **Verify** | Fresh DB creates table |
+
+#### 3.5.7 Define CollectionStore trait
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add CollectionStore trait` |
+| **Create** | `noema-core/src/storage/collection/mod.rs` |
+| **Implement** | Trait with collection, item, tag, field, view methods |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.5.8 Implement collection CRUD
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement collection creation and schema` |
+| **Create** | `noema-core/src/storage/collection/sqlite.rs` |
+| **Implement** | `create()`, `get()`, `update_schema_hint()`, `delete()` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.5.9 Implement item management
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement item add/move/remove with tree` |
+| **Implement** | `add_item(collection_id, target, parent_id, position)` |
+| **Implement** | `move_item(item_id, new_parent_id, new_position)` - reorder tree |
+| **Implement** | `remove_item(item_id)` - cascade to children |
+| **Implement** | `get_items(collection_id)` - returns tree |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.5.10 Implement field and tag operations
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement field caching and tag management` |
+| **Implement** | `update_item_fields(item_id, fields)` - upsert to item_fields |
+| **Implement** | `reindex_item_fields(item_id)` - parse frontmatter, update cache |
+| **Implement** | `tag(item_id, tags)`, `untag(item_id, tags)` |
+| **Implement** | `find_by_tag(collection_id, tag)` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.5.11 Implement view creation and query
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement saved views with filter/sort` |
+| **Implement** | `create_view(collection_id, name, view_type, config)` |
+| **Implement** | `query_view(view_id)` - apply sort/filter from config |
+| **Implement** | Filter by field value, sort by field |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.5.12 Unit tests for collections
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for collection CRUD and queries` |
+| **Test** | Create collection with schema_hint → add items → verify structure |
+| **Test** | Add nested items → move item → verify tree updated |
+| **Test** | Tag items → find by tag → verify results |
+| **Test** | Set fields → create view with filter → query → verify filtered |
+| **Test** | Create table view with sort → verify order |
+| **Verify** | `cargo test -p noema-core collection` passes |
+
+---
 
 ### 3.6 Cross-References
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.6.1 Define Reference and EntityRef types | `Add reference types for any-to-any links` |
-| ⬜ | 3.6.2 Add references table migration | `Add references schema with relation types` |
-| ⬜ | 3.6.3 Define ReferenceStore trait | `Add ReferenceStore trait` |
-| ⬜ | 3.6.4 Implement create and delete | `Implement reference creation and deletion` |
-| ⬜ | 3.6.5 Implement get_outgoing | `Implement outgoing reference queries` |
-| ⬜ | 3.6.6 Implement get_backlinks | `Implement backlink queries` |
-| ⬜ | 3.6.7 Unit tests for references | `Add tests for reference CRUD and backlinks` |
+#### 3.6.1 Define Reference and EntityRef types
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add reference types for any-to-any links` |
+| **Create** | `noema-core/src/storage/reference/types.rs` |
+| **Implement** | `ReferenceInfo` struct, `EntityRef { entity_type, entity_id }` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.6.2 Add references table migration
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add references schema with relation types` |
+| **SQL** | `CREATE TABLE references (id, from_type, from_id, to_type, to_id, relation_type, created_at)` |
+| **SQL** | `UNIQUE (from_type, from_id, to_type, to_id, relation_type)` |
+| **SQL** | Indexes on from and to |
+| **Verify** | Fresh DB creates table |
+
+#### 3.6.3 Define ReferenceStore trait
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add ReferenceStore trait` |
+| **Create** | `noema-core/src/storage/reference/mod.rs` |
+| **Implement** | Trait with `create()`, `delete()`, `get_outgoing()`, `get_backlinks()` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.6.4 Implement create and delete
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement reference creation and deletion` |
+| **Create** | `noema-core/src/storage/reference/sqlite.rs` |
+| **Implement** | `create(from, to, relation)` - insert, handle unique conflict |
+| **Implement** | `delete(id)` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.6.5 Implement get_outgoing
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement outgoing reference queries` |
+| **Implement** | `get_outgoing(from: EntityRef)` → `Vec<ReferenceInfo>` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.6.6 Implement get_backlinks
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement backlink queries` |
+| **Implement** | `get_backlinks(to: EntityRef)` → `Vec<ReferenceInfo>` |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.6.7 Unit tests for references
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for reference CRUD and backlinks` |
+| **Test** | Create reference → get outgoing → verify found |
+| **Test** | Create reference → get backlinks on target → verify found |
+| **Test** | Delete reference → verify not found |
+| **Test** | Multiple references to same target → verify all in backlinks |
+| **Verify** | `cargo test -p noema-core reference` passes |
+
+---
 
 ### 3.7 Temporal Queries
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.7.1 Add temporal indexes to tables | `Add created_at indexes for time queries` |
-| ⬜ | 3.7.2 Define TemporalStore trait | `Add TemporalStore trait for time-based queries` |
-| ⬜ | 3.7.3 Implement query_by_time_range | `Implement time range queries across entities` |
-| ⬜ | 3.7.4 Implement get_activity_summary | `Implement activity summarization` |
-| ⬜ | 3.7.5 Implement LLM context rendering | `Render temporal content as markdown for LLM` |
-| ⬜ | 3.7.6 Unit tests for temporal queries | `Add tests for time-based queries` |
+#### 3.7.1 Add temporal indexes to tables
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add created_at indexes for time queries` |
+| **SQL** | `CREATE INDEX idx_content_blocks_created ON content_blocks(created_at)` |
+| **SQL** | `CREATE INDEX idx_messages_created ON messages(created_at)` |
+| **SQL** | `CREATE INDEX idx_revisions_created ON revisions(created_at)` |
+| **SQL** | `CREATE INDEX idx_conversations_updated ON conversations(updated_at)` |
+| **Verify** | Fresh DB creates indexes |
+
+#### 3.7.2 Define TemporalStore trait
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add TemporalStore trait for time-based queries` |
+| **Create** | `noema-core/src/storage/temporal/mod.rs` |
+| **Implement** | `TemporalStore` trait with `query_by_time_range()`, `get_activity_summary()`, `get_timeline()` |
+| **Implement** | `TemporalContent`, `ActivitySummary`, `ContentType` types |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.7.3 Implement query_by_time_range
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement time range queries across entities` |
+| **Create** | `noema-core/src/storage/temporal/sqlite.rs` |
+| **Implement** | Query messages, revisions, collection items in range |
+| **Implement** | Filter by content_type, limit results |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.7.4 Implement get_activity_summary
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Implement activity summarization` |
+| **Implement** | Count messages, documents, revisions in range |
+| **Implement** | List active conversations |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.7.5 Implement LLM context rendering
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Render temporal content as markdown for LLM` |
+| **Implement** | `render_activity_context(summary, detail_level)` → markdown string |
+| **Implement** | Format with headers, timestamps, previews |
+| **Implement** | Respect token budget (truncate if needed) |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.7.6 Unit tests for temporal queries
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for time-based queries` |
+| **Test** | Create content at different times → query range → verify correct subset |
+| **Test** | Get activity summary → verify counts correct |
+| **Test** | Render context → verify markdown format |
+| **Verify** | `cargo test -p noema-core temporal` passes |
+
+---
 
 ### 3.8 Session Integration
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.8.1 Create adapter types for session | `Add adapter bridging old Session to new stores` |
-| ⬜ | 3.8.2 Implement commit() with new model | `Route commit to turn/span/message creation` |
-| ⬜ | 3.8.3 Implement open_conversation() | `Load conversation via view path` |
-| ⬜ | 3.8.4 Implement commit_parallel_responses() | `Create multiple spans at same turn` |
-| ⬜ | 3.8.5 Update engine to use adapter | `Wire engine to new session adapter` |
-| ⬜ | 3.8.6 Integration tests with engine | `Add tests for full session flow` |
+#### 3.8.1 Create adapter types for session
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add adapter bridging old Session to new stores` |
+| **Create** | `noema-core/src/storage/session/adapter.rs` |
+| **Implement** | `SessionAdapter` holding references to new stores |
+| **Implement** | Map old Session methods to new store calls |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.8.2 Implement commit() with new model
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Route commit to turn/span/message creation` |
+| **Implement** | `commit(user_msg, assistant_msg)` → create turn, span, messages |
+| **Implement** | Store text via ContentBlockStore |
+| **Implement** | Auto-select span in main view |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.8.3 Implement open_conversation()
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Load conversation via view path` |
+| **Implement** | `open_conversation(id)` → get main view path |
+| **Implement** | Return messages in format engine expects |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.8.4 Implement commit_parallel_responses()
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Create multiple spans at same turn` |
+| **Implement** | `commit_parallel_responses(user_msg, responses: Vec<Response>)` |
+| **Implement** | One turn, multiple spans with different model_ids |
+| **Verify** | `cargo build -p noema-core` compiles |
+
+#### 3.8.5 Update engine to use adapter
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Wire engine to new session adapter` |
+| **Update** | Engine initialization to use SessionAdapter |
+| **Update** | Any direct session calls to go through adapter |
+| **Verify** | `cargo build -p noema-core` compiles, app starts |
+
+#### 3.8.6 Integration tests with engine
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Add tests for full session flow` |
+| **Test** | Send message via engine → verify stored in new tables |
+| **Test** | Load conversation → verify messages returned correctly |
+| **Test** | Parallel responses → verify multiple spans |
+| **Verify** | `cargo test -p noema-core session` passes |
+
+---
 
 ### 3.9 Migration and Cleanup
 
-| Status | Task | Commit Message |
-|--------|------|----------------|
-| ⬜ | 3.9.1 Verify all features work with new model | `Run full test suite on new schema` |
-| ⬜ | 3.9.2 Drop legacy conversation tables | `Remove threads, span_sets, spans, span_messages` |
-| ⬜ | 3.9.3 Drop legacy document tables | `Remove old document_tabs, document_revisions` |
-| ⬜ | 3.9.4 Remove old code paths | `Clean up deprecated code references` |
-| ⬜ | 3.9.5 Final verification | `Verify clean database and full functionality`
+#### 3.9.1 Verify all features work with new model
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Run full test suite on new schema` |
+| **Run** | `cargo test --all` - all tests pass |
+| **Run** | Manual app testing - conversations work |
+| **Run** | Manual app testing - documents work |
+| **Verify** | No regressions |
+
+#### 3.9.2 Drop legacy conversation tables
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Remove threads, span_sets, spans, span_messages` |
+| **SQL** | `DROP TABLE IF EXISTS span_messages` |
+| **SQL** | `DROP TABLE IF EXISTS spans` (old) |
+| **SQL** | `DROP TABLE IF EXISTS span_sets` |
+| **SQL** | `DROP TABLE IF EXISTS threads` |
+| **Verify** | Fresh DB doesn't create old tables |
+
+#### 3.9.3 Drop legacy document tables
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Remove old document_tabs, document_revisions` |
+| **SQL** | Drop any legacy document tables not matching new schema |
+| **Verify** | Fresh DB only has new schema |
+
+#### 3.9.4 Remove old code paths
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Clean up deprecated code references` |
+| **Remove** | Old session implementation files |
+| **Remove** | Old conversation store files |
+| **Remove** | References to old table names |
+| **Verify** | `cargo build --all` compiles, no dead code warnings |
+
+#### 3.9.5 Final verification
+| Status | ⬜ |
+|--------|-----|
+| **Commit** | `Verify clean database and full functionality` |
+| **Test** | Fresh install creates only new tables |
+| **Test** | All features work end-to-end |
+| **Test** | No references to legacy schema in codebase |
+| **Verify** | Phase 3 complete
 
 ---
 
