@@ -456,6 +456,33 @@ pub struct ParallelModelError {
     pub error: String,
 }
 
+/// Configuration for which tools to enable for a message.
+/// Designed to be extensible for future tool set selection.
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ToolConfig {
+    /// Master toggle: if false, no tools are available regardless of other settings
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Optional list of specific MCP server IDs to include.
+    /// If None or empty, all connected servers are used (when enabled=true).
+    /// If Some with values, only those servers' tools are available.
+    #[serde(default)]
+    pub server_ids: Option<Vec<String>>,
+
+    /// Optional list of specific tool names to include (across all servers).
+    /// If None, all tools from selected servers are available.
+    /// If Some, only these specific tools are available.
+    #[serde(default)]
+    pub tool_names: Option<Vec<String>>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod ts_export {
     use super::*;
@@ -480,5 +507,6 @@ mod ts_export {
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
         InputContentBlock::export_all().expect("Failed to export InputContentBlock");
         ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");
+        ToolConfig::export_all().expect("Failed to export ToolConfig");
     }
 }

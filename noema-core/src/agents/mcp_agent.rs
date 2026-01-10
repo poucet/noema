@@ -65,6 +65,60 @@ impl McpAgent {
         self.max_iterations
     }
 
+    /// Execute streaming without any tools (for models that don't support tools or when disabled)
+    pub async fn execute_stream_no_tools(
+        &self,
+        context: &mut (impl ConversationContext + Send),
+        model: Arc<dyn ChatModel + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        use futures::StreamExt;
+
+        // Make request WITHOUT tools
+        let mut request = ChatRequest::new(context.iter());
+
+        // Resolve any document refs before sending to LLM
+        self.resolve_documents(&mut request).await;
+
+        // Stream the response
+        let mut stream = model.stream_chat(&request).await?;
+
+        // Accumulate chunks into a single message, merging text blocks
+        let mut accumulated_text = String::new();
+        let mut other_blocks: Vec<ContentBlock> = Vec::new();
+        let mut role = llm::api::Role::default();
+
+        while let Some(chunk) = stream.next().await {
+            role = chunk.role;
+            for block in chunk.payload.content {
+                match block {
+                    ContentBlock::Text { text } => {
+                        accumulated_text.push_str(&text);
+                    }
+                    other => {
+                        other_blocks.push(other);
+                    }
+                }
+            }
+        }
+
+        // Build the final message with merged text content
+        let mut content = Vec::new();
+        if !accumulated_text.is_empty() {
+            content.push(ContentBlock::Text { text: accumulated_text });
+        }
+        content.extend(other_blocks);
+
+        let accumulated = ChatMessage::new(role, ChatPayload::new(content));
+
+        // Log the accumulated response
+        traffic_log::log_llm_response(model.name(), &accumulated);
+
+        // Add the complete accumulated message to context
+        context.add(accumulated);
+
+        Ok(())
+    }
+
     /// Resolve document refs in a request
     async fn resolve_documents(&self, request: &mut ChatRequest) {
         // Extract doc IDs from the request
@@ -117,8 +171,13 @@ impl Agent for McpAgent {
             // Get current tool definitions dynamically
             let tool_definitions = self.tools.get_all_definitions().await;
 
-            // Make request with tools
-            let mut request = ChatRequest::with_tools(context.iter(), tool_definitions);
+            // Make request - only include tools if we have any definitions
+            // This avoids errors with models that don't support tools
+            let mut request = if tool_definitions.is_empty() {
+                ChatRequest::new(context.iter())
+            } else {
+                ChatRequest::with_tools(context.iter(), tool_definitions)
+            };
 
             // Resolve any document refs before sending to LLM
             self.resolve_documents(&mut request).await;
@@ -160,7 +219,13 @@ impl Agent for McpAgent {
             // Get current tool definitions dynamically
             let tool_definitions = self.tools.get_all_definitions().await;
 
-            let mut request = ChatRequest::with_tools(context.iter(), tool_definitions);
+            // Make request - only include tools if we have any definitions
+            // This avoids errors with models that don't support tools
+            let mut request = if tool_definitions.is_empty() {
+                ChatRequest::new(context.iter())
+            } else {
+                ChatRequest::with_tools(context.iter(), tool_definitions)
+            };
 
             // Resolve any document refs before sending to LLM
             self.resolve_documents(&mut request).await;

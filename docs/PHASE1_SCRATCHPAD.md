@@ -9,9 +9,9 @@ Phase 1 consists of 5 "Quick Wins" features focused on model display and privacy
 | [x] | 4 | Local vs non-local model icon (P1) | ModelSelector.tsx, lib.rs |
 | [x] | 3 | Model metadata display (P1) | ModelSelector.tsx |
 | [ ] | 2 | Truncate long model names (P2) | ModelSelector.tsx |
-| [ ] | 31 | Copy raw markdown (P1) | MessageBubble.tsx |
+| [x] | 31 | Copy raw markdown (P1) | MessageBubble.tsx |
 | [ ] | 32 | Private content flag (P0) | Settings.tsx, engine.rs, types |
-| [ ] | 33 | Toggle to disable tools (P1) | ChatInput.tsx |
+| [x] | 33 | Toggle to disable tools (P1) | ChatInput.tsx, App.tsx, types.rs, tauri.ts |
 | [ ] | 34 | Toggle to disable audio/image input (P1) | ChatInput.tsx |
 
 ---
@@ -175,6 +175,57 @@ Will add:
 ```
 
 The dropdown already showed this metadata per-model; now it's visible without opening the dropdown.
+
+### Feature 31: Copy Raw Markdown ✅ DONE
+
+**Implementation:** Added copy button to assistant message bubbles that copies the raw markdown text to clipboard.
+
+**Changes (`MessageBubble.tsx`):**
+- Added `extractRawMarkdown()` helper function to convert DisplayContent to markdown string
+- Added `CopyIcon` and `CheckIcon` SVG components
+- Added `justCopied` state for visual feedback
+- Added `handleCopyRawMarkdown()` handler using `navigator.clipboard.writeText()`
+- Refactored action buttons into a flex container with both copy and fork buttons
+- Copy button shows on hover for assistant messages only (not user/system)
+- Shows green check icon for 2 seconds after successful copy
+
+**UX:**
+- Button appears on hover at bottom-right of assistant messages
+- Click copies raw markdown to clipboard
+- Brief green checkmark feedback on success
+- Tooltip shows "Copy raw markdown" or "Copied!"
+
+### Feature 33: Toggle to Disable Tools ✅ DONE
+
+**Architecture decision:** Tool configuration uses a future-proof `ToolConfig` type that allows for granular control (specific servers, specific tools) while currently implementing a simple on/off toggle.
+
+**Backend changes:**
+- Added `ToolConfig` type to `types.rs` with fields:
+  - `enabled: bool` - master toggle
+  - `server_ids: Option<Vec<String>>` - filter by MCP server (future)
+  - `tool_names: Option<Vec<String>>` - filter by tool name (future)
+- Updated `send_message` command to accept optional `ToolConfig`
+- Added `tool_config` field to `AppState` for engine to read
+
+**Frontend changes (`ChatInput.tsx`):**
+- Added `toolsEnabled` and `onToggleTools` props
+- Added gear/cog icon toggle button next to voice button
+- Purple when enabled, muted when disabled
+- Tooltip shows current state
+- Passes `ToolConfig` to `onSend` callback
+
+**Frontend changes (`App.tsx`):**
+- Added `toolsEnabled` state (default: true)
+- Added `handleToggleTools` function
+- Updated `handleSendMessage` to pass `ToolConfig` to tauri
+- Voice transcriptions also respect tools state
+
+**Frontend changes (`tauri.ts`):**
+- Updated `sendMessage` to accept optional `ToolConfig`
+
+**Generated types:**
+- Added `ToolConfig.ts` to generated types
+- Exported from `index.ts`
 
 ---
 

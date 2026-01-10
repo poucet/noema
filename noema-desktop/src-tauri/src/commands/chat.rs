@@ -1,7 +1,7 @@
 //! Chat-related Tauri commands
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
-use noema_core::{ChatEngine, EngineEvent, McpRegistry};
+use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
 use noema_core::storage::conversation::{ConversationStore, SpanType};
 use noema_core::storage::document::resolver::DocumentResolver;
 use noema_core::storage::content::{StoredContent, StoredPayload};
@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::DisplayContent;
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ReferencedDocument};
+use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ReferencedDocument, ToolConfig};
 
 
 /// Get current messages in the conversation
@@ -33,11 +33,16 @@ pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<Display
 
 /// Send a message with structured content blocks.
 /// Content blocks preserve the exact inline position of text, document references, and attachments.
+///
+/// # Arguments
+/// * `content` - The message content blocks (text, document refs, images, audio)
+/// * `tool_config` - Optional configuration for which tools to enable. If None, uses default (all tools enabled).
 #[tauri::command]
 pub async fn send_message(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     content: Vec<InputContentBlock>,
+    tool_config: Option<ToolConfig>,
 ) -> Result<(), String> {
     if content.is_empty() {
         return Err("Message must have content".to_string());
@@ -78,7 +83,18 @@ pub async fn send_message(
     }
 
     let payload = ChatPayload { content: llm_content };
-    send_message_internal(app, state, payload).await
+
+    // Convert ToolConfig from Tauri types to core types
+    let core_tool_config = match tool_config {
+        Some(tc) => CoreToolConfig {
+            enabled: tc.enabled,
+            server_ids: tc.server_ids,
+            tool_names: tc.tool_names,
+        },
+        None => CoreToolConfig::all_enabled(), // Default: all tools enabled
+    };
+
+    send_message_internal(app, state, payload, core_tool_config).await
 }
 
 /// Internal helper for sending messages
@@ -86,6 +102,7 @@ async fn send_message_internal(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     payload: ChatPayload,
+    tool_config: CoreToolConfig,
 ) -> Result<(), String> {
     let message = ChatMessage::user(payload);
     // Emit user message immediately
@@ -93,10 +110,10 @@ async fn send_message_internal(
     app.emit("user_message", &user_msg)
         .map_err(|e| e.to_string())?;
 
-    // Send to engine - the event loop (started at init) will handle the response
+    // Send to engine with tool config - the event loop (started at init) will handle the response
     let engine_guard = state.engine.lock().await;
     let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-    engine.send_message(message);
+    engine.send_message(message, tool_config);
 
     Ok(())
 }

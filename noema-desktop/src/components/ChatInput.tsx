@@ -3,7 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { isSupportedAttachmentType } from "../mime_types";
-import type { Attachment, DocumentInfoResponse, InputContentBlock } from "../generated";
+import type { Attachment, DocumentInfoResponse, InputContentBlock, ToolConfig } from "../generated";
 import * as tauri from "../tauri";
 
 export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing" | "buffering";
@@ -19,7 +19,7 @@ interface MentionState {
 type EditorBlock = Extract<InputContentBlock, { type: "text" } | { type: "documentRef" }>;
 
 interface ChatInputProps {
-  onSend: (content: InputContentBlock[]) => void;
+  onSend: (content: InputContentBlock[], toolConfig?: ToolConfig) => void;
   disabled?: boolean;
   voiceAvailable?: boolean;
   voiceStatus?: VoiceStatus;
@@ -28,6 +28,10 @@ interface ChatInputProps {
   pendingFork?: boolean;
   prefilledText?: string;
   onCancelFork?: () => void;
+  /** Whether tools are enabled (controlled by parent) */
+  toolsEnabled?: boolean;
+  /** Callback when tools toggle is clicked */
+  onToggleTools?: () => void;
 }
 
 // Get MIME type from file extension
@@ -116,6 +120,8 @@ export function ChatInput({
   pendingFork = false,
   prefilledText = "",
   onCancelFork,
+  toolsEnabled = true,
+  onToggleTools,
 }: ChatInputProps) {
   // Store content as structured blocks instead of a string
   const [blocks, setBlocks] = useState<EditorBlock[]>([{ type: "text", text: "" }]);
@@ -496,12 +502,14 @@ export function ChatInput({
     }
 
     if (contentBlocks.length > 0) {
-      onSend(contentBlocks);
+      // Build tool config based on current toggle state
+      const toolConfig: ToolConfig = { enabled: toolsEnabled, serverIds: null, toolNames: null };
+      onSend(contentBlocks, toolConfig);
       needsDomSyncRef.current = true;
       setBlocks([{ type: "text", text: "" }]);
       setAttachments([]);
     }
-  }, [blocks, attachments, disabled, onSend]);
+  }, [blocks, attachments, disabled, onSend, toolsEnabled]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -755,6 +763,38 @@ export function ChatInput({
                 />
               </svg>
             </button>
+          )}
+          {/* Tools toggle switch */}
+          {onToggleTools && (
+            <div
+              className="flex items-center gap-2 px-2"
+              title={toolsEnabled ? "MCP Tools enabled" : "MCP Tools disabled"}
+            >
+              {/* Wrench icon */}
+              <svg className={`w-4 h-4 ${toolsEnabled ? "text-purple-400" : "text-gray-500"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"
+                />
+              </svg>
+              {/* Toggle switch */}
+              <button
+                type="button"
+                onClick={onToggleTools}
+                disabled={disabled}
+                className={`relative w-10 h-5 rounded-full transition-colors ${
+                  toolsEnabled ? "bg-purple-600" : "bg-gray-600"
+                } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                    toolsEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
           )}
           <button
             type="button"

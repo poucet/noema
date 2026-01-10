@@ -4,6 +4,44 @@ import { AlternatesSelector } from "./message/AlternatesSelector";
 import { ContentBlock } from "./message/ContentBlock";
 import { ForkIcon } from "./message/ForkIcon";
 
+// Extract raw markdown text from content blocks
+function extractRawMarkdown(content: DisplayContent[]): string {
+  return content
+    .map((block) => {
+      if ("Text" in block) return block.Text;
+      if ("DocumentRef" in block) return `[@${block.DocumentRef.title}]`;
+      if ("ToolCall" in block) return `[Tool: ${block.ToolCall.name}]`;
+      if ("ToolResult" in block) {
+        const textParts = block.ToolResult.content
+          .filter((c): c is { Text: string } => "Text" in c)
+          .map((c) => c.Text);
+        return textParts.length > 0 ? `[Result: ${textParts.join("\n")}]` : "[Result]";
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+// Copy icon component
+const CopyIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+    />
+  </svg>
+);
+
+// Check icon for copy feedback
+const CheckIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+  </svg>
+);
+
 interface MessageBubbleProps {
   message: DisplayMessage;
   onDocumentClick?: (docId: string) => void;
@@ -21,6 +59,9 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
   const [previewSpanId, setPreviewSpanId] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<DisplayContent[] | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  // Copy feedback state
+  const [justCopied, setJustCopied] = useState(false);
 
   // Handle preview - fetch content for the alternate
   const handlePreview = async (spanId: string) => {
@@ -76,6 +117,18 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
     }
   };
 
+  // Handle copy raw markdown
+  const handleCopyRawMarkdown = async () => {
+    const markdown = extractRawMarkdown(contentToShow);
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setJustCopied(true);
+      setTimeout(() => setJustCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
   // Determine which content to show
   const contentToShow = previewContent || message.content;
 
@@ -86,6 +139,31 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4 group`}
     >
+      {/* Action buttons for assistant messages - positioned outside bubble on left */}
+      {!isUser && !isSystem && (
+        <div className="flex flex-col justify-end mr-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={handleCopyRawMarkdown}
+            className={`p-1.5 rounded transition-colors ${
+              justCopied
+                ? "text-green-500"
+                : "text-gray-500 hover:text-gray-300 hover:bg-gray-700/50"
+            }`}
+            title={justCopied ? "Copied!" : "Copy"}
+          >
+            {justCopied ? <CheckIcon /> : <CopyIcon />}
+          </button>
+          {canFork && (
+            <button
+              onClick={handleForkClick}
+              className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700/50 transition-colors"
+              title="Fork from here"
+            >
+              <ForkIcon />
+            </button>
+          )}
+        </div>
+      )}
       <div
         className={`max-w-[85%] px-4 py-3 rounded-2xl relative ${isUser ? "bg-teal-600 text-white" : isSystem ? "bg-amber-500/20 text-amber-100" : "bg-surface text-foreground"}`}
       >
@@ -112,12 +190,12 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
             ))
           )}
         </div>
-        {/* Fork button - shown at bottom right of every message on hover */}
-        {canFork && (
+        {/* Fork button for user messages - inside bubble */}
+        {isUser && canFork && (
           <button
             onClick={handleForkClick}
-            className={`absolute bottom-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? "text-teal-200 hover:text-white hover:bg-teal-500" : "text-muted hover:text-purple-400 hover:bg-purple-900/30"}`}
-            title={isUser ? "Fork with this message" : "Fork from this response"}
+            className="absolute bottom-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-teal-200 hover:text-white hover:bg-teal-500"
+            title="Fork with this message"
           >
             <ForkIcon />
           </button>

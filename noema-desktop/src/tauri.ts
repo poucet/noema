@@ -12,6 +12,7 @@ import type {
   DisplayMessage,
   DisplayContent,
   InputContentBlock,
+  ToolConfig,
 } from "./generated";
 
 // Tauri commands
@@ -24,9 +25,10 @@ export async function getMessages(): Promise<DisplayMessage[]> {
 }
 
 export async function sendMessage(
-  content: InputContentBlock[]
+  content: InputContentBlock[],
+  toolConfig?: ToolConfig
 ): Promise<void> {
-  return invoke<void>("send_message", { content });
+  return invoke<void>("send_message", { content, toolConfig });
 }
 
 

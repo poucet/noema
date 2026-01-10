@@ -7,8 +7,33 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use futures::future::join_all;
 
+/// Configuration for which tools to enable during a request.
+/// This allows fine-grained control over MCP tool availability.
+#[derive(Debug, Clone, Default)]
+pub struct ToolConfig {
+    /// Whether tools are enabled at all. If false, no tools will be included.
+    pub enabled: bool,
+    /// Optional list of specific server IDs to include. If None, all servers are included.
+    pub server_ids: Option<Vec<String>>,
+    /// Optional list of specific tool names to include. If None, all tools are included.
+    pub tool_names: Option<Vec<String>>,
+}
+
+impl ToolConfig {
+    /// Create a config with all tools enabled
+    pub fn all_enabled() -> Self {
+        Self { enabled: true, server_ids: None, tool_names: None }
+    }
+
+    /// Create a config with all tools disabled
+    pub fn disabled() -> Self {
+        Self { enabled: false, server_ids: None, tool_names: None }
+    }
+}
+
 pub enum EngineCommand {
-    SendMessage(ChatPayload),
+    /// Send a message with tool configuration
+    SendMessage(ChatPayload, ToolConfig),
     /// Send a message to multiple models in parallel
     /// (payload, model_ids) where model_ids are full IDs like "anthropic/claude-sonnet-4-5"
     SendParallelMessage(ChatPayload, Vec<String>),
@@ -140,7 +165,7 @@ where
 
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
-                EngineCommand::SendMessage(payload) => {
+                EngineCommand::SendMessage(payload, tool_config) => {
                     // 1. Begin transaction and add user message to it
                     let mut tx = {
                         let sess = session.lock().await;
@@ -151,7 +176,14 @@ where
                     };
 
                     // 2. Run Agent (streaming) WITHOUT holding Session lock
-                    match agent.execute_stream(&mut tx, model.clone()).await {
+                    // If tools are disabled, use agent without tools
+                    let execute_result = if tool_config.enabled {
+                        agent.execute_stream(&mut tx, model.clone()).await
+                    } else {
+                        // Create a no-tools agent for this request
+                        agent.execute_stream_no_tools(&mut tx, model.clone()).await
+                    };
+                    match execute_result {
                         Ok(_) => {
                             // 3. Send pending messages (full multimodal content) to UI
                             let pending = tx.pending();
@@ -313,8 +345,8 @@ where
         }
     }
 
-    pub fn send_message(&self, payload: impl Into<ChatPayload>) {
-        let _ = self.cmd_tx.send(EngineCommand::SendMessage(payload.into()));
+    pub fn send_message(&self, payload: impl Into<ChatPayload>, tool_config: ToolConfig) {
+        let _ = self.cmd_tx.send(EngineCommand::SendMessage(payload.into(), tool_config));
     }
 
     pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>) {

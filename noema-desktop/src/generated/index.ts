@@ -17,3 +17,4 @@ export type { McpToolInfo } from "./McpToolInfo";
 export type { ModelInfo } from "./ModelInfo";
 export type { ProviderInfoResponse as ProviderInfo } from "./ProviderInfoResponse";
 export type { ReferencedDocument } from "./ReferencedDocument";
+export type { ToolConfig } from "./ToolConfig";

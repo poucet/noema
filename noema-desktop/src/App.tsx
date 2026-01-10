@@ -7,7 +7,7 @@ import { ModelSelector } from "./components/ModelSelector";
 import { FavoriteModelChips } from "./components/FavoriteModelChips";
 import { Settings } from "./components/Settings";
 import { DocumentPanel } from "./components/DocumentPanel";
-import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock } from "./generated";
+import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock, ToolConfig } from "./generated";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
 import { appLog } from "./utils/log";
@@ -50,17 +50,25 @@ function App() {
   const [pendingForkSpanId, setPendingForkSpanId] = useState<string | null>(null);
   // Prefilled input text (used when forking from a user message)
   const [prefilledInput, setPrefilledInput] = useState<string>("");
+  // Tools enabled state - controls whether MCP tools are sent to the model
+  const [toolsEnabled, setToolsEnabled] = useState<boolean>(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Voice input hook - handles browser audio capture and Whisper transcription
   const handleVoiceTranscription = (text: string) => {
-    handleSendMessage([{ type: "text", text }]);
+    // Voice transcriptions use current tools state
+    const toolConfig: ToolConfig = { enabled: toolsEnabled, serverIds: null, toolNames: null };
+    handleSendMessage([{ type: "text", text }], toolConfig);
   };
 
   const handleVoiceError = (err: string) => {
     setError(`Voice error: ${err}`);
+  };
+
+  const handleToggleTools = () => {
+    setToolsEnabled((prev) => !prev);
   };
 
   const voice = useVoiceInput({
@@ -232,7 +240,7 @@ function App() {
     };
   }, []);
 
-  const handleSendMessage = async (content: InputContentBlock[]) => {
+  const handleSendMessage = async (content: InputContentBlock[], toolConfig?: ToolConfig) => {
     try {
       setError(null);
 
@@ -267,7 +275,7 @@ function App() {
         // Clear selection after sending
         setSelectedModelsForComparison([]);
       } else {
-        await tauri.sendMessage(content);
+        await tauri.sendMessage(content, toolConfig);
       }
     } catch (err) {
       appLog.error("Send message error", String(err));
@@ -728,6 +736,8 @@ function App() {
               pendingFork={!!pendingForkSpanId}
               prefilledText={prefilledInput}
               onCancelFork={handleCancelFork}
+              toolsEnabled={toolsEnabled}
+              onToggleTools={handleToggleTools}
             />
           </>
         ) : activeActivity === "documents" ? (

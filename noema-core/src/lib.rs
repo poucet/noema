@@ -27,5 +27,5 @@ pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::ConversationContext;
 
-pub use engine::{ChatEngine, EngineCommand, EngineEvent, ParallelAlternateInfo};
+pub use engine::{ChatEngine, EngineCommand, EngineEvent, ParallelAlternateInfo, ToolConfig};
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
