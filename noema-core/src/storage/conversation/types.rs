@@ -28,12 +28,19 @@ pub enum SpanRole {
     Assistant,
 }
 
+impl SpanRole {
+    /// Get static string representation (zero allocation)
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            SpanRole::User => "user",
+            SpanRole::Assistant => "assistant",
+        }
+    }
+}
+
 impl std::fmt::Display for SpanRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SpanRole::User => write!(f, "user"),
-            SpanRole::Assistant => write!(f, "assistant"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -70,14 +77,21 @@ pub enum MessageRole {
     Tool,
 }
 
+impl MessageRole {
+    /// Get static string representation (zero allocation)
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::System => "system",
+            MessageRole::Tool => "tool",
+        }
+    }
+}
+
 impl std::fmt::Display for MessageRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MessageRole::User => write!(f, "user"),
-            MessageRole::Assistant => write!(f, "assistant"),
-            MessageRole::System => write!(f, "system"),
-            MessageRole::Tool => write!(f, "tool"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -460,7 +474,7 @@ mod tests {
     #[test]
     fn test_span_role_roundtrip() {
         for role in [SpanRole::User, SpanRole::Assistant] {
-            let s = role.to_string();
+            let s = role.as_str();
             let parsed: SpanRole = s.parse().unwrap();
             assert_eq!(parsed, role);
         }
@@ -474,7 +488,7 @@ mod tests {
             MessageRole::System,
             MessageRole::Tool,
         ] {
-            let s = role.to_string();
+            let s = role.as_str();
             let parsed: MessageRole = s.parse().unwrap();
             assert_eq!(parsed, role);
         }

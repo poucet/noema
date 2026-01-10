@@ -652,7 +652,7 @@ impl ConversationStore for SqliteStore {
         conn.execute(
             "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![&id, span_id, sequence_number, role.to_string(), &content_json, now],
+            params![&id, span_id, sequence_number, role.as_str(), &content_json, now],
         )?;
 
         Ok(id)
@@ -807,7 +807,7 @@ impl TurnStore for SqliteStore {
         conn.execute(
             "INSERT INTO turns (id, conversation_id, role, sequence_number, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id.as_str(), conversation_id.as_str(), role.to_string(), sequence_number, now],
+            params![id.as_str(), conversation_id.as_str(), role.as_str(), sequence_number, now],
         )?;
 
         Ok(TurnInfo {
@@ -1013,7 +1013,7 @@ impl TurnStore for SqliteStore {
                 id.as_str(),
                 span_id.as_str(),
                 sequence_number,
-                message.role.to_string(),
+                message.role.as_str(),
                 content_id.as_ref().map(|c| c.as_str()),
                 message.tool_calls,
                 message.tool_results,
@@ -1445,7 +1445,7 @@ pub mod sync_helpers {
         conn.execute(
             "INSERT INTO turns (id, conversation_id, role, sequence_number, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id.as_str(), conversation_id.as_str(), role.to_string(), sequence_number, now],
+            params![id.as_str(), conversation_id.as_str(), role.as_str(), sequence_number, now],
         )?;
 
         Ok((id, sequence_number))
@@ -1517,7 +1517,7 @@ pub mod sync_helpers {
                 id.as_str(),
                 span_id.as_str(),
                 sequence_number,
-                role.to_string(),
+                role.as_str(),
                 content_id,
                 tool_calls,
                 tool_results,
