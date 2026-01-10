@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "commands"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "commands_macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "proc-macro2",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -2780,7 +2780,7 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 
 [[package]]
 name = "llm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2800,7 +2800,7 @@ dependencies = [
 
 [[package]]
 name = "llm_macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "llm",
@@ -3126,7 +3126,7 @@ checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
 
 [[package]]
 name = "noema-audio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3142,7 +3142,7 @@ dependencies = [
 
 [[package]]
 name = "noema-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "askama",
@@ -3169,7 +3169,7 @@ dependencies = [
 
 [[package]]
 name = "noema-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "noema-ext"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -3219,7 +3219,7 @@ dependencies = [
 
 [[package]]
 name = "noema-mcp-gdocs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

@@ -1,9 +1,9 @@
 [package]
 name = "noema-desktop"
-version = "0.1.0"
+version.workspace = true
+edition.workspace = true
 description = "Noema AI Chat Application"
-authors = ["Chris"]
-edition = "2021"
+authors.workspace = true
 
 [lib]
 name = "noema_ui_lib"

@@ -1,7 +1,7 @@
 [package]
 name = "noema-ext"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Extension utilities for Noema - PDF processing, etc."
 
 [[bin]]

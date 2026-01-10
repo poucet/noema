@@ -2,3 +2,8 @@
 resolver = "3"
 members = ["commands", "config", "noema-core", "noema-core/llm", "noema-audio", "noema-ext", "noema-desktop/src-tauri", "noema-mcp-gdocs"]
 default-members = ["noema-desktop/src-tauri"]
+
+[workspace.package]
+version = "0.2.0"
+authors = ["Chris"]
+edition = "2021"
