@@ -13,75 +13,75 @@ This plan covers a major feature wave for Noema 0.2, organized into 7 phases. Ke
 
 ## Feature Overview (Sorted by Phase)
 
-### Phase 1: Quick Wins
+### Phase 1: Quick Wins ✅
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [ ] | P0 | 32 | Private content flag (blocks non-local models) | Low | High |
-| [ ] | P1 | 3 | Model metadata display (context window, provider) | Low | Medium |
-| [x] | P1 | 4 | Local vs non-local model indicator icon | Low | Medium |
-| [ ] | P1 | 31 | Copy raw markdown from assistant responses | Low | Medium |
-| [ ] | P1 | 33 | Toggle to disable tools (for models without tool support) | Low | Medium |
-| [ ] | P1 | 34 | Toggle to disable audio/image input (placeholder + toggle) | Low | Medium |
-| [ ] | P2 | 2 | Truncate long model names (preserve star icon) | Low | Low |
+| ✅ | P0 | 32 | Private content flag (blocks non-local models) | Low | High |
+| ✅ | P1 | 3 | Model metadata display (context window, provider) | Low | Medium |
+| ✅ | P1 | 4 | Local vs non-local model indicator icon | Low | Medium |
+| ✅ | P1 | 31 | Copy raw markdown from assistant responses | Low | Medium |
+| ✅ | P1 | 33 | Toggle to disable tools (for models without tool support) | Low | Medium |
+| ✅ | P1 | 34 | Toggle to disable audio/image input (placeholder + toggle) | Low | Medium |
+| ✅ | P2 | 2 | Truncate long model names (preserve star icon) | Low | Low |
 
 ### Phase 2: Core UX (Model-Independent)
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [x] | P0 | 26 | @-mention file search beyond initial list | Low | Medium |
+| ✅ | P0 | 26 | @-mention file search beyond initial list | Low | Medium |
+| ⏸️ | P1 | 28 | Parallel conversations with status indicators | Medium | High |
+| ⏸️ | P2 | 5 | Copy-paste markdown into ChatInput | Medium | Medium |
+| ⏸️ | P2 | 18 | Live markdown/Typst rendering with math notation | Medium | Medium |
+| ⏸️ | P3 | 27 | Fix Google Docs import search | Low | Low |
 
 ### Phase 3: Unified Content Model
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [ ] | P0 | 3.1 | Content blocks (text storage with origin tracking) | Medium | Very High |
-| [ ] | P0 | 3.1b | Asset storage (images, audio, binary blobs) | Medium | High |
-| [ ] | P0 | 3.2 | Conversation structure (turns, spans, messages) | High | Very High |
-| [ ] | P0 | 3.3 | Views and forking (conversation branching) | High | Very High |
-| [ ] | P1 | 3.4 | Document structure (tabs, revision history) | Medium | High |
-| [ ] | P1 | 3.5 | Collections (tree organization, tags, fields) | Medium | High |
-| [ ] | P1 | 3.6 | Cross-references and backlinks | Medium | High |
-| [ ] | P2 | 3.7 | Temporal queries (activity summaries for LLM) | Medium | Medium |
-| [ ] | P2 | 3.8 | Session integration (connect engine to new model) | Medium | Very High |
-| [ ] | P2 | 30 | Import/export and data portability | Medium | High |
+| ⬜ | P0 | 3.1 | Content blocks (text storage with origin tracking) | Medium | Very High |
+| ⬜ | P0 | 3.1b | Asset storage (images, audio, binary blobs) | Medium | High |
+| ⬜ | P0 | 3.2 | Conversation structure (turns, spans, messages) | High | Very High |
+| ⬜ | P0 | 3.3 | Views and forking (conversation branching) | High | Very High |
+| ⬜ | P1 | 3.4 | Document structure (tabs, revision history) | Medium | High |
+| ⬜ | P1 | 3.5 | Collections (tree organization, tags, fields) | Medium | High |
+| ⬜ | P1 | 3.6 | Cross-references and backlinks | Medium | High |
+| ⬜ | P2 | 3.7 | Temporal queries (activity summaries for LLM) | Medium | Medium |
+| ⬜ | P2 | 3.8 | Session integration (connect engine to new model) | Medium | Very High |
+| ⬜ | P2 | 30 | Import/export and data portability | Medium | High |
 
 ### Phase 4: Content Model Features (Post-Unification)
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [ ] | P1 | 1 | Undo delete (soft delete via node status) | Low | High |
-| [ ] | P1 | 10 | Per-conversation system prompts (node property) | Low | High |
-| [ ] | P1 | 12 | Auto-naming via summarizer (node metadata) | Medium | High |
-| [ ] | P1 | 13 | Summaries for all nodes | Medium | Medium |
-| [ ] | P1 | 17 | Document editing with revision history | Medium | High |
-| [ ] | P1 | 28 | Parallel conversations with status indicators | Medium | High |
-| [ ] | P2 | 5 | Copy-paste markdown into ChatInput | Medium | Medium |
-| [ ] | P2 | 6 | Drag-and-drop reordering (node sort_order) | Low | Low |
-| [ ] | P2 | 18 | Live markdown/Typst rendering with math notation | Medium | Medium |
-| [ ] | P3 | 27 | Fix Google Docs import search | Low | Low |
+| ⬜ | P1 | 1 | Undo delete (soft delete) | Low | High |
+| ⬜ | P1 | 10 | Per-conversation system prompts | Low | High |
+| ⬜ | P1 | 12 | Auto-naming via summarizer | Medium | High |
+| ⬜ | P1 | 13 | Summaries for all content | Medium | Medium |
+| ⬜ | P1 | 17 | Document editing with revision history | Medium | High |
+| ⬜ | P2 | 6 | Drag-and-drop reordering | Low | Low |
 
 ### Phase 5: Organization + Search
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [ ] | P0 | 21 | Custom skills and slash commands | Medium | High |
-| [ ] | P1 | 14 | Embedding infrastructure + semantic search | High | Very High |
-| [ ] | P1 | 7 | Document hierarchy via nested tags | High | High |
-| [ ] | P1 | 11 | Conversation hierarchy via nested tags | High | High |
-| [ ] | P2 | 16 | Wiki-style cross-linking (conversations ↔ documents) | Medium | Medium |
-| [ ] | P2 | 22 | External integrations (Notion, Google Calendar, etc.) | Medium | Medium |
+| ⬜ | P0 | 21 | Custom skills and slash commands | Medium | High |
+| ⬜ | P1 | 14 | Embedding infrastructure + semantic search | High | Very High |
+| ⬜ | P1 | 7 | Document hierarchy via nested tags | High | High |
+| ⬜ | P1 | 11 | Conversation hierarchy via nested tags | High | High |
+| ⬜ | P2 | 16 | Wiki-style cross-linking (conversations ↔ documents) | Medium | Medium |
+| ⬜ | P2 | 22 | External integrations (Notion, Google Calendar, etc.) | Medium | Medium |
 
 ### Phase 6: RAG + Memories
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [ ] | P1 | 8 | Conversation memories (hybrid auto/manual) | High | Very High |
-| [ ] | P1 | 15 | Full RAG (Retrieval-Augmented Generation) | High | Very High |
-| [ ] | P1 | 19 | MCP coding agent tools (file edit, terminal, etc.) | High | Very High |
-| [ ] | P2 | 9 | Documentation generation with versioning | High | Medium |
+| ⬜ | P1 | 8 | Conversation memories (hybrid auto/manual) | High | Very High |
+| ⬜ | P1 | 15 | Full RAG (Retrieval-Augmented Generation) | High | Very High |
+| ⬜ | P1 | 19 | MCP coding agent tools (file edit, terminal, etc.) | High | Very High |
+| ⬜ | P2 | 9 | Documentation generation with versioning | High | Medium |
 
 ### Phase 7: Agentic + Multimodal Features
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [ ] | P0 | 23 | Audio models (STT/TTS integration) | Medium | High |
-| [ ] | P1 | 20 | Multi-agent/sub-agent conversations | Very High | Very High |
-| [ ] | P2 | 24 | Image generation models (local/remote) | Medium | Medium |
-| [ ] | P2 | 25 | PDF extraction and processing | Medium | Medium |
+| ⬜ | P0 | 23 | Audio models (STT/TTS integration) | Medium | High |
+| ⬜ | P1 | 20 | Multi-agent/sub-agent conversations | Very High | Very High |
+| ⬜ | P2 | 24 | Image generation models (local/remote) | Medium | Medium |
+| ⬜ | P2 | 25 | PDF extraction and processing | Medium | Medium |
 
 ### Future / Out of Scope for 0.2
 | # | Feature | Notes |
