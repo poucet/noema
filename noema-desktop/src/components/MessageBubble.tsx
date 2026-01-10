@@ -8,13 +8,13 @@ import { ForkIcon } from "./message/ForkIcon";
 function extractRawMarkdown(content: DisplayContent[]): string {
   return content
     .map((block) => {
-      if ("Text" in block) return block.Text;
-      if ("DocumentRef" in block) return `[@${block.DocumentRef.title}]`;
-      if ("ToolCall" in block) return `[Tool: ${block.ToolCall.name}]`;
-      if ("ToolResult" in block) {
-        const textParts = block.ToolResult.content
-          .filter((c): c is { Text: string } => "Text" in c)
-          .map((c) => c.Text);
+      if ("text" in block) return block.text;
+      if ("documentRef" in block) return `[@${block.documentRef.title}]`;
+      if ("toolCall" in block) return `[Tool: ${block.toolCall.name}]`;
+      if ("toolResult" in block) {
+        const textParts = block.toolResult.content
+          .filter((c): c is { text: string } => "text" in c)
+          .map((c) => c.text);
         return textParts.length > 0 ? `[Result: ${textParts.join("\n")}]` : "[Result]";
       }
       return "";

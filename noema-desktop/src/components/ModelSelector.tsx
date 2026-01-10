@@ -17,6 +17,19 @@ function formatContextWindow(tokens: number | null): string {
   return String(tokens);
 }
 
+// Format model name for display - strip provider prefix, truncate middle if needed
+function formatModelName(name: string, maxLen = 28): string {
+  // Strip provider prefix (e.g., "ollama/llama3" -> "llama3")
+  const stripped = name.includes("/") ? name.split("/").slice(1).join("/") : name;
+
+  if (stripped.length <= maxLen) return stripped;
+
+  // Keep start and end, truncate middle with ellipsis
+  const endLen = 12; // Keep last 12 chars (often has quantization info like "q4_K_M")
+  const startLen = maxLen - endLen - 1; // -1 for ellipsis
+  return stripped.slice(0, startLen) + "…" + stripped.slice(-endLen);
+}
+
 // Capability icon components
 const TextIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -186,18 +199,18 @@ export function ModelSelector({
     const capabilities = getCapabilities(model.capabilities);
 
     return (
-      <div className="flex items-center justify-between border-b border-gray-700 hover:bg-elevated transition-colors">
+      <div className="flex items-center justify-between border-b border-gray-700 hover:bg-elevated transition-colors min-w-0">
         <button
           onClick={() => {
             onSelectModel(model.id, model.provider);
             setIsOpen(false);
           }}
-          className="flex-1 text-left px-3 py-2"
+          className="flex-1 text-left px-3 py-2 min-w-0 overflow-hidden"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-gray-300 truncate">{model.displayName}</div>
-              <div className="text-xs text-gray-500 truncate">{model.id}</div>
+          <div className="flex items-center justify-between min-w-0">
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <div className="text-sm text-gray-300" title={model.displayName}>{formatModelName(model.displayName)}</div>
+              <div className="text-xs text-gray-500" title={model.id}>{formatModelName(model.id)}</div>
             </div>
             <div className="flex items-center gap-2 ml-2 shrink-0">
               {/* Privacy indicator */}
@@ -259,10 +272,10 @@ export function ModelSelector({
               {isPrivateModel(currentModelObj) ? <PrivateIcon /> : <CloudIcon />}
             </span>
           )}
-          <div className="flex flex-col items-end max-w-48">
+          <div className="flex flex-col items-end">
             <div className="flex items-center gap-2">
-              <span className="truncate max-w-32" title={currentModelObj?.displayName || currentModel}>
-                {currentModelObj?.displayName || currentModel || "Select Model"}
+              <span title={currentModelObj?.displayName || currentModel}>
+                {formatModelName(currentModelObj?.displayName || currentModel || "Select Model", 24)}
               </span>
               {/* Context window badge */}
               {currentModelObj?.contextWindow && (
@@ -275,8 +288,8 @@ export function ModelSelector({
               )}
             </div>
             {currentModelObj && currentModelObj.displayName !== currentModelObj.id && (
-              <span className="text-xs text-gray-500 truncate max-w-40" title={currentModelObj.id}>
-                {currentModelObj.id}
+              <span className="text-xs text-gray-500" title={currentModelObj.id}>
+                {formatModelName(currentModelObj.id, 24)}
               </span>
             )}
           </div>
