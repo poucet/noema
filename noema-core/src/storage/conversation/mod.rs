@@ -2,6 +2,14 @@
 //!
 //! Provides the `ConversationStore` trait for managing conversations,
 //! threads, span sets, spans, and messages.
+//!
+//! ## Unified Content Model Types
+//!
+//! The new Turn/Span/Message types support the Unified Content Model:
+//! - `TurnInfo` - A position in the conversation sequence
+//! - `SpanInfo` (UCM) - A span of messages at a turn (one possible response)
+//! - `MessageInfo` - Individual content within a span
+//! - `ViewInfo` - A path through spans (selects one span per turn)
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -9,6 +17,13 @@ use llm::api::Role;
 use std::str::FromStr;
 
 use crate::storage::content::{StoredMessage, StoredPayload};
+
+// UCM types for the new conversation structure
+pub mod types;
+pub use types::{
+    MessageInfo, MessageRole, NewMessage, SpanInfo as UcmSpanInfo, SpanRole, SpanWithMessages,
+    TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
+};
 
 // ============================================================================
 // Types
