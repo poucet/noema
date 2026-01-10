@@ -1,4 +1,4 @@
-//! SQLite implementation of ConversationStore
+//! SQLite implementation of ConversationStore and TurnStore
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -10,7 +10,16 @@ use super::{
     ConversationInfo, ConversationStore, SpanInfo, SpanSetInfo, SpanSetWithContent, SpanType,
     ThreadInfo,
 };
+use super::types::{
+    MessageInfo, MessageRole, NewMessage, SpanInfo as NewSpanInfo, SpanRole, TurnInfo,
+    TurnStore, TurnWithContent, ViewInfo,
+};
 use crate::storage::content::{StoredMessage, StoredPayload};
+use crate::storage::content_block::sqlite::store_content_sync;
+use crate::storage::content_block::types::{ContentOrigin, ContentType, OriginKind};
+use crate::storage::ids::{
+    ContentBlockId, ConversationId, MessageId, SpanId, TurnId, ViewId,
+};
 use crate::storage::session::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 
@@ -766,5 +775,618 @@ impl ConversationStore for SqliteStore {
         self.add_span_message(&span_id, Role::Assistant, content)
             .await?;
         Ok(span_id)
+    }
+}
+
+// ============================================================================
+// TurnStore Implementation
+// ============================================================================
+
+#[async_trait]
+impl TurnStore for SqliteStore {
+    // ========== Turn Management ==========
+
+    async fn add_turn(
+        &self,
+        conversation_id: &ConversationId,
+        role: SpanRole,
+    ) -> Result<TurnInfo> {
+        let conn = self.conn().lock().unwrap();
+        let id = TurnId::new();
+        let now = unix_timestamp();
+
+        // Get next sequence number
+        let sequence_number: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM turns WHERE conversation_id = ?1",
+                params![conversation_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        conn.execute(
+            "INSERT INTO turns (id, conversation_id, role, sequence_number, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id.as_str(), conversation_id.as_str(), role.as_str(), sequence_number, now],
+        )?;
+
+        Ok(TurnInfo {
+            id,
+            conversation_id: conversation_id.clone(),
+            role,
+            sequence_number,
+            created_at: now,
+        })
+    }
+
+    async fn get_turns(&self, conversation_id: &ConversationId) -> Result<Vec<TurnInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, role, sequence_number, created_at
+             FROM turns WHERE conversation_id = ?1
+             ORDER BY sequence_number",
+        )?;
+
+        let turns = stmt
+            .query_map(params![conversation_id.as_str()], |row| {
+                let id: String = row.get(0)?;
+                let conv_id: String = row.get(1)?;
+                let role_str: String = row.get(2)?;
+                let seq: i32 = row.get(3)?;
+                let created: i64 = row.get(4)?;
+                Ok((id, conv_id, role_str, seq, created))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, conv_id, role_str, seq, created)| {
+                let role = SpanRole::from_str(&role_str)?;
+                Some(TurnInfo {
+                    id: TurnId::from_string(id),
+                    conversation_id: ConversationId::from_string(conv_id),
+                    role,
+                    sequence_number: seq,
+                    created_at: created,
+                })
+            })
+            .collect();
+
+        Ok(turns)
+    }
+
+    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<TurnInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let result = conn.query_row(
+            "SELECT id, conversation_id, role, sequence_number, created_at
+             FROM turns WHERE id = ?1",
+            params![turn_id.as_str()],
+            |row| {
+                let id: String = row.get(0)?;
+                let conv_id: String = row.get(1)?;
+                let role_str: String = row.get(2)?;
+                let seq: i32 = row.get(3)?;
+                let created: i64 = row.get(4)?;
+                Ok((id, conv_id, role_str, seq, created))
+            },
+        );
+
+        match result {
+            Ok((id, conv_id, role_str, seq, created)) => {
+                let role = SpanRole::from_str(&role_str)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid role: {}", role_str))?;
+                Ok(Some(TurnInfo {
+                    id: TurnId::from_string(id),
+                    conversation_id: ConversationId::from_string(conv_id),
+                    role,
+                    sequence_number: seq,
+                    created_at: created,
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // ========== Span Management ==========
+
+    async fn add_span(
+        &self,
+        turn_id: &TurnId,
+        model_id: Option<&str>,
+    ) -> Result<NewSpanInfo> {
+        let conn = self.conn().lock().unwrap();
+        let id = SpanId::new();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO ucm_spans (id, turn_id, model_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id.as_str(), turn_id.as_str(), model_id, now],
+        )?;
+
+        Ok(NewSpanInfo {
+            id,
+            turn_id: turn_id.clone(),
+            model_id: model_id.map(|s| s.to_string()),
+            message_count: 0,
+            created_at: now,
+        })
+    }
+
+    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<NewSpanInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.turn_id, s.model_id, s.created_at,
+                    (SELECT COUNT(*) FROM ucm_messages m WHERE m.span_id = s.id) as message_count
+             FROM ucm_spans s WHERE s.turn_id = ?1
+             ORDER BY s.created_at",
+        )?;
+
+        let spans = stmt
+            .query_map(params![turn_id.as_str()], |row| {
+                let id: String = row.get(0)?;
+                let tid: String = row.get(1)?;
+                let model: Option<String> = row.get(2)?;
+                let created: i64 = row.get(3)?;
+                let msg_count: i32 = row.get(4)?;
+                Ok((id, tid, model, created, msg_count))
+            })?
+            .filter_map(|r| r.ok())
+            .map(|(id, tid, model, created, msg_count)| NewSpanInfo {
+                id: SpanId::from_string(id),
+                turn_id: TurnId::from_string(tid),
+                model_id: model,
+                message_count: msg_count,
+                created_at: created,
+            })
+            .collect();
+
+        Ok(spans)
+    }
+
+    async fn get_span(&self, span_id: &SpanId) -> Result<Option<NewSpanInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let result = conn.query_row(
+            "SELECT s.id, s.turn_id, s.model_id, s.created_at,
+                    (SELECT COUNT(*) FROM ucm_messages m WHERE m.span_id = s.id) as message_count
+             FROM ucm_spans s WHERE s.id = ?1",
+            params![span_id.as_str()],
+            |row| {
+                let id: String = row.get(0)?;
+                let tid: String = row.get(1)?;
+                let model: Option<String> = row.get(2)?;
+                let created: i64 = row.get(3)?;
+                let msg_count: i32 = row.get(4)?;
+                Ok((id, tid, model, created, msg_count))
+            },
+        );
+
+        match result {
+            Ok((id, tid, model, created, msg_count)) => Ok(Some(NewSpanInfo {
+                id: SpanId::from_string(id),
+                turn_id: TurnId::from_string(tid),
+                model_id: model,
+                message_count: msg_count,
+                created_at: created,
+            })),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // ========== Message Management ==========
+
+    async fn add_message(
+        &self,
+        span_id: &SpanId,
+        message: NewMessage,
+    ) -> Result<MessageInfo> {
+        let conn = self.conn().lock().unwrap();
+        let id = MessageId::new();
+        let now = unix_timestamp();
+
+        // Get next sequence number
+        let sequence_number: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM ucm_messages WHERE span_id = ?1",
+                params![span_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Store text in content_blocks if present
+        let content_id: Option<ContentBlockId> = if let Some(ref text) = message.text {
+            let origin = match message.role {
+                MessageRole::User => ContentOrigin {
+                    kind: Some(OriginKind::User),
+                    ..Default::default()
+                },
+                MessageRole::Assistant => ContentOrigin {
+                    kind: Some(OriginKind::Assistant),
+                    ..Default::default()
+                },
+                MessageRole::System => ContentOrigin {
+                    kind: Some(OriginKind::System),
+                    ..Default::default()
+                },
+                MessageRole::Tool => ContentOrigin {
+                    kind: Some(OriginKind::System),
+                    ..Default::default()
+                },
+            };
+            let result = store_content_sync(&conn, text, ContentType::Plain, false, origin)?;
+            Some(result.id)
+        } else {
+            None
+        };
+
+        conn.execute(
+            "INSERT INTO ucm_messages (id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id.as_str(),
+                span_id.as_str(),
+                sequence_number,
+                message.role.as_str(),
+                content_id.as_ref().map(|c| c.as_str()),
+                message.tool_calls,
+                message.tool_results,
+                now
+            ],
+        )?;
+
+        Ok(MessageInfo {
+            id,
+            span_id: span_id.clone(),
+            sequence_number,
+            role: message.role,
+            content_id,
+            tool_calls: message.tool_calls,
+            tool_results: message.tool_results,
+            created_at: now,
+        })
+    }
+
+    async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at
+             FROM ucm_messages WHERE span_id = ?1
+             ORDER BY sequence_number",
+        )?;
+
+        let messages = stmt
+            .query_map(params![span_id.as_str()], |row| {
+                let id: String = row.get(0)?;
+                let sid: String = row.get(1)?;
+                let seq: i32 = row.get(2)?;
+                let role_str: String = row.get(3)?;
+                let content_id: Option<String> = row.get(4)?;
+                let tool_calls: Option<String> = row.get(5)?;
+                let tool_results: Option<String> = row.get(6)?;
+                let created: i64 = row.get(7)?;
+                Ok((id, sid, seq, role_str, content_id, tool_calls, tool_results, created))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, sid, seq, role_str, content_id, tool_calls, tool_results, created)| {
+                let role = MessageRole::from_str(&role_str)?;
+                Some(MessageInfo {
+                    id: MessageId::from_string(id),
+                    span_id: SpanId::from_string(sid),
+                    sequence_number: seq,
+                    role,
+                    content_id: content_id.map(ContentBlockId::from_string),
+                    tool_calls,
+                    tool_results,
+                    created_at: created,
+                })
+            })
+            .collect();
+
+        Ok(messages)
+    }
+
+    async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let result = conn.query_row(
+            "SELECT id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at
+             FROM ucm_messages WHERE id = ?1",
+            params![message_id.as_str()],
+            |row| {
+                let id: String = row.get(0)?;
+                let sid: String = row.get(1)?;
+                let seq: i32 = row.get(2)?;
+                let role_str: String = row.get(3)?;
+                let content_id: Option<String> = row.get(4)?;
+                let tool_calls: Option<String> = row.get(5)?;
+                let tool_results: Option<String> = row.get(6)?;
+                let created: i64 = row.get(7)?;
+                Ok((id, sid, seq, role_str, content_id, tool_calls, tool_results, created))
+            },
+        );
+
+        match result {
+            Ok((id, sid, seq, role_str, content_id, tool_calls, tool_results, created)) => {
+                let role = MessageRole::from_str(&role_str)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid role: {}", role_str))?;
+                Ok(Some(MessageInfo {
+                    id: MessageId::from_string(id),
+                    span_id: SpanId::from_string(sid),
+                    sequence_number: seq,
+                    role,
+                    content_id: content_id.map(ContentBlockId::from_string),
+                    tool_calls,
+                    tool_results,
+                    created_at: created,
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // ========== View Management ==========
+
+    async fn create_view(
+        &self,
+        conversation_id: &ConversationId,
+        name: Option<&str>,
+        is_main: bool,
+    ) -> Result<ViewInfo> {
+        let conn = self.conn().lock().unwrap();
+        let id = ViewId::new();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO views (id, conversation_id, name, is_main, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id.as_str(), conversation_id.as_str(), name, is_main as i32, now],
+        )?;
+
+        Ok(ViewInfo {
+            id,
+            conversation_id: conversation_id.clone(),
+            name: name.map(|s| s.to_string()),
+            is_main,
+            forked_from_view_id: None,
+            forked_at_turn_id: None,
+            created_at: now,
+        })
+    }
+
+    async fn get_views(&self, conversation_id: &ConversationId) -> Result<Vec<ViewInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, conversation_id, name, is_main, forked_from_view_id, forked_at_turn_id, created_at
+             FROM views WHERE conversation_id = ?1
+             ORDER BY created_at",
+        )?;
+
+        let views = stmt
+            .query_map(params![conversation_id.as_str()], |row| {
+                let id: String = row.get(0)?;
+                let cid: String = row.get(1)?;
+                let name: Option<String> = row.get(2)?;
+                let is_main_int: i32 = row.get(3)?;
+                let forked_from: Option<String> = row.get(4)?;
+                let forked_at: Option<String> = row.get(5)?;
+                let created: i64 = row.get(6)?;
+                Ok((id, cid, name, is_main_int, forked_from, forked_at, created))
+            })?
+            .filter_map(|r| r.ok())
+            .map(|(id, cid, name, is_main_int, forked_from, forked_at, created)| ViewInfo {
+                id: ViewId::from_string(id),
+                conversation_id: ConversationId::from_string(cid),
+                name,
+                is_main: is_main_int != 0,
+                forked_from_view_id: forked_from.map(ViewId::from_string),
+                forked_at_turn_id: forked_at.map(TurnId::from_string),
+                created_at: created,
+            })
+            .collect();
+
+        Ok(views)
+    }
+
+    async fn get_main_view(&self, conversation_id: &ConversationId) -> Result<Option<ViewInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let result = conn.query_row(
+            "SELECT id, conversation_id, name, is_main, forked_from_view_id, forked_at_turn_id, created_at
+             FROM views WHERE conversation_id = ?1 AND is_main = 1",
+            params![conversation_id.as_str()],
+            |row| {
+                let id: String = row.get(0)?;
+                let cid: String = row.get(1)?;
+                let name: Option<String> = row.get(2)?;
+                let is_main_int: i32 = row.get(3)?;
+                let forked_from: Option<String> = row.get(4)?;
+                let forked_at: Option<String> = row.get(5)?;
+                let created: i64 = row.get(6)?;
+                Ok((id, cid, name, is_main_int, forked_from, forked_at, created))
+            },
+        );
+
+        match result {
+            Ok((id, cid, name, is_main_int, forked_from, forked_at, created)) => Ok(Some(ViewInfo {
+                id: ViewId::from_string(id),
+                conversation_id: ConversationId::from_string(cid),
+                name,
+                is_main: is_main_int != 0,
+                forked_from_view_id: forked_from.map(ViewId::from_string),
+                forked_at_turn_id: forked_at.map(TurnId::from_string),
+                created_at: created,
+            })),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    async fn select_span(
+        &self,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+        span_id: &SpanId,
+    ) -> Result<()> {
+        let conn = self.conn().lock().unwrap();
+        // Upsert: insert or update selection
+        conn.execute(
+            "INSERT INTO view_selections (view_id, turn_id, span_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(view_id, turn_id) DO UPDATE SET span_id = ?3",
+            params![view_id.as_str(), turn_id.as_str(), span_id.as_str()],
+        )?;
+        Ok(())
+    }
+
+    async fn get_selected_span(
+        &self,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+    ) -> Result<Option<SpanId>> {
+        let conn = self.conn().lock().unwrap();
+        let result = conn.query_row(
+            "SELECT span_id FROM view_selections WHERE view_id = ?1 AND turn_id = ?2",
+            params![view_id.as_str(), turn_id.as_str()],
+            |row| {
+                let span_id: String = row.get(0)?;
+                Ok(span_id)
+            },
+        );
+
+        match result {
+            Ok(span_id) => Ok(Some(SpanId::from_string(span_id))),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>> {
+        // First get the conversation_id for this view
+        let conn = self.conn().lock().unwrap();
+        let conversation_id: String = conn.query_row(
+            "SELECT conversation_id FROM views WHERE id = ?1",
+            params![view_id.as_str()],
+            |row| row.get(0),
+        )?;
+        drop(conn);
+
+        // Get all turns
+        let turns = self.get_turns(&ConversationId::from_string(conversation_id)).await?;
+
+        let mut result = Vec::new();
+        for turn in turns {
+            // Get selected span for this turn (or first span if none selected)
+            let selected_span_id = self.get_selected_span(view_id, &turn.id).await?;
+
+            let span = if let Some(span_id) = selected_span_id {
+                self.get_span(&span_id).await?
+            } else {
+                // Get first span for this turn
+                let spans = self.get_spans(&turn.id).await?;
+                spans.into_iter().next()
+            };
+
+            if let Some(span) = span {
+                let messages = self.get_messages(&span.id).await?;
+                result.push(TurnWithContent {
+                    turn,
+                    span,
+                    messages,
+                });
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn fork_view(
+        &self,
+        view_id: &ViewId,
+        at_turn_id: &TurnId,
+        name: Option<&str>,
+    ) -> Result<ViewInfo> {
+        // Get the original view
+        let conn = self.conn().lock().unwrap();
+        let (conversation_id, _): (String, i32) = conn.query_row(
+            "SELECT conversation_id, is_main FROM views WHERE id = ?1",
+            params![view_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        drop(conn);
+
+        // Create new view
+        let new_id = ViewId::new();
+        let now = unix_timestamp();
+
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT INTO views (id, conversation_id, name, is_main, forked_from_view_id, forked_at_turn_id, created_at)
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6)",
+            params![
+                new_id.as_str(),
+                &conversation_id,
+                name,
+                view_id.as_str(),
+                at_turn_id.as_str(),
+                now
+            ],
+        )?;
+
+        // Copy selections from original view up to (but not including) the fork turn
+        conn.execute(
+            "INSERT INTO view_selections (view_id, turn_id, span_id)
+             SELECT ?1, vs.turn_id, vs.span_id
+             FROM view_selections vs
+             JOIN turns t ON t.id = vs.turn_id
+             JOIN turns fork_turn ON fork_turn.id = ?3
+             WHERE vs.view_id = ?2
+               AND t.sequence_number < fork_turn.sequence_number",
+            params![new_id.as_str(), view_id.as_str(), at_turn_id.as_str()],
+        )?;
+
+        Ok(ViewInfo {
+            id: new_id,
+            conversation_id: ConversationId::from_string(conversation_id),
+            name: name.map(|s| s.to_string()),
+            is_main: false,
+            forked_from_view_id: Some(view_id.clone()),
+            forked_at_turn_id: Some(at_turn_id.clone()),
+            created_at: now,
+        })
+    }
+
+    // ========== Convenience Methods ==========
+
+    async fn add_user_turn(
+        &self,
+        conversation_id: &ConversationId,
+        text: &str,
+    ) -> Result<(TurnInfo, NewSpanInfo, MessageInfo)> {
+        let turn = self.add_turn(conversation_id, SpanRole::User).await?;
+        let span = self.add_span(&turn.id, None).await?;
+        let message = self.add_message(&span.id, NewMessage::user(text)).await?;
+
+        // Auto-select this span in the main view
+        if let Some(main_view) = self.get_main_view(conversation_id).await? {
+            self.select_span(&main_view.id, &turn.id, &span.id).await?;
+        }
+
+        Ok((turn, span, message))
+    }
+
+    async fn add_assistant_turn(
+        &self,
+        conversation_id: &ConversationId,
+        model_id: &str,
+        text: &str,
+    ) -> Result<(TurnInfo, NewSpanInfo, MessageInfo)> {
+        let turn = self.add_turn(conversation_id, SpanRole::Assistant).await?;
+        let span = self.add_span(&turn.id, Some(model_id)).await?;
+        let message = self.add_message(&span.id, NewMessage::assistant(text)).await?;
+
+        // Auto-select this span in the main view
+        if let Some(main_view) = self.get_main_view(conversation_id).await? {
+            self.select_span(&main_view.id, &turn.id, &span.id).await?;
+        }
+
+        Ok((turn, span, message))
     }
 }
