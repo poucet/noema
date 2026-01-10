@@ -84,10 +84,11 @@ Add entry to JOURNAL.md.
 
 ### idea <text>
 
-Add idea to IDEAS.md inbox.
+Add idea to IDEAS.md inbox and commit immediately.
 1. Take text from args or ask
 2. Append to Inbox table with date
-3. Confirm
+3. Run `jj commit` with only IDEAS.md
+4. Confirm
 
 ### handoff
 
