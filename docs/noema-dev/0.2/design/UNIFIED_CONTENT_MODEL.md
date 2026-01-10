@@ -340,33 +340,43 @@ Doc: v1 → v2 → v3 (current)
 
 ### 7. Cross-Reference
 
-Same content appears in multiple places. Documents can be referenced within conversations.
+Any entity can reference any other entity. References are first-class.
 
 ```
-ContentBlock "Meeting summary"
-  ↑
-  ├── Alternative in Conversation, position 5
-  ├── Revision 3 of Document "notes.md"
-  └── Item in Collection "Important"
+Referenceable entities:
+  - ContentBlock
+  - Document (or specific Revision)
+  - Conversation (or specific Position/Alternative)
+  - Collection (or specific Item)
 
-Conversation with DocumentRef:
-  Position 1: [user: "Summarize this doc" + DocumentRef("notes.md")]
-  Position 2: [assistant: response referencing doc content]
+Examples:
+  - Message references Document → RAG grounding
+  - Message references another Conversation → "as discussed in..."
+  - Document references Conversation → "generated from chat"
+  - Collection item references anything → organization
+  - ContentBlock used in multiple places → deduplication
 ```
 
-**Structure:** Content separate from usage. Multiple structures reference same ContentHash.
+**Reference types:**
 
-**References in conversations:**
-- `DocumentRef` in message content → points to Document
-- Document content injected into LLM context at render time
-- Enables RAG-style document grounding in conversations
+| From | To | Use case |
+|------|-----|----------|
+| Message | Document | RAG, "summarize this doc" |
+| Message | Conversation | "as we discussed in [chat]" |
+| Message | ContentBlock | Inline content, images |
+| Document | Conversation | "source: generated from [chat]" |
+| Document | Document | "see also", linked docs |
+| Collection Item | Any | Organization, bookmarks |
 
 **Operations:**
-- Any structure can reference any ContentBlock or Document
-- `backlinks(content)` → all places referencing it
-- `backlinks(document)` → all conversations referencing it
+- `reference(from, to)` → create link
+- `backlinks(entity)` → all entities referencing this one
+- References resolve at render time (get current content)
 
-**UI:** "Used in: [Conversation X], [Document Y], [Collection Z]"
+**UI:**
+- "Used in: [Conversation X], [Document Y], [Collection Z]"
+- Hover to preview referenced content
+- Click to navigate
 
 ---
 
