@@ -1,6 +1,6 @@
 //! SQLite session and transaction implementations
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use llm::{api::Role, ChatMessage};
 use rusqlite::{params, Connection};
@@ -281,10 +281,13 @@ impl SqliteSession {
             let role = msg.role.to_string();
             let stored_payload: StoredPayload = msg.payload.clone().into();
             let content_json = serde_json::to_string(&stored_payload)?;
-            let text_content = msg.get_text();
+            let text_content = {
+                let text = msg.get_text();
+                if text.is_empty() { None } else { Some(text) }
+            };
 
             // Store text in content_blocks and get content_id
-            let content_id = if let Some(text) = &text_content {
+            let content_id = if let Some(ref text) = text_content {
                 let origin_kind = match msg.role {
                     Role::User => Some("user"),
                     Role::Assistant => Some("assistant"),
@@ -390,10 +393,13 @@ impl SqliteSession {
                 let role = msg.role.to_string();
                 let stored_payload: StoredPayload = msg.payload.clone().into();
                 let content_json = serde_json::to_string(&stored_payload)?;
-                let text_content = msg.get_text();
+                let text_content = {
+                    let text = msg.get_text();
+                    if text.is_empty() { None } else { Some(text) }
+                };
 
                 // Store text in content_blocks and get content_id
-                let content_id = if let Some(text) = &text_content {
+                let content_id = if let Some(ref text) = text_content {
                     let origin_kind = match msg.role {
                         Role::User => Some("user"),
                         Role::Assistant => Some("assistant"),
