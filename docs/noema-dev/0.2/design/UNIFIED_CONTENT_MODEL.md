@@ -18,6 +18,7 @@
 | 6 | Edit & splice | Edit mid-conversation, optionally keep subsequent messages |
 | 7 | Versioned documents | Markdown/typst docs with revision history |
 | 8 | Cross-reference | Same content appears in conversation AND as document |
+| 9 | Structured data | Ordered lists, trees, tagged items, table views |
 
 ---
 
@@ -191,6 +192,113 @@ CREATE TABLE document_revisions (
 
 ---
 
+## Structure Layer: Collections (Structured Data)
+
+Collections provide structure over content: ordered lists, trees, tagged items.
+
+```
+Collection
+  └── CollectionItem (ordered, can be nested)
+        └── references ContentBlock (or another Collection)
+```
+
+### Use Cases
+
+| Structure | Example | How it works |
+|-----------|---------|--------------|
+| Ordered list | Task list, bookmarks | Items with `position` |
+| Tree | Folder hierarchy, outline | Items with `parent_item_id` |
+| Tagged items | Labeled conversations | Items have tags |
+| Table view | Kanban, spreadsheet | Items + columns as tags/fields |
+
+### Schema
+
+```sql
+CREATE TABLE collections (
+    id TEXT PRIMARY KEY,
+    user_id TEXT REFERENCES users(id),
+    name TEXT NOT NULL,
+    collection_type TEXT NOT NULL,     -- 'list', 'tree', 'tagged', 'table'
+    schema_json TEXT,                  -- defines columns/fields for table type
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE collection_items (
+    id TEXT PRIMARY KEY,
+    collection_id TEXT REFERENCES collections(id),
+    parent_item_id TEXT REFERENCES collection_items(id),  -- for trees
+    position INTEGER NOT NULL,         -- ordering within parent
+
+    -- What this item points to (one of these)
+    content_id TEXT REFERENCES content_blocks(id),
+    document_id TEXT REFERENCES documents(id),
+    conversation_id TEXT REFERENCES conversations(id),
+    subcollection_id TEXT REFERENCES collections(id),
+
+    -- Structured fields (for table views)
+    fields_json TEXT,                  -- {"status": "done", "priority": 1}
+
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE collection_item_tags (
+    item_id TEXT REFERENCES collection_items(id),
+    tag TEXT NOT NULL,
+    PRIMARY KEY (item_id, tag)
+);
+
+CREATE INDEX idx_collection_items_parent ON collection_items(collection_id, parent_item_id, position);
+CREATE INDEX idx_collection_item_tags ON collection_item_tags(tag);
+```
+
+### Examples
+
+**Ordered task list:**
+```
+Collection "My Tasks" (type: list)
+  ├── Item 1 (position: 0) → ContentBlock "Buy groceries"
+  ├── Item 2 (position: 1) → ContentBlock "Review PR"
+  └── Item 3 (position: 2) → ContentBlock "Write docs"
+```
+
+**Tree (folder hierarchy):**
+```
+Collection "Projects" (type: tree)
+  ├── Item "Work" (parent: null, position: 0)
+  │     ├── Item "Noema" (parent: Work, position: 0) → Conversation
+  │     └── Item "Other" (parent: Work, position: 1) → Document
+  └── Item "Personal" (parent: null, position: 1)
+        └── Item "Notes" (parent: Personal, position: 0) → Document
+```
+
+**Tagged items:**
+```
+Collection "Bookmarks" (type: tagged)
+  ├── Item → Conversation "AI chat" [tags: ai, research]
+  ├── Item → Document "Meeting notes" [tags: work, meetings]
+  └── Item → ContentBlock "Quote" [tags: quotes, ai]
+```
+
+**Table view (Kanban):**
+```
+Collection "Sprint Board" (type: table, schema: {status: enum, assignee: text})
+  ├── Item → ContentBlock "Feature A" {status: "todo", assignee: "alice"}
+  ├── Item → ContentBlock "Bug fix" {status: "in_progress", assignee: "bob"}
+  └── Item → ContentBlock "Refactor" {status: "done", assignee: "alice"}
+```
+
+### Key Properties
+
+1. **Items reference anything**: content, documents, conversations, or subcollections
+2. **Nesting via parent_item_id**: trees of arbitrary depth
+3. **Ordering via position**: stable sort within parent
+4. **Tags for cross-cutting organization**: filter across collections
+5. **Fields for structured data**: table views, kanban boards
+
+---
+
 ## Use Case Implementations
 
 ### 1. Agent Calling Tool
@@ -319,6 +427,43 @@ ContentBlock[xyz...] "Meeting summary"
 
 One storage location, multiple usages.
 
+### 9. Structured Data
+
+Organize any content into lists, trees, or tables.
+
+```
+Collection "Research" (type: tree)
+  ├── Item "Papers" (folder)
+  │     ├── Item → Document "Paper A.md"
+  │     └── Item → Document "Paper B.md"
+  ├── Item "Conversations" (folder)
+  │     ├── Item → Conversation "Chat about X" [tags: ml]
+  │     └── Item → Conversation "Chat about Y" [tags: nlp]
+  └── Item "Notes" (folder)
+        └── Item → ContentBlock "Quick thought"
+```
+
+```sql
+-- Create a project folder structure
+INSERT INTO collections (id, name, collection_type) VALUES ('proj1', 'Research', 'tree');
+
+-- Add folders
+INSERT INTO collection_items (collection_id, parent_item_id, position)
+VALUES ('proj1', NULL, 0);  -- "Papers" folder
+
+-- Add document to folder
+INSERT INTO collection_items (collection_id, parent_item_id, position, document_id)
+VALUES ('proj1', 'papers_folder', 0, 'doc_paper_a');
+
+-- Tag it
+INSERT INTO collection_item_tags (item_id, tag) VALUES ('item1', 'ml');
+```
+
+**Queries:**
+- "All items tagged 'ml'" → join on `collection_item_tags`
+- "Contents of Papers folder" → filter by `parent_item_id`, order by `position`
+- "Kanban by status" → group by `fields_json->>'status'`
+
 ---
 
 ## Summary of Changes from Current Schema
@@ -329,6 +474,7 @@ One storage location, multiple usages.
 | Thread owns spans | Thread selects spans | Sharing for splice |
 | No thread_span_selections | Add `thread_span_selections` | Explicit path definition |
 | Documents separate | Documents use `content_blocks` | Unified content |
+| No collections | Add `collections`, `collection_items` | Lists, trees, tags, tables |
 
 ---
 
@@ -348,5 +494,6 @@ One storage location, multiple usages.
 3. Migrate inline content to content_blocks
 4. Update spans to reference via messages table
 5. Migrate documents to use content_blocks
+6. Add `collections`, `collection_items`, `collection_item_tags` tables
 
 Each step backward-compatible.
