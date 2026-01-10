@@ -27,22 +27,27 @@
 **Separate content (heavy, immutable) from structure (lightweight, mutable).**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    CONTENT LAYER                        │
-│  (immutable, deduplicated, content-addressed)           │
-│                                                         │
-│  ContentBlock: id, body, content_type, origin           │
-└─────────────────────────────────────────────────────────┘
-                           ▲
-                           │ references
-                           │
-┌─────────────────────────────────────────────────────────┐
-│                   STRUCTURE LAYER                       │
-│  (mutable, cheap to fork, defines paths)                │
-│                                                         │
-│  Conversations: Thread → SpanSet → Span → Message       │
-│  Documents: Document → Revision                         │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     CONTENT LAYER                           │
+│  Immutable blobs with origin (who/what/when/derived-from)   │
+└─────────────────────────────────────────────────────────────┘
+                              ▲
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                    STRUCTURE LAYER                          │
+│                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │ Sequence +  │  │  Version    │  │   Tree +    │         │
+│  │ Alternatives│  │   Chain     │  │  Ordering   │         │
+│  │             │  │             │  │             │         │
+│  │ Conversation│  │  Document   │  │ Collection  │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+│         │                │                │                 │
+│         └────────────────┼────────────────┘                 │
+│                          ▼                                  │
+│                   Cross-References                          │
+│              (links between any entities)                   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -51,23 +56,23 @@
 
 ### ContentBlock
 
-Universal content primitive. All text, images, documents are content blocks.
+Universal content primitive. All text, images, documents stored as content blocks.
 
 ```
 ContentBlock {
-    id: ContentHash,           // SHA-256 of body
-    content_type: String,      // "text/markdown", "image/png", etc.
-    body: Bytes,
-    origin: ContentOrigin,
-    created_at: Timestamp,
+    id: ContentHash           // SHA-256 of body, content-addressed
+    content_type: String      // "text/markdown", "image/png", etc.
+    body: Bytes
+    origin: ContentOrigin
+    created_at: Timestamp
 }
 
 ContentOrigin {
-    kind: user | assistant | system | import | tool,
-    user_id: Option<UserId>,
-    model_id: Option<ModelId>,
-    source_id: Option<String>,           // external ID (google doc, url)
-    parent_content_id: Option<ContentHash>,  // if edited/derived
+    kind: user | assistant | system | import | tool
+    user_id: Option<UserId>                    // which user (multi-user)
+    model_id: Option<ModelId>                  // which model (if AI)
+    source_id: Option<String>                  // external ID (google doc, url)
+    parent_content_id: Option<ContentHash>     // if edited/derived
 }
 ```
 
@@ -79,421 +84,363 @@ ContentOrigin {
 
 ---
 
-## Structure Layer: Conversations
+## Structure Layer
 
-### Graph Structure
+### Three Structure Types
+
+| Type | Abstraction | Used for |
+|------|-------------|----------|
+| **Sequence + Alternatives** | Ordered positions, each with alternatives; views select path | Conversations |
+| **Version Chain** | Revisions with parent links, linear with branches | Documents |
+| **Tree + Ordering** | Nested items with position | Collections |
+
+All three reference the same content layer. Cross-references link between any entities.
+
+---
+
+## Structure Type 1: Sequence + Alternatives (Conversations)
+
+### Model
 
 ```
 Conversation
-  └── Thread (a path through span-space)
-        └── SpanSet (position in sequence, can have alternatives)
-              └── Span (one alternative at this position)
-                    └── Message (references ContentBlock)
+  └── Position (ordered slot in sequence)
+        └── Alternative (one option at this position)
+              └── Message → ContentBlock
+
+View (named path through positions)
+  └── selects one alternative at each position
 ```
 
-### Key Insight: Spans are Shareable
+### Key Insight: Alternatives are Shared
 
-A Thread doesn't own spans—it **selects** them. Multiple threads can select the same span.
+Views don't own alternatives—they **select** them. Multiple views can select the same alternative, or different alternatives at the same position.
 
 ```
-Thread A: [span1] → [span2] → [span3] → [span4]
-                              ↗
-Thread B: [span1] → [span2] → [span5] → [span4]  ← reuses span4!
+View A: [pos1:alt1] → [pos2:alt1] → [pos3:alt1] → [pos4:alt1]
+                                         ↗
+View B: [pos1:alt1] → [pos2:alt1] → [pos3:alt2] → [pos4:alt1]  ← reuses pos4:alt1!
 ```
 
-This enables **splice** (use case #6): edit position 3, but keep position 4 from original.
+This enables splice: edit position 3, but keep position 4 from original.
 
-### Schema
+### Operations
 
-```sql
--- Threads define paths
-CREATE TABLE threads (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT REFERENCES conversations(id),
-    parent_thread_id TEXT REFERENCES threads(id),  -- for subagents
-    fork_span_id TEXT REFERENCES spans(id),        -- where we forked from
-    name TEXT,
-    created_at INTEGER NOT NULL
-);
-
--- SpanSets are positions that can have alternatives
-CREATE TABLE span_sets (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT REFERENCES conversations(id),
-    sequence_number INTEGER NOT NULL,  -- position in conversation
-    span_type TEXT NOT NULL,           -- 'user' or 'assistant'
-    created_at INTEGER NOT NULL
-);
-
--- Spans are alternatives at a position
-CREATE TABLE spans (
-    id TEXT PRIMARY KEY,
-    span_set_id TEXT REFERENCES span_sets(id),
-    model_id TEXT,                     -- which model (if assistant)
-    created_at INTEGER NOT NULL
-);
-
--- Thread selections: which span each thread uses at each position
-CREATE TABLE thread_span_selections (
-    thread_id TEXT REFERENCES threads(id),
-    span_set_id TEXT REFERENCES span_sets(id),
-    span_id TEXT REFERENCES spans(id),
-    PRIMARY KEY (thread_id, span_set_id)
-);
-
--- Messages reference content
-CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    span_id TEXT REFERENCES spans(id),
-    sequence_number INTEGER NOT NULL,
-    role TEXT NOT NULL,
-    content_id TEXT REFERENCES content_blocks(id),
-    created_at INTEGER NOT NULL
-);
-```
+| Operation | Description |
+|-----------|-------------|
+| `add_position()` | Append new position to conversation |
+| `add_alternative(position, model)` | Add alternative at position |
+| `select(view, position, alternative)` | View selects which alternative |
+| `fork(view, position)` | New view sharing selections up to position |
+| `spawn_child(view, position)` | New conversation inheriting context |
 
 ---
 
-## Structure Layer: Documents
+## Structure Type 2: Version Chain (Documents)
 
-Documents have revision history, like conversations have span alternatives.
+### Model
 
 ```
 Document
-  └── Revision (version of document content)
-        └── references ContentBlock
+  └── Revision → ContentBlock
+        └── parent_revision (forms DAG)
 ```
 
-### Schema
+Linear history with optional branching. Current revision pointer.
 
-```sql
-CREATE TABLE documents (
-    id TEXT PRIMARY KEY,
-    user_id TEXT REFERENCES users(id),
-    title TEXT NOT NULL,
-    document_type TEXT NOT NULL,       -- 'markdown', 'typst', etc.
-    source TEXT NOT NULL,              -- 'user', 'ai', 'import'
-    source_id TEXT,                    -- external ID if imported
-    current_revision_id TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
+### Operations
 
-CREATE TABLE document_revisions (
-    id TEXT PRIMARY KEY,
-    document_id TEXT REFERENCES documents(id),
-    revision_number INTEGER NOT NULL,
-    parent_revision_id TEXT REFERENCES document_revisions(id),
-    content_id TEXT REFERENCES content_blocks(id),
-    created_at INTEGER NOT NULL,
-    created_by TEXT NOT NULL           -- user_id or model_id
-);
-```
+| Operation | Description |
+|-----------|-------------|
+| `commit(content)` | New revision, parent is current |
+| `branch(revision)` | New revision with different parent |
+| `checkout(revision)` | Move current pointer |
 
 ---
 
-## Structure Layer: Collections (Structured Data)
+## Structure Type 3: Tree + Ordering (Collections)
 
-Collections provide structure over content: ordered lists, trees, tagged items.
+### Model
 
 ```
 Collection
-  └── CollectionItem (ordered, can be nested)
-        └── references ContentBlock (or another Collection)
+  └── Item (has parent, position)
+        └── references: ContentBlock | Document | Conversation | Collection
+        └── tags: [String]
+        └── fields: {key: value}  // for table views
 ```
 
-### Use Cases
+### Variants
 
-| Structure | Example | How it works |
-|-----------|---------|--------------|
-| Ordered list | Task list, bookmarks | Items with `position` |
-| Tree | Folder hierarchy, outline | Items with `parent_item_id` |
-| Tagged items | Labeled conversations | Items have tags |
-| Table view | Kanban, spreadsheet | Items + columns as tags/fields |
+| Variant | Structure | Use case |
+|---------|-----------|----------|
+| List | Flat, ordered | Task list, bookmarks |
+| Tree | Nested, ordered | Folders, outlines |
+| Tagged | Flat + tags | Cross-cutting organization |
+| Table | Flat + fields | Kanban, spreadsheet |
 
-### Schema
+### Operations
 
-```sql
-CREATE TABLE collections (
-    id TEXT PRIMARY KEY,
-    user_id TEXT REFERENCES users(id),
-    name TEXT NOT NULL,
-    collection_type TEXT NOT NULL,     -- 'list', 'tree', 'tagged', 'table'
-    schema_json TEXT,                  -- defines columns/fields for table type
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE collection_items (
-    id TEXT PRIMARY KEY,
-    collection_id TEXT REFERENCES collections(id),
-    parent_item_id TEXT REFERENCES collection_items(id),  -- for trees
-    position INTEGER NOT NULL,         -- ordering within parent
-
-    -- What this item points to (one of these)
-    content_id TEXT REFERENCES content_blocks(id),
-    document_id TEXT REFERENCES documents(id),
-    conversation_id TEXT REFERENCES conversations(id),
-    subcollection_id TEXT REFERENCES collections(id),
-
-    -- Structured fields (for table views)
-    fields_json TEXT,                  -- {"status": "done", "priority": 1}
-
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE collection_item_tags (
-    item_id TEXT REFERENCES collection_items(id),
-    tag TEXT NOT NULL,
-    PRIMARY KEY (item_id, tag)
-);
-
-CREATE INDEX idx_collection_items_parent ON collection_items(collection_id, parent_item_id, position);
-CREATE INDEX idx_collection_item_tags ON collection_item_tags(tag);
-```
-
-### Examples
-
-**Ordered task list:**
-```
-Collection "My Tasks" (type: list)
-  ├── Item 1 (position: 0) → ContentBlock "Buy groceries"
-  ├── Item 2 (position: 1) → ContentBlock "Review PR"
-  └── Item 3 (position: 2) → ContentBlock "Write docs"
-```
-
-**Tree (folder hierarchy):**
-```
-Collection "Projects" (type: tree)
-  ├── Item "Work" (parent: null, position: 0)
-  │     ├── Item "Noema" (parent: Work, position: 0) → Conversation
-  │     └── Item "Other" (parent: Work, position: 1) → Document
-  └── Item "Personal" (parent: null, position: 1)
-        └── Item "Notes" (parent: Personal, position: 0) → Document
-```
-
-**Tagged items:**
-```
-Collection "Bookmarks" (type: tagged)
-  ├── Item → Conversation "AI chat" [tags: ai, research]
-  ├── Item → Document "Meeting notes" [tags: work, meetings]
-  └── Item → ContentBlock "Quote" [tags: quotes, ai]
-```
-
-**Table view (Kanban):**
-```
-Collection "Sprint Board" (type: table, schema: {status: enum, assignee: text})
-  ├── Item → ContentBlock "Feature A" {status: "todo", assignee: "alice"}
-  ├── Item → ContentBlock "Bug fix" {status: "in_progress", assignee: "bob"}
-  └── Item → ContentBlock "Refactor" {status: "done", assignee: "alice"}
-```
-
-### Key Properties
-
-1. **Items reference anything**: content, documents, conversations, or subcollections
-2. **Nesting via parent_item_id**: trees of arbitrary depth
-3. **Ordering via position**: stable sort within parent
-4. **Tags for cross-cutting organization**: filter across collections
-5. **Fields for structured data**: table views, kanban boards
+| Operation | Description |
+|-----------|-------------|
+| `add_item(parent, position, target)` | Add item to tree |
+| `move(item, new_parent, new_position)` | Reorder |
+| `tag(item, tags)` | Add tags |
+| `set_fields(item, fields)` | Set structured data |
 
 ---
 
-## Use Case Implementations
+## Use Case Analysis
 
 ### 1. Agent Calling Tool
 
-Normal flow. Span contains:
-- Assistant message with `tool_use`
-- Tool message with `tool_result`
+Sequential messages within single alternative. No branching.
 
 ```
-SpanSet[5] → Span[A] → [assistant: tool_use, tool: tool_result]
+Position 1: [user message]
+Position 2: [assistant: tool_call] [tool: result] [assistant: continues]
 ```
 
-No special structure needed.
-
-### 2. Agent → Subagent
-
-Parent spawns child thread with scoped context.
-
-```
-Parent Thread: [1] → [2] → [3] → [4:spawn] → [5:summary]
-                              ↓
-Child Thread:  [3] → [child work...] → [result]
-                     (forked from span 3)
-```
-
-```sql
--- Child thread
-INSERT INTO threads (parent_thread_id, fork_span_id, ...)
--- Child inherits selections up to fork point
--- Child result summarized back to parent at position 5
-```
-
-### 3. Agent ↔ Agent (Supervised)
-
-Two threads, human approves message passing.
-
-```
-Agent A Thread: [1] → [2] → [3:msg_to_B] → [6:msg_from_B] → ...
-Agent B Thread: [4:msg_from_A] → [5:msg_to_A] → ...
-```
-
-Messages cross-reference via shared ContentBlocks. Human approves before insertion.
-
-### 4. Parallel Models + Chaining
-
-Multiple spans at same position.
-
-```
-SpanSet[3]:
-  ├── Span[A] (claude) ← selected
-  ├── Span[B] (gpt-4)
-  └── Span[C] (gemini)
-
-Thread selects Span[A], continues from there.
-```
-
-```sql
--- User changes selection
-UPDATE thread_span_selections
-SET span_id = 'span_b'
-WHERE thread_id = ? AND span_set_id = ?;
-```
-
-### 5. Fork Conversation
-
-New thread from any span.
-
-```
-Original: [1] → [2] → [3] → [4] → [5]
-                       ↓
-Forked:   [1] → [2] → [3] → [6] → [7]  (shares 1,2,3)
-```
-
-```sql
-INSERT INTO threads (fork_span_id = 'span_3', ...);
--- Copy selections for positions 1-3
-INSERT INTO thread_span_selections
-SELECT new_thread_id, span_set_id, span_id
-FROM thread_span_selections
-WHERE thread_id = original AND sequence_number <= 3;
-```
-
-### 6. Edit & Splice
-
-Edit position 3, keep positions 4-5 from original.
-
-```
-Original: [1] → [2] → [3] → [4] → [5]
-                       ↓
-Edited:   [1] → [2] → [3'] → [4] → [5]  (3' is new, 4,5 reused)
-```
-
-```sql
--- Create new span at position 3
-INSERT INTO spans (span_set_id = span_set_3, ...);
--- Create new thread with edited selection
-INSERT INTO thread_span_selections VALUES
-  (new_thread, span_set_1, span_1),
-  (new_thread, span_set_2, span_2),
-  (new_thread, span_set_3, span_3_new),  -- edited
-  (new_thread, span_set_4, span_4),      -- reused!
-  (new_thread, span_set_5, span_5);      -- reused!
-```
-
-### 7. Versioned Documents
-
-Document with revision history.
-
-```
-Document "notes.md"
-  ├── Revision 1 → ContentBlock[abc...]
-  ├── Revision 2 → ContentBlock[def...] (parent: rev1)
-  └── Revision 3 → ContentBlock[ghi...] (parent: rev2)
-```
-
-### 8. Cross-Reference
-
-Same content in conversation AND document.
-
-```
-ContentBlock[xyz...] "Meeting summary"
-  ↑
-  ├── Message in Conversation (role: assistant)
-  └── DocumentRevision in "meeting-notes.md"
-```
-
-One storage location, multiple usages.
-
-### 9. Structured Data
-
-Organize any content into lists, trees, or tables.
-
-```
-Collection "Research" (type: tree)
-  ├── Item "Papers" (folder)
-  │     ├── Item → Document "Paper A.md"
-  │     └── Item → Document "Paper B.md"
-  ├── Item "Conversations" (folder)
-  │     ├── Item → Conversation "Chat about X" [tags: ml]
-  │     └── Item → Conversation "Chat about Y" [tags: nlp]
-  └── Item "Notes" (folder)
-        └── Item → ContentBlock "Quick thought"
-```
-
-```sql
--- Create a project folder structure
-INSERT INTO collections (id, name, collection_type) VALUES ('proj1', 'Research', 'tree');
-
--- Add folders
-INSERT INTO collection_items (collection_id, parent_item_id, position)
-VALUES ('proj1', NULL, 0);  -- "Papers" folder
-
--- Add document to folder
-INSERT INTO collection_items (collection_id, parent_item_id, position, document_id)
-VALUES ('proj1', 'papers_folder', 0, 'doc_paper_a');
-
--- Tag it
-INSERT INTO collection_item_tags (item_id, tag) VALUES ('item1', 'ml');
-```
-
-**Queries:**
-- "All items tagged 'ml'" → join on `collection_item_tags`
-- "Contents of Papers folder" → filter by `parent_item_id`, order by `position`
-- "Kanban by status" → group by `fields_json->>'status'`
+**Structure:** Sequence, single alternative per position.
+**No special handling needed.**
 
 ---
 
-## Summary of Changes from Current Schema
+### 2. Agent → Subagent
 
-| Current | Proposed | Why |
-|---------|----------|-----|
-| `span_messages.content` (inline) | `messages.content_id` (reference) | Dedup, cross-ref |
-| Thread owns spans | Thread selects spans | Sharing for splice |
-| No thread_span_selections | Add `thread_span_selections` | Explicit path definition |
-| Documents separate | Documents use `content_blocks` | Unified content |
-| No collections | Add `collections`, `collection_items` | Lists, trees, tags, tables |
+Parent spawns child conversation. Child works with scoped context. Result summarized back.
+
+```
+Parent:  P1 → P2 → P3 → [spawn] ─────────────────→ P4(summary)
+                    │                                   ▲
+                    ▼                                   │
+Child:            C1 → C2 → C3 → [result] ─────────────┘
+                  (inherits P1-P3 context)
+```
+
+**Structure needed:**
+- Parent-child relationship between conversations
+- Child inherits context (positions/alternatives) up to spawn point
+- Summary content flows back as new content in parent
+
+**Operations:**
+- `spawn_child(parent_view, position)` → new conversation
+- Child sees parent's context as read-only prefix
+- `summarize()` → ContentBlock injected into parent's next position
+
+---
+
+### 3. Agent ↔ Agent (Supervised)
+
+Two independent conversations. Human mediates message passing.
+
+```
+Agent A: A1 → A2 → A3 ──[propose to B]──→ A4(from B) → A5
+                              │                 ▲
+                              ▼                 │
+Agent B:              B1 → B2(from A) → B3 ──[propose to A]
+
+Human approves: A3→B2, B3→A4
+```
+
+**Structure needed:**
+- Two independent conversations
+- Proposed links (pending cross-references)
+- Approval state on links
+- Shared content (same ContentBlock in both conversations)
+
+**Operations:**
+- `propose_message(from_conv, to_conv, content)` → pending link
+- `approve(link)` → content added to target conversation
+- Both reference same ContentBlock (dedup)
+
+---
+
+### 4. Parallel Models + Chaining
+
+Multiple alternatives at a position. User selects. Chain continues from selection.
+
+```
+Position 3:
+  ├── Alt A (claude) ← selected
+  ├── Alt B (gpt-4)
+  └── Alt C (gemini)
+
+Position 4 continues from Alt A's context
+```
+
+**Structure:** Multiple alternatives at position. View selection determines path.
+
+**Operations:**
+- `add_alternative(position, model)` → generate with model
+- `select(view, position, alternative)` → choose winner
+- Selection change = context change for subsequent positions
+
+**UI consideration:**
+- Short alternatives → tabs inline
+- Many/long alternatives → dropdown or separate view
+
+---
+
+### 5. Fork Conversation
+
+Branch from any point. Paths diverge independently.
+
+```
+Original: P1 → P2 → P3 → P4 → P5
+                    │
+                    ▼
+Forked:   P1 → P2 → P3 → F4 → F5
+          (shared)    (new positions)
+```
+
+**Structure:** New view sharing positions up to fork point. New positions after.
+
+**Operations:**
+- `fork(view, position)` → new view
+- Positions 1-3 shared (same alternatives selected)
+- Position 4+ are new positions in conversation
+
+**UI consideration:**
+- Show fork relationship in conversation list
+- Breadcrumb: "Forked from [Original] at message 3"
+- Lineage view: tree of related conversations
+
+---
+
+### 6. Edit & Splice
+
+Edit a position. Optionally keep subsequent positions from original.
+
+```
+Original: P1 → P2 → P3 → P4 → P5
+                    │
+                    ▼
+Edited:   P1 → P2 → P3' → P4 → P5
+               (new alt)  (reused!)
+```
+
+**Key insight:** This is NOT a fork. It's:
+1. New alternative at position 3
+2. New view selecting: [alt1, alt1, alt_new, alt1, alt1]
+
+The original P4, P5 are reused because alternatives are shared across views.
+
+**Operations:**
+- `add_alternative(position_3, edited_content)`
+- `create_view(selections)` with mix of original and new alternatives
+
+**Constraint:** Reusing P4/P5 only makes sense if they don't depend on P3's specific content. May need to regenerate.
+
+---
+
+### 7. Versioned Documents
+
+Linear revision history with optional branching.
+
+```
+Doc: v1 → v2 → v3 (current)
+           │
+           └→ v2a → v2b (branch)
+```
+
+**Structure:** Version chain. Each revision → ContentBlock.
+
+**Operations:**
+- `commit(content)` → new revision
+- `branch(revision)` → new revision from old point
+- `checkout(revision)` → move current pointer
+
+---
+
+### 8. Cross-Reference
+
+Same content appears in multiple places.
+
+```
+ContentBlock "Meeting summary"
+  ↑
+  ├── Alternative in Conversation, position 5
+  ├── Revision 3 of Document "notes.md"
+  └── Item in Collection "Important"
+```
+
+**Structure:** Content separate from usage. Multiple structures reference same ContentHash.
+
+**Operations:**
+- Any structure can reference any ContentBlock
+- `backlinks(content)` → all places referencing it
+
+**UI:** "Used in: [Conversation X], [Document Y], [Collection Z]"
+
+---
+
+### 9. Structured Data
+
+Organize entities into trees/lists with metadata.
+
+```
+Collection "Research" (tree)
+  ├── Folder "Papers"
+  │     ├── Document "Paper A" [tags: ml, transformers]
+  │     └── Document "Paper B" [tags: ml, rl]
+  ├── Folder "Chats"
+  │     └── Conversation "Discussion" [tags: ml]
+  └── ContentBlock "Quick note"
+```
+
+**Structure:** Tree with ordering. Items reference any entity type.
+
+**Operations:**
+- `add_item(parent, position, target)`
+- `move(item, new_parent, new_position)`
+- `tag(item, tags)` → cross-cutting queries
+- `set_fields(item, fields)` → table/kanban views
+
+**Queries:**
+- "All items tagged 'ml'" → across collections
+- "Contents of Papers folder" → tree traversal
+- "Kanban by status" → group by field
+
+---
+
+## UI Considerations
+
+### Same Data, Different Views
+
+| Context | Appropriate View |
+|---------|------------------|
+| Few short alternatives | Tabs inline |
+| Many/long alternatives | List with previews |
+| Forked conversations | Tree showing lineage |
+| Subagent work | Collapsed summary, expandable |
+| Edit history at position | "Edited" badge, hover for original |
+
+### Navigation Needs
+
+- **Conversation list:** Show fork relationships, group by lineage
+- **Conversation detail:** Linear view with alternative indicators
+- **Lineage view:** Tree of related conversations
+- **Search:** Across all content, grouped by structure type
 
 ---
 
 ## Open Questions
 
-1. **GC**: When is content orphaned? Reference counting vs. sweep?
-2. **Large blobs**: Keep in BlobStore or unify with content_blocks?
-3. **Indexing**: Single FTS across all content, or per-type?
-4. **Migration**: Inline content → content_blocks extraction strategy?
+1. **Regeneration on splice:** If P4 depends on P3, does edit invalidate it?
+2. **Context inheritance:** How much parent context does subagent see?
+3. **Approval workflow:** How does supervised agent communication flow?
+4. **GC:** When is content orphaned?
+5. **Large alternatives:** When do tabs become unwieldy?
 
 ---
 
-## Migration Path
+## Summary
 
-1. Add `content_blocks` table
-2. Add `thread_span_selections` table
-3. Migrate inline content to content_blocks
-4. Update spans to reference via messages table
-5. Migrate documents to use content_blocks
-6. Add `collections`, `collection_items`, `collection_item_tags` tables
-
-Each step backward-compatible.
+| Structure | Core abstraction | Key operation |
+|-----------|------------------|---------------|
+| Conversation | Positions + alternatives + views | View selects path |
+| Document | Revision chain | Commit creates version |
+| Collection | Tree + ordering + tags | Items reference anything |
+| Content | Immutable blocks | Shared across structures |
+| Links | Cross-references | Connect any entities |
