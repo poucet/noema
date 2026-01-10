@@ -268,15 +268,18 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | # | Create | Update | Implement | SQL | Test |
 |---|--------|--------|-----------|-----|------|
 | 3.2.1 | `storage/conversation/types.rs` | — | `TurnInfo`, `SpanInfo`, `MessageInfo`, `SpanRole`, `NewMessage` | — | compile |
-| 3.2.2 | — | schema/migrations | — | `conversations` table, idx | fresh DB |
-| 3.2.3 | — | schema/migrations | — | `turns` table, unique seq, idx | fresh DB |
-| 3.2.4 | — | schema/migrations | — | `spans` table, CHECK role, idx | fresh DB |
-| 3.2.5 | — | schema/migrations | — | `messages` table, FK content_id | fresh DB |
-| 3.2.6 | `storage/conversation/mod.rs` | — | `ConversationStore` trait (signatures) | — | compile |
-| 3.2.7 | `storage/conversation/sqlite.rs` | — | `add_turn()`, `get_turns()` | — | compile |
-| 3.2.8 | — | sqlite.rs | `add_span()`, `add_child_span()`, `get_spans()`, `get_child_spans()` | — | compile |
-| 3.2.9 | — | sqlite.rs | `add_message()`, `get_messages()` via ContentBlockStore | — | compile |
-| 3.2.10 | `storage/conversation/tests.rs` | — | — | — | chain, multi-span, tool flow, search |
+| 3.2.2 | — | schema/migrations | — | `turns` table, unique seq, idx | fresh DB |
+| 3.2.3 | — | schema/migrations | — | `ucm_spans` table, idx | fresh DB |
+| 3.2.4 | — | schema/migrations | — | `ucm_messages` table, FK content_id | fresh DB |
+| 3.2.5 | — | schema/migrations | — | `views`, `view_selections` tables | fresh DB |
+| 3.2.6 | `storage/conversation/types.rs` | — | `TurnStore` trait (signatures) | — | compile |
+| 3.2.7 | `storage/conversation/sqlite.rs` | — | `add_turn()`, `get_turns()`, `get_turn()` | — | compile |
+| 3.2.8 | — | sqlite.rs | `add_span()`, `get_spans()`, `get_span()` | — | compile |
+| 3.2.9 | — | sqlite.rs | `add_message()`, `get_messages()`, `get_message()` | — | compile |
+| 3.2.10 | `storage/conversation/tests.rs` | — | — | — | chain, multi-span, tool flow |
+| 3.2.11 | — | session/sqlite.rs | Wire existing write paths to TurnStore | — | compile |
+| 3.2.12 | — | — | 🔧 User: Run app via `noema`, send messages | — | E2E verify |
+| 3.2.13 | — | — | 🔧 User: SQL verify `SELECT * FROM turns` shows data | — | data verify |
 
 ---
 

@@ -4,7 +4,7 @@
 //! All text content (messages, documents, revisions) is stored here
 //! with deduplication via SHA-256 hashing.
 
-mod types;
+pub mod types;
 
 #[cfg(feature = "sqlite")]
 pub(crate) mod sqlite;

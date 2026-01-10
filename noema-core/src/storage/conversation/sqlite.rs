@@ -7,16 +7,15 @@ use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 use super::{
-    ConversationInfo, ConversationStore, SpanInfo, SpanSetInfo, SpanSetWithContent, SpanType,
+    ConversationInfo, ConversationStore, SpanInfo as LegacySpanInfo, SpanSetInfo, SpanSetWithContent, SpanType,
     ThreadInfo,
 };
 use super::types::{
-    MessageInfo, MessageRole, NewMessage, SpanInfo as NewSpanInfo, SpanRole, TurnInfo,
+    MessageInfo, MessageRole, NewMessage, SpanInfo, SpanRole, TurnInfo,
     TurnStore, TurnWithContent, ViewInfo,
 };
 use crate::storage::content::{StoredMessage, StoredPayload};
 use crate::storage::content_block::sqlite::store_content_sync;
-use crate::storage::content_block::types::{ContentOrigin, ContentType, OriginKind};
 use crate::storage::ids::{
     ContentBlockId, ConversationId, MessageId, SpanId, TurnId, ViewId,
 };
@@ -558,7 +557,7 @@ impl ConversationStore for SqliteStore {
         }))
     }
 
-    async fn get_span_set_alternates(&self, span_set_id: &str) -> Result<Vec<SpanInfo>> {
+    async fn get_span_set_alternates(&self, span_set_id: &str) -> Result<Vec<LegacySpanInfo>> {
         let conn = self.conn().lock().unwrap();
 
         // Get selected_span_id for this span_set
@@ -582,7 +581,7 @@ impl ConversationStore for SqliteStore {
         let spans = stmt
             .query_map(params![span_set_id], |row| {
                 let id: String = row.get(0)?;
-                Ok(SpanInfo {
+                Ok(LegacySpanInfo {
                     id: id.clone(),
                     model_id: row.get(1)?,
                     created_at: row.get(2)?,
@@ -891,7 +890,7 @@ impl TurnStore for SqliteStore {
         &self,
         turn_id: &TurnId,
         model_id: Option<&str>,
-    ) -> Result<NewSpanInfo> {
+    ) -> Result<SpanInfo> {
         let conn = self.conn().lock().unwrap();
         let id = SpanId::new();
         let now = unix_timestamp();
@@ -902,7 +901,7 @@ impl TurnStore for SqliteStore {
             params![id.as_str(), turn_id.as_str(), model_id, now],
         )?;
 
-        Ok(NewSpanInfo {
+        Ok(SpanInfo {
             id,
             turn_id: turn_id.clone(),
             model_id: model_id.map(|s| s.to_string()),
@@ -911,7 +910,7 @@ impl TurnStore for SqliteStore {
         })
     }
 
-    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<NewSpanInfo>> {
+    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<SpanInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT s.id, s.turn_id, s.model_id, s.created_at,
@@ -930,7 +929,7 @@ impl TurnStore for SqliteStore {
                 Ok((id, tid, model, created, msg_count))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, tid, model, created, msg_count)| NewSpanInfo {
+            .map(|(id, tid, model, created, msg_count)| SpanInfo {
                 id: SpanId::from_string(id),
                 turn_id: TurnId::from_string(tid),
                 model_id: model,
@@ -942,7 +941,7 @@ impl TurnStore for SqliteStore {
         Ok(spans)
     }
 
-    async fn get_span(&self, span_id: &SpanId) -> Result<Option<NewSpanInfo>> {
+    async fn get_span(&self, span_id: &SpanId) -> Result<Option<SpanInfo>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT s.id, s.turn_id, s.model_id, s.created_at,
@@ -960,7 +959,7 @@ impl TurnStore for SqliteStore {
         );
 
         match result {
-            Ok((id, tid, model, created, msg_count)) => Ok(Some(NewSpanInfo {
+            Ok((id, tid, model, created, msg_count)) => Ok(Some(SpanInfo {
                 id: SpanId::from_string(id),
                 turn_id: TurnId::from_string(tid),
                 model_id: model,
@@ -994,26 +993,14 @@ impl TurnStore for SqliteStore {
 
         // Store text in content_blocks if present
         let content_id: Option<ContentBlockId> = if let Some(ref text) = message.text {
-            let origin = match message.role {
-                MessageRole::User => ContentOrigin {
-                    kind: Some(OriginKind::User),
-                    ..Default::default()
-                },
-                MessageRole::Assistant => ContentOrigin {
-                    kind: Some(OriginKind::Assistant),
-                    ..Default::default()
-                },
-                MessageRole::System => ContentOrigin {
-                    kind: Some(OriginKind::System),
-                    ..Default::default()
-                },
-                MessageRole::Tool => ContentOrigin {
-                    kind: Some(OriginKind::System),
-                    ..Default::default()
-                },
+            let origin_kind = match message.role {
+                MessageRole::User => Some("user"),
+                MessageRole::Assistant => Some("assistant"),
+                MessageRole::System => Some("system"),
+                MessageRole::Tool => Some("system"),
             };
-            let result = store_content_sync(&conn, text, ContentType::Plain, false, origin)?;
-            Some(result.id)
+            let content_block_id = store_content_sync(&conn, text, origin_kind, None, None)?;
+            Some(ContentBlockId::from_string(content_block_id))
         } else {
             None
         };
@@ -1259,14 +1246,15 @@ impl TurnStore for SqliteStore {
     }
 
     async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>> {
-        // First get the conversation_id for this view
-        let conn = self.conn().lock().unwrap();
-        let conversation_id: String = conn.query_row(
-            "SELECT conversation_id FROM views WHERE id = ?1",
-            params![view_id.as_str()],
-            |row| row.get(0),
-        )?;
-        drop(conn);
+        // First get the conversation_id for this view (in a block to drop conn before await)
+        let conversation_id = {
+            let conn = self.conn().lock().unwrap();
+            conn.query_row(
+                "SELECT conversation_id FROM views WHERE id = ?1",
+                params![view_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )?
+        };
 
         // Get all turns
         let turns = self.get_turns(&ConversationId::from_string(conversation_id)).await?;
@@ -1359,7 +1347,7 @@ impl TurnStore for SqliteStore {
         &self,
         conversation_id: &ConversationId,
         text: &str,
-    ) -> Result<(TurnInfo, NewSpanInfo, MessageInfo)> {
+    ) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
         let turn = self.add_turn(conversation_id, SpanRole::User).await?;
         let span = self.add_span(&turn.id, None).await?;
         let message = self.add_message(&span.id, NewMessage::user(text)).await?;
@@ -1377,7 +1365,7 @@ impl TurnStore for SqliteStore {
         conversation_id: &ConversationId,
         model_id: &str,
         text: &str,
-    ) -> Result<(TurnInfo, NewSpanInfo, MessageInfo)> {
+    ) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
         let turn = self.add_turn(conversation_id, SpanRole::Assistant).await?;
         let span = self.add_span(&turn.id, Some(model_id)).await?;
         let message = self.add_message(&span.id, NewMessage::assistant(text)).await?;
@@ -1388,5 +1376,253 @@ impl TurnStore for SqliteStore {
         }
 
         Ok((turn, span, message))
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_store() -> SqliteStore {
+        // SqliteStore::in_memory() initializes all schemas
+        SqliteStore::in_memory().unwrap()
+    }
+
+    fn create_test_conversation(store: &SqliteStore) -> ConversationId {
+        let conn = store.conn().lock().unwrap();
+        let id = ConversationId::new();
+        let now = unix_timestamp();
+        conn.execute(
+            "INSERT INTO conversations (id, created_at, updated_at) VALUES (?1, ?2, ?2)",
+            params![id.as_str(), now],
+        ).unwrap();
+        id
+    }
+
+    #[test]
+    fn test_turn_schema_creation() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::storage::content_block::sqlite::init_schema(&conn).unwrap();
+        init_schema(&conn).unwrap();
+
+        // Verify turns table exists
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='turns'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Verify ucm_spans table exists
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ucm_spans'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Verify ucm_messages table exists
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ucm_messages'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_add_turn() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Add a user turn
+        let turn = store.add_turn(&conv_id, SpanRole::User).await.unwrap();
+        assert_eq!(turn.sequence_number, 0);
+        assert_eq!(turn.role, SpanRole::User);
+        assert_eq!(turn.conversation_id, conv_id);
+
+        // Add another turn
+        let turn2 = store.add_turn(&conv_id, SpanRole::Assistant).await.unwrap();
+        assert_eq!(turn2.sequence_number, 1);
+        assert_eq!(turn2.role, SpanRole::Assistant);
+    }
+
+    #[tokio::test]
+    async fn test_get_turns() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Add multiple turns
+        store.add_turn(&conv_id, SpanRole::User).await.unwrap();
+        store.add_turn(&conv_id, SpanRole::Assistant).await.unwrap();
+        store.add_turn(&conv_id, SpanRole::User).await.unwrap();
+
+        // Get all turns
+        let turns = store.get_turns(&conv_id).await.unwrap();
+        assert_eq!(turns.len(), 3);
+        assert_eq!(turns[0].sequence_number, 0);
+        assert_eq!(turns[1].sequence_number, 1);
+        assert_eq!(turns[2].sequence_number, 2);
+    }
+
+    #[tokio::test]
+    async fn test_add_span() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        let turn = store.add_turn(&conv_id, SpanRole::Assistant).await.unwrap();
+
+        // Add a span with model
+        let span = store.add_span(&turn.id, Some("claude-3")).await.unwrap();
+        assert_eq!(span.turn_id, turn.id);
+        assert_eq!(span.model_id.as_deref(), Some("claude-3"));
+        assert_eq!(span.message_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_add_message() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        let turn = store.add_turn(&conv_id, SpanRole::User).await.unwrap();
+        let span = store.add_span(&turn.id, None).await.unwrap();
+
+        // Add a message
+        let msg = store.add_message(&span.id, NewMessage::user("Hello!")).await.unwrap();
+        assert_eq!(msg.sequence_number, 0);
+        assert_eq!(msg.role, MessageRole::User);
+        assert!(msg.content_id.is_some());
+
+        // Add another message
+        let msg2 = store.add_message(&span.id, NewMessage::user("Follow up")).await.unwrap();
+        assert_eq!(msg2.sequence_number, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_messages() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        let turn = store.add_turn(&conv_id, SpanRole::Assistant).await.unwrap();
+        let span = store.add_span(&turn.id, Some("claude-3")).await.unwrap();
+
+        // Add messages
+        store.add_message(&span.id, NewMessage::assistant("Thinking...")).await.unwrap();
+        store.add_message(&span.id, NewMessage::assistant_with_tools(None, r#"{"tool": "search"}"#)).await.unwrap();
+        store.add_message(&span.id, NewMessage::tool_result(r#"{"result": "found"}"#)).await.unwrap();
+        store.add_message(&span.id, NewMessage::assistant("Here's what I found.")).await.unwrap();
+
+        // Get all messages
+        let messages = store.get_messages(&span.id).await.unwrap();
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, MessageRole::Assistant);
+        assert_eq!(messages[1].role, MessageRole::Assistant);
+        assert!(messages[1].tool_calls.is_some());
+        assert_eq!(messages[2].role, MessageRole::Tool);
+        assert!(messages[2].tool_results.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_spans_at_turn() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        let turn = store.add_turn(&conv_id, SpanRole::Assistant).await.unwrap();
+
+        // Add multiple spans (parallel model responses)
+        let span1 = store.add_span(&turn.id, Some("claude-3")).await.unwrap();
+        let span2 = store.add_span(&turn.id, Some("gpt-4")).await.unwrap();
+        let span3 = store.add_span(&turn.id, Some("gemini")).await.unwrap();
+
+        // Add different message counts to each
+        store.add_message(&span1.id, NewMessage::assistant("Claude says hi")).await.unwrap();
+        store.add_message(&span1.id, NewMessage::assistant("And more")).await.unwrap();
+
+        store.add_message(&span2.id, NewMessage::assistant("GPT says hello")).await.unwrap();
+
+        store.add_message(&span3.id, NewMessage::assistant("Gemini here")).await.unwrap();
+        store.add_message(&span3.id, NewMessage::assistant("With tools")).await.unwrap();
+        store.add_message(&span3.id, NewMessage::assistant("Done")).await.unwrap();
+
+        // Get spans and verify message counts
+        let spans = store.get_spans(&turn.id).await.unwrap();
+        assert_eq!(spans.len(), 3);
+
+        // Verify message counts match (refresh spans to get updated counts)
+        let span1_fresh = store.get_span(&span1.id).await.unwrap().unwrap();
+        let span2_fresh = store.get_span(&span2.id).await.unwrap().unwrap();
+        let span3_fresh = store.get_span(&span3.id).await.unwrap().unwrap();
+
+        assert_eq!(span1_fresh.message_count, 2);
+        assert_eq!(span2_fresh.message_count, 1);
+        assert_eq!(span3_fresh.message_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_view_creation_and_selection() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Create main view
+        let view = store.create_view(&conv_id, Some("main"), true).await.unwrap();
+        assert!(view.is_main);
+
+        // Add turns and spans
+        let turn1 = store.add_turn(&conv_id, SpanRole::User).await.unwrap();
+        let span1 = store.add_span(&turn1.id, None).await.unwrap();
+        store.add_message(&span1.id, NewMessage::user("Hello")).await.unwrap();
+
+        let turn2 = store.add_turn(&conv_id, SpanRole::Assistant).await.unwrap();
+        let span2a = store.add_span(&turn2.id, Some("claude-3")).await.unwrap();
+        let span2b = store.add_span(&turn2.id, Some("gpt-4")).await.unwrap();
+        store.add_message(&span2a.id, NewMessage::assistant("Claude response")).await.unwrap();
+        store.add_message(&span2b.id, NewMessage::assistant("GPT response")).await.unwrap();
+
+        // Select spans for view
+        store.select_span(&view.id, &turn1.id, &span1.id).await.unwrap();
+        store.select_span(&view.id, &turn2.id, &span2b.id).await.unwrap(); // Select GPT
+
+        // Verify selection
+        let selected = store.get_selected_span(&view.id, &turn2.id).await.unwrap();
+        assert_eq!(selected, Some(span2b.id.clone()));
+
+        // Get view path
+        let path = store.get_view_path(&view.id).await.unwrap();
+        assert_eq!(path.len(), 2);
+        assert_eq!(path[1].span.model_id.as_deref(), Some("gpt-4"));
+    }
+
+    #[tokio::test]
+    async fn test_convenience_methods() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Create main view first
+        store.create_view(&conv_id, None, true).await.unwrap();
+
+        // Use convenience methods
+        let (turn1, span1, msg1) = store.add_user_turn(&conv_id, "Hi there!").await.unwrap();
+        assert_eq!(turn1.role, SpanRole::User);
+        assert_eq!(msg1.role, MessageRole::User);
+
+        let (turn2, span2, msg2) = store.add_assistant_turn(&conv_id, "claude-3", "Hello!").await.unwrap();
+        assert_eq!(turn2.role, SpanRole::Assistant);
+        assert_eq!(span2.model_id.as_deref(), Some("claude-3"));
+        assert_eq!(msg2.role, MessageRole::Assistant);
+
+        // Verify auto-selection in main view
+        let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
+        let selected = store.get_selected_span(&main_view.id, &turn2.id).await.unwrap();
+        assert_eq!(selected, Some(span2.id));
     }
 }
