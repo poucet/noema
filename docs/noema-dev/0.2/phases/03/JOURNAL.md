@@ -262,3 +262,32 @@ User verified E2E functionality:
 - Dual-write pattern for safe migration (write to both old and new, read from old)
 
 ---
+
+## 2026-01-10: Feature 3.2 Conversation Structure Started
+
+### 3.2.1 Types Definition Complete
+
+Created `storage/conversation/types.rs` with UCM conversation hierarchy:
+
+**Types Added:**
+- `SpanRole` - user/assistant (identifies span owner)
+- `MessageRole` - user/assistant/system/tool (for multi-step flows)
+- `TurnInfo` - Position in conversation sequence
+- `SpanInfo` - One response option at a turn (sequence of messages)
+- `MessageInfo` - Individual content within a span
+- `ViewInfo` - Path through spans (selects one per turn)
+- `ViewSelection` - Selection of span at a turn
+- `NewMessage` - Builder for creating messages
+- `TurnWithContent`, `SpanWithMessages` - Composite query types
+
+### Terminology Unification
+
+Updated design doc and TASKS.md to use consistent terminology:
+- "Alternative" → "Span" everywhere
+- Schema: `alternatives` table → `spans` table
+- Columns: `alternative_id` → `span_id`
+- Trait methods: `add_alternative()` → `add_span()`, `select_alternative()` → `select_span()`
+
+This aligns the design doc with the existing codebase naming (we already have `SpanInfo`).
+
+---

@@ -37,7 +37,7 @@
 │                                                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
 │  │ Sequence +  │  │  Version    │  │   Tree +    │         │
-│  │ Alternatives│  │   Chain     │  │  Ordering   │         │
+│  │   Spans     │  │   Chain     │  │  Ordering   │         │
 │  │             │  │             │  │             │         │
 │  │ Conversation│  │  Document   │  │ Collection  │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
@@ -132,7 +132,7 @@ Message {
 
 | Type | Abstraction | Used for |
 |------|-------------|----------|
-| **Sequence + Alternatives** | Ordered positions, each with alternatives; views select path | Conversations |
+| **Sequence + Spans** | Ordered positions, each with spans; views select path | Conversations |
 | **Version Chain** | Revisions with parent links, linear with branches | Documents |
 | **Tree + Ordering** | Nested items with position | Collections |
 
@@ -144,39 +144,39 @@ All three reference the same content layer. Cross-references link between any en
 
 ### Model
 
-A conversation is a sequence of **turns**. Each turn has a role (user/assistant) and one or more **alternatives**. An alternative is a **span of messages** (not a single message).
+A conversation is a sequence of **turns**. Each turn has a role (user/assistant) and one or more **spans**. A span is a sequence of messages (not a single message).
 
 ```
 Conversation
   └── Turn (user or assistant turn)
-        └── Alternative (one possible response span)
+        └── Span (one possible response - a sequence of messages)
               └── [Message, Message, ...] → each Message has ContentBlockRef
 
 View (named path through conversation)
-  └── selects one alternative at each turn
+  └── selects one span at each turn
 ```
 
-### Why Alternatives are Spans
+### Why Spans Contain Multiple Messages
 
 Different models (or regenerations) produce different numbers of messages for the same turn:
 
 ```
 Turn 3 (assistant):
-  ├── Alt A (claude):  [thinking] → [tool_call] → [tool_result] → [response]  (4 messages)
-  ├── Alt B (gpt-4):   [tool_call] → [tool_result] → [response]               (3 messages)
-  └── Alt C (gemini):  [response]                                              (1 message)
+  ├── Span A (claude):  [thinking] → [tool_call] → [tool_result] → [response]  (4 messages)
+  ├── Span B (gpt-4):   [tool_call] → [tool_result] → [response]               (3 messages)
+  └── Span C (gemini):  [response]                                              (1 message)
 ```
 
-All three are valid alternatives for the same assistant turn, despite having different lengths.
+All three are valid spans for the same assistant turn, despite having different lengths.
 
-### Key Insight: Alternatives are Shared
+### Key Insight: Spans are Shared
 
-Views don't own alternatives—they **select** them. Multiple views can select the same alternative, or different alternatives at the same turn.
+Views don't own spans—they **select** them. Multiple views can select the same span, or different spans at the same turn.
 
 ```
-View A: [turn1:alt1] → [turn2:alt1] → [turn3:alt1] → [turn4:alt1]
-                                           ↗
-View B: [turn1:alt1] → [turn2:alt1] → [turn3:alt2] → [turn4:alt1]  ← reuses turn4:alt1!
+View A: [turn1:span1] → [turn2:span1] → [turn3:span1] → [turn4:span1]
+                                             ↗
+View B: [turn1:span1] → [turn2:span1] → [turn3:span2] → [turn4:span1]  ← reuses turn4:span1!
 ```
 
 This enables splice: edit turn 3, but keep turn 4 from original.
@@ -186,8 +186,8 @@ This enables splice: edit turn 3, but keep turn 4 from original.
 | Operation | Description |
 |-----------|-------------|
 | `add_turn(role)` | Append new turn to conversation |
-| `add_alternative(turn, model)` | Generate alternative span at turn |
-| `select(view, turn, alternative)` | View selects which alternative |
+| `add_span(turn, model)` | Generate span at turn |
+| `select(view, turn, span)` | View selects which span |
 | `fork(view, turn)` | New view sharing selections up to turn |
 | `spawn_child(view, turn)` | New conversation inheriting context |
 
@@ -256,7 +256,7 @@ Parent spawns child conversation. Child works with scoped context. Result summar
 ```
 Parent:  T1 → T2 → T3 ─────────────────────────────→ T4(with summary)
                     │                                      ▲
-                    └─ Alt A contains child span:          │
+                    └─ Span A contains child messages:     │
                          [spawn] → [child work...] → [summary]
                                         │
                                         ▼
@@ -264,18 +264,18 @@ Child:                                C1 → C2 → C3
                                    (inherits T1-T2 context)
 ```
 
-**Key insight:** The subagent call is part of the parent's turn alternative. The child conversation is a separate entity, but its summary becomes part of the parent's message span.
+**Key insight:** The subagent call is part of the parent's turn span. The child conversation is a separate entity, but its summary becomes part of the parent's span.
 
 **Structure needed:**
 - Parent-child relationship between conversations
-- Child inherits context (turns/alternatives) up to spawn point
-- Child span embedded within parent's alternative
+- Child inherits context (turns/spans) up to spawn point
+- Child messages embedded within parent's span
 - Summary content flows back as message in parent's span
 
 **Operations:**
 - `spawn_child(parent_view, turn)` → new conversation
 - Child sees parent's context as read-only prefix
-- Child messages form nested span within parent's alternative
+- Child messages form nested sequence within parent's span
 - `summarize()` → ContentBlock added to parent's current span
 
 ---
@@ -308,30 +308,30 @@ Human approves: A3→B2, B3→A4
 
 ### 3. Parallel Models + Chaining
 
-Multiple alternatives at a turn. User selects. Chain continues from selection.
+Multiple spans at a turn. User selects. Chain continues from selection.
 
 ```
 Turn 3 (assistant):
-  ├── Alt A (claude) ← selected
+  ├── Span A (claude) ← selected
   │     └── [thinking] → [tool_call] → [result] → [response]
-  ├── Alt B (gpt-4)
+  ├── Span B (gpt-4)
   │     └── [response]
-  └── Alt C (gemini)
+  └── Span C (gemini)
         └── [tool_call] → [result] → [response]
 
-Turn 4 continues from Alt A's context
+Turn 4 continues from Span A's context
 ```
 
-**Structure:** Multiple alternatives at turn. Each alternative is a span of messages. View selection determines path.
+**Structure:** Multiple spans at turn. Each span contains a sequence of messages. View selection determines path.
 
 **Operations:**
-- `add_alternative(turn, model)` → generate with model
-- `select(view, turn, alternative)` → choose winner
+- `add_span(turn, model)` → generate with model
+- `select(view, turn, span)` → choose winner
 - Selection change = context change for subsequent turns
 
 **UI consideration:**
-- Short alternatives → tabs inline
-- Many/long alternatives → dropdown or separate view
+- Short spans → tabs inline
+- Many/long spans → dropdown or separate view
 
 ---
 
@@ -351,7 +351,7 @@ Forked:   T1 → T2 → T3 → F4 → F5
 
 **Operations:**
 - `fork(view, turn)` → new view
-- Turns 1-3 shared (same alternatives selected)
+- Turns 1-3 shared (same spans selected)
 - Turn 4+ are new turns in conversation
 
 **UI consideration:**
@@ -370,18 +370,18 @@ Original: T1 → T2 → T3 → T4 → T5
                     │
                     ▼
 Edited:   T1 → T2 → T3' → T4 → T5
-               (new alt)  (reused!)
+               (new span)  (reused!)
 ```
 
 **Key insight:** This is NOT a fork. It's:
-1. New alternative at turn 3
-2. New view selecting: [alt1, alt1, alt_new, alt1, alt1]
+1. New span at turn 3
+2. New view selecting: [span1, span1, span_new, span1, span1]
 
-The original T4, T5 are reused because alternatives are shared across views.
+The original T4, T5 are reused because spans are shared across views.
 
 **Operations:**
-- `add_alternative(turn_3, edited_content)`
-- `create_view(selections)` with mix of original and new alternatives
+- `add_span(turn_3, edited_content)`
+- `create_view(selections)` with mix of original and new spans
 
 **Constraint:** Reusing T4/T5 only makes sense if they don't depend on T3's specific content. May need to regenerate.
 
@@ -414,7 +414,7 @@ Any entity can reference any other entity. References are first-class.
 Referenceable entities:
   - ContentBlock
   - Document (or specific Revision)
-  - Conversation (or specific Position/Alternative)
+  - Conversation (or specific Turn/Span)
   - Collection (or specific Item)
 
 Examples:
@@ -483,8 +483,8 @@ Collection "Research" (tree)
 
 | Context | Appropriate View |
 |---------|------------------|
-| Few short alternatives | Tabs inline |
-| Many/long alternatives | List with previews |
+| Few short spans | Tabs inline |
+| Many/long spans | List with previews |
 | Forked conversations | Tree showing lineage |
 | Subagent work | Collapsed summary, expandable |
 | Edit history at position | "Edited" badge, hover for original |
@@ -492,7 +492,7 @@ Collection "Research" (tree)
 ### Navigation Needs
 
 - **Conversation list:** Show fork relationships, group by lineage
-- **Conversation detail:** Linear view with alternative indicators
+- **Conversation detail:** Linear view with span indicators
 - **Lineage view:** Tree of related conversations
 - **Search:** Across all content, grouped by structure type
 
@@ -504,7 +504,7 @@ Collection "Research" (tree)
 2. **Context inheritance:** How much parent context does subagent see?
 3. **Approval workflow:** How does supervised agent communication flow?
 4. **GC:** When is content orphaned?
-5. **Large alternatives:** When do tabs become unwieldy?
+5. **Many spans:** When do tabs become unwieldy?
 6. **Span boundaries:** When does a new message start vs continue same span?
 
 ---
@@ -513,25 +513,25 @@ Collection "Research" (tree)
 
 | Structure | Core abstraction | Key operation |
 |-----------|------------------|---------------|
-| Conversation | Turns + alternatives (spans) + views | View selects path through spans |
+| Conversation | Turns + spans + views | View selects path through spans |
 | Document | Revision chain | Commit creates version |
 | Collection | Tree + ordering + tags | Items reference anything |
 | Content | Immutable blocks | Shared across structures |
 | Links | Cross-references | Connect any entities |
 
-### Alternative as Span
+### Spans Contain Multiple Messages
 
-The key insight for conversations: an **alternative is a span of messages**, not a single message. This handles:
+The key insight for conversations: a **span is a sequence of messages**, not a single message. This handles:
 - Tool call iterations (model does N tool calls before responding)
 - Subagent work (spawn → child messages → summary)
 - Thinking/reasoning chains (thinking → response)
 
 ```
-Alternative {
-    id: AlternativeId
+Span {
+    id: SpanId
     turn_id: TurnId
     model_id: Option<ModelId>
-    messages: [Message]           // ordered span of messages
+    messages: [Message]           // ordered sequence of messages
     child_conversations: [ConversationRef]  // if spawned subagents
 }
 ```
@@ -597,14 +597,14 @@ CREATE TABLE assets (
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-2.1 | Conversations contain ordered turns | P0 |
-| FR-2.2 | Each turn has role (user/assistant) and one or more alternatives | P0 |
-| FR-2.3 | Each alternative is a span of messages (not single message) | P0 |
+| FR-2.2 | Each turn has role (user/assistant) and one or more spans | P0 |
+| FR-2.3 | Each span contains a sequence of messages (not single message) | P0 |
 | FR-2.4 | Messages reference ContentBlock for text, have inline tool_calls/tool_results | P0 |
-| FR-2.5 | Views select one alternative per turn | P0 |
-| FR-2.6 | Alternatives are shared across views | P0 |
+| FR-2.5 | Views select one span per turn | P0 |
+| FR-2.6 | Spans are shared across views | P0 |
 | FR-2.7 | Fork creates new view sharing selections up to fork point | P0 |
 | FR-2.8 | Spawn child creates new conversation inheriting parent context | P1 |
-| FR-2.9 | Child conversations tracked within parent's alternative | P1 |
+| FR-2.9 | Child conversations tracked within parent's span | P1 |
 
 **Schema:**
 
@@ -626,7 +626,7 @@ CREATE TABLE turns (
     UNIQUE (conversation_id, sequence_number)
 );
 
-CREATE TABLE alternatives (
+CREATE TABLE spans (
     id TEXT PRIMARY KEY,
     turn_id TEXT NOT NULL,
     model_id TEXT,
@@ -636,14 +636,14 @@ CREATE TABLE alternatives (
 
 CREATE TABLE messages (
     id TEXT PRIMARY KEY,
-    alternative_id TEXT NOT NULL,
+    span_id TEXT NOT NULL,
     sequence_number INTEGER NOT NULL,  -- order within span
     role TEXT NOT NULL,                -- user, assistant, system, tool
     content_id TEXT,                   -- FK to content_blocks (text)
     tool_calls TEXT,                   -- JSON array
     tool_results TEXT,                 -- JSON array
     created_at INTEGER NOT NULL,
-    FOREIGN KEY (alternative_id) REFERENCES alternatives(id),
+    FOREIGN KEY (span_id) REFERENCES spans(id),
     FOREIGN KEY (content_id) REFERENCES content_blocks(id)
 );
 
@@ -670,20 +670,20 @@ CREATE TABLE views (
 CREATE TABLE view_selections (
     view_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,
-    alternative_id TEXT NOT NULL,
+    span_id TEXT NOT NULL,
     PRIMARY KEY (view_id, turn_id),
     FOREIGN KEY (view_id) REFERENCES views(id),
     FOREIGN KEY (turn_id) REFERENCES turns(id),
-    FOREIGN KEY (alternative_id) REFERENCES alternatives(id)
+    FOREIGN KEY (span_id) REFERENCES spans(id)
 );
 
 -- Parent-child for subagent spawning
 CREATE TABLE conversation_children (
-    parent_alternative_id TEXT NOT NULL,
+    parent_span_id TEXT NOT NULL,
     child_conversation_id TEXT NOT NULL,
     spawn_position INTEGER NOT NULL,  -- where in parent's span
-    PRIMARY KEY (parent_alternative_id, child_conversation_id),
-    FOREIGN KEY (parent_alternative_id) REFERENCES alternatives(id),
+    PRIMARY KEY (parent_span_id, child_conversation_id),
+    FOREIGN KEY (parent_span_id) REFERENCES spans(id),
     FOREIGN KEY (child_conversation_id) REFERENCES conversations(id)
 );
 ```
@@ -696,28 +696,28 @@ trait ConversationStore {
     fn add_turn(&self, conversation_id: &str, role: Role) -> Result<Turn>;
     fn get_turns(&self, conversation_id: &str) -> Result<Vec<Turn>>;
 
-    // Alternative management (spans)
-    fn add_alternative(&self, turn_id: &str, model_id: Option<&str>) -> Result<Alternative>;
-    fn add_message_to_alternative(&self, alternative_id: &str, message: NewMessage) -> Result<Message>;
-    fn get_alternative_messages(&self, alternative_id: &str) -> Result<Vec<Message>>;
+    // Span management
+    fn add_span(&self, turn_id: &str, model_id: Option<&str>) -> Result<Span>;
+    fn add_message(&self, span_id: &str, message: NewMessage) -> Result<Message>;
+    fn get_messages(&self, span_id: &str) -> Result<Vec<Message>>;
 
     // View management
     fn create_view(&self, conversation_id: &str, name: Option<&str>) -> Result<View>;
     fn fork_view(&self, view_id: &str, at_turn_id: &str) -> Result<View>;
-    fn select_alternative(&self, view_id: &str, turn_id: &str, alternative_id: &str) -> Result<()>;
-    fn get_view_path(&self, view_id: &str) -> Result<Vec<(Turn, Alternative, Vec<Message>)>>;
+    fn select_span(&self, view_id: &str, turn_id: &str, span_id: &str) -> Result<()>;
+    fn get_view_path(&self, view_id: &str) -> Result<Vec<(Turn, Span, Vec<Message>)>>;
 
     // Subagent
-    fn spawn_child(&self, parent_alternative_id: &str, position: i32) -> Result<Conversation>;
+    fn spawn_child(&self, parent_span_id: &str, position: i32) -> Result<Conversation>;
     fn get_inherited_context(&self, child_id: &str) -> Result<Vec<Message>>;
 }
 ```
 
 **Acceptance Criteria:**
-- [ ] Create conversation with turns and alternatives
-- [ ] Alternative contains multiple messages (span)
-- [ ] Different alternatives at same turn have different message counts
-- [ ] Views select path through alternatives
+- [ ] Create conversation with turns and spans
+- [ ] Span contains multiple messages
+- [ ] Different spans at same turn have different message counts
+- [ ] Views select path through spans
 - [ ] Fork shares prior selections, diverges after
 - [ ] Spawn child inherits parent context
 
@@ -1090,13 +1090,13 @@ We adopt a **Strangler Fig** pattern with incremental steps. Each step is end-to
 
 ### Phase 2: Conversation Structure
 
-**Goal:** New Turn/Alternative/View model working alongside old SpanSet/Span/Thread model.
+**Goal:** New Turn/Span/View model working alongside old SpanSet/Span/Thread model.
 
 #### Step 2.1: New Tables (Shadow Mode)
 
 | Layer | Change |
 |-------|--------|
-| Storage | Create `turns`, `alternatives`, `messages_v2`, `views`, `view_selections` |
+| Storage | Create `turns`, `spans`, `messages_v2`, `views`, `view_selections` |
 | Backend | No change to existing code paths |
 | Protocol | No change |
 | Frontend | No change |
@@ -1108,7 +1108,7 @@ We adopt a **Strangler Fig** pattern with incremental steps. Each step is end-to
 | Layer | Change |
 |-------|--------|
 | Storage | Both old and new tables written |
-| Backend | `add_span_message()` also writes to new `messages_v2` via Turn/Alternative |
+| Backend | `add_span_message()` also writes to new `messages_v2` via Turn/Span |
 | Backend | Feature flag `ucm_dual_write=true` |
 | Protocol | No change |
 | Frontend | No change |
@@ -1131,7 +1131,7 @@ We adopt a **Strangler Fig** pattern with incremental steps. Each step is end-to
 | Layer | Change |
 |-------|--------|
 | Backend | `get_messages()` reads from new tables when `ucm_new_read=true` |
-| Protocol | New types for Turn/Alternative/View (versioned or feature-flagged) |
+| Protocol | New types for Turn/Span/View (versioned or feature-flagged) |
 | Frontend | Feature flag to use new protocol types |
 
 **Test:** Toggle flag, verify UI works with new data path. Compare behavior with old path.
@@ -1140,18 +1140,18 @@ We adopt a **Strangler Fig** pattern with incremental steps. Each step is end-to
 
 | Layer | Change |
 |-------|--------|
-| Backend | Implement `create_view()`, `fork_view()`, `select_alternative()` |
+| Backend | Implement `create_view()`, `fork_view()`, `select_span()` |
 | Protocol | Endpoints for view operations |
-| Frontend | UI for viewing alternatives, forking |
+| Frontend | UI for viewing spans, forking |
 
-**Test:** Create conversation, generate alternatives at a turn. Fork view. UI shows alternatives and allows selection.
+**Test:** Create conversation, generate spans at a turn. Fork view. UI shows spans and allows selection.
 
 #### Step 2.6: Migration Script
 
 | Layer | Change |
 |-------|--------|
 | Backend | Script converts old data to new structure |
-| | SpanSet → Turn, Span → Alternative, Thread → View |
+| | SpanSet → Turn, old Span → new Span, Thread → View |
 
 **Test:** Run migration. Verify all conversations accessible via new path. Dual-read shows no discrepancies.
 
@@ -1213,7 +1213,7 @@ We adopt a **Strangler Fig** pattern with incremental steps. Each step is end-to
 | Old Concept | New Concept | Notes |
 |-------------|-------------|-------|
 | `SpanSet` | `Turn` | A point in the conversation sequence. |
-| `Span` | `Alternative` | One possible generation/response at that turn. |
-| `SpanMessage` | `Message` | Now explicitly ordered within an Alternative. |
+| `Span` (old) | `Span` (new) | One possible generation/response at that turn. Now a sequence of messages. |
+| `SpanMessage` | `Message` | Now explicitly ordered within a Span. |
 | `Thread` | `View` | A linear path (selections) through the graph. |
 | `Forked Thread` | `View` (Forked) | A view sharing a prefix with another view. |

@@ -238,13 +238,13 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 
 ### Feature 3.2: Conversation Structure
 
-**Problem**: Current model doesn't support parallel model responses, multi-step tool interactions, or comparing alternatives.
+**Problem**: Current model doesn't support parallel model responses, multi-step tool interactions, or comparing different response options.
 
-**Solution**: Conversations as sequences of turns, each with alternative spans containing messages.
+**Solution**: Conversations as sequences of turns, each with one or more spans containing messages.
 
 **Functional Requirements**:
 - Conversation contains ordered turns (position in sequence)
-- Each turn has one or more spans (alternative responses)
+- Each turn has one or more spans (parallel responses)
 - Each span contains ordered messages (for multi-step flows)
 - Span has role (user/assistant) identifying owner
 - Message has role for multi-step support (assistant → tool → assistant)
@@ -254,7 +254,7 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 **Use Cases Enabled**:
 - Parallel model responses: Multiple spans at same turn, compare them
 - Tool interactions: Single span contains assistant → tool_call → tool_result → response
-- User edits as alternatives: Edit creates new user span at same turn
+- User edits: Edit creates new user span at same turn
 
 **Acceptance Criteria**:
 - [ ] Create conversation with turns and spans
