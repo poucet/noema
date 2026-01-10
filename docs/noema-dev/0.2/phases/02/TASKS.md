@@ -12,7 +12,7 @@ Phase 2 focuses on core UX improvements that don't depend on specific models. Th
 | ⏸️ | P1 | 28 | Parallel conversations with status indicators | App.tsx, SidePanel.tsx, engine.rs |
 | ⏸️ | P2 | 5 | Copy-paste markdown into ChatInput | ChatInput.tsx |
 | ⏸️ | P2 | 18 | Live markdown/Typst rendering with math notation | DocumentPanel.tsx |
-| ⬜ | P3 | 27 | Fix Google Docs import search | Settings.tsx |
+| ⏸️ | P3 | 27 | Fix Google Docs import search | Settings.tsx |
 
 Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
 
