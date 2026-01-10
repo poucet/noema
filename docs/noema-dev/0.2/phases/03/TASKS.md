@@ -25,6 +25,139 @@ Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
 
 ---
 
+## Microtasks (Commit-Sized Steps)
+
+Each microtask is a single atomic commit. Complete in order within each feature.
+
+### 3.1 Content Blocks
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.1.1 Define type-safe IDs module | `Add storage/ids.rs with typed ID newtypes` |
+| ⬜ | 3.1.2 Create ContentOrigin and OriginKind types | `Add content origin types for provenance tracking` |
+| ⬜ | 3.1.3 Define ContentBlockStore trait | `Add ContentBlockStore trait with async methods` |
+| ⬜ | 3.1.4 Add content_blocks table migration | `Add content_blocks schema with hash, origin, privacy` |
+| ⬜ | 3.1.5 Implement SqliteContentBlockStore | `Implement ContentBlockStore for SQLite` |
+| ⬜ | 3.1.6 Add content_block_tags table | `Add tag support for content scoping` |
+| ⬜ | 3.1.7 Unit tests for content block store | `Add tests for content block CRUD and dedup` |
+
+### 3.1b Asset Storage
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.1b.1 Define AssetStore trait | `Add AssetStore trait for binary blobs` |
+| ⬜ | 3.1b.2 Add assets table migration | `Add assets schema with hash, mime, privacy` |
+| ⬜ | 3.1b.3 Implement SqliteAssetStore | `Implement AssetStore for SQLite with blob storage` |
+| ⬜ | 3.1b.4 Add AssetRef to StoredContent enum | `Extend StoredContent with AssetRef variant` |
+| ⬜ | 3.1b.5 Implement asset resolution in payload | `Resolve AssetRef to inline base64 for LLM` |
+| ⬜ | 3.1b.6 Unit tests for asset store | `Add tests for asset storage and resolution` |
+
+### 3.2 Conversation Structure
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.2.1 Define Turn, Span, Message types | `Add conversation structure types` |
+| ⬜ | 3.2.2 Add conversations table migration | `Add conversations schema with parent_span_id` |
+| ⬜ | 3.2.3 Add turns table migration | `Add turns schema with sequence ordering` |
+| ⬜ | 3.2.4 Add spans table migration | `Add spans schema with role and model_id` |
+| ⬜ | 3.2.5 Add messages table migration | `Add messages schema referencing content_blocks` |
+| ⬜ | 3.2.6 Define ConversationStore trait | `Add ConversationStore trait for turn/span/message ops` |
+| ⬜ | 3.2.7 Implement add_turn and get_turns | `Implement turn management in SqliteConversationStore` |
+| ⬜ | 3.2.8 Implement add_span and get_spans | `Implement span management with role tracking` |
+| ⬜ | 3.2.9 Implement add_message and get_messages | `Implement message management with content refs` |
+| ⬜ | 3.2.10 Unit tests for conversation structure | `Add tests for turn/span/message CRUD` |
+
+### 3.3 Views and Forking
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.3.1 Add views table migration | `Add views schema with fork tracking` |
+| ⬜ | 3.3.2 Add view_selections table migration | `Add view_selections for span choices per turn` |
+| ⬜ | 3.3.3 Implement create_view | `Implement view creation with main flag` |
+| ⬜ | 3.3.4 Implement select_span | `Implement span selection for views` |
+| ⬜ | 3.3.5 Implement get_view_path | `Implement path traversal through selected spans` |
+| ⬜ | 3.3.6 Implement fork_view | `Implement view forking with shared prefix` |
+| ⬜ | 3.3.7 Implement edit_turn (splice) | `Implement turn editing with new span creation` |
+| ⬜ | 3.3.8 Unit tests for views and forking | `Add tests for view CRUD and fork operations` |
+
+### 3.4 Document Structure
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.4.1 Define Document, Tab, Revision types | `Add document structure types` |
+| ⬜ | 3.4.2 Add documents table migration | `Add documents schema with source tracking` |
+| ⬜ | 3.4.3 Add document_tabs table migration | `Add tabs schema with hierarchy and position` |
+| ⬜ | 3.4.4 Add revisions table migration | `Add revisions schema referencing content_blocks` |
+| ⬜ | 3.4.5 Define DocumentStore trait | `Add DocumentStore trait for doc/tab/revision ops` |
+| ⬜ | 3.4.6 Implement document CRUD | `Implement document creation and retrieval` |
+| ⬜ | 3.4.7 Implement tab management | `Implement tab add/move/get with hierarchy` |
+| ⬜ | 3.4.8 Implement revision commit/checkout | `Implement revision chain with branching` |
+| ⬜ | 3.4.9 Implement promote_from_message | `Implement message-to-document promotion` |
+| ⬜ | 3.4.10 Unit tests for document structure | `Add tests for doc/tab/revision CRUD` |
+
+### 3.5 Collections
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.5.1 Define Collection, Item, View types | `Add collection structure types` |
+| ⬜ | 3.5.2 Add collections table migration | `Add collections schema with schema_hint` |
+| ⬜ | 3.5.3 Add collection_items table migration | `Add items schema with target polymorphism` |
+| ⬜ | 3.5.4 Add item_fields table migration | `Add fields as cached index from frontmatter` |
+| ⬜ | 3.5.5 Add item_tags table migration | `Add tags for cross-cutting organization` |
+| ⬜ | 3.5.6 Add collection_views table migration | `Add saved views with sort/filter config` |
+| ⬜ | 3.5.7 Define CollectionStore trait | `Add CollectionStore trait` |
+| ⬜ | 3.5.8 Implement collection CRUD | `Implement collection creation and schema` |
+| ⬜ | 3.5.9 Implement item management | `Implement item add/move/remove with tree` |
+| ⬜ | 3.5.10 Implement field and tag operations | `Implement field caching and tag management` |
+| ⬜ | 3.5.11 Implement view creation and query | `Implement saved views with filter/sort` |
+| ⬜ | 3.5.12 Unit tests for collections | `Add tests for collection CRUD and queries` |
+
+### 3.6 Cross-References
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.6.1 Define Reference and EntityRef types | `Add reference types for any-to-any links` |
+| ⬜ | 3.6.2 Add references table migration | `Add references schema with relation types` |
+| ⬜ | 3.6.3 Define ReferenceStore trait | `Add ReferenceStore trait` |
+| ⬜ | 3.6.4 Implement create and delete | `Implement reference creation and deletion` |
+| ⬜ | 3.6.5 Implement get_outgoing | `Implement outgoing reference queries` |
+| ⬜ | 3.6.6 Implement get_backlinks | `Implement backlink queries` |
+| ⬜ | 3.6.7 Unit tests for references | `Add tests for reference CRUD and backlinks` |
+
+### 3.7 Temporal Queries
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.7.1 Add temporal indexes to tables | `Add created_at indexes for time queries` |
+| ⬜ | 3.7.2 Define TemporalStore trait | `Add TemporalStore trait for time-based queries` |
+| ⬜ | 3.7.3 Implement query_by_time_range | `Implement time range queries across entities` |
+| ⬜ | 3.7.4 Implement get_activity_summary | `Implement activity summarization` |
+| ⬜ | 3.7.5 Implement LLM context rendering | `Render temporal content as markdown for LLM` |
+| ⬜ | 3.7.6 Unit tests for temporal queries | `Add tests for time-based queries` |
+
+### 3.8 Session Integration
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.8.1 Create adapter types for session | `Add adapter bridging old Session to new stores` |
+| ⬜ | 3.8.2 Implement commit() with new model | `Route commit to turn/span/message creation` |
+| ⬜ | 3.8.3 Implement open_conversation() | `Load conversation via view path` |
+| ⬜ | 3.8.4 Implement commit_parallel_responses() | `Create multiple spans at same turn` |
+| ⬜ | 3.8.5 Update engine to use adapter | `Wire engine to new session adapter` |
+| ⬜ | 3.8.6 Integration tests with engine | `Add tests for full session flow` |
+
+### 3.9 Migration and Cleanup
+
+| Status | Task | Commit Message |
+|--------|------|----------------|
+| ⬜ | 3.9.1 Verify all features work with new model | `Run full test suite on new schema` |
+| ⬜ | 3.9.2 Drop legacy conversation tables | `Remove threads, span_sets, spans, span_messages` |
+| ⬜ | 3.9.3 Drop legacy document tables | `Remove old document_tabs, document_revisions` |
+| ⬜ | 3.9.4 Remove old code paths | `Clean up deprecated code references` |
+| ⬜ | 3.9.5 Final verification | `Verify clean database and full functionality`
+
+---
+
 ## Feature Details
 
 ### Feature 3.1: Content Block Storage
