@@ -329,3 +329,22 @@ Comprehensive tests added:
 - 3.2.12-13: User verification in app and SQL
 
 ---
+
+## 2026-01-10: Table Naming Cleanup
+
+Renamed tables to avoid `ucm_` prefix and use cleaner naming:
+
+### Legacy Tables (renamed)
+- `spans` → `legacy_spans` (references `span_set_id`)
+- `span_messages` → `legacy_span_messages` (references `legacy_spans`)
+
+### New Tables (clean names)
+- `turns` - positions in conversation sequence
+- `spans` - alternative responses at a turn (references `turn_id`)
+- `messages` - individual messages within a span (references `spans`)
+- `views` - named paths through conversation
+- `view_selections` - span selections per turn per view
+
+This allows the new structure to use intuitive table names while preserving backwards compatibility with the existing legacy schema during migration.
+
+---

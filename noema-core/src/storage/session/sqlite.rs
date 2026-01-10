@@ -294,7 +294,7 @@ impl SqliteSession {
             // Create span
             span_id = Uuid::new_v4().to_string();
             conn.execute(
-                "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO legacy_spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
                 params![&span_id, &span_set_id, model_id, now],
             )?;
 
@@ -350,7 +350,7 @@ impl SqliteSession {
                 };
 
                 conn.execute(
-                    "INSERT INTO span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
+                    "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![&msg_id, &span_id, i as i64, role, &content_json, &content_id, now],
                 )?;
@@ -438,7 +438,7 @@ impl SqliteSession {
             {
                 let conn = self.conn.lock().unwrap();
                 conn.execute(
-                    "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+                    "INSERT INTO legacy_spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
                     params![&span_id, &span_set_id, model_id, now],
                 )?;
             }
@@ -487,7 +487,7 @@ impl SqliteSession {
                     };
 
                     conn.execute(
-                        "INSERT INTO span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
+                        "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                         params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &content_id, now],
                     )?;
@@ -697,8 +697,8 @@ impl SqliteStore {
             // Load messages synchronously for non-forked conversations
             let conn = self.conn.lock().unwrap();
             let query = "SELECT sm.role, sm.content
-                 FROM span_messages sm
-                 JOIN spans s ON sm.span_id = s.id
+                 FROM legacy_span_messages sm
+                 JOIN legacy_spans s ON sm.span_id = s.id
                  JOIN span_sets ss ON s.span_set_id = ss.id
                  JOIN threads t ON ss.thread_id = t.id
                  WHERE t.conversation_id = ?1 AND t.parent_span_id IS NULL

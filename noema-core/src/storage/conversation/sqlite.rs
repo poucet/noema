@@ -64,20 +64,22 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_span_sets_thread ON span_sets(thread_id, sequence_number);
 
-        -- Spans: alternative responses within a SpanSet
-        CREATE TABLE IF NOT EXISTS spans (
+        -- Legacy spans: alternative responses within a SpanSet
+        -- Renamed from 'spans' to avoid conflict with new Turn/Span/Message structure
+        CREATE TABLE IF NOT EXISTS legacy_spans (
             id TEXT PRIMARY KEY,
             span_set_id TEXT REFERENCES span_sets(id) ON DELETE CASCADE,
             model_id TEXT,
             created_at INTEGER NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_spans_span_set ON spans(span_set_id);
+        CREATE INDEX IF NOT EXISTS idx_legacy_spans_span_set ON legacy_spans(span_set_id);
 
-        -- Span messages: individual messages within a span (for multi-turn agentic responses)
-        CREATE TABLE IF NOT EXISTS span_messages (
+        -- Legacy span messages: individual messages within a span (for multi-turn agentic responses)
+        -- Renamed from 'span_messages' to avoid conflict with new messages table
+        CREATE TABLE IF NOT EXISTS legacy_span_messages (
             id TEXT PRIMARY KEY,
-            span_id TEXT REFERENCES spans(id) ON DELETE CASCADE,
+            span_id TEXT REFERENCES legacy_spans(id) ON DELETE CASCADE,
             sequence_number INTEGER NOT NULL,
             role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
             content TEXT NOT NULL,
@@ -86,11 +88,11 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             created_at INTEGER NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_span_messages_span ON span_messages(span_id, sequence_number);
-        CREATE INDEX IF NOT EXISTS idx_span_messages_content ON span_messages(content_id);
+        CREATE INDEX IF NOT EXISTS idx_legacy_span_messages_span ON legacy_span_messages(span_id, sequence_number);
+        CREATE INDEX IF NOT EXISTS idx_legacy_span_messages_content ON legacy_span_messages(content_id);
 
         -- ============================================================================
-        -- UCM Tables: Turn/Span/Message structure (Phase 3)
+        -- Turn/Span/Message structure (Phase 3)
         -- These coexist with the legacy tables during migration
         -- ============================================================================
 
@@ -105,20 +107,19 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_turns_conversation ON turns(conversation_id, sequence_number);
 
-        -- UCM Spans: alternative responses at a turn (replaces spans)
-        -- Named ucm_spans to avoid conflict with existing spans table during migration
-        CREATE TABLE IF NOT EXISTS ucm_spans (
+        -- Spans: alternative responses at a turn (replaces legacy_spans)
+        CREATE TABLE IF NOT EXISTS spans (
             id TEXT PRIMARY KEY,
             turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
             model_id TEXT,
             created_at INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_ucm_spans_turn ON ucm_spans(turn_id);
+        CREATE INDEX IF NOT EXISTS idx_spans_turn ON spans(turn_id);
 
-        -- UCM Messages: individual messages within a span (replaces span_messages)
-        CREATE TABLE IF NOT EXISTS ucm_messages (
+        -- Messages: individual messages within a span (replaces span_messages)
+        CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
-            span_id TEXT NOT NULL REFERENCES ucm_spans(id) ON DELETE CASCADE,
+            span_id TEXT NOT NULL REFERENCES spans(id) ON DELETE CASCADE,
             sequence_number INTEGER NOT NULL,
             role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
             content_id TEXT REFERENCES content_blocks(id),
@@ -126,8 +127,8 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             tool_results TEXT,
             created_at INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_ucm_messages_span ON ucm_messages(span_id, sequence_number);
-        CREATE INDEX IF NOT EXISTS idx_ucm_messages_content ON ucm_messages(content_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_span ON messages(span_id, sequence_number);
+        CREATE INDEX IF NOT EXISTS idx_messages_content ON messages(content_id);
 
         -- Views: named paths through conversation (replaces threads)
         CREATE TABLE IF NOT EXISTS views (
@@ -145,7 +146,7 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS view_selections (
             view_id TEXT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
             turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
-            span_id TEXT NOT NULL REFERENCES ucm_spans(id) ON DELETE CASCADE,
+            span_id TEXT NOT NULL REFERENCES spans(id) ON DELETE CASCADE,
             PRIMARY KEY (view_id, turn_id)
         );
         CREATE INDEX IF NOT EXISTS idx_view_selections_span ON view_selections(span_id);
@@ -236,8 +237,8 @@ impl ConversationStore for SqliteStore {
 
         // Load from span_messages via the main thread's selected spans
         let query = "SELECT sm.role, sm.content
-             FROM span_messages sm
-             JOIN spans s ON sm.span_id = s.id
+             FROM legacy_span_messages sm
+             JOIN legacy_spans s ON sm.span_id = s.id
              JOIN span_sets ss ON s.span_set_id = ss.id
              JOIN threads t ON ss.thread_id = t.id
              WHERE t.conversation_id = ?1 AND t.parent_span_id IS NULL
@@ -444,7 +445,7 @@ impl ConversationStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let span_set_id: Option<String> = conn
             .query_row(
-                "SELECT span_set_id FROM spans WHERE id = ?1",
+                "SELECT span_set_id FROM legacy_spans WHERE id = ?1",
                 params![span_id],
                 |row| row.get(0),
             )
@@ -572,8 +573,8 @@ impl ConversationStore for SqliteStore {
 
         let mut stmt = conn.prepare(
             "SELECT s.id, s.model_id, s.created_at,
-                    (SELECT COUNT(*) FROM span_messages WHERE span_id = s.id) as msg_count
-             FROM spans s
+                    (SELECT COUNT(*) FROM legacy_span_messages WHERE span_id = s.id) as msg_count
+             FROM legacy_spans s
              WHERE s.span_set_id = ?1
              ORDER BY s.created_at",
         )?;
@@ -612,7 +613,7 @@ impl ConversationStore for SqliteStore {
         let now = unix_timestamp();
 
         conn.execute(
-            "INSERT INTO spans (id, span_set_id, model_id, created_at)
+            "INSERT INTO legacy_spans (id, span_set_id, model_id, created_at)
              VALUES (?1, ?2, ?3, ?4)",
             params![&id, span_set_id, model_id, now],
         )?;
@@ -640,7 +641,7 @@ impl ConversationStore for SqliteStore {
         // Get next sequence number for this span
         let sequence_number: i64 = conn
             .query_row(
-                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_messages WHERE span_id = ?1",
+                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM legacy_span_messages WHERE span_id = ?1",
                 params![span_id],
                 |row| row.get(0),
             )
@@ -649,7 +650,7 @@ impl ConversationStore for SqliteStore {
         let content_json = serde_json::to_string(content)?;
 
         conn.execute(
-            "INSERT INTO span_messages (id, span_id, sequence_number, role, content, created_at)
+            "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![&id, span_id, sequence_number, role.to_string(), &content_json, now],
         )?;
@@ -660,7 +661,7 @@ impl ConversationStore for SqliteStore {
     async fn get_span_messages(&self, span_id: &str) -> Result<Vec<StoredMessage>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT role, content FROM span_messages WHERE span_id = ?1 ORDER BY sequence_number",
+            "SELECT role, content FROM legacy_span_messages WHERE span_id = ?1 ORDER BY sequence_number",
         )?;
 
         let messages = stmt
@@ -896,7 +897,7 @@ impl TurnStore for SqliteStore {
         let now = unix_timestamp();
 
         conn.execute(
-            "INSERT INTO ucm_spans (id, turn_id, model_id, created_at)
+            "INSERT INTO spans (id, turn_id, model_id, created_at)
              VALUES (?1, ?2, ?3, ?4)",
             params![id.as_str(), turn_id.as_str(), model_id, now],
         )?;
@@ -914,8 +915,8 @@ impl TurnStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT s.id, s.turn_id, s.model_id, s.created_at,
-                    (SELECT COUNT(*) FROM ucm_messages m WHERE m.span_id = s.id) as message_count
-             FROM ucm_spans s WHERE s.turn_id = ?1
+                    (SELECT COUNT(*) FROM messages m WHERE m.span_id = s.id) as message_count
+             FROM spans s WHERE s.turn_id = ?1
              ORDER BY s.created_at",
         )?;
 
@@ -945,8 +946,8 @@ impl TurnStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT s.id, s.turn_id, s.model_id, s.created_at,
-                    (SELECT COUNT(*) FROM ucm_messages m WHERE m.span_id = s.id) as message_count
-             FROM ucm_spans s WHERE s.id = ?1",
+                    (SELECT COUNT(*) FROM messages m WHERE m.span_id = s.id) as message_count
+             FROM spans s WHERE s.id = ?1",
             params![span_id.as_str()],
             |row| {
                 let id: String = row.get(0)?;
@@ -985,7 +986,7 @@ impl TurnStore for SqliteStore {
         // Get next sequence number
         let sequence_number: i32 = conn
             .query_row(
-                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM ucm_messages WHERE span_id = ?1",
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE span_id = ?1",
                 params![span_id.as_str()],
                 |row| row.get(0),
             )
@@ -1006,7 +1007,7 @@ impl TurnStore for SqliteStore {
         };
 
         conn.execute(
-            "INSERT INTO ucm_messages (id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at)
+            "INSERT INTO messages (id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id.as_str(),
@@ -1036,7 +1037,7 @@ impl TurnStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at
-             FROM ucm_messages WHERE span_id = ?1
+             FROM messages WHERE span_id = ?1
              ORDER BY sequence_number",
         )?;
 
@@ -1075,7 +1076,7 @@ impl TurnStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at
-             FROM ucm_messages WHERE id = ?1",
+             FROM messages WHERE id = ?1",
             params![message_id.as_str()],
             |row| {
                 let id: String = row.get(0)?;
@@ -1419,20 +1420,20 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
 
-        // Verify ucm_spans table exists
+        // Verify spans table exists
         let count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ucm_spans'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='spans'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(count, 1);
 
-        // Verify ucm_messages table exists
+        // Verify messages table exists
         let count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ucm_messages'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='messages'",
                 [],
                 |row| row.get(0),
             )
