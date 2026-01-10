@@ -25,6 +25,7 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             system_prompt TEXT,
             summary_text TEXT,
             summary_embedding BLOB,
+            is_private INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
@@ -91,7 +92,7 @@ impl ConversationStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
 
         // Count span_sets as the "message count" (each span_set is a turn in conversation)
-        let query = "SELECT c.id, c.title, COUNT(ss.id) as msg_count, c.created_at, c.updated_at
+        let query = "SELECT c.id, c.title, COUNT(ss.id) as msg_count, c.is_private, c.created_at, c.updated_at
              FROM conversations c
              LEFT JOIN threads t ON t.conversation_id = c.id AND t.parent_span_id IS NULL
              LEFT JOIN span_sets ss ON ss.thread_id = t.id
@@ -102,12 +103,14 @@ impl ConversationStore for SqliteStore {
         let mut stmt = conn.prepare(query)?;
         let infos: Vec<ConversationInfo> = stmt
             .query_map(params![user_id], |row| {
+                let is_private_int: i32 = row.get(3)?;
                 Ok(ConversationInfo {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     message_count: row.get(2)?,
-                    created_at: row.get(3)?,
-                    updated_at: row.get(4)?,
+                    is_private: is_private_int != 0,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -121,6 +124,26 @@ impl ConversationStore for SqliteStore {
         conn.execute(
             "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
             params![name, now, id],
+        )?;
+        Ok(())
+    }
+
+    async fn get_conversation_private(&self, id: &str) -> Result<bool> {
+        let conn = self.conn().lock().unwrap();
+        let is_private: i32 = conn.query_row(
+            "SELECT COALESCE(is_private, 0) FROM conversations WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(is_private != 0)
+    }
+
+    async fn set_conversation_private(&self, id: &str, is_private: bool) -> Result<()> {
+        let conn = self.conn().lock().unwrap();
+        let now = unix_timestamp();
+        conn.execute(
+            "UPDATE conversations SET is_private = ?1, updated_at = ?2 WHERE id = ?3",
+            params![is_private as i32, now, id],
         )?;
         Ok(())
     }

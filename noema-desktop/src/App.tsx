@@ -52,6 +52,14 @@ function App() {
   const [prefilledInput, setPrefilledInput] = useState<string>("");
   // Tools enabled state - controls whether MCP tools are sent to the model
   const [toolsEnabled, setToolsEnabled] = useState<boolean>(true);
+  // Conversation privacy state - warns before using cloud models with private conversations
+  const [isConversationPrivate, setIsConversationPrivate] = useState<boolean>(false);
+  // Privacy warning dialog state
+  const [privacyWarning, setPrivacyWarning] = useState<{
+    show: boolean;
+    pendingContent: InputContentBlock[];
+    pendingToolConfig?: ToolConfig;
+  }>({ show: false, pendingContent: [] });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -69,6 +77,29 @@ function App() {
 
   const handleToggleTools = () => {
     setToolsEnabled((prev) => !prev);
+  };
+
+  const handleTogglePrivate = async () => {
+    if (!currentConversationId) return;
+    const newPrivate = !isConversationPrivate;
+    try {
+      await tauri.setConversationPrivate(currentConversationId, newPrivate);
+      setIsConversationPrivate(newPrivate);
+      // Refresh conversation list to show updated privacy status
+      const convos = await tauri.listConversations();
+      setConversations(convos);
+    } catch (err) {
+      appLog.error("Toggle private error", String(err));
+      setError(String(err));
+    }
+  };
+
+  // Check if current model is private (local) by looking at capabilities
+  const isCurrentModelPrivate = (): boolean => {
+    const currentModelObj = models.find(
+      (m) => m.displayName === currentModel || m.id === currentModel
+    );
+    return currentModelObj?.capabilities.includes("Private") ?? false;
   };
 
   const voice = useVoiceInput({
@@ -107,6 +138,10 @@ function App() {
 
         const convId = await tauri.getCurrentConversationId();
         setCurrentConversationId(convId);
+
+        // Load privacy status for current conversation
+        const isPrivate = await tauri.getConversationPrivate(convId);
+        setIsConversationPrivate(isPrivate);
 
         // Load messages with alternates info for span awareness
         const msgs = await tauri.getMessagesWithAlternates();
@@ -240,9 +275,19 @@ function App() {
     };
   }, []);
 
-  const handleSendMessage = async (content: InputContentBlock[], toolConfig?: ToolConfig) => {
+  const handleSendMessage = async (content: InputContentBlock[], toolConfig?: ToolConfig, skipPrivacyCheck?: boolean) => {
     try {
       setError(null);
+
+      // Check if we need to show privacy warning (private conversation + cloud model)
+      if (!skipPrivacyCheck && isConversationPrivate && !isCurrentModelPrivate()) {
+        setPrivacyWarning({
+          show: true,
+          pendingContent: content,
+          pendingToolConfig: toolConfig,
+        });
+        return;
+      }
 
       // If we have a pending fork, create the fork first, then send
       if (pendingForkSpanId) {
@@ -288,6 +333,7 @@ function App() {
       const id = await tauri.newConversation();
       setCurrentConversationId(id);
       setMessages([]);
+      setIsConversationPrivate(false); // New conversations start as non-private
       const convos = await tauri.listConversations();
       setConversations(convos);
     } catch (err) {
@@ -301,6 +347,9 @@ function App() {
       const msgs = await tauri.switchConversation(id);
       setCurrentConversationId(id);
       setMessages(msgs);
+      // Load privacy status for this conversation
+      const isPrivate = await tauri.getConversationPrivate(id);
+      setIsConversationPrivate(isPrivate);
     } catch (err) {
       appLog.error("Select conversation error", String(err));
       setError(String(err));
@@ -525,6 +574,46 @@ function App() {
         <Settings onClose={() => setShowSettings(false)} />
       )}
 
+      {/* Privacy Warning Dialog */}
+      {privacyWarning.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-surface rounded-lg p-6 max-w-md mx-4 shadow-xl border border-gray-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-amber-900/50 p-2 rounded-full">
+                <svg className="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-foreground">Privacy Warning</h2>
+            </div>
+            <p className="text-muted mb-6">
+              This conversation is marked as <span className="text-amber-300 font-medium">private</span>, but you're using a <span className="text-blue-300 font-medium">cloud model</span>. Your message will be sent to an external provider.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  // Send anyway
+                  handleSendMessage(privacyWarning.pendingContent, privacyWarning.pendingToolConfig, true);
+                  setPrivacyWarning({ show: false, pendingContent: [] });
+                }}
+                className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Send Anyway
+              </button>
+              <button
+                onClick={() => setPrivacyWarning({ show: false, pendingContent: [] })}
+                className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            <p className="text-xs text-muted mt-4 text-center">
+              Tip: Switch to a local model (marked with a green lock) to keep your data private.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Document Panel */}
       {activeDocumentId && (
         <DocumentPanel
@@ -537,9 +626,37 @@ function App() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
         <div className="border-b border-gray-700 px-4 py-3 flex items-center justify-between bg-background">
-          <h1 className="text-lg font-semibold text-foreground">
-            Noema
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-semibold text-foreground">
+              Noema
+            </h1>
+            {/* Privacy toggle for current conversation */}
+            {activeActivity === "conversations" && (
+              <button
+                onClick={handleTogglePrivate}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors ${
+                  isConversationPrivate
+                    ? "bg-amber-900/50 text-amber-300 hover:bg-amber-900/70"
+                    : "bg-gray-700/50 text-gray-400 hover:bg-gray-700/70"
+                }`}
+                title={isConversationPrivate
+                  ? "Private: Will warn before using cloud models"
+                  : "Not private: Click to mark as private"
+                }
+              >
+                {isConversationPrivate ? (
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                  </svg>
+                )}
+                <span>{isConversationPrivate ? "Private" : "Not Private"}</span>
+              </button>
+            )}
+          </div>
           {activeActivity === "conversations" && (
             <ModelSelector
               models={models}

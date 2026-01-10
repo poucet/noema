@@ -182,6 +182,8 @@ pub fn run() {
             commands::chat::new_conversation,
             commands::chat::delete_conversation,
             commands::chat::rename_conversation,
+            commands::chat::get_conversation_private,
+            commands::chat::set_conversation_private,
             commands::chat::get_model_name,
             commands::chat::get_current_conversation_id,
             commands::chat::get_favorite_models,

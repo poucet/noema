@@ -60,6 +60,34 @@ Chronological stream of thoughts, changes, and observations.
 - Updated `send_message` command to accept optional `ToolConfig`
 - Added `tool_config` field to `AppState` for engine to read
 
+### Feature 32: Private Content Flag
+**User story:** Users can mark conversations as "private" to receive a warning before sending messages to cloud models.
+
+**Backend changes (`noema-core`):**
+- Added `is_private` column to `conversations` table (SQLite, default 0)
+- Added `is_private: bool` field to `ConversationInfo` struct
+- Added `get_conversation_private()` and `set_conversation_private()` methods to `ConversationStore` trait
+- Implemented methods in `sqlite.rs`
+
+**Tauri changes (`noema-desktop/src-tauri`):**
+- Added `is_private: bool` to `ConversationInfo` type in `types.rs`
+- Added `get_conversation_private` and `set_conversation_private` commands in `chat.rs`
+- Registered commands in `lib.rs`
+
+**Frontend changes (`noema-desktop/src`):**
+- Added `getConversationPrivate()` and `setConversationPrivate()` functions to `tauri.ts`
+- Added `isConversationPrivate` state to `App.tsx`
+- Added privacy toggle button in top bar (lock icon, amber when private)
+- Added `isCurrentModelPrivate()` helper to check if model has "Private" capability
+- Added privacy warning dialog when sending message with private conversation + cloud model
+- Dialog offers "Send Anyway" and "Cancel" options with tip about local models
+
+**UX flow:**
+1. Click the lock/unlock button in top bar to toggle conversation privacy
+2. When private + cloud model, sending shows warning dialog
+3. User can cancel or proceed knowingly
+4. Lock icon is amber when private, gray when not
+
 ---
 
 ## Observations & Learnings (from OBSERVATIONS.md)
@@ -87,11 +115,11 @@ Chronological stream of thoughts, changes, and observations.
 ### Implementation Order
 1. Feature 4: Local vs non-local icon (Done)
 2. Feature 3: Model metadata display (Done)
-3. Feature 2: Truncate long model names (Pending)
-4. Feature 31: Copy raw markdown (Done)
-5. Feature 32: Private content flag (Pending)
+3. Feature 31: Copy raw markdown (Done)
+4. Feature 33: Toggle to disable tools (Done)
+5. Feature 32: Private content flag (Done)
+6. Feature 2: Truncate long model names (Pending)
 
 ### Remaining Work
 - [ ] Feature 2: Truncate long model names
-- [ ] Feature 32: Private content flag (P0 - highest priority remaining)
 - [ ] Feature 34: Toggle to disable audio/image input

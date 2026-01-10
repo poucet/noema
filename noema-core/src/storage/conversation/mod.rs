@@ -48,6 +48,9 @@ pub struct ConversationInfo {
     pub id: String,
     pub name: Option<String>,
     pub message_count: usize,
+    /// Whether this conversation contains private/sensitive content
+    /// When true, warns before using cloud models
+    pub is_private: bool,
     /// Unix timestamp when created
     pub created_at: i64,
     /// Unix timestamp when last updated
@@ -109,6 +112,12 @@ pub trait ConversationStore: Send + Sync {
 
     /// Rename a conversation
     async fn rename_conversation(&self, id: &str, name: Option<&str>) -> Result<()>;
+
+    /// Get whether a conversation is marked as private
+    async fn get_conversation_private(&self, id: &str) -> Result<bool>;
+
+    /// Set whether a conversation is marked as private
+    async fn set_conversation_private(&self, id: &str, is_private: bool) -> Result<()>;
 
     /// Delete a conversation and all its data
     async fn delete_conversation(&self, id: &str) -> Result<()>;

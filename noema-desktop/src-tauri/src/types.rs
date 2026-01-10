@@ -22,6 +22,8 @@ pub struct ConversationInfo {
     pub id: String,
     pub name: Option<String>,
     pub message_count: usize,
+    /// Whether this conversation is marked as private (warns before using cloud models)
+    pub is_private: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -32,6 +34,7 @@ impl From<noema_core::storage::conversation::ConversationInfo> for ConversationI
             id: info.id,
             name: info.name,
             message_count: info.message_count,
+            is_private: info.is_private,
             created_at: info.created_at,
             updated_at: info.updated_at,
         }

@@ -466,6 +466,37 @@ pub async fn rename_conversation(
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
 
+/// Get whether the current conversation is marked as private
+#[tauri::command]
+pub async fn get_conversation_private(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: String,
+) -> Result<bool, String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("App not initialized")?;
+
+    store
+        .get_conversation_private(&conversation_id)
+        .await
+        .map_err(|e| format!("Failed to get conversation privacy: {}", e))
+}
+
+/// Set whether a conversation is marked as private
+#[tauri::command]
+pub async fn set_conversation_private(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: String,
+    is_private: bool,
+) -> Result<(), String> {
+    let store_guard = state.store.lock().await;
+    let store = store_guard.as_ref().ok_or("App not initialized")?;
+
+    store
+        .set_conversation_private(&conversation_id, is_private)
+        .await
+        .map_err(|e| format!("Failed to set conversation privacy: {}", e))
+}
+
 /// Get current model name
 #[tauri::command]
 pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, String> {

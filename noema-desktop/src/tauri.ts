@@ -74,6 +74,19 @@ export async function renameConversation(
   return invoke<void>("rename_conversation", { conversationId, name });
 }
 
+export async function getConversationPrivate(
+  conversationId: string
+): Promise<boolean> {
+  return invoke<boolean>("get_conversation_private", { conversationId });
+}
+
+export async function setConversationPrivate(
+  conversationId: string,
+  isPrivate: boolean
+): Promise<void> {
+  return invoke<void>("set_conversation_private", { conversationId, isPrivate });
+}
+
 export async function getModelName(): Promise<string> {
   return invoke<string>("get_model_name");
 }
