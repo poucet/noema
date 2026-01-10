@@ -11,8 +11,11 @@ use uuid::Uuid;
 use super::{SessionStore, StorageTransaction};
 use crate::storage::content::StoredPayload;
 use crate::storage::content_block::sqlite::store_content_sync;
+use crate::storage::conversation::sqlite::sync_helpers as turn_sync;
+use crate::storage::conversation::types::{MessageRole, SpanRole};
 use crate::storage::conversation::SpanType;
 use crate::storage::helper::unix_timestamp;
+use crate::storage::ids::ConversationId;
 use crate::ConversationContext;
 
 // ============================================================================
@@ -242,6 +245,9 @@ impl SqliteSession {
     }
 
     /// Write messages as spans to the database
+    ///
+    /// This method uses dual-write: writes to both legacy tables (threads, span_sets,
+    /// legacy_spans, legacy_span_messages) and new tables (turns, spans, messages, views).
     async fn write_as_span(
         &self,
         messages: &[ChatMessage],
@@ -251,6 +257,14 @@ impl SqliteSession {
         let now = unix_timestamp();
         let span_set_id;
         let span_id;
+        let conv_id = ConversationId::from_string(self.conversation_id.clone());
+
+        // Determine SpanRole from span_type
+        let turn_role = if span_type == "user" {
+            SpanRole::User
+        } else {
+            SpanRole::Assistant
+        };
 
         // Scope for initial DB operations - connection released before async
         {
@@ -305,7 +319,26 @@ impl SqliteSession {
             )?;
         } // conn released here
 
-        // Write span_messages
+        // Dual-write: Create turn, span, and view in new tables
+        let new_span_id = {
+            let conn = self.conn.lock().unwrap();
+
+            // Ensure main view exists
+            let view_id = turn_sync::ensure_main_view(&conn, &conv_id)?;
+
+            // Create turn in new tables
+            let (turn_id, _) = turn_sync::add_turn_sync(&conn, &conv_id, turn_role)?;
+
+            // Create span in new tables
+            let ucm_span_id = turn_sync::add_span_sync(&conn, &turn_id, model_id)?;
+
+            // Select this span in the main view
+            turn_sync::select_span_sync(&conn, &view_id, &turn_id, &ucm_span_id)?;
+
+            ucm_span_id
+        };
+
+        // Write span_messages to both legacy and new tables
         for (i, msg) in messages.iter().enumerate() {
             let msg_id = Uuid::new_v4().to_string();
             let role = msg.role.to_string();
@@ -324,13 +357,13 @@ impl SqliteSession {
             }
 
             let content_json = serde_json::to_string(&stored_payload)?;
+            let text = msg.get_text();
 
             // DB operations in a scope to release connection before next iteration
             {
                 let conn = self.conn.lock().unwrap();
 
-                // Store text in content_blocks and get content_id
-                let text = msg.get_text();
+                // Store text in content_blocks and get content_id (for legacy table)
                 let content_id = if !text.is_empty() {
                     let origin_kind = match msg.role {
                         Role::User => Some("user"),
@@ -349,11 +382,37 @@ impl SqliteSession {
                     None
                 };
 
+                // Write to legacy table
                 conn.execute(
                     "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![&msg_id, &span_id, i as i64, role, &content_json, &content_id, now],
                 )?;
+
+                // Dual-write: Write to new messages table
+                let msg_role = match msg.role {
+                    Role::User => MessageRole::User,
+                    Role::Assistant => MessageRole::Assistant,
+                    Role::System => MessageRole::System,
+                    _ => MessageRole::Tool,
+                };
+
+                // Extract tool_calls and tool_results from payload if present
+                let tool_calls = stored_payload.tool_calls_json();
+                let tool_results = stored_payload.tool_results_json();
+
+                if let Err(e) = turn_sync::add_message_sync(
+                    &conn,
+                    &new_span_id,
+                    msg_role,
+                    if text.is_empty() { None } else { Some(&text) },
+                    tool_calls.as_deref(),
+                    tool_results.as_deref(),
+                    self.user_id.as_deref(),
+                    model_id,
+                ) {
+                    tracing::warn!("Failed to write to new messages table: {}", e);
+                }
             } // conn released here before next iteration
         }
 
@@ -370,6 +429,9 @@ impl SqliteSession {
     }
 
     /// Write multiple model responses as alternates in a single span_set
+    ///
+    /// This method uses dual-write: writes to both legacy tables (threads, span_sets,
+    /// legacy_spans, legacy_span_messages) and new tables (turns, spans, messages, views).
     pub async fn write_parallel_responses(
         &mut self,
         responses: &[(String, Vec<ChatMessage>)],
@@ -389,6 +451,7 @@ impl SqliteSession {
 
         let now = unix_timestamp();
         let span_set_id;
+        let conv_id = ConversationId::from_string(self.conversation_id.clone());
 
         {
             let conn = self.conn.lock().unwrap();
@@ -428,20 +491,38 @@ impl SqliteSession {
             )?;
         } // Release conn lock
 
+        // Dual-write: Create single turn for all parallel responses
+        let (new_turn_id, main_view_id) = {
+            let conn = self.conn.lock().unwrap();
+
+            // Ensure main view exists
+            let view_id = turn_sync::ensure_main_view(&conn, &conv_id)?;
+
+            // Create turn in new tables (assistant turn for parallel responses)
+            let (turn_id, _seq) = turn_sync::add_turn_sync(&conn, &conv_id, SpanRole::Assistant)?;
+
+            (turn_id, view_id)
+        };
+
         let mut span_ids = Vec::new();
         let mut selected_span_id = None;
+        let mut new_selected_span_id = None;
 
         // Create a span for each model's response
         for (idx, (model_id, messages)) in responses.iter().enumerate() {
             let span_id = Uuid::new_v4().to_string();
 
-            {
+            // Dual-write: Create span in new tables
+            let new_span_id = {
                 let conn = self.conn.lock().unwrap();
                 conn.execute(
                     "INSERT INTO legacy_spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
                     params![&span_id, &span_set_id, model_id, now],
                 )?;
-            }
+
+                // Create span in new tables
+                turn_sync::add_span_sync(&conn, &new_turn_id, Some(model_id))?
+            };
 
             // Write messages for this span
             for (msg_idx, msg) in messages.iter().enumerate() {
@@ -461,13 +542,13 @@ impl SqliteSession {
                 }
 
                 let content_json = serde_json::to_string(&stored_payload)?;
+                let text = msg.get_text();
 
                 // DB operations in scope to release lock before next iteration
                 {
                     let conn = self.conn.lock().unwrap();
 
                     // Store text in content_blocks and get content_id
-                    let text = msg.get_text();
                     let content_id = if !text.is_empty() {
                         let origin_kind = match msg.role {
                             Role::User => Some("user"),
@@ -486,16 +567,43 @@ impl SqliteSession {
                         None
                     };
 
+                    // Write to legacy table
                     conn.execute(
                         "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                         params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &content_id, now],
                     )?;
+
+                    // Dual-write: Write to new messages table
+                    let msg_role = match msg.role {
+                        Role::User => MessageRole::User,
+                        Role::Assistant => MessageRole::Assistant,
+                        Role::System => MessageRole::System,
+                        _ => MessageRole::Tool,
+                    };
+
+                    // Extract tool_calls and tool_results from payload if present
+                    let tool_calls = stored_payload.tool_calls_json();
+                    let tool_results = stored_payload.tool_results_json();
+
+                    if let Err(e) = turn_sync::add_message_sync(
+                        &conn,
+                        &new_span_id,
+                        msg_role,
+                        if text.is_empty() { None } else { Some(&text) },
+                        tool_calls.as_deref(),
+                        tool_results.as_deref(),
+                        self.user_id.as_deref(),
+                        Some(model_id.as_str()),
+                    ) {
+                        tracing::warn!("Failed to write to new messages table: {}", e);
+                    }
                 } // conn released here
             }
 
             if idx == selected_index {
                 selected_span_id = Some(span_id.clone());
+                new_selected_span_id = Some(new_span_id.clone());
             }
             span_ids.push(span_id);
         }
@@ -504,12 +612,19 @@ impl SqliteSession {
         {
             let conn = self.conn.lock().unwrap();
 
-            // Set the selected span
+            // Set the selected span (legacy)
             if let Some(sel_id) = &selected_span_id {
                 conn.execute(
                     "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
                     params![sel_id, &span_set_id],
                 )?;
+            }
+
+            // Dual-write: Select span in main view (new tables)
+            if let Some(new_sel_id) = &new_selected_span_id {
+                if let Err(e) = turn_sync::select_span_sync(&conn, &main_view_id, &new_turn_id, new_sel_id) {
+                    tracing::warn!("Failed to select span in new view: {}", e);
+                }
             }
 
             // Update conversation timestamp

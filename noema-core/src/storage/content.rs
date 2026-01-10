@@ -184,6 +184,42 @@ impl StoredPayload {
             .collect();
         Ok(llm::ChatPayload::new(blocks?))
     }
+
+    /// Extract tool calls from this payload as JSON string (for new messages table)
+    pub fn tool_calls_json(&self) -> Option<String> {
+        let tool_calls: Vec<&ToolCall> = self
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                StoredContent::ToolCall(call) => Some(call),
+                _ => None,
+            })
+            .collect();
+
+        if tool_calls.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&tool_calls).ok()
+        }
+    }
+
+    /// Extract tool results from this payload as JSON string (for new messages table)
+    pub fn tool_results_json(&self) -> Option<String> {
+        let tool_results: Vec<&ToolResult> = self
+            .content
+            .iter()
+            .filter_map(|c| match c {
+                StoredContent::ToolResult(result) => Some(result),
+                _ => None,
+            })
+            .collect();
+
+        if tool_results.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&tool_results).ok()
+        }
+    }
 }
 
 /// Convert from LLM ChatPayload to StoredPayload

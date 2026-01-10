@@ -1381,6 +1381,171 @@ impl TurnStore for SqliteStore {
 }
 
 // ============================================================================
+// Synchronous Helpers for Dual-Write
+// ============================================================================
+
+/// Helper functions for writing to TurnStore tables synchronously.
+/// These are used by SqliteSession for dual-write during migration.
+pub mod sync_helpers {
+    use anyhow::Result;
+    use rusqlite::{params, Connection};
+
+    use crate::storage::content_block::sqlite::store_content_sync;
+    use crate::storage::conversation::types::{MessageRole, SpanRole};
+    use crate::storage::helper::unix_timestamp;
+    use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, ViewId};
+
+    /// Ensure a main view exists for the conversation, creating one if needed.
+    /// Returns the view ID.
+    pub fn ensure_main_view(conn: &Connection, conversation_id: &ConversationId) -> Result<ViewId> {
+        // Check if main view exists
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM views WHERE conversation_id = ?1 AND is_main = 1",
+                params![conversation_id.as_str()],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if let Some(id) = existing {
+            return Ok(ViewId::from_string(id));
+        }
+
+        // Create main view
+        let id = ViewId::new();
+        let now = unix_timestamp();
+        conn.execute(
+            "INSERT INTO views (id, conversation_id, name, is_main, created_at)
+             VALUES (?1, ?2, 'main', 1, ?3)",
+            params![id.as_str(), conversation_id.as_str(), now],
+        )?;
+
+        Ok(id)
+    }
+
+    /// Add a turn to the new turns table.
+    /// Returns (turn_id, sequence_number).
+    pub fn add_turn_sync(
+        conn: &Connection,
+        conversation_id: &ConversationId,
+        role: SpanRole,
+    ) -> Result<(TurnId, i32)> {
+        let id = TurnId::new();
+        let now = unix_timestamp();
+
+        // Get next sequence number
+        let sequence_number: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM turns WHERE conversation_id = ?1",
+                params![conversation_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        conn.execute(
+            "INSERT INTO turns (id, conversation_id, role, sequence_number, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id.as_str(), conversation_id.as_str(), role.as_str(), sequence_number, now],
+        )?;
+
+        Ok((id, sequence_number))
+    }
+
+    /// Add a span to the new spans table.
+    pub fn add_span_sync(
+        conn: &Connection,
+        turn_id: &TurnId,
+        model_id: Option<&str>,
+    ) -> Result<SpanId> {
+        let id = SpanId::new();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO spans (id, turn_id, model_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id.as_str(), turn_id.as_str(), model_id, now],
+        )?;
+
+        Ok(id)
+    }
+
+    /// Add a message to the new messages table.
+    /// Text content is stored in content_blocks.
+    pub fn add_message_sync(
+        conn: &Connection,
+        span_id: &SpanId,
+        role: MessageRole,
+        text: Option<&str>,
+        tool_calls: Option<&str>,
+        tool_results: Option<&str>,
+        user_id: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<MessageId> {
+        let id = MessageId::new();
+        let now = unix_timestamp();
+
+        // Get next sequence number
+        let sequence_number: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE span_id = ?1",
+                params![span_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Store text in content_blocks if present
+        let content_id: Option<String> = if let Some(text) = text {
+            if !text.is_empty() {
+                let origin_kind = match role {
+                    MessageRole::User => Some("user"),
+                    MessageRole::Assistant => Some("assistant"),
+                    MessageRole::System => Some("system"),
+                    MessageRole::Tool => Some("system"),
+                };
+                Some(store_content_sync(conn, text, origin_kind, user_id, model_id)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        conn.execute(
+            "INSERT INTO messages (id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id.as_str(),
+                span_id.as_str(),
+                sequence_number,
+                role.as_str(),
+                content_id,
+                tool_calls,
+                tool_results,
+                now
+            ],
+        )?;
+
+        Ok(id)
+    }
+
+    /// Select a span for a turn in a view.
+    pub fn select_span_sync(
+        conn: &Connection,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+        span_id: &SpanId,
+    ) -> Result<()> {
+        conn.execute(
+            "INSERT INTO view_selections (view_id, turn_id, span_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(view_id, turn_id) DO UPDATE SET span_id = ?3",
+            params![view_id.as_str(), turn_id.as_str(), span_id.as_str()],
+        )?;
+        Ok(())
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

@@ -348,3 +348,41 @@ Renamed tables to avoid `ucm_` prefix and use cleaner naming:
 This allows the new structure to use intuitive table names while preserving backwards compatibility with the existing legacy schema during migration.
 
 ---
+
+## 2026-01-10: Dual-Write Integration (3.2.11)
+
+Implemented dual-write for session write paths. When messages are committed, they now write to both:
+- **Legacy tables**: `threads`, `span_sets`, `legacy_spans`, `legacy_span_messages`
+- **New tables**: `turns`, `spans`, `messages`, `views`, `view_selections`
+
+### Key Changes
+
+1. **[noema-core/src/storage/conversation/sqlite.rs](noema-core/src/storage/conversation/sqlite.rs)** - Added `sync_helpers` module with synchronous functions for writing to TurnStore tables:
+   - `ensure_main_view()` - Creates main view if it doesn't exist
+   - `add_turn_sync()` - Creates turn with sequence number
+   - `add_span_sync()` - Creates span for a turn
+   - `add_message_sync()` - Creates message with content block storage
+   - `select_span_sync()` - Selects span in view
+
+2. **[noema-core/src/storage/session/sqlite.rs](noema-core/src/storage/session/sqlite.rs)** - Updated `write_as_span()` and `write_parallel_responses()`:
+   - Both methods now dual-write to legacy and new tables
+   - Main view is auto-created for new conversations
+   - Spans are auto-selected in the main view
+   - Tool calls/results extracted to separate JSON columns
+
+3. **[noema-core/src/storage/content.rs](noema-core/src/storage/content.rs)** - Added helper methods:
+   - `tool_calls_json()` - Extracts tool calls as JSON
+   - `tool_results_json()` - Extracts tool results as JSON
+
+### Design Notes
+
+- **Synchronous helpers**: The TurnStore trait uses async, but session write paths need sync access within mutex guards. Created sync helper functions that take `&Connection` directly.
+- **Auto-selection**: New spans are automatically selected in the main view, matching legacy behavior where `selected_span_id` is set on span_sets.
+- **Graceful degradation**: Errors writing to new tables are logged as warnings but don't fail the operation, ensuring backwards compatibility.
+
+### Next Steps
+
+- **3.2.12**: User E2E verification - run app, send messages, verify conversations work
+- **3.2.13**: SQL verification - `SELECT * FROM turns`, `SELECT * FROM spans`, `SELECT * FROM messages` should show data
+
+---

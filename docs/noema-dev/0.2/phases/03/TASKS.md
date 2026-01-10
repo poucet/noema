@@ -75,7 +75,7 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.2.8 | ⚡ Implement add_span, get_spans, get_span |
 | ✅ | 3.2.9 | ⚡ Implement add_message, get_messages, get_message |
 | ✅ | 3.2.10 | ✅ Unit tests for TurnStore |
-| ⬜ | 3.2.11 | 🔧 Wire existing write paths to TurnStore (dual-write) |
+| ✅ | 3.2.11 | 🔧 Wire existing write paths to TurnStore (dual-write) |
 | ⬜ | 3.2.12 | 🔧 User: E2E verification in noema app |
 | ⬜ | 3.2.13 | 🔧 User: SQL verify data in new tables |
 
