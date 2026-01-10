@@ -19,11 +19,9 @@ simply/                       # The system (reusable)
     │   ├── ROADMAP.md
     │   └── IDEAS.md
     └── phase/
-        ├── TASKS.md
-        ├── DEVLOG.md
-        ├── OBSERVATIONS.md
-        ├── SCRATCHPAD.md
-        └── CARRYOVER.md
+        ├── TASKS.md          # The Plan (Sprint View)
+        ├── JOURNAL.md        # The Execution (Log + Notes + Obs)
+        └── HANDOFF.md        # The Bridge (Continuity context)
 
 docs/
 ├── simply.yaml               # Current state (project, version, phase)
@@ -34,10 +32,8 @@ docs/
         └── phases/
             └── {phase}/
                 ├── TASKS.md
-                ├── DEVLOG.md
-                ├── OBSERVATIONS.md
-                ├── SCRATCHPAD.md
-                └── CARRYOVER.md
+                ├── JOURNAL.md
+                └── HANDOFF.md
 ```
 
 ## Phase Files
@@ -45,10 +41,8 @@ docs/
 | File | Purpose | When to Update |
 |------|---------|----------------|
 | `TASKS.md` | Task table + feature specs | Mark tasks done, add new tasks |
-| `DEVLOG.md` | Chronological changes | After each feature/commit |
-| `OBSERVATIONS.md` | Learnings, gotchas | When discovering something notable |
-| `SCRATCHPAD.md` | Working notes | Anytime |
-| `CARRYOVER.md` | Context for next phase | At end of phase |
+| `JOURNAL.md` | Chronological log & notes | During work (Thoughts, Changes, Obs) |
+| `HANDOFF.md` | Context for next phase | At end of phase |
 
 ## Path Resolution
 
@@ -81,11 +75,11 @@ Find next task to work on.
 2. Find next `todo` task (P0 > P1 > P2 > P3)
 3. Present details, ask if ready to start
 
-### observe <text>
+### journal <text>
 
-Add observation to OBSERVATIONS.md.
+Add entry to JOURNAL.md.
 1. Take text from args or ask
-2. Categorize and append
+2. Append with timestamp
 3. Confirm
 
 ### idea <text>
@@ -95,12 +89,12 @@ Add idea to IDEAS.md inbox.
 2. Append to Inbox table with date
 3. Confirm
 
-### summarize
+### handoff
 
-Generate CARRYOVER.md for phase end.
-1. Read TASKS.md, DEVLOG.md, OBSERVATIONS.md
-2. Write completed/incomplete features, key context, open questions
-3. Save to CARRYOVER.md
+Prepare HANDOFF.md for phase end.
+1. Read TASKS.md, JOURNAL.md
+2. Draft system state, notes, and next steps
+3. Save to HANDOFF.md
 
 ### switch <phase>
 
@@ -114,10 +108,8 @@ Switch to different phase.
 ## Pre-Compact
 
 Before compacting, update current phase docs:
-- `DEVLOG.md` - Changes made this session
-- `OBSERVATIONS.md` - Learnings or gotchas
+- `JOURNAL.md` - Changes and notes from this session
 - `TASKS.md` - Task status updates
-- `SCRATCHPAD.md` - Notes to help resume
 
 ---
 
@@ -126,13 +118,12 @@ Before compacting, update current phase docs:
 1. Create `docs/{project}/{version}/phases/{NN}/`
 2. Copy templates from `simply/templates/phase/`
 3. Copy phase overview from ROADMAP.md to TASKS.md
-4. Read previous CARRYOVER.md for context
+4. Read previous HANDOFF.md for context
 5. Update `docs/simply.yaml`
 
 ## Phase Transitions
 
 When completing a phase:
-1. Update DEVLOG.md with all changes
-2. Capture learnings in OBSERVATIONS.md
-3. Write CARRYOVER.md for next phase
-4. Update TASKS.md with final status
+1. Update TASKS.md with final status
+2. Capture learnings and context in HANDOFF.md
+3. Update `docs/simply.yaml` for next phase
