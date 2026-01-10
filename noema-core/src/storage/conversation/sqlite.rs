@@ -130,12 +130,17 @@ impl ConversationStore for SqliteStore {
 
     async fn get_conversation_private(&self, id: &str) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
-        let is_private: i32 = conn.query_row(
+        let result: std::result::Result<i32, _> = conn.query_row(
             "SELECT COALESCE(is_private, 0) FROM conversations WHERE id = ?1",
             params![id],
             |row| row.get(0),
-        )?;
-        Ok(is_private != 0)
+        );
+        // Return false if conversation doesn't exist yet
+        match result {
+            Ok(is_private) => Ok(is_private != 0),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn set_conversation_private(&self, id: &str, is_private: bool) -> Result<()> {
