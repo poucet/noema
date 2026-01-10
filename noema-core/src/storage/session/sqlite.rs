@@ -12,7 +12,7 @@ use super::{SessionStore, StorageTransaction};
 use crate::storage::content::StoredPayload;
 use crate::storage::content_block::sqlite::store_content_sync;
 use crate::storage::conversation::sqlite::sync_helpers as turn_sync;
-use crate::storage::conversation::types::{MessageRole, SpanRole};
+use crate::storage::conversation::types::SpanRole;
 use crate::storage::conversation::SpanType;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::ConversationId;
@@ -390,21 +390,13 @@ impl SqliteSession {
                 )?;
 
                 // Dual-write: Write to new messages table
-                let msg_role = match msg.role {
-                    Role::User => MessageRole::User,
-                    Role::Assistant => MessageRole::Assistant,
-                    Role::System => MessageRole::System,
-                    _ => MessageRole::Tool,
-                };
-
-                // Extract tool_calls and tool_results from payload if present
                 let tool_calls = stored_payload.tool_calls_json();
                 let tool_results = stored_payload.tool_results_json();
 
                 if let Err(e) = turn_sync::add_message_sync(
                     &conn,
                     &new_span_id,
-                    msg_role,
+                    msg.role.into(),
                     if text.is_empty() { None } else { Some(&text) },
                     tool_calls.as_deref(),
                     tool_results.as_deref(),
@@ -575,21 +567,13 @@ impl SqliteSession {
                     )?;
 
                     // Dual-write: Write to new messages table
-                    let msg_role = match msg.role {
-                        Role::User => MessageRole::User,
-                        Role::Assistant => MessageRole::Assistant,
-                        Role::System => MessageRole::System,
-                        _ => MessageRole::Tool,
-                    };
-
-                    // Extract tool_calls and tool_results from payload if present
                     let tool_calls = stored_payload.tool_calls_json();
                     let tool_results = stored_payload.tool_results_json();
 
                     if let Err(e) = turn_sync::add_message_sync(
                         &conn,
                         &new_span_id,
-                        msg_role,
+                        msg.role.into(),
                         if text.is_empty() { None } else { Some(&text) },
                         tool_calls.as_deref(),
                         tool_results.as_deref(),

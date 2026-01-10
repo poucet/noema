@@ -28,21 +28,23 @@ pub enum SpanRole {
     Assistant,
 }
 
-impl SpanRole {
-    /// Convert to database string representation
-    pub fn as_str(&self) -> &'static str {
+impl std::fmt::Display for SpanRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SpanRole::User => "user",
-            SpanRole::Assistant => "assistant",
+            SpanRole::User => write!(f, "user"),
+            SpanRole::Assistant => write!(f, "assistant"),
         }
     }
+}
 
-    /// Parse from database string representation
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for SpanRole {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "user" => Some(SpanRole::User),
-            "assistant" => Some(SpanRole::Assistant),
-            _ => None,
+            "user" => Ok(SpanRole::User),
+            "assistant" => Ok(SpanRole::Assistant),
+            _ => Err(()),
         }
     }
 }
@@ -68,25 +70,39 @@ pub enum MessageRole {
     Tool,
 }
 
-impl MessageRole {
-    /// Convert to database string representation
-    pub fn as_str(&self) -> &'static str {
+impl std::fmt::Display for MessageRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
-            MessageRole::Tool => "tool",
+            MessageRole::User => write!(f, "user"),
+            MessageRole::Assistant => write!(f, "assistant"),
+            MessageRole::System => write!(f, "system"),
+            MessageRole::Tool => write!(f, "tool"),
         }
     }
+}
 
-    /// Parse from database string representation
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for MessageRole {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "user" => Some(MessageRole::User),
-            "assistant" => Some(MessageRole::Assistant),
-            "system" => Some(MessageRole::System),
-            "tool" => Some(MessageRole::Tool),
-            _ => None,
+            "user" => Ok(MessageRole::User),
+            "assistant" => Ok(MessageRole::Assistant),
+            "system" => Ok(MessageRole::System),
+            "tool" => Ok(MessageRole::Tool),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Convert from LLM Role to MessageRole
+impl From<llm::api::Role> for MessageRole {
+    fn from(role: llm::api::Role) -> Self {
+        match role {
+            llm::api::Role::User => MessageRole::User,
+            llm::api::Role::Assistant => MessageRole::Assistant,
+            llm::api::Role::System => MessageRole::System,
+            _ => MessageRole::Tool,
         }
     }
 }
@@ -444,8 +460,8 @@ mod tests {
     #[test]
     fn test_span_role_roundtrip() {
         for role in [SpanRole::User, SpanRole::Assistant] {
-            let s = role.as_str();
-            let parsed = SpanRole::from_str(s).unwrap();
+            let s = role.to_string();
+            let parsed: SpanRole = s.parse().unwrap();
             assert_eq!(parsed, role);
         }
     }
@@ -458,8 +474,8 @@ mod tests {
             MessageRole::System,
             MessageRole::Tool,
         ] {
-            let s = role.as_str();
-            let parsed = MessageRole::from_str(s).unwrap();
+            let s = role.to_string();
+            let parsed: MessageRole = s.parse().unwrap();
             assert_eq!(parsed, role);
         }
     }

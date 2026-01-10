@@ -807,7 +807,7 @@ impl TurnStore for SqliteStore {
         conn.execute(
             "INSERT INTO turns (id, conversation_id, role, sequence_number, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id.as_str(), conversation_id.as_str(), role.as_str(), sequence_number, now],
+            params![id.as_str(), conversation_id.as_str(), role.to_string(), sequence_number, now],
         )?;
 
         Ok(TurnInfo {
@@ -838,7 +838,7 @@ impl TurnStore for SqliteStore {
             })?
             .filter_map(|r| r.ok())
             .filter_map(|(id, conv_id, role_str, seq, created)| {
-                let role = SpanRole::from_str(&role_str)?;
+                let role = role_str.parse::<SpanRole>().ok()?;
                 Some(TurnInfo {
                     id: TurnId::from_string(id),
                     conversation_id: ConversationId::from_string(conv_id),
@@ -870,8 +870,8 @@ impl TurnStore for SqliteStore {
 
         match result {
             Ok((id, conv_id, role_str, seq, created)) => {
-                let role = SpanRole::from_str(&role_str)
-                    .ok_or_else(|| anyhow::anyhow!("Invalid role: {}", role_str))?;
+                let role = role_str.parse::<SpanRole>()
+                    .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
                 Ok(Some(TurnInfo {
                     id: TurnId::from_string(id),
                     conversation_id: ConversationId::from_string(conv_id),
@@ -1013,7 +1013,7 @@ impl TurnStore for SqliteStore {
                 id.as_str(),
                 span_id.as_str(),
                 sequence_number,
-                message.role.as_str(),
+                message.role.to_string(),
                 content_id.as_ref().map(|c| c.as_str()),
                 message.tool_calls,
                 message.tool_results,
@@ -1055,7 +1055,7 @@ impl TurnStore for SqliteStore {
             })?
             .filter_map(|r| r.ok())
             .filter_map(|(id, sid, seq, role_str, content_id, tool_calls, tool_results, created)| {
-                let role = MessageRole::from_str(&role_str)?;
+                let role = role_str.parse::<MessageRole>().ok()?;
                 Some(MessageInfo {
                     id: MessageId::from_string(id),
                     span_id: SpanId::from_string(sid),
@@ -1093,8 +1093,8 @@ impl TurnStore for SqliteStore {
 
         match result {
             Ok((id, sid, seq, role_str, content_id, tool_calls, tool_results, created)) => {
-                let role = MessageRole::from_str(&role_str)
-                    .ok_or_else(|| anyhow::anyhow!("Invalid role: {}", role_str))?;
+                let role = role_str.parse::<MessageRole>()
+                    .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
                 Ok(Some(MessageInfo {
                     id: MessageId::from_string(id),
                     span_id: SpanId::from_string(sid),
@@ -1445,7 +1445,7 @@ pub mod sync_helpers {
         conn.execute(
             "INSERT INTO turns (id, conversation_id, role, sequence_number, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id.as_str(), conversation_id.as_str(), role.as_str(), sequence_number, now],
+            params![id.as_str(), conversation_id.as_str(), role.to_string(), sequence_number, now],
         )?;
 
         Ok((id, sequence_number))
@@ -1517,7 +1517,7 @@ pub mod sync_helpers {
                 id.as_str(),
                 span_id.as_str(),
                 sequence_number,
-                role.as_str(),
+                role.to_string(),
                 content_id,
                 tool_calls,
                 tool_results,
