@@ -6,11 +6,13 @@ Phase 1 consists of 5 "Quick Wins" features focused on model display and privacy
 
 | Done | # | Feature | Files |
 |------|---|---------|-------|
-| [x] | 4 | Local vs non-local model icon (P1) | ModelSelector.tsx |
+| [x] | 4 | Local vs non-local model icon (P1) | ModelSelector.tsx, lib.rs |
 | [ ] | 3 | Model metadata display (P1) | ModelSelector.tsx |
 | [ ] | 2 | Truncate long model names (P2) | ModelSelector.tsx |
 | [ ] | 31 | Copy raw markdown (P1) | MessageBubble.tsx |
 | [ ] | 32 | Private content flag (P0) | Settings.tsx, engine.rs, types |
+| [ ] | 33 | Toggle to disable tools (P1) | ChatInput.tsx |
+| [ ] | 34 | Toggle to disable audio/image input (P1) | ChatInput.tsx |
 
 ---
 

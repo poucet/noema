@@ -18,8 +18,10 @@ This plan covers a major feature wave for Noema 0.2, organized into 7 phases. Ke
 |------|-----|---|---------|------------|--------|
 | [ ] | P0 | 32 | Private content flag (blocks non-local models) | Low | High |
 | [ ] | P1 | 3 | Model metadata display (context window, provider) | Low | Medium |
-| [ ] | P1 | 4 | Local vs non-local model indicator icon | Low | Medium |
+| [x] | P1 | 4 | Local vs non-local model indicator icon | Low | Medium |
 | [ ] | P1 | 31 | Copy raw markdown from assistant responses | Low | Medium |
+| [ ] | P1 | 33 | Toggle to disable tools (for models without tool support) | Low | Medium |
+| [ ] | P1 | 34 | Toggle to disable audio/image input (placeholder + toggle) | Low | Medium |
 | [ ] | P2 | 2 | Truncate long model names (preserve star icon) | Low | Low |
 
 ### Phase 2: Core UX (Model-Independent)
@@ -153,6 +155,35 @@ This plan covers a major feature wave for Noema 0.2, organized into 7 phases. Ke
 **Files**:
 - `noema-desktop/src/components/ConversationSettings.tsx`
 - `noema-core/src/engine.rs` (model selection validation)
+
+---
+
+### Feature 33: Toggle to Disable Tools
+
+**Problem**: Some models don't support tool/function calling. Users need an easy way to disable tools when using such models.
+
+**Solution**: Add toggle at bottom of chat input area to enable/disable tools.
+- Toggle shows current state: "Tools: On/Off"
+- When off, MCP tools are not sent to the model
+- Per-conversation setting (persisted)
+- Visual indicator when tools are disabled
+
+**File**: `noema-desktop/src/components/ChatInput.tsx`
+
+---
+
+### Feature 34: Toggle to Disable Audio/Image Input
+
+**Problem**: Some models don't support multimodal input (images, audio). When users try to attach media, it either fails or gets ignored.
+
+**Solution**: Add toggles to disable audio/image input with placeholder UI.
+- When model lacks `Vision` capability, image input is disabled
+- When model lacks `AudioInput` capability, audio input is disabled
+- Show placeholder instead of input button: "Model doesn't support images"
+- Easy toggle to force-enable (for testing or model capability updates)
+- Per-conversation override possible
+
+**File**: `noema-desktop/src/components/ChatInput.tsx`
 
 ---
 
