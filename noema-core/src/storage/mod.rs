@@ -16,6 +16,9 @@
 //! - `BlobStore` - Content-addressable binary storage
 mod helper;
 
+// Type-safe ID newtypes
+pub mod ids;
+
 // Session module contains traits and all session implementations
 
 // Domain-specific storage modules
