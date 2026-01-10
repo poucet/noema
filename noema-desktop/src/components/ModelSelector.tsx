@@ -37,14 +37,38 @@ const EmbeddingIcon = () => (
   </svg>
 );
 
-// Get capability info
+// Privacy icon (shield) - data stays on device
+const PrivateIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+  </svg>
+);
+
+// Cloud provider icon
+const CloudIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+  </svg>
+);
+
+// Check if a model is private (data stays on device)
+function isPrivateModel(model: ModelInfo): boolean {
+  return model.capabilities.includes("Private");
+}
+
+// Check if all models from a provider are private
+function isPrivateProvider(models: ModelInfo[]): boolean {
+  return models.length > 0 && models.every(m => m.capabilities.includes("Private"));
+}
+
+// Get capability info for display (excludes Privacy which is shown separately)
 function getCapabilities(capabilities: string[]): { key: string; label: string; Icon: React.FC }[] {
   const result: { key: string; label: string; Icon: React.FC }[] = [];
   if (capabilities.includes("Text")) {
     result.push({ key: "text", label: "Text/Chat", Icon: TextIcon });
   }
-  if (capabilities.includes("Image")) {
-    result.push({ key: "image", label: "Vision", Icon: VisionIcon });
+  if (capabilities.includes("Vision")) {
+    result.push({ key: "vision", label: "Vision", Icon: VisionIcon });
   }
   if (capabilities.includes("Embedding")) {
     result.push({ key: "embedding", label: "Embedding", Icon: EmbeddingIcon });
@@ -263,16 +287,25 @@ export function ModelSelector({
               )}
 
               {/* Other models grouped by provider */}
-              {Object.entries(groupedModels).map(([provider, providerModels]) => (
-                <div key={provider}>
-                  <div className="px-3 py-2 text-xs font-semibold text-muted uppercase bg-background sticky top-0">
-                    {provider}
+              {(Object.entries(groupedModels) as [string, ModelInfo[]][]).map(([provider, providerModels]) => {
+                const isPrivate = isPrivateProvider(providerModels);
+                return (
+                  <div key={provider}>
+                    <div className="px-3 py-2 text-xs font-semibold text-muted uppercase bg-background sticky top-0 flex items-center gap-1.5">
+                      <span
+                        title={isPrivate ? "Private (data stays on device)" : "Cloud (data sent to provider)"}
+                        className={isPrivate ? "text-green-500" : "text-blue-400"}
+                      >
+                        {isPrivate ? <PrivateIcon /> : <CloudIcon />}
+                      </span>
+                      {provider}
+                    </div>
+                    {providerModels.map((model) => (
+                      <ModelRow key={getFullModelId(model)} model={model} isFavorite={false} />
+                    ))}
                   </div>
-                  {providerModels.map((model) => (
-                    <ModelRow key={getFullModelId(model)} model={model} isFavorite={false} />
-                  ))}
-                </div>
-              ))}
+                );
+              })}
 
               {filteredModels.length === 0 && searchQuery && (
                 <div className="px-3 py-4 text-sm text-muted text-center">

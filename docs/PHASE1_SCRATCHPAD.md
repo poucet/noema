@@ -4,13 +4,13 @@
 
 Phase 1 consists of 5 "Quick Wins" features focused on model display and privacy:
 
-| # | Feature | Files |
-|---|---------|-------|
-| 32 | Private content flag (P0) | Settings.tsx, engine.rs, types |
-| 3 | Model metadata display (P1) | ModelSelector.tsx |
-| 4 | Local vs non-local model icon (P1) | ModelSelector.tsx |
-| 31 | Copy raw markdown (P1) | MessageBubble.tsx |
-| 2 | Truncate long model names (P2) | ModelSelector.tsx |
+| Done | # | Feature | Files |
+|------|---|---------|-------|
+| [x] | 4 | Local vs non-local model icon (P1) | ModelSelector.tsx |
+| [ ] | 3 | Model metadata display (P1) | ModelSelector.tsx |
+| [ ] | 2 | Truncate long model names (P2) | ModelSelector.tsx |
+| [ ] | 31 | Copy raw markdown (P1) | MessageBubble.tsx |
+| [ ] | 32 | Private content flag (P0) | Settings.tsx, engine.rs, types |
 
 ---
 
@@ -131,9 +131,41 @@ Will add:
 
 ---
 
+## Progress Log
+
+### Feature 4: Privacy Icon via Capabilities ✅ DONE
+
+**Architecture decision:** Privacy is now a `ModelCapability` enum variant, not a hardcoded provider list. This is extensible for future capabilities like `Tools`, `Thinking`, `Streaming`, etc.
+
+**Backend changes (`noema-core/llm/src/lib.rs`):**
+- Expanded `ModelCapability` enum with new variants:
+  - `Vision` (renamed from `Image`)
+  - `AudioInput`, `AudioGeneration`, `ImageGeneration`
+  - `Tools`, `Thinking`, `Streaming`
+  - `Private` - data stays on device
+- Each provider sets capabilities per-model
+
+**Provider changes (`noema-core/llm/src/providers/`):**
+- Ollama: adds `Private` capability to all models (local)
+- Gemini: renamed `Image` → `Vision`
+
+**Frontend changes (`ModelSelector.tsx`):**
+- Removed hardcoded `LOCAL_PROVIDERS` list
+- Added `PrivateIcon` (shield SVG) and `CloudIcon`
+- Added `isPrivateModel()` and `isPrivateProvider()` helpers
+- Provider headers show shield (green) for private, cloud (blue) for cloud
+- Updated `getCapabilities()` to use `Vision` instead of `Image`
+
+**Build verified:** `cargo build --package llm` succeeds
+
+---
+
 ## Notes for Future Context
 
 - No toast library installed - Feature 31 needs simple feedback mechanism
 - Types auto-generate from Rust via ts-rs (`/src/generated/`)
 - Use `jj commit` not `git commit` per project rules
 - Each feature should be a separate commit
+- Pre-existing TypeScript errors in codebase (19 errors) - not from Phase 1 changes
+- Vite build works despite tsc errors
+- `ModelCapability` enum is now the single source of truth for model features

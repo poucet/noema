@@ -42,10 +42,10 @@ impl From<ModelDefinition> for crate::ModelDefinition {
                         }
                         // Note: Gemini models with generateContent support multimodal input (text + images)
                         // but this is not explicitly indicated in supportedGenerationMethods.
-                        // Image capability refers to vision/multimodal input support, which is inherent
+                        // Vision capability refers to multimodal input support, which is inherent
                         // to generateContent models in Gemini.
-                        if !capabilities.contains(&crate::ModelCapability::Image) {
-                            capabilities.push(crate::ModelCapability::Image);
+                        if !capabilities.contains(&crate::ModelCapability::Vision) {
+                            capabilities.push(crate::ModelCapability::Vision);
                         }
                     }
                     "embedContent" => {

@@ -19,11 +19,41 @@ pub use tools::ToolRegistry;
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = ChatChunk> + Send>>;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Capabilities and characteristics of a model.
+///
+/// These are used to:
+/// - Filter models by what they can do (e.g., only show models that support vision)
+/// - Display capability indicators in the UI
+/// - Enforce privacy rules (e.g., block cloud models for private content)
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ModelCapability {
+    // === Content Processing ===
+    /// Can process and generate text (chat/completion)
     Text,
+    /// Can process/understand images (vision)
+    Vision,
+    /// Can process audio input
+    AudioInput,
+    /// Can generate embeddings
     Embedding,
-    Image,
+
+    // === Generation ===
+    /// Can generate images
+    ImageGeneration,
+    /// Can generate audio (text-to-speech)
+    AudioGeneration,
+
+    // === Advanced Features ===
+    /// Supports tool/function calling
+    Tools,
+    /// Supports extended thinking/reasoning (e.g., Claude's thinking, o1's reasoning)
+    Thinking,
+    /// Supports streaming responses
+    Streaming,
+
+    // === Privacy ===
+    /// Data stays private - never leaves the device (local models)
+    Private,
 }
 
 #[derive(Clone, Debug)]

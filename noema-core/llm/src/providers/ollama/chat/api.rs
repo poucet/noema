@@ -49,7 +49,7 @@ impl From<ModelDefinition> for crate::ModelDefinition {
             // Default to text capability for non-embedding models
             capabilities.push(crate::ModelCapability::Text);
             if has_vision {
-                capabilities.push(crate::ModelCapability::Image);
+                capabilities.push(crate::ModelCapability::Vision);
             }
         }
 
@@ -57,6 +57,9 @@ impl From<ModelDefinition> for crate::ModelDefinition {
         if capabilities.is_empty() {
             capabilities.push(crate::ModelCapability::Text);
         }
+
+        // Ollama models run locally - data never leaves the device
+        capabilities.push(crate::ModelCapability::Private);
 
         crate::ModelDefinition::new(model.name, capabilities)
     }
