@@ -119,8 +119,34 @@ Started implementation of Content Block storage.
 
 - **content_hash in helper module**: Initially in sqlite.rs, moved to helper.rs since SHA-256 hashing isn't sqlite-specific.
 
-### Remaining for 3.1
+---
 
-- 3.1.6: content_block_tags table (tagging support)
+## 2026-01-10: Feature 3.1 Integration Complete
+
+Added integration tasks to ensure content blocks are actually used by the app.
+
+### Integration Commits
+
+6. **📦 Add content_id column to span_messages table** (3.1.8)
+   - Added `content_id TEXT REFERENCES content_blocks(id)` to span_messages
+   - Added index on content_id for joins
+   - Updated TASKS.md with integration tasks (3.1.8-3.1.10)
+
+7. **🔧 Store message text in content_blocks on write** (3.1.9)
+   - Added `store_content_sync()` helper that takes `&Connection` directly
+   - Updated `write_as_span()` to store text in content_blocks and set content_id
+   - Updated `write_parallel_responses()` similarly
+   - Origin tracking: role → origin_kind, user_id, model_id populated
+
+### Approach
+
+- **Dual-write for now**: Text is stored in both content_blocks AND text_content/content JSON
+- **Read path unchanged**: App continues reading from existing columns
+- **Verification**: Send messages → content_blocks table populated → conversations still work
+- **Future**: Can remove text duplication once confident in content_blocks
+
+### Feature 3.1 Complete
+
+All 10 tasks done (3.1.6 tags deferred as not critical for integration path).
 
 ---

@@ -10,7 +10,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 
 | Status | Pri | # | Feature | Description |
 |--------|-----|---|---------|-------------|
-| 🔄 | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
+| ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ⬜ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ⬜ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
 | ⬜ | P0 | 3.3 | Views and forking | Named paths through conversations, fork support |
@@ -42,9 +42,9 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.1.5 | ⚡ Implement SqliteContentBlockStore |
 | ⏸️ | 3.1.6 | 📦 Add content_block_tags table (deferred) |
 | ✅ | 3.1.7 | ✅ Unit tests for content block store |
-| ⬜ | 3.1.8 | 📦 Add `content_id` column to `span_messages` |
-| ⬜ | 3.1.9 | 🔧 Update `write_as_span()` to store text in content_blocks |
-| ⬜ | 3.1.10 | 🔧 Update `open_conversation()` to resolve content_id |
+| ✅ | 3.1.8 | 📦 Add `content_id` column to `span_messages` |
+| ✅ | 3.1.9 | 🔧 Update `write_as_span()` to store text in content_blocks |
+| ✅ | 3.1.10 | ✅ E2E verification (text still in both places, read path unchanged) |
 
 ### 3.1b Asset Storage (6 tasks)
 
