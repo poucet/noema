@@ -12,6 +12,7 @@ Lightweight inbox for ideas not yet in the roadmap.
 | 4 | Local filesystem as first-class citizen | Easy markdown import/export for AI design conversations. Accelerates agentic behavior by enabling design work with AI models inside noema. | 2026-01-10 |
 | 5 | Dynamic Typst functions for data queries | Typst functions that generate content from noema store data (bug counts, stats, charts). Computed on-the-fly in UI, templatized in storage. When injected into LLM context, evaluate and include both raw template code and generated output. | 2026-01-10 |
 | 6 | Proactive AI check-ins | AI initiates conversations after inactivity with check-in prompts. Templatizable check-in patterns for different contexts (e.g. project status, mood, goals). | 2026-01-10 |
+| 7 | Endless conversation as main entry point | Single continuous conversation that manages context history in the background. No explicit session boundaries. | 2026-01-10 |
 
 ## Triaged
 
