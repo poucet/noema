@@ -10,15 +10,14 @@
 
 | # | Use Case | Description |
 |---|----------|-------------|
-| 1 | Agent calling tool | Agent invokes tool, gets result, continues |
-| 2 | Agent → subagent | Parent spawns child with scoped context, gets summary back |
-| 3 | Agent ↔ agent (supervised) | Two agents communicate, human approves cross-messages |
-| 4 | Parallel models + chaining | Multiple models respond, user selects, chain continues |
-| 5 | Fork conversation | Branch from any point, paths diverge |
-| 6 | Edit & splice | Edit mid-conversation, optionally keep subsequent messages |
-| 7 | Versioned documents | Markdown/typst docs with revision history |
-| 8 | Cross-reference | Same content appears in conversation AND as document |
-| 9 | Structured data | Ordered lists, trees, tagged items, table views |
+| 1 | Agent → subagent | Parent spawns child with scoped context, gets summary back |
+| 2 | Agent ↔ agent (supervised) | Two agents communicate, human approves cross-messages |
+| 3 | Parallel models + chaining | Multiple models respond, user selects, chain continues |
+| 4 | Fork conversation | Branch from any point, paths diverge |
+| 5 | Edit & splice | Edit mid-conversation, optionally keep subsequent messages |
+| 6 | Versioned documents | Markdown/typst docs with revision history |
+| 7 | Cross-reference | Same content appears in conversation AND as document |
+| 8 | Structured data | Ordered lists, trees, tagged items, table views |
 
 ---
 
@@ -192,21 +191,7 @@ Collection
 
 ## Use Case Analysis
 
-### 1. Agent Calling Tool
-
-Sequential messages within single alternative. No branching.
-
-```
-Position 1: [user message]
-Position 2: [assistant: tool_call] [tool: result] [assistant: continues]
-```
-
-**Structure:** Sequence, single alternative per position.
-**No special handling needed.**
-
----
-
-### 2. Agent → Subagent
+### 1. Agent → Subagent
 
 Parent spawns child conversation. Child works with scoped context. Result summarized back.
 
@@ -230,7 +215,7 @@ Child:            C1 → C2 → C3 → [result] ──────────�
 
 ---
 
-### 3. Agent ↔ Agent (Supervised)
+### 2. Agent ↔ Agent (Supervised)
 
 Two independent conversations. Human mediates message passing.
 
@@ -256,7 +241,7 @@ Human approves: A3→B2, B3→A4
 
 ---
 
-### 4. Parallel Models + Chaining
+### 3. Parallel Models + Chaining
 
 Multiple alternatives at a position. User selects. Chain continues from selection.
 
@@ -282,7 +267,7 @@ Position 4 continues from Alt A's context
 
 ---
 
-### 5. Fork Conversation
+### 4. Fork Conversation
 
 Branch from any point. Paths diverge independently.
 
@@ -308,7 +293,7 @@ Forked:   P1 → P2 → P3 → F4 → F5
 
 ---
 
-### 6. Edit & Splice
+### 5. Edit & Splice
 
 Edit a position. Optionally keep subsequent positions from original.
 
@@ -334,7 +319,7 @@ The original P4, P5 are reused because alternatives are shared across views.
 
 ---
 
-### 7. Versioned Documents
+### 6. Versioned Documents
 
 Linear revision history with optional branching.
 
@@ -353,9 +338,9 @@ Doc: v1 → v2 → v3 (current)
 
 ---
 
-### 8. Cross-Reference
+### 7. Cross-Reference
 
-Same content appears in multiple places.
+Same content appears in multiple places. Documents can be referenced within conversations.
 
 ```
 ContentBlock "Meeting summary"
@@ -363,19 +348,29 @@ ContentBlock "Meeting summary"
   ├── Alternative in Conversation, position 5
   ├── Revision 3 of Document "notes.md"
   └── Item in Collection "Important"
+
+Conversation with DocumentRef:
+  Position 1: [user: "Summarize this doc" + DocumentRef("notes.md")]
+  Position 2: [assistant: response referencing doc content]
 ```
 
 **Structure:** Content separate from usage. Multiple structures reference same ContentHash.
 
+**References in conversations:**
+- `DocumentRef` in message content → points to Document
+- Document content injected into LLM context at render time
+- Enables RAG-style document grounding in conversations
+
 **Operations:**
-- Any structure can reference any ContentBlock
+- Any structure can reference any ContentBlock or Document
 - `backlinks(content)` → all places referencing it
+- `backlinks(document)` → all conversations referencing it
 
 **UI:** "Used in: [Conversation X], [Document Y], [Collection Z]"
 
 ---
 
-### 9. Structured Data
+### 8. Structured Data
 
 Organize entities into trees/lists with metadata.
 
