@@ -12,8 +12,8 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 |--------|-----|---|---------|-------------|
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
-| ⬜ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
-| ⬜ | P0 | 3.3 | Views and forking | Named paths through conversations, fork support |
+| 🔄 | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
+| 🔄 | P0 | 3.3 | Views and forking | Named paths through conversations, fork support |
 | ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
@@ -61,33 +61,36 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.1b.9 | 🔧 User: Attach image to message, send, verify image displays |
 | ✅ | 3.1b.10 | 🔧 User: SQL verify `SELECT * FROM assets` shows new row |
 
-### 3.2 Conversation Structure (10 tasks)
+### 3.2 Conversation Structure (13 tasks)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.2.1 | 🏗️ Define Turn, Span, Message types |
-| ⬜ | 3.2.2 | 📦 Add conversations table migration |
-| ⬜ | 3.2.3 | 📦 Add turns table migration |
-| ⬜ | 3.2.4 | 📦 Add spans table migration |
-| ⬜ | 3.2.5 | 📦 Add messages table migration |
-| ⬜ | 3.2.6 | 🏗️ Define ConversationStore trait |
-| ⬜ | 3.2.7 | ⚡ Implement add_turn and get_turns |
-| ⬜ | 3.2.8 | ⚡ Implement add_span and get_spans |
-| ⬜ | 3.2.9 | ⚡ Implement add_message and get_messages |
-| ⬜ | 3.2.10 | ✅ Unit tests for conversation structure |
+| ✅ | 3.2.1 | 🏗️ Define Turn, Span, Message types (`storage/conversation/types.rs`) |
+| ✅ | 3.2.2 | 📦 Add turns table migration |
+| ✅ | 3.2.3 | 📦 Add spans table migration (legacy renamed to `legacy_spans`) |
+| ✅ | 3.2.4 | 📦 Add messages table migration (legacy renamed to `legacy_span_messages`) |
+| ✅ | 3.2.5 | 📦 Add views, view_selections tables |
+| ✅ | 3.2.6 | 🏗️ Define TurnStore trait |
+| ✅ | 3.2.7 | ⚡ Implement add_turn, get_turns, get_turn |
+| ✅ | 3.2.8 | ⚡ Implement add_span, get_spans, get_span |
+| ✅ | 3.2.9 | ⚡ Implement add_message, get_messages, get_message |
+| ✅ | 3.2.10 | ✅ Unit tests for TurnStore |
+| ⬜ | 3.2.11 | 🔧 Wire existing write paths to TurnStore (dual-write) |
+| ⬜ | 3.2.12 | 🔧 User: E2E verification in noema app |
+| ⬜ | 3.2.13 | 🔧 User: SQL verify data in new tables |
 
 ### 3.3 Views and Forking (8 tasks)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.1 | 📦 Add views table migration |
-| ⬜ | 3.3.2 | 📦 Add view_selections table migration |
-| ⬜ | 3.3.3 | ⚡ Implement create_view |
-| ⬜ | 3.3.4 | ⚡ Implement select_span |
-| ⬜ | 3.3.5 | ⚡ Implement get_view_path |
-| ⬜ | 3.3.6 | ⚡ Implement fork_view |
+| ✅ | 3.3.1 | 📦 Add views table migration |
+| ✅ | 3.3.2 | 📦 Add view_selections table migration |
+| ✅ | 3.3.3 | ⚡ Implement create_view, get_views, get_main_view |
+| ✅ | 3.3.4 | ⚡ Implement select_span, get_selected_span |
+| ✅ | 3.3.5 | ⚡ Implement get_view_path |
+| ✅ | 3.3.6 | ⚡ Implement fork_view |
 | ⬜ | 3.3.7 | ⚡ Implement edit_turn (splice) |
-| ⬜ | 3.3.8 | ✅ Unit tests for views and forking |
+| ✅ | 3.3.8 | ✅ Unit tests for views and forking
 
 ### 3.4 Document Structure (10 tasks)
 
