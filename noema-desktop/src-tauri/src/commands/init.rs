@@ -3,7 +3,9 @@
 use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
+use noema_core::storage::asset::AssetStore;
 use noema_core::storage::blob::{BlobStore, FsBlobStore};
+use noema_core::storage::coordinator::DynStorageCoordinator;
 use noema_core::storage::document::resolver::DocumentResolver;
 use noema_core::storage::conversation::ConversationStore;
 use noema_core::storage::user::UserStore;
@@ -170,10 +172,27 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     std::fs::create_dir_all(&blob_dir)
         .map_err(|e| format!("Failed to create blob storage dir: {}", e))?;
 
-    let store = Arc::new(SqliteStore::open(&db_path)
-        .map_err(|e| format!("Failed to open database: {}", e))?);
-
+    // Create blob store first (needed for coordinator)
     let blob_store = Arc::new(FsBlobStore::new(blob_dir)) as Arc<dyn BlobStore>;
+
+    // Create the SQL store
+    let store = SqliteStore::open(&db_path)
+        .map_err(|e| format!("Failed to open database: {}", e))?;
+
+    // Wrap store in Arc so we can share it
+    let store = Arc::new(store);
+
+    // Create storage coordinator for automatic asset externalization
+    // The coordinator uses the blob store for binary data and the SQL store for asset metadata
+    // Note: SqliteStore implements AssetStore
+    let asset_store = Arc::clone(&store) as Arc<dyn AssetStore>;
+    let coordinator = Arc::new(DynStorageCoordinator::new(
+        blob_store.clone(),
+        asset_store,
+    ));
+
+    // Set the coordinator on the store (uses interior mutability)
+    store.set_coordinator(coordinator);
 
     *state.store.lock().await = Some(store);
     *state.blob_store.lock().await = Some(blob_store);

@@ -1,69 +1,230 @@
 //! SQLite implementation of AssetStore
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 
-use super::{AssetInfo, AssetStore};
-use crate::storage::session::SqliteStore;
+use super::{Asset, AssetStore, AssetStoreResult, StoredAsset};
 use crate::storage::helper::unix_timestamp;
+use crate::storage::ids::AssetId;
+use crate::storage::session::SqliteStore;
 
-pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
+pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
-        -- Assets (CAS metadata)
         CREATE TABLE IF NOT EXISTS assets (
             id TEXT PRIMARY KEY,
             mime_type TEXT NOT NULL,
             original_filename TEXT,
-            file_size_bytes INTEGER,
-            metadata_json TEXT,
+            size_bytes INTEGER NOT NULL,
             local_path TEXT,
+            is_private INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
         );
+
+        CREATE INDEX IF NOT EXISTS idx_assets_private ON assets(is_private);
+        CREATE INDEX IF NOT EXISTS idx_assets_created ON assets(created_at);
         "#,
-    )
-    .context("Failed to initialize asset schema")?;
+    )?;
     Ok(())
 }
 
 #[async_trait]
 impl AssetStore for SqliteStore {
-    async fn register_asset(
-        &self,
-        hash: &str,
-        mime_type: &str,
-        original_filename: Option<&str>,
-        file_size_bytes: Option<i64>,
-        local_path: Option<&str>,
-    ) -> Result<()> {
+    async fn store(&self, id: AssetId, asset: Asset) -> Result<AssetStoreResult> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();
+
+        // Check if already exists
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM assets WHERE id = ?1",
+                params![id.as_str()],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        if exists {
+            return Ok(AssetStoreResult { id, is_new: false });
+        }
+
         conn.execute(
-            "INSERT OR IGNORE INTO assets (id, mime_type, original_filename, file_size_bytes, local_path, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![hash, mime_type, original_filename, file_size_bytes, local_path, now],
+            "INSERT INTO assets (id, mime_type, original_filename, size_bytes, local_path, is_private, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id.as_str(),
+                asset.mime_type,
+                asset.original_filename,
+                asset.size_bytes,
+                asset.local_path,
+                asset.is_private as i32,
+                now
+            ],
         )?;
-        Ok(())
+
+        Ok(AssetStoreResult { id, is_new: true })
     }
 
-    async fn get_asset(&self, hash: &str) -> Result<Option<AssetInfo>> {
+    async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>> {
         let conn = self.conn().lock().unwrap();
         let asset = conn
             .query_row(
-                "SELECT id, mime_type, original_filename, file_size_bytes, local_path FROM assets WHERE id = ?1",
-                params![hash],
+                "SELECT mime_type, original_filename, size_bytes, local_path, is_private, created_at
+                 FROM assets WHERE id = ?1",
+                params![id.as_str()],
                 |row| {
-                    Ok(AssetInfo {
-                        id: row.get(0)?,
-                        mime_type: row.get(1)?,
-                        original_filename: row.get(2)?,
-                        file_size_bytes: row.get(3)?,
-                        local_path: row.get(4)?,
+                    Ok(StoredAsset {
+                        id: id.clone(),
+                        asset: Asset {
+                            mime_type: row.get(0)?,
+                            original_filename: row.get(1)?,
+                            size_bytes: row.get(2)?,
+                            local_path: row.get(3)?,
+                            is_private: row.get::<_, i32>(4)? != 0,
+                        },
+                        created_at: row.get(5)?,
                     })
                 },
             )
             .ok();
         Ok(asset)
+    }
+
+    async fn exists(&self, id: &AssetId) -> Result<bool> {
+        let conn = self.conn().lock().unwrap();
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM assets WHERE id = ?1",
+                params![id.as_str()],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        Ok(exists)
+    }
+
+    async fn delete(&self, id: &AssetId) -> Result<bool> {
+        let conn = self.conn().lock().unwrap();
+        let deleted = conn.execute("DELETE FROM assets WHERE id = ?1", params![id.as_str()])?;
+        Ok(deleted > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn test_schema_creation() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+
+        // Verify table exists
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assets'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Verify indexes exist
+        let index_count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_assets%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(index_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_store_and_get() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let id = AssetId::from_string("abc123hash");
+        let asset = Asset::new("image/png", 1024).with_filename("test.png");
+
+        let result = store.store(id.clone(), asset).await.unwrap();
+        assert!(result.is_new);
+        assert_eq!(result.id.as_str(), "abc123hash");
+
+        let stored = store.get(&id).await.unwrap().unwrap();
+        assert_eq!(stored.mime_type(), "image/png");
+        assert_eq!(stored.size_bytes(), 1024);
+        assert_eq!(stored.original_filename(), Some("test.png"));
+        assert!(!stored.is_private());
+    }
+
+    #[tokio::test]
+    async fn test_deduplication() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let id = AssetId::from_string("duplicate_hash");
+        let asset1 = Asset::new("image/jpeg", 2048);
+        let result1 = store.store(id.clone(), asset1).await.unwrap();
+        assert!(result1.is_new);
+
+        // Store same hash again
+        let asset2 = Asset::new("image/jpeg", 2048);
+        let result2 = store.store(id.clone(), asset2).await.unwrap();
+        assert!(!result2.is_new);
+    }
+
+    #[tokio::test]
+    async fn test_exists() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let id = AssetId::from_string("exists_test");
+        let asset = Asset::new("audio/mp3", 4096);
+        store.store(id.clone(), asset).await.unwrap();
+
+        assert!(store.exists(&id).await.unwrap());
+        assert!(!store.exists(&AssetId::from_string("nonexistent")).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_delete() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let id = AssetId::from_string("delete_test");
+        let asset = Asset::new("application/pdf", 8192);
+        store.store(id.clone(), asset).await.unwrap();
+
+        assert!(store.exists(&id).await.unwrap());
+        assert!(store.delete(&id).await.unwrap());
+        assert!(!store.exists(&id).await.unwrap());
+
+        // Delete non-existent returns false
+        assert!(!store.delete(&id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_private_asset() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let id = AssetId::from_string("private_hash");
+        let asset = Asset::new("image/png", 512).private();
+        store.store(id.clone(), asset).await.unwrap();
+
+        let stored = store.get(&id).await.unwrap().unwrap();
+        assert!(stored.is_private());
+    }
+
+    #[tokio::test]
+    async fn test_local_path() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let id = AssetId::from_string("local_path_hash");
+        let asset = Asset::new("image/png", 256)
+            .with_filename("photo.png")
+            .with_local_path("/home/user/photos/photo.png");
+
+        store.store(id.clone(), asset).await.unwrap();
+
+        let stored = store.get(&id).await.unwrap().unwrap();
+        assert_eq!(stored.local_path(), Some("/home/user/photos/photo.png"));
     }
 }

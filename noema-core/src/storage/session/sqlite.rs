@@ -25,6 +25,8 @@ use crate::ConversationContext;
 /// and use it to create multiple sessions (conversations).
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+    /// Optional storage coordinator for asset externalization (uses RwLock for interior mutability)
+    coordinator: std::sync::RwLock<Option<Arc<crate::storage::coordinator::DynStorageCoordinator>>>,
 }
 
 impl SqliteStore {
@@ -33,6 +35,7 @@ impl SqliteStore {
         let conn = Connection::open(&path)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
+            coordinator: std::sync::RwLock::new(None),
         };
         store.init_schema()?;
         Ok(store)
@@ -43,9 +46,26 @@ impl SqliteStore {
         let conn = Connection::open_in_memory()?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
+            coordinator: std::sync::RwLock::new(None),
         };
         store.init_schema()?;
         Ok(store)
+    }
+
+    /// Set the storage coordinator for asset externalization
+    ///
+    /// When set, the coordinator will automatically extract inline images/audio
+    /// from messages and store them in blob storage before persisting to the database.
+    /// This method uses interior mutability so it can be called on &self.
+    pub fn set_coordinator(&self, coordinator: Arc<crate::storage::coordinator::DynStorageCoordinator>) {
+        let mut guard = self.coordinator.write().unwrap();
+        *guard = Some(coordinator);
+    }
+
+    /// Get the storage coordinator (if set)
+    pub fn coordinator(&self) -> Option<Arc<crate::storage::coordinator::DynStorageCoordinator>> {
+        let guard = self.coordinator.read().unwrap();
+        guard.clone()
     }
 
     /// Get access to the connection (for trait implementations)
@@ -163,6 +183,8 @@ pub struct SqliteSession {
     cache: Vec<ChatMessage>,
     /// Whether this conversation has been persisted to the database
     persisted: bool,
+    /// Optional storage coordinator for asset externalization
+    coordinator: Option<Arc<crate::storage::coordinator::DynStorageCoordinator>>,
 }
 
 impl SqliteSession {
@@ -173,6 +195,7 @@ impl SqliteSession {
         user_id: Option<String>,
         cache: Vec<ChatMessage>,
         persisted: bool,
+        coordinator: Option<Arc<crate::storage::coordinator::DynStorageCoordinator>>,
     ) -> Self {
         Self {
             conn,
@@ -180,6 +203,7 @@ impl SqliteSession {
             user_id,
             cache,
             persisted,
+            coordinator,
         }
     }
 
@@ -218,7 +242,7 @@ impl SqliteSession {
     }
 
     /// Write messages as spans to the database
-    fn write_as_span(
+    async fn write_as_span(
         &self,
         messages: &[ChatMessage],
         span_type: &str,
@@ -275,12 +299,31 @@ impl SqliteSession {
             params![&span_id, &span_set_id],
         )?;
 
+        // Drop the connection lock before async operations
+        drop(conn);
+
         // Write span_messages
         for (i, msg) in messages.iter().enumerate() {
             let msg_id = Uuid::new_v4().to_string();
             let role = msg.role.to_string();
-            let stored_payload: StoredPayload = msg.payload.clone().into();
+            let mut stored_payload: StoredPayload = msg.payload.clone().into();
+
+            // Externalize assets (images/audio) if coordinator is available
+            if let Some(coordinator) = &self.coordinator {
+                match coordinator.externalize_assets(stored_payload).await {
+                    Ok(externalized) => stored_payload = externalized,
+                    Err(e) => {
+                        tracing::warn!("Failed to externalize assets: {}", e);
+                        // Fall back to storing inline data
+                        stored_payload = msg.payload.clone().into();
+                    }
+                }
+            }
+
             let content_json = serde_json::to_string(&stored_payload)?;
+
+            // Re-acquire connection for DB operations
+            let conn = self.conn.lock().unwrap();
 
             // Store text in content_blocks and get content_id
             let text = msg.get_text();
@@ -307,9 +350,11 @@ impl SqliteSession {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![&msg_id, &span_id, i as i64, role, &content_json, &content_id, now],
             )?;
+            // Connection is dropped at end of loop iteration, released for next async operation
         }
 
         // Update conversation timestamp
+        let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
             params![now, &self.conversation_id],
@@ -319,7 +364,7 @@ impl SqliteSession {
     }
 
     /// Write multiple model responses as alternates in a single span_set
-    pub fn write_parallel_responses(
+    pub async fn write_parallel_responses(
         &mut self,
         responses: &[(String, Vec<ChatMessage>)],
         selected_index: usize,
@@ -336,42 +381,47 @@ impl SqliteSession {
             self.persisted = true;
         }
 
-        let conn = self.conn.lock().unwrap();
         let now = unix_timestamp();
+        let span_set_id;
+        let thread_id;
 
-        // Get the main thread
-        let thread_id: String = match conn.query_row(
-            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
-            params![&self.conversation_id],
-            |row| row.get(0),
-        ) {
-            Ok(id) => id,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                let thread_id = Uuid::new_v4().to_string();
-                conn.execute(
-                    "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
-                    params![&thread_id, &self.conversation_id, now],
-                )?;
-                thread_id
-            }
-            Err(e) => return Err(e.into()),
-        };
+        {
+            let conn = self.conn.lock().unwrap();
 
-        // Get next sequence number
-        let sequence_number: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
-                params![&thread_id],
+            // Get the main thread
+            thread_id = match conn.query_row(
+                "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
+                params![&self.conversation_id],
                 |row| row.get(0),
-            )
-            .unwrap_or(1);
+            ) {
+                Ok(id) => id,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    let tid = Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
+                        params![&tid, &self.conversation_id, now],
+                    )?;
+                    tid
+                }
+                Err(e) => return Err(e.into()),
+            };
 
-        // Create a single span_set for all alternates
-        let span_set_id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, 'assistant', ?4)",
-            params![&span_set_id, &thread_id, sequence_number, now],
-        )?;
+            // Get next sequence number
+            let sequence_number: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
+                    params![&thread_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(1);
+
+            // Create a single span_set for all alternates
+            span_set_id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, 'assistant', ?4)",
+                params![&span_set_id, &thread_id, sequence_number, now],
+            )?;
+        } // Release conn lock
 
         let mut span_ids = Vec::new();
         let mut selected_span_id = None;
@@ -379,17 +429,35 @@ impl SqliteSession {
         // Create a span for each model's response
         for (idx, (model_id, messages)) in responses.iter().enumerate() {
             let span_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![&span_id, &span_set_id, model_id, now],
-            )?;
+
+            {
+                let conn = self.conn.lock().unwrap();
+                conn.execute(
+                    "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+                    params![&span_id, &span_set_id, model_id, now],
+                )?;
+            }
 
             // Write messages for this span
             for (msg_idx, msg) in messages.iter().enumerate() {
                 let msg_id = Uuid::new_v4().to_string();
                 let role = msg.role.to_string();
-                let stored_payload: StoredPayload = msg.payload.clone().into();
+                let mut stored_payload: StoredPayload = msg.payload.clone().into();
+
+                // Externalize assets (images/audio) if coordinator is available
+                if let Some(coordinator) = &self.coordinator {
+                    match coordinator.externalize_assets(stored_payload).await {
+                        Ok(externalized) => stored_payload = externalized,
+                        Err(e) => {
+                            tracing::warn!("Failed to externalize assets: {}", e);
+                            stored_payload = msg.payload.clone().into();
+                        }
+                    }
+                }
+
                 let content_json = serde_json::to_string(&stored_payload)?;
+
+                let conn = self.conn.lock().unwrap();
 
                 // Store text in content_blocks and get content_id
                 let text = msg.get_text();
@@ -423,6 +491,8 @@ impl SqliteSession {
             }
             span_ids.push(span_id);
         }
+
+        let conn = self.conn.lock().unwrap();
 
         // Set the selected span
         if let Some(sel_id) = &selected_span_id {
@@ -507,7 +577,7 @@ impl SessionStore for SqliteSession {
         };
 
         // Write as span to database
-        self.write_as_span(&messages, &span_type.to_string(), None)?;
+        self.write_as_span(&messages, &span_type.to_string(), None).await?;
 
         // Update cache
         self.cache.extend(messages);
@@ -537,7 +607,7 @@ impl SessionStore for SqliteSession {
         if responses.is_empty() {
             return Ok((String::new(), Vec::new()));
         }
-        let (span_set_id, span_ids) = self.write_parallel_responses(responses, selected_index)?;
+        let (span_set_id, span_ids) = self.write_parallel_responses(responses, selected_index).await?;
         Ok((span_set_id, span_ids))
     }
 }
@@ -557,6 +627,7 @@ impl SqliteStore {
             Some(user_id.to_string()),
             Vec::new(),
             false,
+            self.coordinator(),
         ))
     }
 
@@ -664,6 +735,7 @@ impl SqliteStore {
             user_id,
             messages,
             true, // Already exists in DB
+            self.coordinator(),
         ))
     }
 }

@@ -4,7 +4,8 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use std::sync::Arc;
 
-use noema_core::storage::asset::AssetStore;
+use noema_core::storage::asset::{Asset, AssetStore};
+use noema_core::storage::ids::AssetId;
 use crate::logging::log_message;
 use crate::state::AppState;
 
@@ -101,14 +102,14 @@ pub async fn store_asset(
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Store not initialized")?;
 
+    let asset_id = AssetId::from_string(&stored.hash);
+    let mut asset = Asset::new(&mime_type, bytes.len() as i64);
+    if let Some(name) = filename {
+        asset = asset.with_filename(name);
+    }
+
     store
-        .register_asset(
-            &stored.hash,
-            &mime_type,
-            filename.as_deref(),
-            Some(bytes.len() as i64),
-            None, // local_path not needed for CAS
-        )
+        .store(asset_id, asset)
         .await
         .map_err(|e| format!("Failed to register asset: {}", e))?;
 

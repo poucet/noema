@@ -151,12 +151,82 @@ All 10 tasks done (3.1.6 tags deferred to 3.5 Collections as not critical for in
 
 ---
 
-## 2026-01-10: Context Handoff Notes
+## 2026-01-10: Feature 3.1b Asset Storage Implementation
 
-**Status**: Feature 3.1 Content Blocks is fully complete and integrated.
+Implemented asset storage following the ContentBlock pattern:
+
+### Changes
+
+1. **storage/asset/mod.rs** - Rewrote with UCM-aligned types:
+   - `Asset` - input form with mime_type, size_bytes, filename, local_path, is_private
+   - `StoredAsset` - wraps Asset with id and created_at
+   - `AssetStoreResult` - id + is_new flag for dedup feedback
+   - `AssetStore` trait: store(), get(), exists(), delete()
+   - Removed legacy types (no backwards compat needed during dev rush)
+
+2. **storage/asset/sqlite.rs** - Implemented SqliteAssetStore:
+   - Updated schema with is_private column and indexes
+   - Full trait implementation
+   - Unit tests for all operations
+
+### Notes
+
+- AssetRef already existed in StoredContent (task 3.1b.4)
+- StoredPayload.resolve() already handles asset resolution (task 3.1b.5)
+- AssetId is the SHA-256 hash (provided by caller from BlobStore)
+
+**Status**: Code complete, awaiting user verification (compile, tests, E2E).
+
+---
+
+## 2026-01-10: StorageCoordinator Implementation
+
+Added `StorageCoordinator` to automatically externalize inline images/audio to blob/asset storage when messages are persisted.
+
+### Architecture
+
+The coordinator is **session-agnostic** - it only knows about `BlobStore` and `AssetStore` traits, not SQLite or any specific session implementation.
+
+**Key Components**:
+- `DynStorageCoordinator` - Type-erased version using `Arc<dyn BlobStore>` and `Arc<dyn AssetStore>`
+- `StorageCoordinator<B, A>` - Generic version for when concrete types are known
+
+**Flow**:
+1. App init creates `DynStorageCoordinator` with blob_store and asset_store (SqliteStore implements AssetStore)
+2. Coordinator is set on `SqliteStore` using interior mutability (`RwLock`)
+3. When sessions are created, they receive the coordinator
+4. During `write_as_span()` and `write_parallel_responses()`, payloads are processed through `coordinator.externalize_assets()`
+5. Inline `Image { data, mime_type }` and `Audio { data, mime_type }` are converted to `AssetRef { asset_id, ... }`
+
+### Key Files Changed
+
+- [noema-core/src/storage/coordinator.rs](noema-core/src/storage/coordinator.rs) - NEW: `DynStorageCoordinator` and `StorageCoordinator`
+- [noema-core/src/storage/mod.rs](noema-core/src/storage/mod.rs) - Added `pub mod coordinator`
+- [noema-core/src/storage/session/sqlite.rs](noema-core/src/storage/session/sqlite.rs):
+  - `SqliteStore.coordinator` field with `RwLock` for interior mutability
+  - `set_coordinator()` and `coordinator()` methods
+  - `SqliteSession` receives coordinator from store
+  - `write_as_span()` and `write_parallel_responses()` now async, call `coordinator.externalize_assets()`
+- [noema-desktop/src-tauri/src/commands/init.rs](noema-desktop/src-tauri/src/commands/init.rs):
+  - Creates `DynStorageCoordinator` during `init_storage()`
+  - Sets coordinator on store before storing in AppState
+
+### Design Decisions
+
+1. **Interior mutability for coordinator** - Using `RwLock` allows setting coordinator after store is wrapped in `Arc`
+2. **Async write methods** - `write_as_span()` and `write_parallel_responses()` are now async to support coordinator's async blob storage
+3. **Graceful fallback** - If externalization fails, falls back to storing inline data with warning
+
+**Status**: Code complete, pending compilation and verification.
+
+---
+
+## 2026-01-10: Context Handoff Notes (Previous)
+
+**Status**: Feature 3.1 Content Blocks is fully complete and integrated. Feature 3.1b Asset Storage code complete, pending verification.
 
 **Next Steps** (in priority order):
-1. **3.1b Asset Storage** (P0) - Binary blob storage for images, audio, PDFs
+1. **Verify 3.1b** - Compile, run tests, E2E check
 2. **3.2 Conversation Structure** (P0) - Turns, spans, messages with content references
 
 **Key Files for Next Context**:
@@ -165,6 +235,7 @@ All 10 tasks done (3.1.6 tags deferred to 3.5 Collections as not critical for in
 - [noema-core/src/storage/ids.rs](noema-core/src/storage/ids.rs) - Type-safe ID newtypes
 - [noema-core/src/storage/helper.rs](noema-core/src/storage/helper.rs) - `content_hash()` function
 - [noema-core/src/storage/session/sqlite.rs](noema-core/src/storage/session/sqlite.rs) - Integration point, `write_as_span()`
+- [noema-core/src/storage/coordinator.rs](noema-core/src/storage/coordinator.rs) - StorageCoordinator for asset externalization
 
 **Pattern Established**:
 - Build types/traits → schema → impl → tests → **integration into existing system**

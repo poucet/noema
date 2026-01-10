@@ -27,6 +27,7 @@ pub mod blob;
 pub mod content;
 pub mod content_block;
 pub mod conversation;
+pub mod coordinator;
 pub mod document;
 pub mod session;
 pub mod user;
