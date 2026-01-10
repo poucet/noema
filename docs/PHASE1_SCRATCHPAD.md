@@ -7,7 +7,7 @@ Phase 1 consists of 5 "Quick Wins" features focused on model display and privacy
 | Done | # | Feature | Files |
 |------|---|---------|-------|
 | [x] | 4 | Local vs non-local model icon (P1) | ModelSelector.tsx, lib.rs |
-| [ ] | 3 | Model metadata display (P1) | ModelSelector.tsx |
+| [x] | 3 | Model metadata display (P1) | ModelSelector.tsx |
 | [ ] | 2 | Truncate long model names (P2) | ModelSelector.tsx |
 | [ ] | 31 | Copy raw markdown (P1) | MessageBubble.tsx |
 | [ ] | 32 | Private content flag (P0) | Settings.tsx, engine.rs, types |
@@ -159,6 +159,22 @@ Will add:
 - Updated `getCapabilities()` to use `Vision` instead of `Image`
 
 **Build verified:** `cargo build --package llm` succeeds
+
+### Feature 3: Model Metadata Display ✅ DONE
+
+**Changes (`ModelSelector.tsx`):**
+- Enhanced current model button to show metadata at-a-glance
+- Added privacy indicator icon (shield/cloud) to the left of model name
+- Added context window badge (e.g., "128K") next to model name
+- Tooltips show full details on hover
+
+**Display layout:**
+```
+[🛡️] Claude 3.5 Sonnet [128K] ▼
+      claude-3-5-sonnet-20241022
+```
+
+The dropdown already showed this metadata per-model; now it's visible without opening the dropdown.
 
 ---
 

@@ -190,6 +190,13 @@ export function ModelSelector({
               <div className="text-xs text-gray-500 truncate">{model.id}</div>
             </div>
             <div className="flex items-center gap-2 ml-2 shrink-0">
+              {/* Privacy indicator */}
+              <span
+                title={isPrivateModel(model) ? "Private (data stays on device)" : "Cloud (data sent to provider)"}
+                className={isPrivateModel(model) ? "text-green-500" : "text-blue-400"}
+              >
+                {isPrivateModel(model) ? <PrivateIcon /> : <CloudIcon />}
+              </span>
               {/* Capabilities */}
               <div className="flex gap-1">
                 {capabilities.map(({ key, label, Icon }) => (
@@ -233,8 +240,28 @@ export function ModelSelector({
           onClick={() => setIsOpen(!isOpen)}
           className="flex items-center gap-2 px-3 py-2 bg-surface hover:bg-elevated rounded-lg text-sm font-medium text-muted transition-colors"
         >
+          {/* Privacy indicator for current model */}
+          {currentModelObj && (
+            <span
+              title={isPrivateModel(currentModelObj) ? "Private (data stays on device)" : "Cloud (data sent to provider)"}
+              className={isPrivateModel(currentModelObj) ? "text-green-500" : "text-blue-400"}
+            >
+              {isPrivateModel(currentModelObj) ? <PrivateIcon /> : <CloudIcon />}
+            </span>
+          )}
           <div className="flex flex-col items-end">
-            <span>{currentModelObj?.displayName || currentModel || "Select Model"}</span>
+            <div className="flex items-center gap-2">
+              <span>{currentModelObj?.displayName || currentModel || "Select Model"}</span>
+              {/* Context window badge */}
+              {currentModelObj?.contextWindow && (
+                <span
+                  title={`Context window: ${currentModelObj.contextWindow.toLocaleString()} tokens`}
+                  className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded"
+                >
+                  {formatContextWindow(currentModelObj.contextWindow)}
+                </span>
+              )}
+            </div>
             {currentModelObj && currentModelObj.displayName !== currentModelObj.id && (
               <span className="text-xs text-gray-500">{currentModelObj.id}</span>
             )}
