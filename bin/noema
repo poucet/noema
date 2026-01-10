@@ -43,6 +43,41 @@ noema_install() {
     open "$REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
 }
 
+noema_nuke() {
+    local DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/noema"
+    local DB_PATH="$DATA_DIR/database/noema.db"
+    local BLOB_DIR="$DATA_DIR/blob_storage"
+
+    echo "This will DELETE all Noema data:"
+    echo "  Database: $DB_PATH"
+    echo "  Blobs:    $BLOB_DIR"
+    echo ""
+
+    read -p "Are you sure? (y/N) " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [ -f "$DB_PATH" ]; then
+            rm -f "$DB_PATH"
+            echo "Deleted database: $DB_PATH"
+        else
+            echo "Database not found: $DB_PATH"
+        fi
+
+        if [ -d "$BLOB_DIR" ]; then
+            rm -rf "$BLOB_DIR"
+            echo "Deleted blobs directory: $BLOB_DIR"
+        else
+            echo "Blobs directory not found: $BLOB_DIR"
+        fi
+
+        echo ""
+        echo "Nuke complete. Run 'noema gui' to start fresh."
+    else
+        echo "Aborted."
+    fi
+}
+
 noema_help() {
     cat <<EOF
 Noema CLI Helper
@@ -53,6 +88,7 @@ Commands:
   gui                 Run the Tauri GUI (React + web)
   build               Build release binaries
   install             Open the macOS installer (.dmg)
+  nuke                Delete all Noema data (database and blobs)
   help                Show this help message
 
 Environment Variables:
@@ -77,7 +113,7 @@ EOF
 
 # Export list of available commands (for meta-wrapper discovery)
 noema_commands() {
-    echo "gui build install help"
+    echo "gui build install nuke help"
 }
 
 # ============================================================================
@@ -114,7 +150,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
         complete)
             noema_complete "$@"
             ;;
-        gui|build|install|help)
+        gui|build|install|nuke|help)
             "noema_$cmd" "$@"
             ;;
         *)
