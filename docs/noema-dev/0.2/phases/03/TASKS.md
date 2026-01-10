@@ -40,7 +40,7 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.1.3 | 🏗️ Define ContentBlockStore trait |
 | ✅ | 3.1.4 | 📦 Add content_blocks table migration |
 | ✅ | 3.1.5 | ⚡ Implement SqliteContentBlockStore |
-| ⏸️ | 3.1.6 | 📦 Add content_block_tags table (deferred) |
+| ⏸️ | 3.1.6 | 📦 Add content_block_tags table (deferred → 3.5 Collections) |
 | ✅ | 3.1.7 | ✅ Unit tests for content block store |
 | ✅ | 3.1.8 | 📦 Add `content_id` column to `span_messages` |
 | ✅ | 3.1.9 | 🔧 Update `write_as_span()` to store text in content_blocks |

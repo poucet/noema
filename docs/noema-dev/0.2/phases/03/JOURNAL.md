@@ -147,6 +147,28 @@ Added integration tasks to ensure content blocks are actually used by the app.
 
 ### Feature 3.1 Complete
 
-All 10 tasks done (3.1.6 tags deferred as not critical for integration path).
+All 10 tasks done (3.1.6 tags deferred to 3.5 Collections as not critical for integration path).
+
+---
+
+## 2026-01-10: Context Handoff Notes
+
+**Status**: Feature 3.1 Content Blocks is fully complete and integrated.
+
+**Next Steps** (in priority order):
+1. **3.1b Asset Storage** (P0) - Binary blob storage for images, audio, PDFs
+2. **3.2 Conversation Structure** (P0) - Turns, spans, messages with content references
+
+**Key Files for Next Context**:
+- [noema-core/src/storage/content_block/sqlite.rs](noema-core/src/storage/content_block/sqlite.rs) - ContentBlockStore impl, `store_content_sync()` helper
+- [noema-core/src/storage/content_block/types.rs](noema-core/src/storage/content_block/types.rs) - Origin types
+- [noema-core/src/storage/ids.rs](noema-core/src/storage/ids.rs) - Type-safe ID newtypes
+- [noema-core/src/storage/helper.rs](noema-core/src/storage/helper.rs) - `content_hash()` function
+- [noema-core/src/storage/session/sqlite.rs](noema-core/src/storage/session/sqlite.rs) - Integration point, `write_as_span()`
+
+**Pattern Established**:
+- Build types/traits → schema → impl → tests → **integration into existing system**
+- Each feature should wire into existing app, not build parallel systems
+- Dual-write pattern for safe migration (write to both old and new, read from old)
 
 ---
