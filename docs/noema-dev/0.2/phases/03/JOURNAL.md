@@ -36,3 +36,27 @@ Key design decisions captured:
 - Views select paths through alternatives
 
 ---
+
+## 2026-01-10: IDEAS Vetting Against UCM & Hook System
+
+Reviewed new IDEAS (#1, #4-12) against existing designs:
+
+**Fully Covered:**
+- #5 Dynamic Typst Functions → `is_dynamic` flag + `render.before.*` hooks
+- #6 Proactive Check-ins → `temporal.idle.*` and `temporal.scheduled.*` triggers
+- #8 Auto-journaling → `entity.created.message` hook + enqueue action
+- #10 Reflexes → This IS the hook system (Input/Time/Context = hooks by type)
+- #7 Endless Conversation → Views + context strategies (EP-5)
+
+**Partially Covered (extension points exist):**
+- #1 Access Control → `is_private` exists; ACL tables can be added later
+- #4 Local Filesystem → `DocumentSource::Import` + asset `local_path`; bidirectional sync as future extension
+- #9 Active Context Engine → Hooks provide foundation; nudge UI is future feature
+- #11 Soft Schemas → Collections with advisory schema_hint + tags; tag inheritance can be added
+
+**Not a Gap (naming):**
+- #12 Neuro Nomenclature → Alignment opportunity, not structural change
+
+**Conclusion:** UCM and Hook System designs are already future-proof for all new IDEAS. No changes needed to Phase 3 scope.
+
+---

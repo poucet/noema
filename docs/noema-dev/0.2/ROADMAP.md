@@ -83,11 +83,25 @@ This plan covers a major feature wave for Noema 0.2, organized into 7 phases. Ke
 | ⬜ | P2 | 24 | Image generation models (local/remote) | Medium | Medium |
 | ⬜ | P2 | 25 | PDF extraction and processing | Medium | Medium |
 
+### Phase 8: Active Context & Automation (from IDEAS)
+| Done | Pri | # | Feature | Complexity | Impact |
+|------|-----|---|---------|------------|--------|
+| ⬜ | P1 | I5 | Dynamic Typst functions | Medium | High |
+| ⬜ | P1 | I6 | Proactive AI check-ins | Medium | High |
+| ⬜ | P1 | I10 | Reflexes (lightweight hooks) | Medium | High |
+| ⬜ | P2 | I7 | Endless conversation mode | Medium | Medium |
+| ⬜ | P2 | I8 | Auto-journaling from interactions | Medium | Medium |
+| ⬜ | P2 | I9 | Active context / feedback engine | High | High |
+| ⬜ | P2 | I11 | Soft schemas / tag hierarchy | Medium | Medium |
+| ⬜ | P3 | I1 | Access control model | High | Medium |
+| ⬜ | P3 | I4 | Local filesystem sync | Medium | Medium |
+
 ### Future / Out of Scope for 0.2
 | # | Feature | Notes |
 |---|---------|-------|
 | - | Noema Web (browser version) | Requires noema-backend extraction |
 | - | Cloud sync / multi-device | Requires backend service |
+| I12 | Neuro nomenclature | Naming convention - apply when refactoring |
 
 ---
 
