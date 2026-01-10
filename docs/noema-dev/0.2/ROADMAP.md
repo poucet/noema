@@ -32,13 +32,15 @@ This plan covers a major feature wave for Noema 0.2, organized into 7 phases. Ke
 ### Phase 3: Unified Content Model
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| [ ] | P0 | 29a | Core node system (base types, properties, metadata) | High | Very High |
-| [ ] | P0 | 29b | Container nodes (workspace, tag/folder, database) | High | Very High |
-| [ ] | P1 | 29c | Content nodes (conversation, thread, message, document, span) | High | Very High |
-| [ ] | P1 | 29d | Structured data (schemas, column types, templates, formulas) | Medium | High |
-| [ ] | P1 | 29e | Relations system (parent/child, references, backlinks) | Medium | High |
-| [ ] | P1 | 29f | UI views (list/table, tree, board, graph, timeline) | High | High |
-| [ ] | P2 | 29g | Agent nodes and context injection | High | Very High |
+| [ ] | P0 | 3.1 | Content blocks (text storage with origin tracking) | Medium | Very High |
+| [ ] | P0 | 3.1b | Asset storage (images, audio, binary blobs) | Medium | High |
+| [ ] | P0 | 3.2 | Conversation structure (turns, spans, messages) | High | Very High |
+| [ ] | P0 | 3.3 | Views and forking (conversation branching) | High | Very High |
+| [ ] | P1 | 3.4 | Document structure (tabs, revision history) | Medium | High |
+| [ ] | P1 | 3.5 | Collections (tree organization, tags, fields) | Medium | High |
+| [ ] | P1 | 3.6 | Cross-references and backlinks | Medium | High |
+| [ ] | P2 | 3.7 | Temporal queries (activity summaries for LLM) | Medium | Medium |
+| [ ] | P2 | 3.8 | Session integration (connect engine to new model) | Medium | Very High |
 | [ ] | P2 | 30 | Import/export and data portability | Medium | High |
 
 ### Phase 4: Content Model Features (Post-Unification)
@@ -319,134 +321,146 @@ ALTER TABLE documents ADD COLUMN summary_embedding BLOB;
 
 ## Phase 3: Unified Content Model
 
-**Problem**: Conversations, documents, tags, databases are separate systems with duplicated hierarchy/relation logic. No unified way to organize, link, and view all content.
+**Problem**: Conversations, documents, and organization are separate systems. No parallel model responses, conversation forking, cross-referencing, or unified search.
 
-**Solution**: Unified data model where everything is a node.
+**Solution**: Separate immutable content (text, assets) from mutable structure (conversations, documents, collections). All text is searchable and referenceable.
 
----
-
-### Feature 29a: Core Node System
-
-Base infrastructure for all content types.
-
-**Node Base**:
-- `id`: UUID
-- `type`: node type discriminator
-- `properties`: typed key-value map
-- `created_at`, `updated_at`: timestamps
-- `embedding`: vector for semantic search
-- `summary`: auto-generated summary
-
-**Property Types**: text, number, date, select, multi-select, checkbox, relation, formula
+**Core Principle**: Content is heavy and immutable. Structure is lightweight and mutable.
 
 ---
 
-### Feature 29b: Container Nodes
+### Feature 3.1: Content Block Storage
 
-Organizational structures that hold other nodes.
-
-- **Workspace**: top-level container, user's root
-- **Tag/Folder**: hierarchical organization, supports nesting and multi-tagging
-- **Database**: schema-defined collection with typed columns
-
----
-
-### Feature 29c: Content Nodes
-
-Leaf items that hold actual content.
-
-- **Conversation**: chat session container
-- **Thread**: sub-conversation or branch within conversation
-- **Message**: single chat message (user/assistant/system)
-- **Document**: markdown/Typst content with revisions
-- **Span**: highlighted/annotated section within content
-- **Row**: structured record in a database
-
----
-
-### Feature 29d: Structured Data with Formulas
-
-Schema-defined properties and dynamic content.
-
-**Column Types**:
-- Basic: text, number, date, checkbox
-- Selection: select, multi-select
-- Relations: relation (link to other nodes)
-- Computed: formula, rollup, count
-
-**Formulas & Dynamic Content**:
-- `{{count:tag:todos WHERE done=false}}` - count incomplete todos
-- `{{sum:column:effort}}` - sum a numeric column
-- `{{query:type:feature | count}}` - count features
-- Formulas work in documents AND database columns
-
-**Built-in Templates**:
-- **Todo list**: checkbox + task + due + priority + tags
-- **Feature tracker**: # + feature + pri + complexity + impact + phase + `{{count}}`
-- **Reading list**: title + author + status + rating
-- **Meeting notes**: date + attendees + agenda + action items
-- **Custom**: user-defined schemas
-
----
-
-### Feature 29e: Relations System
-
-Connections between nodes.
-
-- **Parent/child**: hierarchical containment
-- **References**: explicit `[[node:id]]` links
-- **Backlinks**: auto-computed incoming references
-- **Relations**: typed links (e.g., "blocks", "relates to", "depends on")
-
----
-
-### Feature 29f: UI Views
-
-Efficient UI models for different use cases.
-
-- **List/Table**: sortable, filterable columns - databases, search results
-- **Tree**: hierarchical navigation - tags, folders, threads
-- **Board**: kanban-style grouping - todos by status, features by phase
-- **Graph**: relationship visualization - backlinks, dependencies
-- **Timeline**: chronological view - messages, activity
-- **Calendar**: date-based view - todos by due date, meetings
-- **Drag-drop**: universal for hierarchy/tagging operations
-
----
-
-### Feature 29g: Agent Nodes and Context Injection
-
-Agents as first-class content nodes.
-
-**Agent Templates**:
-```yaml
-name: "Code Reviewer"
-system_prompt: |
-  You are a code reviewer. Review for bugs, style, best practices.
-  Guidelines: {{doc:coding-standards}}
-  Feature count: {{count:type:feature WHERE phase="Phase 3"}}
-context:
-  - query: "tag:current-project AND type:document"
-  - node: "doc:architecture-overview"
-tools: [read_file, suggest_edit]
-```
+Unified text storage with provenance tracking.
 
 **Capabilities**:
-- Select any nodes as agent context
-- Dynamic queries inject live data
-- Sub-agents inherit parent context
-- Agents organized under projects via tags
+- All text content stored in content-addressable format
+- Origin tracking: who created (user, assistant, system), which model, derived from what
+- Deduplication: same text stored once, referenced many times
+- Privacy flag: mark content as local-only (never sent to cloud models)
+- Full-text search across all content
+
+**Benefits**:
+- Unified search across messages, documents, and revisions
+- Cross-referencing ("as I said in message X")
+- Space-efficient (identical text deduplicated)
+- Provenance chain (track content origins and derivations)
 
 ---
 
-### Benefits
+### Feature 3.1b: Asset Storage
 
-- Tag can contain any content type
-- Database row can link to conversation, document, or agent
-- Message can reference a document span
-- Single query/filter system across all content
-- Formulas provide live counts/sums in documents and tables
-- All content manageable from within Noema UI
+Binary content handling for images, audio, PDFs.
+
+**Capabilities**:
+- Content-addressed blob storage (deduplication)
+- Inline references from messages/documents
+- Privacy flag for local-only assets
+- Automatic resolution when sending to LLM
+
+---
+
+### Feature 3.2: Conversation Structure
+
+New model supporting parallel responses and multi-step interactions.
+
+**Concepts**:
+- **Turn**: A position in the conversation sequence
+- **Span**: An alternative response at a turn (can contain multiple messages)
+- **Message**: Individual content within a span
+
+**Use Cases Enabled**:
+- **Parallel model responses**: Ask Claude and GPT-4 the same question, compare answers
+- **Multi-step tool interactions**: Assistant → tool_call → tool_result → response in one span
+- **User edits as alternatives**: Edit your question, both versions preserved
+
+---
+
+### Feature 3.3: Views and Conversation Forking
+
+Navigate and branch conversation history.
+
+**Capabilities**:
+- **Views**: Named paths through conversation (select which span at each turn)
+- **Forking**: Branch from any point, explore different directions
+- **Splice**: Edit mid-conversation, optionally keep subsequent messages
+- **Cheap branching**: Views are just selection pointers, no content duplication
+
+**Use Cases Enabled**:
+- Explore "what if I had asked differently?"
+- A/B test different prompts
+- Keep multiple conversation threads without data duplication
+
+---
+
+### Feature 3.4: Document Structure
+
+Hierarchical documents with revision history.
+
+**Capabilities**:
+- **Tabs**: Structural organization within documents
+- **Sub-tabs**: Nested hierarchy (Overview → Details → API, Schema)
+- **Per-tab revisions**: Each section has independent version history
+- **Source tracking**: User created, AI generated, imported, promoted from message
+- **Promote to document**: Save assistant response as editable document
+
+**Benefits**:
+- Organize long documents into navigable sections
+- Revert individual sections without affecting others
+- Seamless AI → Document workflow
+
+---
+
+### Feature 3.5: Collections
+
+Flexible organization across content types.
+
+**Capabilities**:
+- **Tree structure**: Nested folders/groups
+- **Mixed content**: Items can reference documents, conversations, content blocks, or other collections
+- **Tags**: Cross-cutting organization (item can have multiple tags)
+- **Fields**: Typed metadata for table/kanban views
+- **Schema hints**: UI guidance for expected fields (not enforced)
+
+**Use Cases Enabled**:
+- Project folders grouping related documents and conversations
+- Task lists with status, priority, due date
+- Kanban boards grouped by field value
+- Bookmarks of mixed content types
+
+---
+
+### Feature 3.6: Cross-References and Backlinks
+
+Connect content across the system.
+
+**Capabilities**:
+- Reference any entity from any entity
+- Optional relation types (cites, derived_from, blocks)
+- Automatic backlink tracking
+- @-mention syntax support
+
+**Use Cases Enabled**:
+- "See @api-design for details" in a message
+- "Generated from [conversation X]" in a document
+- Backlinks panel showing all references to current item
+
+---
+
+### Feature 3.7: Temporal Queries
+
+Time-based content retrieval for LLM context.
+
+**Capabilities**:
+- Query content by time range (last hour, day, week)
+- Group results by entity type
+- Generate activity summaries for LLM injection
+- Configurable detail level
+
+**Use Cases Enabled**:
+- "Summarize what I worked on last week"
+- "What topics have I been exploring?"
+- Proactive assistant: "I noticed you've been working on X..."
 
 ---
 
@@ -675,8 +689,8 @@ version = "0.2.0"
 |-------|-------|
 | 1 | `ModelSelector.tsx` |
 | 2 | `ChatInput.tsx`, `engine.rs` (parallel conversations) |
-| 3 | New: `noema-core/src/node/`, `storage/node.rs`, `NodeView.tsx`, `TableView.tsx`, `TreeView.tsx`, `BoardView.tsx` |
-| 4 | Updates to node properties/metadata for deferred features |
+| 3 | New: `storage/content_block/`, `storage/asset/`, `storage/conversation/` (rewrite), `storage/document/` (rewrite), `storage/collection/`, `storage/reference/` |
+| 4 | Updates using new content model for deferred features |
 | 5 | New: `storage/tag/`, `storage/vector/`, `embedding/`, `TagTree.tsx`, `SearchBar.tsx` |
 | 6 | New: `storage/memory/`, `rag/`, `summarizer.rs`, `MemoriesPanel.tsx` |
 | 7 | New: `noema-mcp-coding/`, `AgentPanel.tsx`, audio/image integration |
@@ -688,13 +702,17 @@ version = "0.2.0"
 ```
 Prerequisites: Version consolidation
 
-Phase 1 → Phase 2 → Phase 3 (Unified Model) → Phase 4 → Phase 5 → Phase 6 → Phase 7
+Phase 1 → Phase 2 → Phase 3 (Unified Content Model) → Phase 4 → Phase 5 → Phase 6 → Phase 7
                               ↓
-                        Core Nodes (29a-c)
+                   Content Blocks (3.1) + Assets (3.1b)
                               ↓
-                   Structured Data (29d) + Relations (29e)
+                   Conversations (3.2) + Views (3.3)
                               ↓
-                   UI Views (29f) + Import/Export (30)
+                   Documents (3.4) + Collections (3.5)
+                              ↓
+                   References (3.6) + Temporal (3.7)
+                              ↓
+                   Session Integration (3.8) + Import/Export (30)
                               ↓
                    Deferred Features (1, 6, 10, 12, 13, 17)
                               ↓
@@ -702,7 +720,7 @@ Phase 1 → Phase 2 → Phase 3 (Unified Model) → Phase 4 → Phase 5 → Phas
                               ↓              ↓
                    Tags (7,11) ───→ Memories (8)
                               ↓
-                   Skills (21) ──→ Agents (29g, 19, 20)
+                   Skills (21) ──→ Agents (19, 20)
 ```
 
 ---
