@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::{SessionStore, StorageTransaction};
 use crate::storage::content::StoredPayload;
+use crate::storage::content_block::sqlite::store_content_sync;
 use crate::storage::conversation::SpanType;
 use crate::storage::helper::unix_timestamp;
 use crate::ConversationContext;
@@ -282,10 +283,29 @@ impl SqliteSession {
             let content_json = serde_json::to_string(&stored_payload)?;
             let text_content = msg.get_text();
 
+            // Store text in content_blocks and get content_id
+            let content_id = if let Some(text) = &text_content {
+                let origin_kind = match msg.role {
+                    Role::User => Some("user"),
+                    Role::Assistant => Some("assistant"),
+                    Role::System => Some("system"),
+                    _ => None,
+                };
+                match store_content_sync(&conn, text, origin_kind, self.user_id.as_deref(), model_id) {
+                    Ok(id) => Some(id),
+                    Err(e) => {
+                        tracing::warn!("Failed to store content block: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             conn.execute(
-                "INSERT INTO span_messages (id, span_id, sequence_number, role, content, text_content, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![&msg_id, &span_id, i as i64, role, &content_json, &text_content, now],
+                "INSERT INTO span_messages (id, span_id, sequence_number, role, content, text_content, content_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![&msg_id, &span_id, i as i64, role, &content_json, &text_content, &content_id, now],
             )?;
         }
 
@@ -372,10 +392,29 @@ impl SqliteSession {
                 let content_json = serde_json::to_string(&stored_payload)?;
                 let text_content = msg.get_text();
 
+                // Store text in content_blocks and get content_id
+                let content_id = if let Some(text) = &text_content {
+                    let origin_kind = match msg.role {
+                        Role::User => Some("user"),
+                        Role::Assistant => Some("assistant"),
+                        Role::System => Some("system"),
+                        _ => None,
+                    };
+                    match store_content_sync(&conn, text, origin_kind, self.user_id.as_deref(), Some(model_id.as_str())) {
+                        Ok(id) => Some(id),
+                        Err(e) => {
+                            tracing::warn!("Failed to store content block: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 conn.execute(
-                    "INSERT INTO span_messages (id, span_id, sequence_number, role, content, text_content, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &text_content, now],
+                    "INSERT INTO span_messages (id, span_id, sequence_number, role, content, text_content, content_id, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &text_content, &content_id, now],
                 )?;
             }
 
