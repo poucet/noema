@@ -32,6 +32,10 @@ interface ChatInputProps {
   toolsEnabled?: boolean;
   /** Callback when tools toggle is clicked */
   onToggleTools?: () => void;
+  /** Whether current model supports vision (image input) */
+  modelHasVision?: boolean;
+  /** Whether current model supports audio input */
+  modelHasAudioInput?: boolean;
 }
 
 // Get MIME type from file extension
@@ -122,6 +126,8 @@ export function ChatInput({
   onCancelFork,
   toolsEnabled = true,
   onToggleTools,
+  modelHasVision = true,
+  modelHasAudioInput = true,
 }: ChatInputProps) {
   // Store content as structured blocks instead of a string
   const [blocks, setBlocks] = useState<EditorBlock[]>([{ type: "text", text: "" }]);
@@ -423,6 +429,11 @@ export function ChatInput({
 
   // Set up Tauri drag-drop event listener
   const lastDropRef = useRef<{ paths: string[]; time: number } | null>(null);
+  // Use refs to access current capability values in the effect callback
+  const modelHasVisionRef = useRef(modelHasVision);
+  const modelHasAudioInputRef = useRef(modelHasAudioInput);
+  modelHasVisionRef.current = modelHasVision;
+  modelHasAudioInputRef.current = modelHasAudioInput;
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -458,6 +469,13 @@ export function ChatInput({
             for (const filePath of paths) {
               const attachment = await filePathToAttachment(filePath);
               if (attachment) {
+                // Filter based on current model capabilities
+                if (!modelHasVisionRef.current && attachment.mimeType.startsWith("image/")) {
+                  continue;
+                }
+                if (!modelHasAudioInputRef.current && attachment.mimeType.startsWith("audio/")) {
+                  continue;
+                }
                 newAttachments.push(attachment);
               }
             }
@@ -587,6 +605,14 @@ export function ChatInput({
     const newAttachments: Attachment[] = [];
 
     for (const file of fileArray) {
+      // Skip image files if model doesn't support vision
+      if (!modelHasVision && file.type.startsWith("image/")) {
+        continue;
+      }
+      // Skip audio files if model doesn't support audio input
+      if (!modelHasAudioInput && file.type.startsWith("audio/")) {
+        continue;
+      }
       const attachment = await fileToAttachment(file);
       if (attachment) {
         newAttachments.push(attachment);
@@ -596,7 +622,7 @@ export function ChatInput({
     if (newAttachments.length > 0) {
       setAttachments((prev) => [...prev, ...newAttachments]);
     }
-  }, []);
+  }, [modelHasVision, modelHasAudioInput]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -693,8 +719,17 @@ export function ChatInput({
       {/* Drag overlay */}
       {isDragOver && (
         <div className="absolute inset-0 bg-teal-500/20 flex items-center justify-center pointer-events-none z-10 rounded-lg border-2 border-dashed border-teal-500">
-          <div className="bg-teal-600 text-white px-4 py-2 rounded-lg shadow-lg">
-            Drop files to attach
+          <div className="bg-teal-600 text-white px-4 py-2 rounded-lg shadow-lg text-center">
+            <div>Drop files to attach</div>
+            {(!modelHasVision || !modelHasAudioInput) && (
+              <div className="text-xs text-teal-200 mt-1">
+                {!modelHasVision && !modelHasAudioInput
+                  ? "Images and audio not supported by model"
+                  : !modelHasVision
+                    ? "Images not supported by model"
+                    : "Audio not supported by model"}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -799,20 +834,22 @@ export function ChatInput({
           <button
             type="button"
             onClick={onToggleVoice}
-            disabled={disabled || !voiceAvailable}
+            disabled={disabled || !voiceAvailable || !modelHasAudioInput}
             className={getVoiceButtonClass()}
             title={
-              !voiceAvailable
-                ? "Voice input not available"
-                : voiceStatus === "disabled"
-                  ? "Enable voice input"
-                  : voiceStatus === "listening"
-                    ? "Listening..."
-                    : voiceStatus === "transcribing"
-                      ? "Transcribing..."
-                      : voiceStatus === "buffering"
-                        ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? "s" : ""} queued`
-                        : "Voice enabled (click to disable)"
+              !modelHasAudioInput
+                ? "Model doesn't support audio input"
+                : !voiceAvailable
+                  ? "Voice input not available"
+                  : voiceStatus === "disabled"
+                    ? "Enable voice input"
+                    : voiceStatus === "listening"
+                      ? "Listening..."
+                      : voiceStatus === "transcribing"
+                        ? "Transcribing..."
+                        : voiceStatus === "buffering"
+                          ? `${voiceBufferedCount} message${voiceBufferedCount !== 1 ? "s" : ""} queued`
+                          : "Voice enabled (click to disable)"
             }
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

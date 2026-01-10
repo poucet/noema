@@ -102,6 +102,22 @@ function App() {
     return currentModelObj?.capabilities.includes("Private") ?? false;
   };
 
+  // Check if current model supports vision (image input)
+  const currentModelHasVision = (): boolean => {
+    const currentModelObj = models.find(
+      (m) => m.displayName === currentModel || m.id === currentModel
+    );
+    return currentModelObj?.capabilities.includes("Vision") ?? true;
+  };
+
+  // Check if current model supports audio input
+  const currentModelHasAudioInput = (): boolean => {
+    const currentModelObj = models.find(
+      (m) => m.displayName === currentModel || m.id === currentModel
+    );
+    return currentModelObj?.capabilities.includes("AudioInput") ?? true;
+  };
+
   const voice = useVoiceInput({
     onTranscription: handleVoiceTranscription,
     onError: handleVoiceError,
@@ -855,6 +871,8 @@ function App() {
               onCancelFork={handleCancelFork}
               toolsEnabled={toolsEnabled}
               onToggleTools={handleToggleTools}
+              modelHasVision={currentModelHasVision()}
+              modelHasAudioInput={currentModelHasAudioInput()}
             />
           </>
         ) : activeActivity === "documents" ? (

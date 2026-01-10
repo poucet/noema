@@ -96,6 +96,29 @@ Chronological stream of thoughts, changes, and observations.
 - Added `shrink-0` to context window badge to prevent shrinking
 - Full model name/ID shown on hover via title attribute
 
+### Feature 34: Toggle to Disable Audio/Image Input
+**User story:** When a model doesn't support vision or audio input, the UI should disable those input methods and inform the user.
+
+**Frontend changes (`App.tsx`):**
+- Added `currentModelHasVision()` helper to check if model has "Vision" capability
+- Added `currentModelHasAudioInput()` helper to check if model has "AudioInput" capability
+- Passed `modelHasVision` and `modelHasAudioInput` props to ChatInput
+
+**Frontend changes (`ChatInput.tsx`):**
+- Added `modelHasVision` and `modelHasAudioInput` props (default to true for backwards compat)
+- Updated `processFiles()` to skip image files when model lacks Vision capability
+- Updated `processFiles()` to skip audio files when model lacks AudioInput capability
+- Added refs to track capabilities for Tauri drag-drop event handler
+- Updated Tauri drag-drop handler to filter attachments by capability
+- Voice button now disabled when model doesn't support audio input
+- Voice button title shows "Model doesn't support audio input" when disabled
+- Drag overlay shows warning text when model lacks Vision or AudioInput capability
+
+**UX flow:**
+1. When model lacks Vision: images silently skipped on drag/drop/paste
+2. When model lacks AudioInput: voice button disabled with explanatory tooltip
+3. Drag overlay shows contextual message about unsupported file types
+
 ---
 
 ## Observations & Learnings (from OBSERVATIONS.md)
@@ -129,4 +152,6 @@ Chronological stream of thoughts, changes, and observations.
 6. Feature 2: Truncate long model names (Done)
 
 ### Remaining Work
-- [ ] Feature 34: Toggle to disable audio/image input
+- [x] Feature 34: Toggle to disable audio/image input (Done)
+
+**Phase 1 Complete!** All features implemented.
