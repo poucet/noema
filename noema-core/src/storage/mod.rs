@@ -25,6 +25,7 @@ pub mod ids;
 pub mod asset;
 pub mod blob;
 pub mod content;
+pub mod content_block;
 pub mod conversation;
 pub mod document;
 pub mod session;
