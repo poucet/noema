@@ -53,21 +53,23 @@
 
 ## Content Layer
 
-### ContentBlock
+Two storage types: **text content** (searchable, referenceable) and **binary assets** (opaque blobs).
 
-Universal content primitive. All text, images, documents stored as content blocks.
+### ContentBlock (Text)
+
+All textual content: messages, documents, structured text.
 
 ```
 ContentBlock {
-    id: ContentHash           // SHA-256 of body, content-addressed
-    content_type: String      // "text/markdown", "image/png", etc.
-    body: Bytes
+    id: ContentHash           // SHA-256 of text
+    content_type: String      // "text/plain", "text/markdown", "text/typst"
+    text: String              // the actual text content
     origin: ContentOrigin
     created_at: Timestamp
 }
 
 ContentOrigin {
-    kind: user | assistant | system | import | tool
+    kind: user | assistant | system | import
     user_id: Option<UserId>                    // which user (multi-user)
     model_id: Option<ModelId>                  // which model (if AI)
     source_id: Option<String>                  // external ID (google doc, url)
@@ -75,11 +77,52 @@ ContentOrigin {
 }
 ```
 
-**Benefits:**
-- Deduplication (same content = same hash = stored once)
-- Cross-referencing (same content in conversation AND document)
-- Lineage tracking (who created, from what)
-- Unified search/RAG across all content
+**What goes in ContentBlock:**
+- User messages (text)
+- Assistant responses (text)
+- Document content (markdown, typst)
+- Imported documents (converted to text)
+
+**ContentBlock enables:**
+- Full-text search across all text
+- RAG (retrieve relevant content for context)
+- Cross-referencing ("as I said in message X")
+- Summarization (summarize any content block)
+
+### Asset (Binary)
+
+Binary content: images, audio, PDF, video. Stored in BlobStore (CAS).
+
+```
+Asset {
+    id: SHA256Hash            // content-addressed
+    mime_type: String         // "image/png", "audio/mp3", etc.
+    filename: Option<String>
+    size_bytes: u64
+}
+```
+
+**What goes in BlobStore:**
+- Images (png, jpg, webp)
+- Audio (mp3, wav)
+- PDF, video, other binary
+
+### Tool Interactions
+
+Tool calls and results stay **inline in messages** (not ContentBlock):
+- May contain binary references (AssetRef)
+- Ephemeral to conversation flow
+- Not independently searchable/referenceable
+
+```
+Message {
+    role: user | assistant
+    content: ContentBlockRef          // text → searchable
+    asset_refs: [AssetRef]            // binary attachments
+    tool_calls: [ToolCall]            // inline
+    tool_results: [ToolResult]        // inline
+}
+```
 
 ---
 
