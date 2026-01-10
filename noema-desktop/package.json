@@ -10,9 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@mixmark-io/domino": "^2.2.0",
     "@tailwindcss/typography": "^0.5.19",
-    "turndown": "^7.2.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-fs": "^2.4.4",
     "@tauri-apps/plugin-opener": "^2",
@@ -29,7 +27,6 @@
     "@tailwindcss/vite": "^4.1.17",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
-    "@types/turndown": "^5.0.5",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.4.22",
