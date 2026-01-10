@@ -259,21 +259,25 @@ export function ModelSelector({
               {isPrivateModel(currentModelObj) ? <PrivateIcon /> : <CloudIcon />}
             </span>
           )}
-          <div className="flex flex-col items-end">
+          <div className="flex flex-col items-end max-w-48">
             <div className="flex items-center gap-2">
-              <span>{currentModelObj?.displayName || currentModel || "Select Model"}</span>
+              <span className="truncate max-w-32" title={currentModelObj?.displayName || currentModel}>
+                {currentModelObj?.displayName || currentModel || "Select Model"}
+              </span>
               {/* Context window badge */}
               {currentModelObj?.contextWindow && (
                 <span
                   title={`Context window: ${currentModelObj.contextWindow.toLocaleString()} tokens`}
-                  className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded"
+                  className="text-[10px] text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded shrink-0"
                 >
                   {formatContextWindow(currentModelObj.contextWindow)}
                 </span>
               )}
             </div>
             {currentModelObj && currentModelObj.displayName !== currentModelObj.id && (
-              <span className="text-xs text-gray-500">{currentModelObj.id}</span>
+              <span className="text-xs text-gray-500 truncate max-w-40" title={currentModelObj.id}>
+                {currentModelObj.id}
+              </span>
             )}
           </div>
           <svg

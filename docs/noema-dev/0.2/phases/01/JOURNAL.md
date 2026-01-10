@@ -88,6 +88,14 @@ Chronological stream of thoughts, changes, and observations.
 3. User can cancel or proceed knowingly
 4. Lock icon is amber when private, gray when not
 
+### Feature 2: Truncate Long Model Names
+**Changes (`ModelSelector.tsx`):**
+- Added `max-w-48` to the current model display container
+- Added `truncate max-w-32` to the model display name with tooltip
+- Added `truncate max-w-40` to the model ID with tooltip
+- Added `shrink-0` to context window badge to prevent shrinking
+- Full model name/ID shown on hover via title attribute
+
 ---
 
 ## Observations & Learnings (from OBSERVATIONS.md)
@@ -118,8 +126,7 @@ Chronological stream of thoughts, changes, and observations.
 3. Feature 31: Copy raw markdown (Done)
 4. Feature 33: Toggle to disable tools (Done)
 5. Feature 32: Private content flag (Done)
-6. Feature 2: Truncate long model names (Pending)
+6. Feature 2: Truncate long model names (Done)
 
 ### Remaining Work
-- [ ] Feature 2: Truncate long model names
 - [ ] Feature 34: Toggle to disable audio/image input
