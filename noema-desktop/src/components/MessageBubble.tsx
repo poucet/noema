@@ -139,31 +139,6 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4 group`}
     >
-      {/* Action buttons for assistant messages - positioned outside bubble on left */}
-      {!isUser && !isSystem && (
-        <div className="flex flex-col justify-end mr-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={handleCopyRawMarkdown}
-            className={`p-1.5 rounded transition-colors ${
-              justCopied
-                ? "text-green-500"
-                : "text-gray-500 hover:text-gray-300 hover:bg-gray-700/50"
-            }`}
-            title={justCopied ? "Copied!" : "Copy"}
-          >
-            {justCopied ? <CheckIcon /> : <CopyIcon />}
-          </button>
-          {canFork && (
-            <button
-              onClick={handleForkClick}
-              className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700/50 transition-colors"
-              title="Fork from here"
-            >
-              <ForkIcon />
-            </button>
-          )}
-        </div>
-      )}
       <div
         className={`max-w-[85%] px-4 py-3 rounded-2xl relative ${isUser ? "bg-teal-600 text-white" : isSystem ? "bg-amber-500/20 text-amber-100" : "bg-surface text-foreground"}`}
       >
@@ -201,6 +176,31 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
           </button>
         )}
       </div>
+      {/* Action buttons for assistant messages - positioned outside bubble on right */}
+      {!isUser && !isSystem && (
+        <div className="flex flex-col justify-end ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={handleCopyRawMarkdown}
+            className={`p-1.5 rounded transition-colors ${
+              justCopied
+                ? "text-green-500"
+                : "text-gray-500 hover:text-gray-300 hover:bg-gray-700/50"
+            }`}
+            title={justCopied ? "Copied!" : "Copy"}
+          >
+            {justCopied ? <CheckIcon /> : <CopyIcon />}
+          </button>
+          {canFork && (
+            <button
+              onClick={handleForkClick}
+              className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700/50 transition-colors"
+              title="Fork from here"
+            >
+              <ForkIcon />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
