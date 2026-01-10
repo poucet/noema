@@ -248,59 +248,62 @@ impl SqliteSession {
         span_type: &str,
         model_id: Option<&str>,
     ) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
         let now = unix_timestamp();
+        let span_set_id;
+        let span_id;
 
-        // Get the main thread, or create one if it doesn't exist
-        let thread_id: String = match conn.query_row(
-            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
-            params![&self.conversation_id],
-            |row| row.get(0),
-        ) {
-            Ok(id) => id,
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                // Create main thread for new conversation
-                let thread_id = Uuid::new_v4().to_string();
-                conn.execute(
-                    "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
-                    params![&thread_id, &self.conversation_id, now],
-                )?;
-                thread_id
-            }
-            Err(e) => return Err(e.into()),
-        };
+        // Scope for initial DB operations - connection released before async
+        {
+            let conn = self.conn.lock().unwrap();
 
-        // Get next sequence number for span_set
-        let sequence_number: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
-                params![&thread_id],
+            // Get the main thread, or create one if it doesn't exist
+            let thread_id: String = match conn.query_row(
+                "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
+                params![&self.conversation_id],
                 |row| row.get(0),
-            )
-            .unwrap_or(1);
+            ) {
+                Ok(id) => id,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    // Create main thread for new conversation
+                    let thread_id = Uuid::new_v4().to_string();
+                    conn.execute(
+                        "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
+                        params![&thread_id, &self.conversation_id, now],
+                    )?;
+                    thread_id
+                }
+                Err(e) => return Err(e.into()),
+            };
 
-        // Create span_set
-        let span_set_id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![&span_set_id, &thread_id, sequence_number, span_type, now],
-        )?;
+            // Get next sequence number for span_set
+            let sequence_number: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
+                    params![&thread_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(1);
 
-        // Create span
-        let span_id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![&span_id, &span_set_id, model_id, now],
-        )?;
+            // Create span_set
+            span_set_id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![&span_set_id, &thread_id, sequence_number, span_type, now],
+            )?;
 
-        // Set this span as the selected one
-        conn.execute(
-            "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
-            params![&span_id, &span_set_id],
-        )?;
+            // Create span
+            span_id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![&span_id, &span_set_id, model_id, now],
+            )?;
 
-        // Drop the connection lock before async operations
-        drop(conn);
+            // Set this span as the selected one
+            conn.execute(
+                "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
+                params![&span_id, &span_set_id],
+            )?;
+        } // conn released here
 
         // Write span_messages
         for (i, msg) in messages.iter().enumerate() {
@@ -322,43 +325,46 @@ impl SqliteSession {
 
             let content_json = serde_json::to_string(&stored_payload)?;
 
-            // Re-acquire connection for DB operations
-            let conn = self.conn.lock().unwrap();
+            // DB operations in a scope to release connection before next iteration
+            {
+                let conn = self.conn.lock().unwrap();
 
-            // Store text in content_blocks and get content_id
-            let text = msg.get_text();
-            let content_id = if !text.is_empty() {
-                let origin_kind = match msg.role {
-                    Role::User => Some("user"),
-                    Role::Assistant => Some("assistant"),
-                    Role::System => Some("system"),
-                    _ => None,
-                };
-                match store_content_sync(&conn, &text, origin_kind, self.user_id.as_deref(), model_id) {
-                    Ok(id) => Some(id),
-                    Err(e) => {
-                        tracing::warn!("Failed to store content block: {}", e);
-                        None
+                // Store text in content_blocks and get content_id
+                let text = msg.get_text();
+                let content_id = if !text.is_empty() {
+                    let origin_kind = match msg.role {
+                        Role::User => Some("user"),
+                        Role::Assistant => Some("assistant"),
+                        Role::System => Some("system"),
+                        _ => None,
+                    };
+                    match store_content_sync(&conn, &text, origin_kind, self.user_id.as_deref(), model_id) {
+                        Ok(id) => Some(id),
+                        Err(e) => {
+                            tracing::warn!("Failed to store content block: {}", e);
+                            None
+                        }
                     }
-                }
-            } else {
-                None
-            };
+                } else {
+                    None
+                };
 
-            conn.execute(
-                "INSERT INTO span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![&msg_id, &span_id, i as i64, role, &content_json, &content_id, now],
-            )?;
-            // Connection is dropped at end of loop iteration, released for next async operation
+                conn.execute(
+                    "INSERT INTO span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![&msg_id, &span_id, i as i64, role, &content_json, &content_id, now],
+                )?;
+            } // conn released here before next iteration
         }
 
         // Update conversation timestamp
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
-            params![now, &self.conversation_id],
-        )?;
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+                params![now, &self.conversation_id],
+            )?;
+        }
 
         Ok(span_id)
     }
@@ -377,19 +383,18 @@ impl SqliteSession {
         if !self.persisted {
             let conn = self.conn.lock().unwrap();
             self.create_conversation_record(&conn)?;
-            drop(conn);
+            // conn drops at end of scope
             self.persisted = true;
         }
 
         let now = unix_timestamp();
         let span_set_id;
-        let thread_id;
 
         {
             let conn = self.conn.lock().unwrap();
 
             // Get the main thread
-            thread_id = match conn.query_row(
+            let thread_id: String = match conn.query_row(
                 "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
                 params![&self.conversation_id],
                 |row| row.get(0),
@@ -457,33 +462,36 @@ impl SqliteSession {
 
                 let content_json = serde_json::to_string(&stored_payload)?;
 
-                let conn = self.conn.lock().unwrap();
+                // DB operations in scope to release lock before next iteration
+                {
+                    let conn = self.conn.lock().unwrap();
 
-                // Store text in content_blocks and get content_id
-                let text = msg.get_text();
-                let content_id = if !text.is_empty() {
-                    let origin_kind = match msg.role {
-                        Role::User => Some("user"),
-                        Role::Assistant => Some("assistant"),
-                        Role::System => Some("system"),
-                        _ => None,
-                    };
-                    match store_content_sync(&conn, &text, origin_kind, self.user_id.as_deref(), Some(model_id.as_str())) {
-                        Ok(id) => Some(id),
-                        Err(e) => {
-                            tracing::warn!("Failed to store content block: {}", e);
-                            None
+                    // Store text in content_blocks and get content_id
+                    let text = msg.get_text();
+                    let content_id = if !text.is_empty() {
+                        let origin_kind = match msg.role {
+                            Role::User => Some("user"),
+                            Role::Assistant => Some("assistant"),
+                            Role::System => Some("system"),
+                            _ => None,
+                        };
+                        match store_content_sync(&conn, &text, origin_kind, self.user_id.as_deref(), Some(model_id.as_str())) {
+                            Ok(id) => Some(id),
+                            Err(e) => {
+                                tracing::warn!("Failed to store content block: {}", e);
+                                None
+                            }
                         }
-                    }
-                } else {
-                    None
-                };
+                    } else {
+                        None
+                    };
 
-                conn.execute(
-                    "INSERT INTO span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &content_id, now],
-                )?;
+                    conn.execute(
+                        "INSERT INTO span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &content_id, now],
+                    )?;
+                } // conn released here
             }
 
             if idx == selected_index {
@@ -492,23 +500,24 @@ impl SqliteSession {
             span_ids.push(span_id);
         }
 
-        let conn = self.conn.lock().unwrap();
+        // Final DB updates in scope
+        {
+            let conn = self.conn.lock().unwrap();
 
-        // Set the selected span
-        if let Some(sel_id) = &selected_span_id {
+            // Set the selected span
+            if let Some(sel_id) = &selected_span_id {
+                conn.execute(
+                    "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
+                    params![sel_id, &span_set_id],
+                )?;
+            }
+
+            // Update conversation timestamp
             conn.execute(
-                "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
-                params![sel_id, &span_set_id],
+                "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+                params![now, &self.conversation_id],
             )?;
-        }
-
-        // Update conversation timestamp
-        conn.execute(
-            "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
-            params![now, &self.conversation_id],
-        )?;
-
-        drop(conn);
+        } // conn released here
 
         // Update cache with the selected response messages
         if selected_index < responses.len() {

@@ -81,12 +81,12 @@ impl DynStorageCoordinator {
     }
 
     /// Get access to the blob store for asset resolution
-    pub fn blob_store(&self) -> &Arc<dyn BlobStore> {
+    pub fn blob_store(&self) -> Arc<dyn BlobStore> {
         Arc::clone(&self.blob_store)
     }
 
     /// Get access to the asset store
-    pub fn asset_store(&self) -> &Arc<dyn AssetStore> {
+    pub fn asset_store(&self) -> Arc<dyn AssetStore> {
         Arc::clone(&self.asset_store)
     }
 }
