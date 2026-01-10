@@ -28,7 +28,7 @@ This plan covers a major feature wave for Noema 0.2, organized into 7 phases. Ke
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
 | [x] | P0 | 26 | @-mention file search beyond initial list | Low | Medium |
-| [ ] | P2 | 5 | Copy-paste markdown into ChatInput | Medium | Medium |
+| [x] | P2 | 5 | Copy-paste markdown into ChatInput | Medium | Medium |
 | [ ] | P3 | 27 | Fix Google Docs import search | Low | Low |
 
 ### Phase 3: Unified Content Model

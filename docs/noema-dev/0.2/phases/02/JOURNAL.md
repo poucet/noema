@@ -34,3 +34,22 @@ See `../01/HANDOFF.md` for full context.
 - UX improvements: loading indicator, empty state, increased result count
 
 ---
+
+## 2026-01-10: Feature 5 - Copy-paste markdown into ChatInput
+
+**Changes:**
+- Added `turndown` package for HTML-to-markdown conversion
+- Extended `handlePaste` to detect HTML clipboard content
+- Convert HTML with formatting (headings, lists, links, code, etc.) to markdown
+- Plain text paste still works normally (falls through to default behavior)
+
+**Files modified:**
+- `noema-desktop/package.json` - added turndown + types
+- `noema-desktop/src/components/ChatInput.tsx` - paste handler
+
+**Notes:**
+- Uses regex to detect meaningful HTML structure before converting
+- Turndown configured with ATX headings, fenced code blocks, dash bullets
+- Inserts converted markdown at cursor position, then syncs state via input event
+
+---

@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { readFile } from "@tauri-apps/plugin-fs";
+import TurndownService from "turndown";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { isSupportedAttachmentType } from "../mime_types";
 import type { Attachment, DocumentInfoResponse, InputContentBlock, ToolConfig } from "../generated";
@@ -135,6 +136,16 @@ export function ChatInput({
   const [isDragOver, setIsDragOver] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Turndown service for HTML-to-markdown conversion
+  const turndownService = useMemo(() => {
+    const service = new TurndownService({
+      headingStyle: "atx",
+      codeBlockStyle: "fenced",
+      bulletListMarker: "-",
+    });
+    return service;
+  }, []);
 
   // When prefilledText changes (fork from user message), update the input
   useEffect(() => {
@@ -683,12 +694,47 @@ export function ChatInput({
         }
       }
 
+      // Handle file attachments
       if (files.length > 0) {
         e.preventDefault();
         await processFiles(files);
+        return;
       }
+
+      // Check for HTML content to convert to markdown
+      const html = e.clipboardData.getData("text/html");
+
+      // Only convert HTML if it contains actual formatting (not just plain text wrapped in tags)
+      if (html && html.includes("<") && html.includes(">")) {
+        // Check if the HTML has meaningful structure beyond just a wrapper
+        const hasFormatting = /<(h[1-6]|p|ul|ol|li|pre|code|blockquote|a|strong|em|b|i|table|tr|td|th)\b/i.test(html);
+
+        if (hasFormatting) {
+          e.preventDefault();
+          const markdown = turndownService.turndown(html);
+
+          // Insert the markdown at current cursor position
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            const textNode = document.createTextNode(markdown);
+            range.insertNode(textNode);
+            range.setStartAfter(textNode);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            // Trigger input handler to sync state
+            editorRef.current?.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          return;
+        }
+      }
+
+      // Fall through to default paste behavior for plain text
     },
-    [processFiles]
+    [processFiles, turndownService]
   );
 
   const getVoiceButtonClass = () => {
