@@ -535,3 +535,445 @@ Alternative {
     child_conversations: [ConversationRef]  // if spawned subagents
 }
 ```
+
+---
+
+## Feature Requirements
+
+Detailed implementation requirements derived from use cases and ROADMAP features.
+
+---
+
+### FR-1: Content Storage
+
+**Use Cases:** All
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-1.1 | ContentBlocks are content-addressed (SHA-256 of text) | P0 |
+| FR-1.2 | Store content_type, text, origin metadata | P0 |
+| FR-1.3 | Origin tracks: kind, user_id, model_id, source_id, parent_content_id | P0 |
+| FR-1.4 | Deduplication: same text = same hash = stored once | P1 |
+| FR-1.5 | Assets stored separately in BlobStore (content-addressed) | P0 |
+| FR-1.6 | Full-text search across ContentBlocks | P1 |
+
+**Schema:**
+
+```sql
+CREATE TABLE content_blocks (
+    id TEXT PRIMARY KEY,           -- SHA-256 of text
+    content_type TEXT NOT NULL,    -- text/plain, text/markdown, text/typst
+    text TEXT NOT NULL,
+    origin_kind TEXT NOT NULL,     -- user, assistant, system, import
+    origin_user_id TEXT,
+    origin_model_id TEXT,
+    origin_source_id TEXT,
+    origin_parent_id TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE assets (
+    id TEXT PRIMARY KEY,           -- SHA-256 of bytes
+    mime_type TEXT NOT NULL,
+    filename TEXT,
+    size_bytes INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+-- Actual bytes stored in filesystem: data/{id[0:2]}/{id}
+```
+
+**Acceptance Criteria:**
+- [ ] Create ContentBlock, get back content hash
+- [ ] Same text returns same hash
+- [ ] Store and retrieve assets by hash
+- [ ] Full-text search returns matching ContentBlocks
+
+---
+
+### FR-2: Conversation Structure
+
+**Use Cases:** 1, 2, 3, 4, 5 (subagent, agent↔agent, parallel, fork, splice)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-2.1 | Conversations contain ordered turns | P0 |
+| FR-2.2 | Each turn has role (user/assistant) and one or more alternatives | P0 |
+| FR-2.3 | Each alternative is a span of messages (not single message) | P0 |
+| FR-2.4 | Messages reference ContentBlock for text, have inline tool_calls/tool_results | P0 |
+| FR-2.5 | Views select one alternative per turn | P0 |
+| FR-2.6 | Alternatives are shared across views | P0 |
+| FR-2.7 | Fork creates new view sharing selections up to fork point | P0 |
+| FR-2.8 | Spawn child creates new conversation inheriting parent context | P1 |
+| FR-2.9 | Child conversations tracked within parent's alternative | P1 |
+
+**Schema:**
+
+```sql
+CREATE TABLE conversations (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE turns (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,            -- user, assistant
+    sequence_number INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+    UNIQUE (conversation_id, sequence_number)
+);
+
+CREATE TABLE alternatives (
+    id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL,
+    model_id TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (turn_id) REFERENCES turns(id)
+);
+
+CREATE TABLE messages (
+    id TEXT PRIMARY KEY,
+    alternative_id TEXT NOT NULL,
+    sequence_number INTEGER NOT NULL,  -- order within span
+    content_id TEXT,                   -- FK to content_blocks (text)
+    tool_calls TEXT,                   -- JSON array
+    tool_results TEXT,                 -- JSON array
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (alternative_id) REFERENCES alternatives(id),
+    FOREIGN KEY (content_id) REFERENCES content_blocks(id)
+);
+
+CREATE TABLE message_assets (
+    message_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (message_id, asset_id),
+    FOREIGN KEY (message_id) REFERENCES messages(id),
+    FOREIGN KEY (asset_id) REFERENCES assets(id)
+);
+
+CREATE TABLE views (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    name TEXT,
+    is_main BOOLEAN DEFAULT FALSE,
+    forked_from_view_id TEXT,
+    forked_at_turn_id TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+
+CREATE TABLE view_selections (
+    view_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    alternative_id TEXT NOT NULL,
+    PRIMARY KEY (view_id, turn_id),
+    FOREIGN KEY (view_id) REFERENCES views(id),
+    FOREIGN KEY (turn_id) REFERENCES turns(id),
+    FOREIGN KEY (alternative_id) REFERENCES alternatives(id)
+);
+
+-- Parent-child for subagent spawning
+CREATE TABLE conversation_children (
+    parent_alternative_id TEXT NOT NULL,
+    child_conversation_id TEXT NOT NULL,
+    spawn_position INTEGER NOT NULL,  -- where in parent's span
+    PRIMARY KEY (parent_alternative_id, child_conversation_id),
+    FOREIGN KEY (parent_alternative_id) REFERENCES alternatives(id),
+    FOREIGN KEY (child_conversation_id) REFERENCES conversations(id)
+);
+```
+
+**Operations:**
+
+```rust
+trait ConversationStore {
+    // Turn management
+    fn add_turn(&self, conversation_id: &str, role: Role) -> Result<Turn>;
+    fn get_turns(&self, conversation_id: &str) -> Result<Vec<Turn>>;
+
+    // Alternative management (spans)
+    fn add_alternative(&self, turn_id: &str, model_id: Option<&str>) -> Result<Alternative>;
+    fn add_message_to_alternative(&self, alternative_id: &str, message: NewMessage) -> Result<Message>;
+    fn get_alternative_messages(&self, alternative_id: &str) -> Result<Vec<Message>>;
+
+    // View management
+    fn create_view(&self, conversation_id: &str, name: Option<&str>) -> Result<View>;
+    fn fork_view(&self, view_id: &str, at_turn_id: &str) -> Result<View>;
+    fn select_alternative(&self, view_id: &str, turn_id: &str, alternative_id: &str) -> Result<()>;
+    fn get_view_path(&self, view_id: &str) -> Result<Vec<(Turn, Alternative, Vec<Message>)>>;
+
+    // Subagent
+    fn spawn_child(&self, parent_alternative_id: &str, position: i32) -> Result<Conversation>;
+    fn get_inherited_context(&self, child_id: &str) -> Result<Vec<Message>>;
+}
+```
+
+**Acceptance Criteria:**
+- [ ] Create conversation with turns and alternatives
+- [ ] Alternative contains multiple messages (span)
+- [ ] Different alternatives at same turn have different message counts
+- [ ] Views select path through alternatives
+- [ ] Fork shares prior selections, diverges after
+- [ ] Spawn child inherits parent context
+
+---
+
+### FR-3: Document Structure
+
+**Use Cases:** 6, 7 (versioned documents, cross-reference)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-3.1 | Documents have ordered revisions (DAG) | P0 |
+| FR-3.2 | Each revision references a ContentBlock | P0 |
+| FR-3.3 | Current revision pointer tracks head | P0 |
+| FR-3.4 | Branch creates revision with different parent | P1 |
+| FR-3.5 | Documents referenceable from conversations/collections | P0 |
+
+**Schema:**
+
+```sql
+CREATE TABLE documents (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    current_revision_id TEXT,
+    source TEXT NOT NULL,          -- user_created, ai_generated, google_drive, import
+    source_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE revisions (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    content_id TEXT NOT NULL,
+    parent_revision_id TEXT,
+    revision_number INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(id),
+    FOREIGN KEY (content_id) REFERENCES content_blocks(id)
+);
+```
+
+**Acceptance Criteria:**
+- [ ] Create document with initial content
+- [ ] Commit creates new revision
+- [ ] Branch from non-head revision
+- [ ] Checkout moves current pointer
+- [ ] Diff between revisions
+
+---
+
+### FR-4: Collection Structure
+
+**Use Cases:** 8 (structured data)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-4.1 | Collections contain items in tree structure | P0 |
+| FR-4.2 | Items reference any entity type | P0 |
+| FR-4.3 | Items have position within parent | P0 |
+| FR-4.4 | Items can have tags | P1 |
+| FR-4.5 | Items can have typed fields | P1 |
+| FR-4.6 | Schema defines field types for database collections | P2 |
+
+**Schema:**
+
+```sql
+CREATE TABLE collections (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    schema_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE collection_items (
+    id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL,
+    parent_item_id TEXT,
+    position INTEGER NOT NULL,
+    target_type TEXT NOT NULL,     -- content, document, conversation, collection
+    target_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE item_tags (
+    item_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (item_id, tag)
+);
+
+CREATE TABLE item_fields (
+    item_id TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    field_value TEXT NOT NULL,     -- JSON
+    PRIMARY KEY (item_id, field_name)
+);
+```
+
+**Acceptance Criteria:**
+- [ ] Create collection with tree of items
+- [ ] Items reference various entity types
+- [ ] Move items, reorder
+- [ ] Tag and query by tag
+- [ ] Set/get typed fields
+
+---
+
+### FR-5: Cross-References
+
+**Use Cases:** 7 (cross-reference), all
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-5.1 | Any entity can reference any other entity | P0 |
+| FR-5.2 | References have optional relation type | P1 |
+| FR-5.3 | Backlinks auto-computed | P1 |
+| FR-5.4 | Inline `[[type:id]]` syntax parsed | P2 |
+
+**Schema:**
+
+```sql
+CREATE TABLE references (
+    id TEXT PRIMARY KEY,
+    from_type TEXT NOT NULL,
+    from_id TEXT NOT NULL,
+    to_type TEXT NOT NULL,
+    to_id TEXT NOT NULL,
+    relation_type TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE (from_type, from_id, to_type, to_id, relation_type)
+);
+
+CREATE INDEX idx_references_from ON references(from_type, from_id);
+CREATE INDEX idx_references_to ON references(to_type, to_id);
+```
+
+**Acceptance Criteria:**
+- [ ] Create reference between entities
+- [ ] Query outgoing references
+- [ ] Query incoming references (backlinks)
+- [ ] Parse inline reference syntax
+
+---
+
+### FR-6: Views and Queries
+
+**Use Cases:** 8, navigation
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-6.1 | List view: flat, sortable, filterable | P0 |
+| FR-6.2 | Tree view: hierarchical navigation | P0 |
+| FR-6.3 | Table view: columns from fields | P1 |
+| FR-6.4 | Board view: grouped by field (kanban) | P2 |
+| FR-6.5 | Query by type, tag, field, date | P1 |
+
+**Acceptance Criteria:**
+- [ ] List view with sort/filter
+- [ ] Tree view for hierarchy
+- [ ] Basic query parsing
+- [ ] Filter by type, tag, field
+
+---
+
+### FR-7: Agent Context
+
+**Use Cases:** 1, 2 (subagent, agent↔agent)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-7.1 | Agent templates define system prompt, context sources | P1 |
+| FR-7.2 | Context from static nodes or queries | P1 |
+| FR-7.3 | Template variables expanded at runtime | P2 |
+| FR-7.4 | Sub-agents inherit scoped parent context | P2 |
+
+**Schema:**
+
+```sql
+CREATE TABLE agent_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    system_prompt TEXT NOT NULL,
+    context_spec TEXT NOT NULL,    -- JSON
+    tools TEXT,                    -- JSON
+    created_at INTEGER NOT NULL
+);
+```
+
+**Acceptance Criteria:**
+- [ ] Define agent with system prompt and context
+- [ ] Expand template variables
+- [ ] Context injection from nodes/queries
+
+---
+
+### FR-8: Import/Export
+
+**Use Cases:** Data portability
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-8.1 | Export entity to JSON | P1 |
+| FR-8.2 | Export document to Markdown | P1 |
+| FR-8.3 | Export conversation to Markdown | P1 |
+| FR-8.4 | Import from JSON | P1 |
+| FR-8.5 | Import markdown files | P2 |
+
+**Acceptance Criteria:**
+- [ ] Export entity with all metadata
+- [ ] Markdown export for documents/conversations
+- [ ] Import restores entities
+
+---
+
+## Implementation Phases
+
+### Phase 3a: Core Storage
+
+1. ContentBlock with deduplication
+2. Asset storage (BlobStore)
+3. Basic conversation structure (turns, alternatives as spans, messages)
+4. Document with revisions
+
+### Phase 3b: Views and Relations
+
+1. Conversation views and selection
+2. Fork operation
+3. Cross-references with backlinks
+4. Collection structure
+
+### Phase 3c: Queries and UI
+
+1. Query language
+2. List/Tree views
+3. Tag and field queries
+
+### Phase 3d: Agents and Import/Export
+
+1. Agent templates
+2. Context injection
+3. Export/import
+
+---
+
+## Migration Strategy
+
+| Current | New |
+|---------|-----|
+| `conversations` | `conversations` + `turns` + `alternatives` + `views` |
+| `spans` | Merged into `alternatives` |
+| `messages` | `messages` with alternative_id instead of span_id |
+| `documents` | `documents` + `revisions` |
+| `document_revisions` | Merged into `revisions` |
+
+Steps:
+1. Create new tables alongside existing
+2. Migrate with ID preservation
+3. Update application code
+4. Drop old tables
