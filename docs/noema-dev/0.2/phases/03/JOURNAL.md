@@ -229,6 +229,25 @@ The coordinator is **session-agnostic** - it only knows about `BlobStore` and `A
 1. **Verify 3.1b** - Compile, run tests, E2E check
 2. **3.2 Conversation Structure** (P0) - Turns, spans, messages with content references
 
+---
+
+## 2026-01-10: Feature 3.1b Asset Storage Complete
+
+User verified E2E functionality:
+- App runs via `noema`
+- Image attachment works - displays correctly in conversation
+- Assets table populated with new rows
+
+**Feature 3.1b Complete** - All 10 tasks done.
+
+**Summary of 3.1b Implementation**:
+- `AssetStore` trait with store/get/exists/delete operations
+- `SqliteAssetStore` implementation with SHA-256 hash-based deduplication
+- `StorageCoordinator` automatically externalizes inline images/audio to blob storage
+- Integration with existing session write paths (`write_as_span()`, `write_parallel_responses()`)
+
+**Next**: Feature 3.2 Conversation Structure (P0)
+
 **Key Files for Next Context**:
 - [noema-core/src/storage/content_block/sqlite.rs](noema-core/src/storage/content_block/sqlite.rs) - ContentBlockStore impl, `store_content_sync()` helper
 - [noema-core/src/storage/content_block/types.rs](noema-core/src/storage/content_block/types.rs) - Origin types

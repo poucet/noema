@@ -11,7 +11,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | Status | Pri | # | Feature | Description |
 |--------|-----|---|---------|-------------|
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
-| 🔄 | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
+| ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ⬜ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
 | ⬜ | P0 | 3.3 | Views and forking | Named paths through conversations, fork support |
 | ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
@@ -50,16 +50,16 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 
 | Status | # | Task |
 |--------|---|------|
-| 🔄 | 3.1b.1 | 🏗️ Define AssetStore trait |
-| 🔄 | 3.1b.2 | 📦 Add assets table migration |
-| 🔄 | 3.1b.3 | ⚡ Implement SqliteAssetStore |
-| 🔄 | 3.1b.4 | 🏗️ Add AssetRef to StoredContent enum |
-| 🔄 | 3.1b.5 | ⚡ Implement asset resolution in payload |
-| 🔄 | 3.1b.6 | ✅ Unit tests for asset store |
-| 🔄 | 3.1b.7 | 🔧 Update store_asset command to use new API |
-| ⬜ | 3.1b.8 | 🔧 User: Run app via `noema` |
-| ⬜ | 3.1b.9 | 🔧 User: Attach image to message, send, verify image displays |
-| ⬜ | 3.1b.10 | 🔧 User: SQL verify `SELECT * FROM assets` shows new row |
+| ✅ | 3.1b.1 | 🏗️ Define AssetStore trait |
+| ✅ | 3.1b.2 | 📦 Add assets table migration |
+| ✅ | 3.1b.3 | ⚡ Implement SqliteAssetStore |
+| ✅ | 3.1b.4 | 🏗️ Add AssetRef to StoredContent enum |
+| ✅ | 3.1b.5 | ⚡ Implement asset resolution in payload |
+| ✅ | 3.1b.6 | ✅ Unit tests for asset store |
+| ✅ | 3.1b.7 | 🔧 Update store_asset command to use new API |
+| ✅ | 3.1b.8 | 🔧 User: Run app via `noema` |
+| ✅ | 3.1b.9 | 🔧 User: Attach image to message, send, verify image displays |
+| ✅ | 3.1b.10 | 🔧 User: SQL verify `SELECT * FROM assets` shows new row |
 
 ### 3.2 Conversation Structure (10 tasks)
 

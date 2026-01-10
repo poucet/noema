@@ -3,11 +3,12 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.1b"
-feature_name: "Asset Storage"
-task: "3.1b.1"
-task_name: "Define AssetStore trait"
+feature: "3.2"
+feature_name: "Conversation Structure"
+task: "3.2.1"
+task_name: "Define Turn, Span, Message types"
 
 # Completed
 completed_features:
-  - "3.1"  # Content blocks - Content-addressed text storage with origin tracking
+  - "3.1"   # Content blocks - Content-addressed text storage with origin tracking
+  - "3.1b"  # Asset storage - Binary blob storage (images, audio, PDFs)
