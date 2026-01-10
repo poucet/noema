@@ -1,20 +1,35 @@
 //! Traffic logging for LLM API calls
 //!
 //! Logs all LLM requests/responses to noema.log
+//! Content is truncated to avoid leaking private data in logs.
 
 use config::PathManager;
 use std::io::Write;
 
-/// Log an LLM request
-pub fn log_request(model: &str, request: &impl serde::Serialize) {
-    let json = serde_json::to_string_pretty(request).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("REQUEST", &format!("[{}]\n{}", model, json));
+/// Maximum characters to log for content (to protect privacy)
+const MAX_CONTENT_LOG_CHARS: usize = 200;
+
+/// Truncate a string for logging, adding ellipsis if truncated
+fn truncate_for_log(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}... ({} chars total)", &s[..max_len], s.len())
+    }
 }
 
-/// Log an LLM response
+/// Log an LLM request (truncated summary only)
+pub fn log_request(model: &str, request: &impl serde::Serialize) {
+    let json = serde_json::to_string(request).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("REQUEST", &format!("[{}] {}", model, summary));
+}
+
+/// Log an LLM response (truncated summary only)
 pub fn log_response(model: &str, response: &impl serde::Serialize) {
-    let json = serde_json::to_string_pretty(response).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("RESPONSE", &format!("[{}]\n{}", model, json));
+    let json = serde_json::to_string(response).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("RESPONSE", &format!("[{}] {}", model, summary));
 }
 
 /// Log an LLM error
@@ -22,16 +37,18 @@ pub fn log_error(model: &str, error: &str) {
     log_traffic("ERROR", &format!("[{}] {}", model, error));
 }
 
-/// Log an LLM streaming start
+/// Log an LLM streaming start (truncated summary only)
 pub fn log_stream_start(model: &str, request: &impl serde::Serialize) {
-    let json = serde_json::to_string_pretty(request).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("STREAM_START", &format!("[{}]\n{}", model, json));
+    let json = serde_json::to_string(request).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("STREAM_START", &format!("[{}] {}", model, summary));
 }
 
-/// Log an LLM streaming response (accumulated from chunks)
+/// Log an LLM streaming response (truncated summary only)
 pub fn log_stream_response(model: &str, response: &impl serde::Serialize) {
-    let json = serde_json::to_string_pretty(response).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("STREAM_RESPONSE", &format!("[{}]\n{}", model, json));
+    let json = serde_json::to_string(response).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("STREAM_RESPONSE", &format!("[{}] {}", model, summary));
 }
 
 /// Internal function to write to the log file

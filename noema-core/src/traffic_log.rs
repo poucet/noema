@@ -1,20 +1,35 @@
 //! Traffic logging for LLM and MCP calls
 //!
 //! Logs all LLM requests/responses and MCP tool calls to noema.log
+//! Content is truncated to avoid leaking private data in logs.
 
 use config::PathManager;
 use std::io::Write;
 
-/// Log an LLM request
-pub fn log_llm_request(model: &str, request: &impl serde::Serialize) {
-    let json = serde_json::to_string_pretty(request).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("LLM", "REQUEST", &format!("[{}]\n{}", model, json));
+/// Maximum characters to log for content (to protect privacy)
+const MAX_CONTENT_LOG_CHARS: usize = 200;
+
+/// Truncate a string for logging, adding ellipsis if truncated
+fn truncate_for_log(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}... ({} chars total)", &s[..max_len], s.len())
+    }
 }
 
-/// Log an LLM response
+/// Log an LLM request (truncated summary only)
+pub fn log_llm_request(model: &str, request: &impl serde::Serialize) {
+    let json = serde_json::to_string(request).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("LLM", "REQUEST", &format!("[{}] {}", model, summary));
+}
+
+/// Log an LLM response (truncated summary only)
 pub fn log_llm_response(model: &str, response: &impl serde::Serialize) {
-    let json = serde_json::to_string_pretty(response).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("LLM", "RESPONSE", &format!("[{}]\n{}", model, json));
+    let json = serde_json::to_string(response).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("LLM", "RESPONSE", &format!("[{}] {}", model, summary));
 }
 
 /// Log an LLM error
@@ -22,16 +37,23 @@ pub fn log_llm_error(model: &str, error: &str) {
     log_traffic("LLM", "ERROR", &format!("[{}] {}", model, error));
 }
 
-/// Log an LLM streaming start
+/// Log an LLM streaming start (truncated summary only)
 pub fn log_llm_stream_start(model: &str, request: &impl serde::Serialize) {
-    let json = serde_json::to_string_pretty(request).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("LLM", "STREAM_START", &format!("[{}]\n{}", model, json));
+    let json = serde_json::to_string(request).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("LLM", "STREAM_START", &format!("[{}] {}", model, summary));
 }
 
-/// Log an MCP tool call request
+/// Log an LLM streaming end
+pub fn log_llm_stream_end(model: &str, chunk_count: u64, total_chars: usize) {
+    log_traffic("LLM", "STREAM_END", &format!("[{}] chunks={}, chars={}", model, chunk_count, total_chars));
+}
+
+/// Log an MCP tool call request (truncated summary only)
 pub fn log_mcp_request(tool_name: &str, args: &serde_json::Value) {
-    let json = serde_json::to_string_pretty(args).unwrap_or_else(|_| "<serialization error>".to_string());
-    log_traffic("MCP", "REQUEST", &format!("[{}]\n{}", tool_name, json));
+    let json = serde_json::to_string(args).unwrap_or_else(|_| "<serialization error>".to_string());
+    let summary = truncate_for_log(&json, MAX_CONTENT_LOG_CHARS);
+    log_traffic("MCP", "REQUEST", &format!("[{}] {}", tool_name, summary));
 }
 
 /// Log an MCP tool call response
