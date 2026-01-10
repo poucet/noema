@@ -638,6 +638,7 @@ CREATE TABLE messages (
     id TEXT PRIMARY KEY,
     alternative_id TEXT NOT NULL,
     sequence_number INTEGER NOT NULL,  -- order within span
+    role TEXT NOT NULL,                -- user, assistant, system, tool
     content_id TEXT,                   -- FK to content_blocks (text)
     tool_calls TEXT,                   -- JSON array
     tool_results TEXT,                 -- JSON array
@@ -932,48 +933,287 @@ CREATE TABLE agent_templates (
 
 ---
 
-## Implementation Phases
+## Extension Points
 
-### Phase 3a: Core Storage
+UCM provides hooks for future systems (temporality, dynamic content, automation) without coupling to specific implementations. See [HOOK_SYSTEM.md](HOOK_SYSTEM.md) for the full design.
 
-1. ContentBlock with deduplication
-2. Asset storage (BlobStore)
-3. Basic conversation structure (turns, alternatives as spans, messages)
-4. Document with revisions
+### EP-1: Event Emission
 
-### Phase 3b: Views and Relations
+UCM emits events after entity lifecycle operations. Events are logged as ContentBlocks.
 
-1. Conversation views and selection
-2. Fork operation
-3. Cross-references with backlinks
-4. Collection structure
+| Operation | Event Type |
+|-----------|------------|
+| Create entity | `entity.created.{type}` |
+| Update entity | `entity.updated.{type}` |
+| Delete entity | `entity.deleted.{type}` |
 
-### Phase 3c: Queries and UI
+**Schema addition:**
 
-1. Query language
-2. List/Tree views
-3. Tag and field queries
+```sql
+CREATE TABLE events (
+    id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,           -- Extensible string
+    payload_content_id TEXT,            -- ContentBlock: event details
+    source_entity_type TEXT,
+    source_entity_id TEXT,
+    timestamp INTEGER NOT NULL,
+    FOREIGN KEY (payload_content_id) REFERENCES content_blocks(id)
+);
 
-### Phase 3d: Agents and Import/Export
+CREATE INDEX idx_events_type_time ON events(event_type, timestamp);
+```
 
-1. Agent templates
-2. Context injection
-3. Export/import
+**Integration:** Every `Store` trait method that mutates data calls `emit_event()` after success.
+
+### EP-2: Temporal Indexing
+
+All entities have `created_at` and `updated_at` timestamps. Indexes support time-range queries.
+
+```sql
+CREATE INDEX idx_messages_created ON messages(created_at);
+CREATE INDEX idx_content_blocks_created ON content_blocks(created_at);
+CREATE INDEX idx_messages_conv_created ON messages(conversation_id, created_at);
+```
+
+**Integration:** Query methods accept optional `TemporalQuery { after, before, limit }`.
+
+### EP-3: Hook Registry
+
+Hooks bind event patterns to actions. Both are ContentBlocks.
+
+```sql
+CREATE TABLE hooks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    pattern_content_id TEXT NOT NULL,   -- ContentBlock: event pattern
+    action_content_id TEXT NOT NULL,    -- ContentBlock: action spec
+    priority INTEGER DEFAULT 0,
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (pattern_content_id) REFERENCES content_blocks(id),
+    FOREIGN KEY (action_content_id) REFERENCES content_blocks(id)
+);
+```
+
+**Integration:** Hook engine queries registry on each event, matches patterns, executes actions.
+
+### EP-4: Dynamic Content Flag
+
+ContentBlocks can be marked as containing evaluatable expressions.
+
+```sql
+ALTER TABLE content_blocks ADD COLUMN is_dynamic BOOLEAN DEFAULT FALSE;
+```
+
+**Integration:** Render pipeline checks `is_dynamic` and invokes evaluator before display/LLM injection.
+
+### EP-5: Context Strategy
+
+Views can reference a context strategy for building LLM context from history.
+
+```sql
+ALTER TABLE views ADD COLUMN context_strategy_id TEXT;
+```
+
+**Integration:** `get_view_context(view_id, budget)` applies strategy to compress/summarize history.
 
 ---
 
-## Migration Strategy
+## Implementation & Migration Plan
 
-| Current | New |
-|---------|-----|
-| `conversations` | `conversations` + `turns` + `alternatives` + `views` |
-| `spans` | Merged into `alternatives` |
-| `messages` | `messages` with alternative_id instead of span_id |
-| `documents` | `documents` + `revisions` |
-| `document_revisions` | Merged into `revisions` |
+We adopt a **Strangler Fig** pattern with incremental steps. Each step is end-to-end testable: storage → protocol → backend → frontend.
 
-Steps:
-1. Create new tables alongside existing
-2. Migrate with ID preservation
-3. Update application code
-4. Drop old tables
+### Principles
+
+1. **Vertical slices**: Each step delivers working functionality across all layers
+2. **Feature flags**: New behavior behind flags, old behavior remains default
+3. **Dual-read**: Read from new + old, compare, log discrepancies
+4. **Incremental migration**: Backfill in background, no big-bang cutover
+
+---
+
+### Phase 1: Content Layer Foundation
+
+**Goal:** ContentBlock storage working end-to-end without changing existing behavior.
+
+#### Step 1.1: ContentBlock Table + Store
+
+| Layer | Change |
+|-------|--------|
+| Storage | Create `content_blocks` table |
+| Backend | Implement `ContentStore` trait |
+| Protocol | No change (internal only) |
+| Frontend | No change |
+
+**Test:** Unit tests for ContentStore CRUD, hash deduplication.
+
+#### Step 1.2: Documents Use ContentBlocks
+
+| Layer | Change |
+|-------|--------|
+| Storage | Add `content_id` column to `document_revisions` |
+| Backend | `create_revision()` stores to ContentBlock, saves `content_id` |
+| Backend | `get_revision()` reads from ContentBlock (fallback to `content_markdown`) |
+| Protocol | No change (content returned same as before) |
+| Frontend | No change |
+
+**Test:** Create document, verify content in `content_blocks`. Edit document, verify dedup if same content. Load old documents (fallback works).
+
+**Backfill:** Background job migrates existing `content_markdown` → ContentBlock.
+
+#### Step 1.3: Messages Use ContentBlocks
+
+| Layer | Change |
+|-------|--------|
+| Storage | Add `content_id` column to `span_messages` |
+| Backend | `add_span_message()` extracts text, stores ContentBlock |
+| Backend | `get_messages()` resolves `content_id` |
+| Protocol | No change |
+| Frontend | No change |
+
+**Test:** Send message, verify content in `content_blocks`. Load conversation, verify content resolves.
+
+**Backfill:** Background job migrates existing message payloads.
+
+#### Step 1.4: Events Table + Emission
+
+| Layer | Change |
+|-------|--------|
+| Storage | Create `events` table |
+| Backend | `emit_event()` called after ContentBlock/Document/Message mutations |
+| Protocol | New endpoint: `GET /events?after=<timestamp>` (optional, for debugging) |
+| Frontend | No change (or debug panel showing events) |
+
+**Test:** Create document → event logged. Create message → event logged. Query events by time range.
+
+---
+
+### Phase 2: Conversation Structure
+
+**Goal:** New Turn/Alternative/View model working alongside old SpanSet/Span/Thread model.
+
+#### Step 2.1: New Tables (Shadow Mode)
+
+| Layer | Change |
+|-------|--------|
+| Storage | Create `turns`, `alternatives`, `messages_v2`, `views`, `view_selections` |
+| Backend | No change to existing code paths |
+| Protocol | No change |
+| Frontend | No change |
+
+**Test:** Tables exist, can insert/query directly.
+
+#### Step 2.2: Dual-Write to New Structure
+
+| Layer | Change |
+|-------|--------|
+| Storage | Both old and new tables written |
+| Backend | `add_span_message()` also writes to new `messages_v2` via Turn/Alternative |
+| Backend | Feature flag `ucm_dual_write=true` |
+| Protocol | No change |
+| Frontend | No change |
+
+**Test:** Send messages with flag on. Verify both old and new tables populated correctly. Query both, compare.
+
+#### Step 2.3: Dual-Read with Comparison
+
+| Layer | Change |
+|-------|--------|
+| Backend | `get_messages()` reads from both, logs discrepancies |
+| Backend | Feature flag `ucm_dual_read=true` |
+| Protocol | No change |
+| Frontend | No change |
+
+**Test:** Load conversations. Check logs for any mismatches between old/new reads.
+
+#### Step 2.4: New Read Path (Feature Flagged)
+
+| Layer | Change |
+|-------|--------|
+| Backend | `get_messages()` reads from new tables when `ucm_new_read=true` |
+| Protocol | New types for Turn/Alternative/View (versioned or feature-flagged) |
+| Frontend | Feature flag to use new protocol types |
+
+**Test:** Toggle flag, verify UI works with new data path. Compare behavior with old path.
+
+#### Step 2.5: Views and Forking
+
+| Layer | Change |
+|-------|--------|
+| Backend | Implement `create_view()`, `fork_view()`, `select_alternative()` |
+| Protocol | Endpoints for view operations |
+| Frontend | UI for viewing alternatives, forking |
+
+**Test:** Create conversation, generate alternatives at a turn. Fork view. UI shows alternatives and allows selection.
+
+#### Step 2.6: Migration Script
+
+| Layer | Change |
+|-------|--------|
+| Backend | Script converts old data to new structure |
+| | SpanSet → Turn, Span → Alternative, Thread → View |
+
+**Test:** Run migration. Verify all conversations accessible via new path. Dual-read shows no discrepancies.
+
+---
+
+### Phase 3: Cutover and Extension Points
+
+**Goal:** New structure is primary. Extension points enabled.
+
+#### Step 3.1: New Path Default
+
+| Layer | Change |
+|-------|--------|
+| Backend | `ucm_new_read=true` becomes default |
+| Backend | Old read path deprecated (logged if used) |
+| Protocol | Old types deprecated |
+| Frontend | Old UI paths removed |
+
+**Test:** Full regression. All features work with new path.
+
+#### Step 3.2: Hook Registry
+
+| Layer | Change |
+|-------|--------|
+| Storage | Create `hooks` table |
+| Backend | Hook engine: on event, match patterns, execute actions |
+| Backend | Basic actions: log, enqueue |
+| Protocol | CRUD for hooks (admin only initially) |
+| Frontend | Hook management UI (optional) |
+
+**Test:** Create hook matching `entity.created.message`. Send message. Verify hook fired.
+
+#### Step 3.3: Temporal Triggers
+
+| Layer | Change |
+|-------|--------|
+| Storage | Create `temporal_triggers` table |
+| Backend | Scheduler reads triggers, emits events |
+| Protocol | CRUD for temporal triggers |
+| Frontend | UI for scheduling (optional) |
+
+**Test:** Create idle trigger (1 minute for testing). Wait. Verify event emitted.
+
+#### Step 3.4: Cleanup
+
+| Layer | Change |
+|-------|--------|
+| Storage | Drop `threads`, `span_sets`, `spans`, `span_messages` |
+| Storage | Drop `content_markdown` from `document_revisions` |
+| Backend | Remove old read/write paths |
+| Protocol | Remove deprecated types |
+
+**Test:** Full regression. Database smaller. No references to old tables.
+
+---
+
+## Migration Mapping
+
+| Old Concept | New Concept | Notes |
+|-------------|-------------|-------|
+| `SpanSet` | `Turn` | A point in the conversation sequence. |
+| `Span` | `Alternative` | One possible generation/response at that turn. |
+| `SpanMessage` | `Message` | Now explicitly ordered within an Alternative. |
+| `Thread` | `View` | A linear path (selections) through the graph. |
+| `Forked Thread` | `View` (Forked) | A view sharing a prefix with another view. |
