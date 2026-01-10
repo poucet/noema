@@ -74,10 +74,12 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
             content TEXT NOT NULL,
             text_content TEXT,
+            content_id TEXT REFERENCES content_blocks(id),
             created_at INTEGER NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_span_messages_span ON span_messages(span_id, sequence_number);
+        CREATE INDEX IF NOT EXISTS idx_span_messages_content ON span_messages(content_id);
         "#,
     )
     .context("Failed to initialize conversation schema")?;
