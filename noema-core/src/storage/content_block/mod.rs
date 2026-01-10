@@ -5,10 +5,13 @@
 //! with deduplication via SHA-256 hashing.
 
 mod types;
+
+#[cfg(feature = "sqlite")]
 pub(crate) mod sqlite;
 
 pub use types::{ContentOrigin, ContentType, OriginKind};
 
+use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::storage::ids::ContentBlockId;
@@ -121,22 +124,6 @@ pub struct StoreResult {
     pub is_new: bool,
 }
 
-/// Error type for content block operations
-#[derive(Debug, thiserror::Error)]
-pub enum ContentBlockError {
-    #[error("Content block not found: {0}")]
-    NotFound(ContentBlockId),
-
-    #[error("Database error: {0}")]
-    Database(String),
-
-    #[error("Invalid content type: {0}")]
-    InvalidContentType(String),
-
-    #[error("Invalid origin kind: {0}")]
-    InvalidOriginKind(String),
-}
-
 /// Trait for content block storage operations
 #[async_trait]
 pub trait ContentBlockStore: Send + Sync {
@@ -144,17 +131,17 @@ pub trait ContentBlockStore: Send + Sync {
     ///
     /// If content with the same hash already exists, returns the existing ID
     /// (content deduplication).
-    async fn store(&self, content: ContentBlock) -> Result<StoreResult, ContentBlockError>;
+    async fn store(&self, content: ContentBlock) -> Result<StoreResult>;
 
     /// Get a content block by ID
-    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredContentBlock>, ContentBlockError>;
+    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredContentBlock>>;
 
     /// Get just the text content by ID (lightweight)
-    async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>, ContentBlockError>;
+    async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>>;
 
     /// Check if a content block exists
-    async fn exists(&self, id: &ContentBlockId) -> Result<bool, ContentBlockError>;
+    async fn exists(&self, id: &ContentBlockId) -> Result<bool>;
 
     /// Find content block by hash (for deduplication checks)
-    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>, ContentBlockError>;
+    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>>;
 }

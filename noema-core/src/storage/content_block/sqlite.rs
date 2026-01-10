@@ -1,12 +1,10 @@
 //! SQLite implementation of ContentBlockStore
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 
-use super::{
-    ContentBlock, ContentBlockError, ContentBlockStore, StoredContentBlock, StoreResult,
-};
+use super::{ContentBlock, ContentBlockStore, StoredContentBlock, StoreResult};
 use crate::storage::content_block::types::{ContentOrigin, ContentType, OriginKind};
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
@@ -54,7 +52,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 
 #[async_trait]
 impl ContentBlockStore for SqliteStore {
-    async fn store(&self, content: ContentBlock) -> Result<StoreResult, ContentBlockError> {
+    async fn store(&self, content: ContentBlock) -> Result<StoreResult> {
         let hash = content_hash(&content.text);
         let conn = self.conn().lock().unwrap();
 
@@ -88,7 +86,7 @@ impl ContentBlockStore for SqliteStore {
                 now,
             ],
         )
-        .map_err(|e| ContentBlockError::Database(e.to_string()))?;
+        .context("Failed to insert content block")?;
 
         Ok(StoreResult {
             id,
@@ -97,7 +95,7 @@ impl ContentBlockStore for SqliteStore {
         })
     }
 
-    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredContentBlock>, ContentBlockError> {
+    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredContentBlock>> {
         let conn = self.conn().lock().unwrap();
 
         let result = conn.query_row(
@@ -124,11 +122,11 @@ impl ContentBlockStore for SqliteStore {
         match result {
             Ok(data) => Ok(Some(data.into_stored_content_block()?)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(ContentBlockError::Database(e.to_string())),
+            Err(e) => Err(e).context("Failed to get content block"),
         }
     }
 
-    async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>, ContentBlockError> {
+    async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>> {
         let conn = self.conn().lock().unwrap();
 
         let result = conn.query_row(
@@ -140,11 +138,11 @@ impl ContentBlockStore for SqliteStore {
         match result {
             Ok(text) => Ok(Some(text)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(ContentBlockError::Database(e.to_string())),
+            Err(e) => Err(e).context("Failed to get content block text"),
         }
     }
 
-    async fn exists(&self, id: &ContentBlockId) -> Result<bool, ContentBlockError> {
+    async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
 
         let count: i32 = conn
@@ -153,12 +151,12 @@ impl ContentBlockStore for SqliteStore {
                 params![id.as_str()],
                 |row| row.get(0),
             )
-            .map_err(|e| ContentBlockError::Database(e.to_string()))?;
+            .context("Failed to check content block existence")?;
 
         Ok(count > 0)
     }
 
-    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>, ContentBlockError> {
+    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>> {
         let conn = self.conn().lock().unwrap();
         find_by_hash_internal(&conn, hash)
     }
@@ -174,7 +172,7 @@ pub(crate) fn store_content_sync(
     origin_kind: Option<&str>,
     origin_user_id: Option<&str>,
     origin_model_id: Option<&str>,
-) -> Result<String, ContentBlockError> {
+) -> Result<String> {
     let hash = content_hash(text);
 
     // Check for existing content with same hash (deduplication)
@@ -199,16 +197,13 @@ pub(crate) fn store_content_sync(
             now,
         ],
     )
-    .map_err(|e| ContentBlockError::Database(e.to_string()))?;
+    .context("Failed to store content block")?;
 
     Ok(id.into_string())
 }
 
 /// Internal helper for hash lookup (used by both store and find_by_hash)
-fn find_by_hash_internal(
-    conn: &Connection,
-    hash: &str,
-) -> Result<Option<ContentBlockId>, ContentBlockError> {
+fn find_by_hash_internal(conn: &Connection, hash: &str) -> Result<Option<ContentBlockId>> {
     let result = conn.query_row(
         "SELECT id FROM content_blocks WHERE content_hash = ?1 LIMIT 1",
         params![hash],
@@ -221,7 +216,7 @@ fn find_by_hash_internal(
     match result {
         Ok(id) => Ok(Some(id)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(ContentBlockError::Database(e.to_string())),
+        Err(e) => Err(e).context("Failed to find content block by hash"),
     }
 }
 
@@ -241,16 +236,16 @@ struct RowData {
 }
 
 impl RowData {
-    fn into_stored_content_block(self) -> Result<StoredContentBlock, ContentBlockError> {
+    fn into_stored_content_block(self) -> Result<StoredContentBlock> {
         let content_type = ContentType::from_str(&self.content_type)
-            .ok_or_else(|| ContentBlockError::InvalidContentType(self.content_type.clone()))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid content type: {}", self.content_type))?;
 
         let origin_kind = self
             .origin_kind
             .as_deref()
             .map(|s| {
                 OriginKind::from_str(s)
-                    .ok_or_else(|| ContentBlockError::InvalidOriginKind(s.to_string()))
+                    .ok_or_else(|| anyhow::anyhow!("Invalid origin kind: {}", s))
             })
             .transpose()?;
 
