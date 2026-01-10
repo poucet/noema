@@ -79,7 +79,7 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ⬜ | 3.2.12 | 🔧 User: E2E verification in noema app |
 | ⬜ | 3.2.13 | 🔧 User: SQL verify data in new tables |
 
-### 3.3 Views and Forking (8 tasks)
+### 3.3 Views and Forking (11 tasks)
 
 | Status | # | Task |
 |--------|---|------|
@@ -90,7 +90,10 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.5 | ⚡ Implement get_view_path |
 | ✅ | 3.3.6 | ⚡ Implement fork_view |
 | ⬜ | 3.3.7 | ⚡ Implement edit_turn (splice) |
-| ✅ | 3.3.8 | ✅ Unit tests for views and forking
+| ✅ | 3.3.8 | ✅ Unit tests for views and forking |
+| ⬜ | 3.3.9 | 🔧 User: E2E verification - fork conversation in noema app |
+| ⬜ | 3.3.10 | 🔧 User: SQL verify `SELECT * FROM views` shows data |
+| ⬜ | 3.3.11 | 🔧 User: SQL verify `SELECT * FROM view_selections` shows data |
 
 ### 3.4 Document Structure (10 tasks)
 
