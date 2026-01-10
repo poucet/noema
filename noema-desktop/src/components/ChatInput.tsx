@@ -161,6 +161,7 @@ export function ChatInput({
     selectedIndex: 0,
   });
   const [mentionResults, setMentionResults] = useState<DocumentInfoResponse[]>([]);
+  const [mentionLoading, setMentionLoading] = useState(false);
   const mentionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track which text block and position within it the cursor is at
@@ -176,6 +177,7 @@ export function ChatInput({
   useEffect(() => {
     if (!mentionState.isActive) {
       setMentionResults([]);
+      setMentionLoading(false);
       return;
     }
 
@@ -183,15 +185,18 @@ export function ChatInput({
       clearTimeout(mentionDebounceRef.current);
     }
 
+    setMentionLoading(true);
     const delay = mentionState.query.length === 0 ? 50 : 150;
     mentionDebounceRef.current = setTimeout(async () => {
       try {
-        const results = await tauri.searchDocuments(mentionState.query, 5);
+        const results = await tauri.searchDocuments(mentionState.query, 10);
         setMentionResults(results);
         setMentionState((prev) => ({ ...prev, selectedIndex: 0 }));
       } catch (err) {
         console.error("Failed to search documents:", err);
         setMentionResults([]);
+      } finally {
+        setMentionLoading(false);
       }
     }, delay);
 
@@ -740,42 +745,52 @@ export function ChatInput({
       {/* Input area */}
       <div className="p-4 relative">
         {/* Mention autocomplete dropdown */}
-        {mentionState.isActive && mentionResults.length > 0 && (
+        {mentionState.isActive && (
           <div className="absolute bottom-full left-4 right-4 mb-2 max-w-4xl mx-auto">
             <div className="bg-elevated border border-gray-600 rounded-lg shadow-lg overflow-hidden">
               <div className="text-xs text-muted px-3 py-2 border-b border-gray-700">
                 Documents
               </div>
-              <ul className="max-h-48 overflow-y-auto">
-                {mentionResults.map((doc, index) => (
-                  <li key={doc.id}>
-                    <button
-                      type="button"
-                      onClick={() => insertMention(doc)}
-                      className={`w-full text-left px-3 py-2 flex items-center gap-2 ${
-                        index === mentionState.selectedIndex
-                          ? "bg-teal-600/30 text-teal-100"
-                          : "hover:bg-gray-700/50 text-foreground"
-                      }`}
-                    >
-                      <svg
-                        className="w-4 h-4 text-teal-400 shrink-0"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+              {mentionLoading ? (
+                <div className="px-3 py-4 text-center text-muted">
+                  <span className="inline-block animate-pulse">Searching...</span>
+                </div>
+              ) : mentionResults.length > 0 ? (
+                <ul className="max-h-48 overflow-y-auto">
+                  {mentionResults.map((doc, index) => (
+                    <li key={doc.id}>
+                      <button
+                        type="button"
+                        onClick={() => insertMention(doc)}
+                        className={`w-full text-left px-3 py-2 flex items-center gap-2 ${
+                          index === mentionState.selectedIndex
+                            ? "bg-teal-600/30 text-teal-100"
+                            : "hover:bg-gray-700/50 text-foreground"
+                        }`}
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                        />
-                      </svg>
-                      <span className="truncate">{doc.title}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                        <svg
+                          className="w-4 h-4 text-teal-400 shrink-0"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                          />
+                        </svg>
+                        <span className="truncate">{doc.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="px-3 py-4 text-center text-muted">
+                  No documents found
+                </div>
+              )}
             </div>
           </div>
         )}

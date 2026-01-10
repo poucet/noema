@@ -15,3 +15,22 @@ Key patterns established:
 See `../01/HANDOFF.md` for full context.
 
 ---
+
+## 2026-01-10: Feature 26 - @-mention file search
+
+**Changes:**
+- Added `mentionLoading` state to track search in progress
+- Updated search effect to set loading state and increased limit from 5 to 10 results
+- Added loading state ("Searching...") to mention dropdown
+- Added empty state ("No documents found") when search returns no results
+- Dropdown now always shows when mention is active (not just when results exist)
+
+**Files modified:**
+- `noema-desktop/src/components/ChatInput.tsx`
+
+**Notes:**
+- The search was already querying all documents via `searchDocuments` Tauri command
+- Backend uses SQLite `LIKE` with `%query%` pattern for case-insensitive title search
+- UX improvements: loading indicator, empty state, increased result count
+
+---

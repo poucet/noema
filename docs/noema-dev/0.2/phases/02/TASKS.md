@@ -8,7 +8,7 @@ Phase 2 focuses on core UX improvements that don't depend on specific models. Th
 
 | Status | Pri | # | Feature | Files |
 |--------|-----|---|---------|-------|
-| ⬜ | P0 | 26 | @-mention file search beyond initial list | ChatInput.tsx, tauri.ts |
+| ✅ | P0 | 26 | @-mention file search beyond initial list | ChatInput.tsx, tauri.ts |
 | ⬜ | P1 | 28 | Parallel conversations with status indicators | App.tsx, SidePanel.tsx, engine.rs |
 | ⬜ | P2 | 5 | Copy-paste markdown into ChatInput | ChatInput.tsx |
 | ⬜ | P2 | 18 | Live markdown/Typst rendering with math notation | DocumentPanel.tsx |
