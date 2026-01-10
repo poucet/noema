@@ -43,6 +43,7 @@ config = { path = "../../config" }
 noema-audio = { path = "../../noema-audio", features = ["browser"] }
 noema-ext = { path = "../../noema-ext" }
 noema-mcp-gdocs = { path = "../../noema-mcp-gdocs" }
+thiserror = "2.0.17"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"

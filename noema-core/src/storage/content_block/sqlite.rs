@@ -1,7 +1,16 @@
 //! SQLite implementation of ContentBlockStore
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use async_trait::async_trait;
+use rusqlite::{params, Connection};
+
+use super::{
+    ContentBlock, ContentBlockError, ContentBlockStore, StoredContentBlock, StoreResult,
+};
+use crate::storage::content_block::types::{ContentOrigin, ContentType, OriginKind};
+use crate::storage::helper::{content_hash, unix_timestamp};
+use crate::storage::ids::ContentBlockId;
+use crate::storage::session::SqliteStore;
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -43,6 +52,190 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+#[async_trait]
+impl ContentBlockStore for SqliteStore {
+    async fn store(&self, content: ContentBlock) -> Result<StoreResult, ContentBlockError> {
+        let hash = content_hash(&content.text);
+        let conn = self.conn().lock().unwrap();
+
+        // Check for existing content with same hash (deduplication)
+        if let Some(existing_id) = find_by_hash_internal(&conn, &hash)? {
+            return Ok(StoreResult {
+                id: existing_id,
+                hash,
+                is_new: false,
+            });
+        }
+
+        // Insert new content block
+        let id = ContentBlockId::new();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO content_blocks (id, content_hash, content_type, text, is_private, origin_kind, origin_user_id, origin_model_id, origin_source_id, origin_parent_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                id.as_str(),
+                &hash,
+                content.content_type.as_str(),
+                &content.text,
+                content.is_private as i32,
+                content.origin.kind.as_ref().map(|k| k.as_str()),
+                content.origin.user_id.as_ref().map(|id| id.as_str()),
+                content.origin.model_id.as_deref(),
+                content.origin.source_id.as_deref(),
+                content.origin.parent_id.as_ref().map(|id| id.as_str()),
+                now,
+            ],
+        )
+        .map_err(|e| ContentBlockError::Database(e.to_string()))?;
+
+        Ok(StoreResult {
+            id,
+            hash,
+            is_new: true,
+        })
+    }
+
+    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredContentBlock>, ContentBlockError> {
+        let conn = self.conn().lock().unwrap();
+
+        let result = conn.query_row(
+            "SELECT id, content_hash, content_type, text, is_private, origin_kind, origin_user_id, origin_model_id, origin_source_id, origin_parent_id, created_at
+             FROM content_blocks WHERE id = ?1",
+            params![id.as_str()],
+            |row| {
+                Ok(RowData {
+                    id: row.get(0)?,
+                    content_hash: row.get(1)?,
+                    content_type: row.get(2)?,
+                    text: row.get(3)?,
+                    is_private: row.get(4)?,
+                    origin_kind: row.get(5)?,
+                    origin_user_id: row.get(6)?,
+                    origin_model_id: row.get(7)?,
+                    origin_source_id: row.get(8)?,
+                    origin_parent_id: row.get(9)?,
+                    created_at: row.get(10)?,
+                })
+            },
+        );
+
+        match result {
+            Ok(data) => Ok(Some(data.into_stored_content_block()?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(ContentBlockError::Database(e.to_string())),
+        }
+    }
+
+    async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>, ContentBlockError> {
+        let conn = self.conn().lock().unwrap();
+
+        let result = conn.query_row(
+            "SELECT text FROM content_blocks WHERE id = ?1",
+            params![id.as_str()],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(text) => Ok(Some(text)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(ContentBlockError::Database(e.to_string())),
+        }
+    }
+
+    async fn exists(&self, id: &ContentBlockId) -> Result<bool, ContentBlockError> {
+        let conn = self.conn().lock().unwrap();
+
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM content_blocks WHERE id = ?1",
+                params![id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|e| ContentBlockError::Database(e.to_string()))?;
+
+        Ok(count > 0)
+    }
+
+    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>, ContentBlockError> {
+        let conn = self.conn().lock().unwrap();
+        find_by_hash_internal(&conn, hash)
+    }
+}
+
+/// Internal helper for hash lookup (used by both store and find_by_hash)
+fn find_by_hash_internal(
+    conn: &Connection,
+    hash: &str,
+) -> Result<Option<ContentBlockId>, ContentBlockError> {
+    let result = conn.query_row(
+        "SELECT id FROM content_blocks WHERE content_hash = ?1 LIMIT 1",
+        params![hash],
+        |row| {
+            let id: String = row.get(0)?;
+            Ok(ContentBlockId::from_string(id))
+        },
+    );
+
+    match result {
+        Ok(id) => Ok(Some(id)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ContentBlockError::Database(e.to_string())),
+    }
+}
+
+/// Helper struct for reading row data
+struct RowData {
+    id: String,
+    content_hash: String,
+    content_type: String,
+    text: String,
+    is_private: i32,
+    origin_kind: Option<String>,
+    origin_user_id: Option<String>,
+    origin_model_id: Option<String>,
+    origin_source_id: Option<String>,
+    origin_parent_id: Option<String>,
+    created_at: i64,
+}
+
+impl RowData {
+    fn into_stored_content_block(self) -> Result<StoredContentBlock, ContentBlockError> {
+        let content_type = ContentType::from_str(&self.content_type)
+            .ok_or_else(|| ContentBlockError::InvalidContentType(self.content_type.clone()))?;
+
+        let origin_kind = self
+            .origin_kind
+            .as_deref()
+            .map(|s| {
+                OriginKind::from_str(s)
+                    .ok_or_else(|| ContentBlockError::InvalidOriginKind(s.to_string()))
+            })
+            .transpose()?;
+
+        let origin = ContentOrigin {
+            kind: origin_kind,
+            user_id: self.origin_user_id.map(|s| s.into()),
+            model_id: self.origin_model_id,
+            source_id: self.origin_source_id,
+            parent_id: self.origin_parent_id.map(|s| s.into()),
+        };
+
+        Ok(StoredContentBlock {
+            id: ContentBlockId::from_string(self.id),
+            content_hash: self.content_hash,
+            content: ContentBlock {
+                text: self.text,
+                content_type,
+                is_private: self.is_private != 0,
+                origin,
+            },
+            created_at: self.created_at,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,5 +265,117 @@ mod tests {
             )
             .unwrap();
         assert_eq!(index_count, 4);
+    }
+
+    #[test]
+    fn test_content_hash() {
+        let hash1 = content_hash("Hello, world!");
+        let hash2 = content_hash("Hello, world!");
+        let hash3 = content_hash("Different content");
+
+        assert_eq!(hash1, hash2, "Same content should produce same hash");
+        assert_ne!(hash1, hash3, "Different content should produce different hash");
+        assert_eq!(hash1.len(), 64, "SHA-256 hash should be 64 hex chars");
+    }
+
+    #[tokio::test]
+    async fn test_store_and_get() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let content = ContentBlock::plain("Test content");
+        let result = store.store(content).await.unwrap();
+
+        assert!(result.is_new);
+        assert!(!result.hash.is_empty());
+
+        // Retrieve and verify
+        let stored = store.get(&result.id).await.unwrap().unwrap();
+        assert_eq!(stored.text(), "Test content");
+        assert_eq!(stored.content_type(), &ContentType::Plain);
+        assert!(!stored.is_private());
+    }
+
+    #[tokio::test]
+    async fn test_deduplication() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let content1 = ContentBlock::plain("Duplicate me");
+        let result1 = store.store(content1).await.unwrap();
+        assert!(result1.is_new);
+
+        // Store same content again
+        let content2 = ContentBlock::plain("Duplicate me");
+        let result2 = store.store(content2).await.unwrap();
+
+        assert!(!result2.is_new, "Second store should be deduplicated");
+        assert_eq!(result1.id, result2.id, "IDs should match for deduplicated content");
+        assert_eq!(result1.hash, result2.hash);
+    }
+
+    #[tokio::test]
+    async fn test_get_text() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let content = ContentBlock::markdown("# Header");
+        let result = store.store(content).await.unwrap();
+
+        let text = store.get_text(&result.id).await.unwrap().unwrap();
+        assert_eq!(text, "# Header");
+    }
+
+    #[tokio::test]
+    async fn test_exists() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let content = ContentBlock::plain("Exists test");
+        let result = store.store(content).await.unwrap();
+
+        assert!(store.exists(&result.id).await.unwrap());
+        assert!(!store.exists(&ContentBlockId::new()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_find_by_hash() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let content = ContentBlock::plain("Find by hash");
+        let result = store.store(content).await.unwrap();
+
+        let found = store.find_by_hash(&result.hash).await.unwrap().unwrap();
+        assert_eq!(found, result.id);
+
+        // Non-existent hash
+        let not_found = store.find_by_hash("nonexistent").await.unwrap();
+        assert!(not_found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_content_with_origin() {
+        use crate::storage::ids::UserId;
+
+        let store = SqliteStore::in_memory().unwrap();
+
+        let content = ContentBlock::markdown("User content")
+            .with_origin(ContentOrigin::user(UserId::from_string("user-123")));
+
+        let result = store.store(content).await.unwrap();
+        let stored = store.get(&result.id).await.unwrap().unwrap();
+
+        assert_eq!(stored.origin().kind, Some(OriginKind::User));
+        assert_eq!(
+            stored.origin().user_id.as_ref().map(|id| id.as_str()),
+            Some("user-123")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_private_content() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        let content = ContentBlock::plain("Private data").private();
+        let result = store.store(content).await.unwrap();
+
+        let stored = store.get(&result.id).await.unwrap().unwrap();
+        assert!(stored.is_private());
     }
 }
