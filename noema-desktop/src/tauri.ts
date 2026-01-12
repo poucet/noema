@@ -12,7 +12,15 @@ import type {
   DisplayMessage,
   InputContentBlock,
   ToolConfig,
+  StreamingMessageEvent,
+  MessageCompleteEvent,
+  ErrorEvent,
+  ModelChangedEvent,
+  HistoryClearedEvent,
 } from "./generated";
+
+// Re-export event payload types for consumers
+export type { StreamingMessageEvent, MessageCompleteEvent, ErrorEvent, ModelChangedEvent, HistoryClearedEvent } from "./generated";
 
 // Tauri commands
 export async function initApp(): Promise<string> {
@@ -24,10 +32,11 @@ export async function getMessages(): Promise<DisplayMessage[]> {
 }
 
 export async function sendMessage(
+  conversationId: string,
   content: InputContentBlock[],
   toolConfig?: ToolConfig
 ): Promise<void> {
-  return invoke<void>("send_message", { content, toolConfig });
+  return invoke<void>("send_message", { conversationId, content, toolConfig });
 }
 
 
@@ -50,10 +59,10 @@ export async function listConversations(): Promise<ConversationInfo[]> {
   return invoke<ConversationInfo[]>("list_conversations");
 }
 
-export async function switchConversation(
+export async function loadConversation(
   conversationId: string
 ): Promise<DisplayMessage[]> {
-  return invoke<DisplayMessage[]>("switch_conversation", { conversationId });
+  return invoke<DisplayMessage[]>("load_conversation", { conversationId });
 }
 
 export async function newConversation(): Promise<string> {
@@ -90,10 +99,6 @@ export async function getModelName(): Promise<string> {
   return invoke<string>("get_model_name");
 }
 
-export async function getCurrentConversationId(): Promise<string> {
-  return invoke<string>("get_current_conversation_id");
-}
-
 // Favorite models
 export async function getFavoriteModels(): Promise<string[]> {
   return invoke<string[]>("get_favorite_models");
@@ -121,33 +126,33 @@ export function onUserMessage(
 }
 
 export function onStreamingMessage(
-  callback: (message: DisplayMessage) => void
+  callback: (payload: StreamingMessageEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<DisplayMessage>("streaming_message", (event) =>
+  return listen<StreamingMessageEvent>("streaming_message", (event) =>
     callback(event.payload)
   );
 }
 
 export function onMessageComplete(
-  callback: (messages: DisplayMessage[]) => void
+  callback: (payload: MessageCompleteEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<DisplayMessage[]>("message_complete", (event) =>
+  return listen<MessageCompleteEvent>("message_complete", (event) =>
     callback(event.payload)
   );
 }
 
-export function onError(callback: (error: string) => void): Promise<UnlistenFn> {
-  return listen<string>("error", (event) => callback(event.payload));
+export function onError(callback: (payload: ErrorEvent) => void): Promise<UnlistenFn> {
+  return listen<ErrorEvent>("error", (event) => callback(event.payload));
 }
 
 export function onModelChanged(
-  callback: (name: string) => void
+  callback: (payload: ModelChangedEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<string>("model_changed", (event) => callback(event.payload));
+  return listen<ModelChangedEvent>("model_changed", (event) => callback(event.payload));
 }
 
-export function onHistoryCleared(callback: () => void): Promise<UnlistenFn> {
-  return listen<void>("history_cleared", () => callback());
+export function onHistoryCleared(callback: (payload: HistoryClearedEvent) => void): Promise<UnlistenFn> {
+  return listen<HistoryClearedEvent>("history_cleared", (event) => callback(event.payload));
 }
 
 // Parallel execution events

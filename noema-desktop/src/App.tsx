@@ -153,16 +153,22 @@ function App() {
         const convos = await tauri.listConversations();
         setConversations(convos);
 
-        const convId = await tauri.getCurrentConversationId();
+        // Pick the most recent conversation, or create a new one
+        let convId: string;
+        if (convos.length > 0) {
+          convId = convos[0].id;
+        } else {
+          convId = await tauri.newConversation();
+        }
         setCurrentConversationId(convId);
 
         // Load privacy status for current conversation
         const isPrivate = await tauri.getConversationPrivate(convId);
         setIsConversationPrivate(isPrivate);
 
-        // Load messages (view path is resolved by backend)
-        const msgs = await tauri.getMessages();
-        setMessages(msgs);
+        // Load messages for this conversation
+        const msgs = await tauri.loadConversation(convId);
+        setMessages(Array.isArray(msgs) ? msgs : []);
 
         // Load models in background
         tauri.listModels().then(setModels).catch(console.error);
@@ -211,31 +217,58 @@ function App() {
       setIsLoading(true);
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onStreamingMessage((msg) => {
-      setStreamingMessage(msg);
+    tauri.onStreamingMessage(({ conversationId, message: msg }) => {
+      // Only update if this event is for the current conversation
+      setCurrentConversationId((currentId) => {
+        if (currentId === conversationId) {
+          setStreamingMessage(msg);
+        }
+        return currentId;
+      });
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onMessageComplete((msgs) => {
-      setMessages(msgs);
-      setStreamingMessage(null);
-      setIsLoading(false);
+    tauri.onMessageComplete(({ conversationId, messages: msgs }) => {
+      // Only update if this event is for the current conversation
+      setCurrentConversationId((currentId) => {
+        if (currentId === conversationId) {
+          setMessages(Array.isArray(msgs) ? msgs : []);
+          setStreamingMessage(null);
+          setIsLoading(false);
+        }
+        return currentId;
+      });
       // Refresh conversations
       tauri.listConversations().then(setConversations).catch(console.error);
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onError((err) => {
-      appLog.error("Backend error received", err);
-      setError(err);
-      setIsLoading(false);
-      setStreamingMessage(null);
+    tauri.onError(({ conversationId, error }) => {
+      appLog.error("Backend error received", error);
+      setCurrentConversationId((currentId) => {
+        if (currentId === conversationId) {
+          setError(error);
+          setIsLoading(false);
+          setStreamingMessage(null);
+        }
+        return currentId;
+      });
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onModelChanged((name) => {
-      setCurrentModel(name);
+    tauri.onModelChanged(({ conversationId, model }) => {
+      setCurrentConversationId((currentId) => {
+        if (currentId === conversationId) {
+          setCurrentModel(model);
+        }
+        return currentId;
+      });
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onHistoryCleared(() => {
-      setMessages([]);
+    tauri.onHistoryCleared(({ conversationId }) => {
+      setCurrentConversationId((currentId) => {
+        if (currentId === conversationId) {
+          setMessages([]);
+        }
+        return currentId;
+      });
     }).then((unlisten) => unlisteners.push(unlisten));
 
     // Parallel execution events
@@ -328,7 +361,7 @@ function App() {
         // Clear selection after sending
         setSelectedModelsForComparison([]);
       } else {
-        await tauri.sendMessage(content, toolConfig);
+        await tauri.sendMessage(currentConversationId, content, toolConfig);
       }
     } catch (err) {
       appLog.error("Send message error", String(err));
@@ -352,9 +385,9 @@ function App() {
 
   const handleSelectConversation = async (id: string) => {
     try {
-      const msgs = await tauri.switchConversation(id);
+      const msgs = await tauri.loadConversation(id);
       setCurrentConversationId(id);
-      setMessages(msgs);
+      setMessages(Array.isArray(msgs) ? msgs : []);
       // Load privacy status for this conversation
       const isPrivate = await tauri.getConversationPrivate(id);
       setIsConversationPrivate(isPrivate);
@@ -373,9 +406,9 @@ function App() {
         const otherConversation = conversations.find((c) => c.id !== id);
         if (otherConversation) {
           // Switch to another existing conversation
-          const msgs = await tauri.switchConversation(otherConversation.id);
+          const msgs = await tauri.loadConversation(otherConversation.id);
           setCurrentConversationId(otherConversation.id);
-          setMessages(msgs);
+          setMessages(Array.isArray(msgs) ? msgs : []);
         } else {
           // No other conversations, create a new one
           const newId = await tauri.newConversation();
@@ -475,10 +508,17 @@ function App() {
       setCurrentModel(modelName);
       const convos = await tauri.listConversations();
       setConversations(convos);
-      const convId = await tauri.getCurrentConversationId();
+
+      // Pick the most recent conversation, or create a new one
+      let convId: string;
+      if (convos.length > 0) {
+        convId = convos[0].id;
+      } else {
+        convId = await tauri.newConversation();
+      }
       setCurrentConversationId(convId);
-      const msgs = await tauri.getMessages();
-      setMessages(msgs);
+      const msgs = await tauri.loadConversation(convId);
+      setMessages(Array.isArray(msgs) ? msgs : []);
       tauri.listModels().then(setModels).catch(console.error);
       tauri.getFavoriteModels().then(setFavoriteModels).catch(console.error);
       setIsInitialized(true);

@@ -130,7 +130,7 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
   };
 
   // Determine which content to show
-  const contentToShow = previewContent || message.content;
+  const contentToShow = previewContent || message.content || [];
 
   // Can fork if we have a spanId and fork handler
   const canFork = onFork && message.spanId && !isSystem;
