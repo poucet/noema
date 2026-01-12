@@ -3,24 +3,23 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::storage::types::asset::{Asset, AssetStoreResult, StoredAsset};
 use crate::storage::ids::AssetId;
+use crate::storage::types::asset::{Asset, StoredAsset};
 
 /// Trait for asset storage operations
 ///
-/// Assets are stored with content-addressing (SHA-256 hash as ID).
+/// Assets have a unique ID (UUID) and reference blob content via blob_hash.
 /// The binary data is stored separately in a BlobStore; this trait
 /// manages the metadata.
 #[async_trait]
 pub trait AssetStore: Send + Sync {
-    /// Store asset metadata for a blob
+    /// Create a new asset record
     ///
     /// The caller is responsible for storing the actual binary data in a BlobStore
-    /// and providing the hash as the asset ID. If an asset with the same hash
-    /// already exists, this returns the existing asset (deduplication).
-    async fn store(&self, id: AssetId, asset: Asset) -> Result<AssetStoreResult>;
+    /// and providing the blob_hash in the Asset. Returns the generated AssetId.
+    async fn create_asset(&self, asset: Asset) -> Result<AssetId>;
 
-    /// Get an asset by ID (hash)
+    /// Get an asset by ID
     async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>>;
 
     /// Check if an asset exists

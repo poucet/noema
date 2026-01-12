@@ -64,7 +64,7 @@ pub use traits::{
 // Types
 pub use types::{
     // Asset
-    Asset, AssetStoreResult, StoredAsset,
+    Asset, StoredAsset,
     // Blob
     StoredBlob,
     // ContentBlock

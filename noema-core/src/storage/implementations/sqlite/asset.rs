@@ -3,18 +3,20 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
+use uuid::Uuid;
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{Asset, AssetStoreResult, StoredAsset};
+use crate::storage::types::{Asset, StoredAsset};
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS assets (
             id TEXT PRIMARY KEY,
+            blob_hash TEXT NOT NULL,
             mime_type TEXT NOT NULL,
             original_filename TEXT,
             size_bytes INTEGER NOT NULL,
@@ -23,6 +25,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
             created_at INTEGER NOT NULL
         );
 
+        CREATE INDEX IF NOT EXISTS idx_assets_blob_hash ON assets(blob_hash);
         CREATE INDEX IF NOT EXISTS idx_assets_private ON assets(is_private);
         CREATE INDEX IF NOT EXISTS idx_assets_created ON assets(created_at);
         "#,
@@ -32,28 +35,17 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 
 #[async_trait]
 impl AssetStore for SqliteStore {
-    async fn store(&self, id: AssetId, asset: Asset) -> Result<AssetStoreResult> {
+    async fn create_asset(&self, asset: Asset) -> Result<AssetId> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();
-
-        // Check if already exists
-        let exists: bool = conn
-            .query_row(
-                "SELECT 1 FROM assets WHERE id = ?1",
-                params![id.as_str()],
-                |_| Ok(true),
-            )
-            .unwrap_or(false);
-
-        if exists {
-            return Ok(AssetStoreResult { id, is_new: false });
-        }
+        let id = AssetId::from_string(Uuid::new_v4().to_string());
 
         conn.execute(
-            "INSERT INTO assets (id, mime_type, original_filename, size_bytes, local_path, is_private, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO assets (id, blob_hash, mime_type, original_filename, size_bytes, local_path, is_private, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id.as_str(),
+                asset.blob_hash,
                 asset.mime_type,
                 asset.original_filename,
                 asset.size_bytes,
@@ -63,27 +55,28 @@ impl AssetStore for SqliteStore {
             ],
         )?;
 
-        Ok(AssetStoreResult { id, is_new: true })
+        Ok(id)
     }
 
     async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>> {
         let conn = self.conn().lock().unwrap();
         let asset = conn
             .query_row(
-                "SELECT mime_type, original_filename, size_bytes, local_path, is_private, created_at
+                "SELECT blob_hash, mime_type, original_filename, size_bytes, local_path, is_private, created_at
                  FROM assets WHERE id = ?1",
                 params![id.as_str()],
                 |row| {
                     Ok(StoredAsset {
                         id: id.clone(),
                         asset: Asset {
-                            mime_type: row.get(0)?,
-                            original_filename: row.get(1)?,
-                            size_bytes: row.get(2)?,
-                            local_path: row.get(3)?,
-                            is_private: row.get::<_, i32>(4)? != 0,
+                            blob_hash: row.get(0)?,
+                            mime_type: row.get(1)?,
+                            original_filename: row.get(2)?,
+                            size_bytes: row.get(3)?,
+                            local_path: row.get(4)?,
+                            is_private: row.get::<_, i32>(5)? != 0,
                         },
-                        created_at: row.get(5)?,
+                        created_at: row.get(6)?,
                     })
                 },
             )
@@ -138,21 +131,19 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(index_count, 2);
+        assert_eq!(index_count, 3);
     }
 
     #[tokio::test]
-    async fn test_store_and_get() {
+    async fn test_create_and_get() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let id = AssetId::from_string("abc123hash");
-        let asset = Asset::new("image/png", 1024).with_filename("test.png");
+        let asset = Asset::new("abc123hash", "image/png", 1024).with_filename("test.png");
 
-        let result = store.store(id.clone(), asset).await.unwrap();
-        assert!(result.is_new);
-        assert_eq!(result.id.as_str(), "abc123hash");
+        let id = store.create_asset(asset).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
+        assert_eq!(stored.blob_hash(), "abc123hash");
         assert_eq!(stored.mime_type(), "image/png");
         assert_eq!(stored.size_bytes(), 1024);
         assert_eq!(stored.original_filename(), Some("test.png"));
@@ -160,39 +151,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deduplication() {
+    async fn test_same_blob_different_assets() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let id = AssetId::from_string("duplicate_hash");
-        let asset1 = Asset::new("image/jpeg", 2048);
-        let result1 = store.store(id.clone(), asset1).await.unwrap();
-        assert!(result1.is_new);
+        // Two assets with the same blob hash should get different IDs
+        let asset1 = Asset::new("same_blob_hash", "image/jpeg", 2048);
+        let id1 = store.create_asset(asset1).await.unwrap();
 
-        // Store same hash again
-        let asset2 = Asset::new("image/jpeg", 2048);
-        let result2 = store.store(id.clone(), asset2).await.unwrap();
-        assert!(!result2.is_new);
+        let asset2 = Asset::new("same_blob_hash", "image/jpeg", 2048);
+        let id2 = store.create_asset(asset2).await.unwrap();
+
+        // IDs should be different
+        assert_ne!(id1.as_str(), id2.as_str());
+
+        // Both should exist and have the same blob_hash
+        let stored1 = store.get(&id1).await.unwrap().unwrap();
+        let stored2 = store.get(&id2).await.unwrap().unwrap();
+        assert_eq!(stored1.blob_hash(), stored2.blob_hash());
     }
 
     #[tokio::test]
     async fn test_exists() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let id = AssetId::from_string("exists_test");
-        let asset = Asset::new("audio/mp3", 4096);
-        store.store(id.clone(), asset).await.unwrap();
+        let asset = Asset::new("exists_test_hash", "audio/mp3", 4096);
+        let id = store.create_asset(asset).await.unwrap();
 
         assert!(store.exists(&id).await.unwrap());
-        assert!(!store.exists(&AssetId::from_string("nonexistent")).await.unwrap());
+        assert!(!store.exists(&AssetId::from_string("nonexistent".to_string())).await.unwrap());
     }
 
     #[tokio::test]
     async fn test_delete() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let id = AssetId::from_string("delete_test");
-        let asset = Asset::new("application/pdf", 8192);
-        store.store(id.clone(), asset).await.unwrap();
+        let asset = Asset::new("delete_test_hash", "application/pdf", 8192);
+        let id = store.create_asset(asset).await.unwrap();
 
         assert!(store.exists(&id).await.unwrap());
         assert!(store.delete(&id).await.unwrap());
@@ -206,9 +200,8 @@ mod tests {
     async fn test_private_asset() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let id = AssetId::from_string("private_hash");
-        let asset = Asset::new("image/png", 512).private();
-        store.store(id.clone(), asset).await.unwrap();
+        let asset = Asset::new("private_hash", "image/png", 512).private();
+        let id = store.create_asset(asset).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
         assert!(stored.is_private());
@@ -218,12 +211,11 @@ mod tests {
     async fn test_local_path() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let id = AssetId::from_string("local_path_hash");
-        let asset = Asset::new("image/png", 256)
+        let asset = Asset::new("local_path_hash", "image/png", 256)
             .with_filename("photo.png")
             .with_local_path("/home/user/photos/photo.png");
 
-        store.store(id.clone(), asset).await.unwrap();
+        let id = store.create_asset(asset).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
         assert_eq!(stored.local_path(), Some("/home/user/photos/photo.png"));

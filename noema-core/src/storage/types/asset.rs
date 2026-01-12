@@ -5,6 +5,9 @@ use crate::storage::ids::AssetId;
 /// Asset metadata for storage (input form)
 #[derive(Debug, Clone)]
 pub struct Asset {
+    /// SHA-256 hash of the blob content (references the blob store)
+    pub blob_hash: String,
+
     /// MIME type of the asset (e.g., "image/png", "audio/mp3")
     pub mime_type: String,
 
@@ -23,8 +26,9 @@ pub struct Asset {
 
 impl Asset {
     /// Create a new asset with required fields
-    pub fn new(mime_type: impl Into<String>, size_bytes: i64) -> Self {
+    pub fn new(blob_hash: impl Into<String>, mime_type: impl Into<String>, size_bytes: i64) -> Self {
         Self {
+            blob_hash: blob_hash.into(),
             mime_type: mime_type.into(),
             original_filename: None,
             size_bytes,
@@ -55,7 +59,7 @@ impl Asset {
 /// A stored asset with metadata from the database
 #[derive(Debug, Clone)]
 pub struct StoredAsset {
-    /// Unique identifier (SHA-256 hash of content)
+    /// Unique identifier (UUID)
     pub id: AssetId,
 
     /// The asset metadata
@@ -66,6 +70,11 @@ pub struct StoredAsset {
 }
 
 impl StoredAsset {
+    /// Get the blob hash (for fetching from blob store)
+    pub fn blob_hash(&self) -> &str {
+        &self.asset.blob_hash
+    }
+
     /// Get the MIME type
     pub fn mime_type(&self) -> &str {
         &self.asset.mime_type
@@ -92,12 +101,3 @@ impl StoredAsset {
     }
 }
 
-/// Result of storing an asset
-#[derive(Clone, Debug)]
-pub struct AssetStoreResult {
-    /// The asset ID (SHA-256 hash)
-    pub id: AssetId,
-
-    /// Whether this was a new insertion (false = deduplicated)
-    pub is_new: bool,
-}

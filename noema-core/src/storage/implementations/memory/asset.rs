@@ -4,10 +4,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use uuid::Uuid;
 
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{Asset, AssetStoreResult, StoredAsset};
+use crate::storage::types::{Asset, StoredAsset};
 
 /// In-memory asset store for testing
 #[derive(Debug, Default)]
@@ -30,9 +31,9 @@ impl MemoryAssetStore {
 
 #[async_trait]
 impl AssetStore for MemoryAssetStore {
-    async fn store(&self, id: AssetId, asset: Asset) -> Result<AssetStoreResult> {
+    async fn create_asset(&self, asset: Asset) -> Result<AssetId> {
         let mut assets = self.assets.lock().unwrap();
-        let is_new = !assets.contains_key(id.as_str());
+        let id = AssetId::from_string(Uuid::new_v4().to_string());
 
         let stored = StoredAsset {
             id: id.clone(),
@@ -41,7 +42,7 @@ impl AssetStore for MemoryAssetStore {
         };
         assets.insert(id.as_str().to_string(), stored);
 
-        Ok(AssetStoreResult { id, is_new })
+        Ok(id)
     }
 
     async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>> {
@@ -63,37 +64,34 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_store_and_get() {
+    async fn test_create_and_get() {
         let store = MemoryAssetStore::new();
-        let id = AssetId::from_string("test-asset-123");
-        let asset = Asset::new("image/png", 1024);
+        let asset = Asset::new("test-blob-hash", "image/png", 1024);
 
-        let result = store.store(id.clone(), asset.clone()).await.unwrap();
-        assert!(result.is_new);
-        assert_eq!(result.id.as_str(), id.as_str());
+        let id = store.create_asset(asset.clone()).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
         assert_eq!(stored.asset.mime_type, "image/png");
         assert_eq!(stored.asset.size_bytes, 1024);
+        assert_eq!(stored.asset.blob_hash, "test-blob-hash");
     }
 
     #[tokio::test]
     async fn test_exists() {
         let store = MemoryAssetStore::new();
-        let id = AssetId::from_string("exists-test");
 
-        assert!(!store.exists(&id).await.unwrap());
-
-        store.store(id.clone(), Asset::new("text/plain", 100)).await.unwrap();
+        let id = store.create_asset(Asset::new("hash", "text/plain", 100)).await.unwrap();
         assert!(store.exists(&id).await.unwrap());
+
+        let fake_id = AssetId::from_string("nonexistent".to_string());
+        assert!(!store.exists(&fake_id).await.unwrap());
     }
 
     #[tokio::test]
     async fn test_delete() {
         let store = MemoryAssetStore::new();
-        let id = AssetId::from_string("delete-test");
 
-        store.store(id.clone(), Asset::new("text/plain", 50)).await.unwrap();
+        let id = store.create_asset(Asset::new("hash", "text/plain", 50)).await.unwrap();
         assert!(store.exists(&id).await.unwrap());
 
         assert!(store.delete(&id).await.unwrap());
@@ -102,18 +100,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_existing() {
+    async fn test_same_blob_different_ids() {
         let store = MemoryAssetStore::new();
-        let id = AssetId::from_string("update-test");
 
-        let first = store.store(id.clone(), Asset::new("image/png", 100)).await.unwrap();
-        assert!(first.is_new);
+        let id1 = store.create_asset(Asset::new("same_hash", "image/png", 100)).await.unwrap();
+        let id2 = store.create_asset(Asset::new("same_hash", "image/png", 100)).await.unwrap();
 
-        let second = store.store(id.clone(), Asset::new("image/jpeg", 200)).await.unwrap();
-        assert!(!second.is_new);
+        // Different IDs for same blob
+        assert_ne!(id1.as_str(), id2.as_str());
 
-        let stored = store.get(&id).await.unwrap().unwrap();
-        assert_eq!(stored.asset.mime_type, "image/jpeg");
-        assert_eq!(stored.asset.size_bytes, 200);
+        // Both exist
+        assert!(store.exists(&id1).await.unwrap());
+        assert!(store.exists(&id2).await.unwrap());
     }
 }
