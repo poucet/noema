@@ -13,7 +13,7 @@ use crate::state::AppState;
 use crate::types::{ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ToolConfig};
 
 
-/// Get current messages in the conversation
+/// Get current messages in the conversation (committed + pending)
 #[tauri::command]
 pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<DisplayMessage>, String> {
     let engine_guard = state.engine.lock().await;
@@ -22,12 +22,19 @@ pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<Display
     let session_arc = engine.get_session();
     let session = session_arc.lock().await;
 
-    // messages_for_display returns resolved messages
-    Ok(session
+    // Start with committed messages
+    let mut msgs: Vec<DisplayMessage> = session
         .messages_for_display()
         .iter()
         .map(DisplayMessage::from)
-        .collect())
+        .collect();
+
+    // Add pending messages (not yet committed to storage)
+    for pending in session.pending_messages() {
+        msgs.push(DisplayMessage::from(pending));
+    }
+
+    Ok(msgs)
 }
 
 /// Send a message with structured content blocks.
@@ -144,17 +151,26 @@ pub fn start_engine_event_loop(app: AppHandle) {
                     let _ = app.emit("streaming_message", &display_msg);
                 }
                 Some(EngineEvent::MessageComplete) => {
-                    // Get all messages after completion
+                    // Get all messages after completion (committed + pending)
                     let messages = {
                         let engine_guard = state.engine.lock().await;
                         if let Some(engine) = engine_guard.as_ref() {
                             let session_arc = engine.get_session();
                             let session = session_arc.lock().await;
-                            session
+
+                            // Start with committed messages
+                            let mut msgs: Vec<DisplayMessage> = session
                                 .messages_for_display()
                                 .iter()
                                 .map(DisplayMessage::from)
-                                .collect::<Vec<_>>()
+                                .collect();
+
+                            // Add pending messages (not yet committed to storage)
+                            for pending in session.pending_messages() {
+                                msgs.push(DisplayMessage::from(pending));
+                            }
+
+                            msgs
                         } else {
                             vec![]
                         }
@@ -336,7 +352,7 @@ pub async fn switch_conversation(
     let conv_id = ConversationId::from_string(conversation_id.clone());
 
     // Open session for the conversation
-    let session = Session::open(Arc::clone(&store), conv_id, store.as_ref())
+    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conv_id)
         .await
         .map_err(|e| format!("Failed to open conversation: {}", e))?;
 
@@ -385,7 +401,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
     // Open session for the new conversation
-    let session = Session::open(Arc::clone(&store), conv_id.clone(), store.as_ref())
+    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conv_id.clone())
         .await
         .map_err(|e| format!("Failed to open new conversation: {}", e))?;
 

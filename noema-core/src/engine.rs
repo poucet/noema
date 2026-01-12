@@ -8,7 +8,7 @@
 
 use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry};
 use crate::storage::session::Session;
-use crate::storage::traits::TurnStore;
+use crate::storage::traits::{ContentBlockStore, TurnStore};
 use crate::storage::DocumentResolver;
 use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
@@ -77,9 +77,10 @@ pub struct ParallelAlternateInfo {
 
 /// Chat engine that manages conversation sessions
 ///
-/// Uses Session<S> which implements ConversationContext directly.
-pub struct ChatEngine<S: TurnStore + Send + Sync + 'static> {
-    session: Arc<Mutex<Session<S>>>,
+/// Uses Session<T, C> which implements ConversationContext directly.
+/// T = TurnStore, C = ContentBlockStore (may be the same type, e.g. SqliteStore)
+pub struct ChatEngine<T: TurnStore + Send + Sync + 'static, C: ContentBlockStore + Send + Sync + 'static> {
+    session: Arc<Mutex<Session<T, C>>>,
     mcp_registry: Arc<Mutex<McpRegistry>>,
     cmd_tx: mpsc::UnboundedSender<EngineCommand>,
     event_rx: mpsc::UnboundedReceiver<EngineEvent>,
@@ -90,9 +91,9 @@ pub struct ChatEngine<S: TurnStore + Send + Sync + 'static> {
     document_resolver: Arc<dyn DocumentResolver>,
 }
 
-impl<S: TurnStore + Send + Sync + 'static> ChatEngine<S> {
+impl<T: TurnStore + Send + Sync + 'static, C: ContentBlockStore + Send + Sync + 'static> ChatEngine<T, C> {
     pub fn new(
-        session: Session<S>,
+        session: Session<T, C>,
         model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: McpRegistry,
         document_resolver: Arc<dyn DocumentResolver>,
@@ -131,7 +132,7 @@ impl<S: TurnStore + Send + Sync + 'static> ChatEngine<S> {
     }
 
     async fn processor_loop(
-        session: Arc<Mutex<Session<S>>>,
+        session: Arc<Mutex<Session<T, C>>>,
         mut model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         document_resolver: Arc<dyn DocumentResolver>,
@@ -162,16 +163,26 @@ impl<S: TurnStore + Send + Sync + 'static> ChatEngine<S> {
 
                     match execute_result {
                         Ok(_) => {
-                            // Send pending messages to UI
-                            let sess = session.lock().await;
-                            for msg in sess.pending() {
-                                let _ = event_tx.send(EngineEvent::Message(msg.clone()));
+                            // Send pending messages to UI before committing
+                            {
+                                let sess = session.lock().await;
+                                for msg in sess.pending() {
+                                    let _ = event_tx.send(EngineEvent::Message(msg.clone()));
+                                }
                             }
-                            let _ = event_tx.send(EngineEvent::MessageComplete);
 
-                            // Note: Actual commit to storage requires ContentStorer
-                            // which the engine doesn't have. The caller should handle
-                            // committing after receiving MessageComplete.
+                            // Commit pending messages to storage
+                            let model_id = model.id();
+                            let commit_result = {
+                                let mut sess = session.lock().await;
+                                sess.commit(Some(model_id)).await
+                            };
+
+                            if let Err(e) = commit_result {
+                                let _ = event_tx.send(EngineEvent::Error(format!("Failed to commit: {}", e)));
+                            }
+
+                            let _ = event_tx.send(EngineEvent::MessageComplete);
                         }
                         Err(e) => {
                             let _ = event_tx.send(EngineEvent::Error(e.to_string()));
@@ -217,7 +228,7 @@ impl<S: TurnStore + Send + Sync + 'static> ChatEngine<S> {
         self.event_rx.recv().await
     }
 
-    pub fn get_session(&self) -> Arc<Mutex<Session<S>>> {
+    pub fn get_session(&self) -> Arc<Mutex<Session<T, C>>> {
         Arc::clone(&self.session)
     }
 

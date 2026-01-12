@@ -31,6 +31,10 @@ impl MistralChatModel {
 
 #[async_trait]
 impl ChatModel for MistralChatModel {
+    fn id(&self) -> &str {
+        &self.model_name
+    }
+
     fn name(&self) -> &str {
         &self.model_name
     }

@@ -249,7 +249,7 @@ async fn init_user(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-async fn init_session(state: &AppState) -> Result<(Session<SqliteStore>, Arc<SqliteStore>), String> {
+async fn init_session(state: &AppState) -> Result<(Session<SqliteStore, SqliteStore>, Arc<SqliteStore>), String> {
     let store = {
         let store_guard = state.store.lock().await;
         store_guard
@@ -276,8 +276,8 @@ async fn init_session(state: &AppState) -> Result<(Session<SqliteStore>, Arc<Sql
     };
 
     // Open session for the conversation
-    // Session::open needs a ContentBlockStore for resolving text - SqliteStore implements it
-    let session = Session::open(Arc::clone(&store), conversation_id.clone(), store.as_ref())
+    // Session::open takes TurnStore and ContentBlockStore - SqliteStore implements both
+    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conversation_id.clone())
         .await
         .map_err(|e| format!("Failed to open session: {}", e))?;
 
@@ -292,7 +292,7 @@ fn init_mcp() -> Result<McpRegistry, String> {
 
 async fn init_engine(
     state: &AppState,
-    session: Session<SqliteStore>,
+    session: Session<SqliteStore, SqliteStore>,
     store: Arc<SqliteStore>,
     mcp_registry: McpRegistry,
 ) -> Result<String, String> {

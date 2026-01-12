@@ -108,6 +108,10 @@ impl ModelDefinition {
 
 #[async_trait]
 pub trait ChatModel {
+    /// Model ID (e.g., "claude-sonnet-4-20250514")
+    fn id(&self) -> &str;
+
+    /// Display name for the model
     fn name(&self) -> &str;
 
     async fn chat(&self, messages: &ChatRequest) -> anyhow::Result<ChatMessage>;
@@ -118,6 +122,10 @@ pub trait ChatModel {
 // Blanket implementation for Arc<dyn ChatModel> to make it easier to work with
 #[async_trait]
 impl ChatModel for Arc<dyn ChatModel + Send + Sync> {
+    fn id(&self) -> &str {
+        (**self).id()
+    }
+
     fn name(&self) -> &str {
         (**self).name()
     }

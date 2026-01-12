@@ -27,6 +27,10 @@ impl ClaudeChatModel {
 
 #[async_trait]
 impl ChatModel for ClaudeChatModel {
+    fn id(&self) -> &str {
+        &self.model_name
+    }
+
     fn name(&self) -> &str {
         &self.model_name
     }

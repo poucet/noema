@@ -5,7 +5,7 @@
 //! - **Implementations**: `SimpleAgent`, `ToolAgent`, `McpAgent`
 //! - **MCP Support**: `McpRegistry`, `McpToolRegistry` for Model Context Protocol
 //! - **Engine**: `ChatEngine` for managing chat sessions
-//! - **Storage**: `Session<S: TurnStore>` for DB-agnostic session management
+//! - **Storage**: `Session<T: TurnStore, C: ContentBlockStore>` for DB-agnostic session management
 //!
 //! # Example
 //!

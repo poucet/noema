@@ -22,7 +22,7 @@
 //!
 //! ## Session API
 //!
-//! - `Session<S: TurnStore>` - DB-agnostic session with lazy content resolution
+//! - `Session<T: TurnStore, C: ContentBlockStore>` - DB-agnostic session with lazy content resolution
 //! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
 //! - `AssetResolver` - Resolution trait for assets and documents
 
@@ -79,7 +79,7 @@ pub use types::{
 };
 
 // Session
-pub use session::{AssetResolver, ContentStorer, ResolvedContent, ResolvedMessage, Session};
+pub use session::{AssetResolver, ResolvedContent, ResolvedMessage, Session};
 
 // Implementations (feature-gated)
 #[cfg(feature = "sqlite")]

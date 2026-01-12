@@ -2,7 +2,7 @@
 //!
 //! This module provides:
 //!
-//! - `Session<S: TurnStore>` - DB-agnostic session with lazy resolution
+//! - `Session<T: TurnStore, C: ContentBlockStore>` - DB-agnostic session with lazy resolution
 //! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
 //! - `AssetResolver` - Resolution trait for assets and documents
 //!
@@ -17,5 +17,5 @@ mod types;
 
 // Re-export session types
 pub use resolver::AssetResolver;
-pub use session::{ContentStorer, Session};
+pub use session::Session;
 pub use types::{ResolvedContent, ResolvedMessage};

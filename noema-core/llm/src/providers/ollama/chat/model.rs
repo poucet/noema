@@ -23,6 +23,10 @@ impl OllamaChatModel {
 
 #[async_trait]
 impl ChatModel for OllamaChatModel {
+    fn id(&self) -> &str {
+        &self.model_name
+    }
+
     fn name(&self) -> &str {
         &self.model_name
     }

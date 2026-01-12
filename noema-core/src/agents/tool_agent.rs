@@ -153,6 +153,10 @@ mod tests {
 
     #[async_trait]
     impl ChatModel for MockToolModel {
+        fn id(&self) -> &str {
+            "mock-tool"
+        }
+
         fn name(&self) -> &str {
             "mock-tool"
         }

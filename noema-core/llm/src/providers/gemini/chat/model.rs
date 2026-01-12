@@ -23,6 +23,10 @@ impl GeminiChatModel {
 
 #[async_trait]
 impl ChatModel for GeminiChatModel {
+    fn id(&self) -> &str {
+        &self.model_name
+    }
+
     fn name(&self) -> &str {
         &self.model_name
     }
