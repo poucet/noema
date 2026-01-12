@@ -1,8 +1,7 @@
 //! TurnStore trait for Turn/Span/Message storage operations
 //!
-//! This trait defines the operations for the new conversation structure
-//! (Phase 3 Unified Content Model). It coexists with the legacy
-//! `ConversationStore` trait during migration.
+//! This trait defines the operations for the Turn/Span/Message/View
+//! conversation structure (Phase 3 Unified Content Model).
 
 use anyhow::Result;
 use async_trait::async_trait;

@@ -1,119 +1,18 @@
 //! Conversation structure types
 //!
-//! This module defines types for both the legacy conversation model
-//! and the new Turn/Span/Message hierarchy (Unified Content Model).
+//! This module defines types for the Turn/Span/Message hierarchy:
 //!
-//! ## Legacy Types (used during migration)
-//! - `SpanType` - User or assistant span type
-//! - `ConversationInfo` - Conversation metadata for listing
-//! - `ThreadInfo` - Thread metadata
-//! - `SpanInfo` (legacy) - Span metadata with selection state
-//! - `SpanSetInfo` - SpanSet metadata
-//! - `SpanSetWithContent` - SpanSet with messages
-//!
-//! ## New Types (Turn/Span/Message hierarchy)
 //! - `TurnInfo` - A position in the conversation sequence
-//! - `NewSpanInfo` - A span of messages at a turn
-//! - `MessageInfo` - Individual content within a span
-//! - `ViewInfo` - A path through spans
-
-use std::str::FromStr;
+//! - `SpanInfo` - A span of messages at a turn (one alternative)
+//! - `MessageInfo` - Individual message within a span
+//! - `ViewInfo` - A path through spans (main view or fork)
 
 use serde::{Deserialize, Serialize};
 
-use crate::storage::content::StoredMessage;
-use crate::storage::ids::{ContentBlockId, ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId};
 
 // ============================================================================
-// Legacy Types (for migration compatibility)
-// ============================================================================
-
-/// Span type (user input or assistant response)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LegacySpanType {
-    User,
-    Assistant,
-}
-
-impl ToString for LegacySpanType {
-    fn to_string(&self) -> String {
-        match self {
-            LegacySpanType::User => "user".to_string(),
-            LegacySpanType::Assistant => "assistant".to_string(),
-        }
-    }
-}
-
-impl FromStr for LegacySpanType {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "user" => Ok(LegacySpanType::User),
-            "assistant" => Ok(LegacySpanType::Assistant),
-            _ => Err(format!("{s} is not a valid LegacySpanType")),
-        }
-    }
-}
-
-/// Information about a conversation for listing/display
-#[derive(Debug, Clone)]
-pub struct LegacyConversationInfo {
-    pub id: String,
-    pub name: Option<String>,
-    pub message_count: usize,
-    /// Whether this conversation contains private/sensitive content
-    /// When true, warns before using cloud models
-    pub is_private: bool,
-    /// Unix timestamp when created
-    pub created_at: i64,
-    /// Unix timestamp when last updated
-    pub updated_at: i64,
-}
-
-/// Information about a thread (for listing threads/branches)
-#[derive(Debug, Clone)]
-pub struct LegacyThreadInfo {
-    pub id: String,
-    pub conversation_id: String,
-    pub parent_span_id: Option<String>,
-    pub name: Option<String>,
-    pub status: String,
-    pub created_at: i64,
-}
-
-/// Information about a span (one model's response within a SpanSet)
-#[derive(Debug, Clone)]
-pub struct LegacySpanInfo {
-    pub id: String,
-    pub model_id: Option<String>,
-    pub message_count: usize,
-    pub is_selected: bool,
-    pub created_at: i64,
-}
-
-/// Information about a SpanSet (position in conversation)
-#[derive(Debug, Clone)]
-pub struct LegacySpanSetInfo {
-    pub id: String,
-    pub thread_id: String,
-    pub sequence_number: i64,
-    pub span_type: LegacySpanType,
-    pub selected_span_id: Option<String>,
-    pub created_at: i64,
-}
-
-/// A SpanSet with its selected span's messages
-#[derive(Debug, Clone)]
-pub struct LegacySpanSetWithContent {
-    pub id: String,
-    pub span_type: LegacySpanType,
-    pub messages: Vec<StoredMessage>,
-    pub alternates: Vec<LegacySpanInfo>,
-}
-
-// ============================================================================
-// New Types: Span Role
+// Span Role
 // ============================================================================
 
 /// Role identifying who owns a span (user or assistant)
@@ -217,7 +116,6 @@ impl From<llm::api::Role> for MessageRole {
             llm::api::Role::User => MessageRole::User,
             llm::api::Role::Assistant => MessageRole::Assistant,
             llm::api::Role::System => MessageRole::System,
-            _ => MessageRole::Tool,
         }
     }
 }
@@ -304,13 +202,10 @@ pub struct MessageWithContent {
     pub content: Vec<MessageContentInfo>,
 }
 
-// Note: ContentType enum removed - StoredContent enum discriminant is used directly
-// for content_type column values ("text", "asset_ref", "document_ref", "tool_call", "tool_result")
-
 /// A single content item within a message
 ///
 /// Maps directly to a row in the `message_content` table.
-/// Uses `StoredContent` directly - no separate `MessageContentData` needed.
+/// Uses `StoredContent` directly - refs-only design.
 #[derive(Clone, Debug)]
 pub struct MessageContentInfo {
     /// Unique identifier
@@ -384,6 +279,27 @@ pub struct SpanWithMessages {
     pub messages: Vec<MessageWithContent>,
 }
 
+// ============================================================================
+// Conversation Info (for listing)
+// ============================================================================
+
+/// Information about a conversation for listing/display
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConversationInfo {
+    /// Unique identifier
+    pub id: ConversationId,
+    /// Human-readable name/title
+    pub name: Option<String>,
+    /// Number of turns in the conversation
+    pub turn_count: usize,
+    /// Whether this conversation contains private/sensitive content
+    pub is_private: bool,
+    /// Unix timestamp when created
+    pub created_at: i64,
+    /// Unix timestamp when last updated
+    pub updated_at: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +326,4 @@ mod tests {
             assert_eq!(parsed, role);
         }
     }
-
 }
