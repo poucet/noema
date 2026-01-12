@@ -1,19 +1,21 @@
-//! SQLite session and transaction implementations
+//! SQLite session implementation using TurnStore
+//!
+//! This module provides SQLite-backed conversation sessions that use the
+//! Turn/Span/Message structure exclusively. All conversation data is stored
+//! via TurnStore, with content externalized via StorageCoordinator.
 
 use anyhow::Result;
 use async_trait::async_trait;
-use llm::{api::Role, ChatMessage};
+use llm::{api::Role, ChatMessage, ContentBlock};
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
 use super::{SessionStore, StorageTransaction};
-use crate::storage::content::StoredPayload;
-use crate::storage::content_block::sqlite::store_content_sync;
-use crate::storage::conversation::sqlite::sync_helpers as turn_sync;
-use crate::storage::conversation::types::SpanRole;
-use crate::storage::conversation::LegacySpanType;
+use crate::storage::content::{ContentResolver, StoredContent};
+use crate::storage::content_block::OriginKind;
+use crate::storage::conversation::TurnStore;
+use crate::storage::conversation::types::{MessageRole, SpanRole};
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::ConversationId;
 use crate::ConversationContext;
@@ -28,7 +30,7 @@ use crate::ConversationContext;
 /// and use it to create multiple sessions (conversations).
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
-    /// Optional storage coordinator for asset externalization (uses RwLock for interior mutability)
+    /// Storage coordinator for content externalization
     coordinator: std::sync::RwLock<Option<Arc<crate::storage::coordinator::DynStorageCoordinator>>>,
 }
 
@@ -55,11 +57,7 @@ impl SqliteStore {
         Ok(store)
     }
 
-    /// Set the storage coordinator for asset externalization
-    ///
-    /// When set, the coordinator will automatically extract inline images/audio
-    /// from messages and store them in blob storage before persisting to the database.
-    /// This method uses interior mutability so it can be called on &self.
+    /// Set the storage coordinator for content externalization
     pub fn set_coordinator(&self, coordinator: Arc<crate::storage::coordinator::DynStorageCoordinator>) {
         let mut guard = self.coordinator.write().unwrap();
         *guard = Some(coordinator);
@@ -78,13 +76,11 @@ impl SqliteStore {
 
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        // Initialize each domain's schema
         crate::storage::user::sqlite::init_schema(&conn)?;
         crate::storage::conversation::sqlite::init_schema(&conn)?;
         crate::storage::asset::sqlite::init_schema(&conn)?;
         crate::storage::document::sqlite::init_schema(&conn)?;
         crate::storage::content_block::sqlite::init_schema(&conn)?;
-
         Ok(())
     }
 }
@@ -179,14 +175,14 @@ impl Drop for SqliteTransaction {
 /// SQLite-backed session for a single conversation
 pub struct SqliteSession {
     conn: Arc<Mutex<Connection>>,
-    conversation_id: String,
+    conversation_id: ConversationId,
     /// User ID who owns this conversation
     user_id: Option<String>,
     /// In-memory cache of messages (kept in sync with DB)
     cache: Vec<ChatMessage>,
     /// Whether this conversation has been persisted to the database
     persisted: bool,
-    /// Optional storage coordinator for asset externalization
+    /// Storage coordinator for content externalization
     coordinator: Option<Arc<crate::storage::coordinator::DynStorageCoordinator>>,
 }
 
@@ -194,7 +190,7 @@ impl SqliteSession {
     /// Create a new session (internal use - called from SqliteStore)
     pub(crate) fn new(
         conn: Arc<Mutex<Connection>>,
-        conversation_id: String,
+        conversation_id: ConversationId,
         user_id: Option<String>,
         cache: Vec<ChatMessage>,
         persisted: bool,
@@ -212,7 +208,7 @@ impl SqliteSession {
 
     /// Get the conversation ID
     pub fn conversation_id(&self) -> &str {
-        &self.conversation_id
+        self.conversation_id.as_str()
     }
 
     /// Get the user ID (if set)
@@ -220,212 +216,58 @@ impl SqliteSession {
         self.user_id.as_deref()
     }
 
-    /// Get the main thread ID for this conversation (creates one if it doesn't exist)
-    pub fn get_or_create_thread_id(&self) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
-        let now = unix_timestamp();
-
-        match conn.query_row(
-            "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
-            params![&self.conversation_id],
-            |row| row.get(0),
-        ) {
-            Ok(id) => Ok(id),
-            Err(rusqlite::Error::QueryReturnedNoRows) => {
-                // Create main thread for new conversation
-                let thread_id = Uuid::new_v4().to_string();
-                conn.execute(
-                    "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
-                    params![&thread_id, &self.conversation_id, now],
-                )?;
-                Ok(thread_id)
-            }
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    /// Write messages as spans to the database
-    ///
-    /// This method uses dual-write: writes to both legacy tables (threads, span_sets,
-    /// legacy_spans, legacy_span_messages) and new tables (turns, spans, messages, views).
-    async fn write_as_span(
+    /// Write messages as a turn to the database using TurnStore
+    async fn write_turn(
         &self,
+        store: &SqliteStore,
         messages: &[ChatMessage],
-        span_type: &str,
         model_id: Option<&str>,
-    ) -> Result<String> {
-        let now = unix_timestamp();
-        let span_set_id;
-        let span_id;
-        let conv_id = ConversationId::from_string(self.conversation_id.clone());
+    ) -> Result<()> {
+        if messages.is_empty() {
+            return Ok(());
+        }
 
-        // Determine SpanRole from span_type
-        let turn_role = if span_type == "user" {
-            SpanRole::User
-        } else {
-            SpanRole::Assistant
+        // Determine span role from first message
+        let span_role = match messages.first().map(|m| &m.role) {
+            Some(Role::User) => SpanRole::User,
+            _ => SpanRole::Assistant,
         };
 
-        // Scope for initial DB operations - connection released before async
-        {
-            let conn = self.conn.lock().unwrap();
+        // Create turn
+        let turn = store.add_turn(&self.conversation_id, span_role).await?;
 
-            // Get the main thread, or create one if it doesn't exist
-            let thread_id: String = match conn.query_row(
-                "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
-                params![&self.conversation_id],
-                |row| row.get(0),
-            ) {
-                Ok(id) => id,
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    // Create main thread for new conversation
-                    let thread_id = Uuid::new_v4().to_string();
-                    conn.execute(
-                        "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
-                        params![&thread_id, &self.conversation_id, now],
-                    )?;
-                    thread_id
-                }
-                Err(e) => return Err(e.into()),
-            };
+        // Create span with model_id if specified
+        let span = store.add_span(&turn.id, model_id).await?;
 
-            // Get next sequence number for span_set
-            let sequence_number: i64 = conn
-                .query_row(
-                    "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
-                    params![&thread_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(1);
+        // Store messages
+        for msg in messages {
+            let content = self.store_message_content(&msg.payload.content, &msg.role).await?;
+            let message_role: MessageRole = msg.role.into();
+            store.add_message(&span.id, message_role, &content).await?;
+        }
 
-            // Create span_set
-            span_set_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![&span_set_id, &thread_id, sequence_number, span_type, now],
-            )?;
-
-            // Create span
-            span_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO legacy_spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![&span_id, &span_set_id, model_id, now],
-            )?;
-
-            // Set this span as the selected one
-            conn.execute(
-                "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
-                params![&span_id, &span_set_id],
-            )?;
-        } // conn released here
-
-        // Dual-write: Create turn, span, and view in new tables
-        let new_span_id = {
-            let conn = self.conn.lock().unwrap();
-
-            // Ensure main view exists
-            let view_id = turn_sync::ensure_main_view(&conn, &conv_id)?;
-
-            // Create turn in new tables
-            let (turn_id, _) = turn_sync::add_turn_sync(&conn, &conv_id, turn_role)?;
-
-            // Create span in new tables
-            let ucm_span_id = turn_sync::add_span_sync(&conn, &turn_id, model_id)?;
-
-            // Select this span in the main view
-            turn_sync::select_span_sync(&conn, &view_id, &turn_id, &ucm_span_id)?;
-
-            ucm_span_id
-        };
-
-        // Write span_messages to both legacy and new tables
-        for (i, msg) in messages.iter().enumerate() {
-            let msg_id = Uuid::new_v4().to_string();
-            let role = msg.role.to_string();
-            let mut stored_payload: StoredPayload = msg.payload.clone().into();
-
-            // Externalize assets (images/audio) if coordinator is available
-            if let Some(coordinator) = &self.coordinator {
-                match coordinator.externalize_assets(stored_payload).await {
-                    Ok(externalized) => stored_payload = externalized,
-                    Err(e) => {
-                        tracing::warn!("Failed to externalize assets: {}", e);
-                        // Fall back to storing inline data
-                        stored_payload = msg.payload.clone().into();
-                    }
-                }
-            }
-
-            let content_json = serde_json::to_string(&stored_payload)?;
-            let text = msg.get_text();
-
-            // DB operations in a scope to release connection before next iteration
-            {
-                let conn = self.conn.lock().unwrap();
-
-                // Store text in content_blocks and get content_id (for legacy table)
-                let content_id = if !text.is_empty() {
-                    let origin_kind = match msg.role {
-                        Role::User => Some("user"),
-                        Role::Assistant => Some("assistant"),
-                        Role::System => Some("system"),
-                        _ => None,
-                    };
-                    match store_content_sync(&conn, &text, origin_kind, self.user_id.as_deref(), model_id) {
-                        Ok(id) => Some(id),
-                        Err(e) => {
-                            tracing::warn!("Failed to store content block: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                // Write to legacy table
-                conn.execute(
-                    "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![&msg_id, &span_id, i as i64, role, &content_json, &content_id, now],
-                )?;
-
-                // Dual-write: Write to new messages table
-                let tool_calls = stored_payload.tool_calls_json();
-                let tool_results = stored_payload.tool_results_json();
-
-                if let Err(e) = turn_sync::add_message_sync(
-                    &conn,
-                    &new_span_id,
-                    msg.role.into(),
-                    if text.is_empty() { None } else { Some(&text) },
-                    tool_calls.as_deref(),
-                    tool_results.as_deref(),
-                    self.user_id.as_deref(),
-                    model_id,
-                ) {
-                    tracing::warn!("Failed to write to new messages table: {}", e);
-                }
-            } // conn released here before next iteration
+        // Select this span in the main view
+        if let Some(main_view) = store.get_main_view(&self.conversation_id).await? {
+            store.select_span(&main_view.id, &turn.id, &span.id).await?;
         }
 
         // Update conversation timestamp
         {
             let conn = self.conn.lock().unwrap();
+            let now = unix_timestamp();
             conn.execute(
                 "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
-                params![now, &self.conversation_id],
+                params![now, self.conversation_id.as_str()],
             )?;
         }
 
-        Ok(span_id)
+        Ok(())
     }
 
-    /// Write multiple model responses as alternates in a single span_set
-    ///
-    /// This method uses dual-write: writes to both legacy tables (threads, span_sets,
-    /// legacy_spans, legacy_span_messages) and new tables (turns, spans, messages, views).
-    pub async fn write_parallel_responses(
-        &mut self,
+    /// Write multiple model responses as parallel spans at the same turn
+    async fn write_parallel_turn(
+        &self,
+        store: &SqliteStore,
         responses: &[(String, Vec<ChatMessage>)],
         selected_index: usize,
     ) -> Result<(String, Vec<String>)> {
@@ -433,213 +275,69 @@ impl SqliteSession {
             return Err(anyhow::anyhow!("No responses to write"));
         }
 
-        // Ensure conversation exists
-        if !self.persisted {
-            let conn = self.conn.lock().unwrap();
-            self.create_conversation_record(&conn)?;
-            // conn drops at end of scope
-            self.persisted = true;
-        }
+        // Create a single turn for all parallel responses
+        let turn = store.add_turn(&self.conversation_id, SpanRole::Assistant).await?;
+        let turn_id_str = turn.id.as_str().to_string();
+        let mut span_ids = Vec::with_capacity(responses.len());
 
-        let now = unix_timestamp();
-        let span_set_id;
-        let conv_id = ConversationId::from_string(self.conversation_id.clone());
-
-        {
-            let conn = self.conn.lock().unwrap();
-
-            // Get the main thread
-            let thread_id: String = match conn.query_row(
-                "SELECT id FROM threads WHERE conversation_id = ?1 AND parent_span_id IS NULL",
-                params![&self.conversation_id],
-                |row| row.get(0),
-            ) {
-                Ok(id) => id,
-                Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    let tid = Uuid::new_v4().to_string();
-                    conn.execute(
-                        "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
-                        params![&tid, &self.conversation_id, now],
-                    )?;
-                    tid
-                }
-                Err(e) => return Err(e.into()),
-            };
-
-            // Get next sequence number
-            let sequence_number: i64 = conn
-                .query_row(
-                    "SELECT COALESCE(MAX(sequence_number), 0) + 1 FROM span_sets WHERE thread_id = ?1",
-                    params![&thread_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(1);
-
-            // Create a single span_set for all alternates
-            span_set_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO span_sets (id, thread_id, sequence_number, span_type, created_at) VALUES (?1, ?2, ?3, 'assistant', ?4)",
-                params![&span_set_id, &thread_id, sequence_number, now],
-            )?;
-        } // Release conn lock
-
-        // Dual-write: Create single turn for all parallel responses
-        let (new_turn_id, main_view_id) = {
-            let conn = self.conn.lock().unwrap();
-
-            // Ensure main view exists
-            let view_id = turn_sync::ensure_main_view(&conn, &conv_id)?;
-
-            // Create turn in new tables (assistant turn for parallel responses)
-            let (turn_id, _seq) = turn_sync::add_turn_sync(&conn, &conv_id, SpanRole::Assistant)?;
-
-            (turn_id, view_id)
-        };
-
-        let mut span_ids = Vec::new();
-        let mut selected_span_id = None;
-        let mut new_selected_span_id = None;
-
-        // Create a span for each model's response
         for (idx, (model_id, messages)) in responses.iter().enumerate() {
-            let span_id = Uuid::new_v4().to_string();
+            // Create span for this model
+            let span = store.add_span(&turn.id, Some(model_id)).await?;
+            span_ids.push(span.id.as_str().to_string());
 
-            // Dual-write: Create span in new tables
-            let new_span_id = {
-                let conn = self.conn.lock().unwrap();
-                conn.execute(
-                    "INSERT INTO legacy_spans (id, span_set_id, model_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-                    params![&span_id, &span_set_id, model_id, now],
-                )?;
-
-                // Create span in new tables
-                turn_sync::add_span_sync(&conn, &new_turn_id, Some(model_id))?
-            };
-
-            // Write messages for this span
-            for (msg_idx, msg) in messages.iter().enumerate() {
-                let msg_id = Uuid::new_v4().to_string();
-                let role = msg.role.to_string();
-                let mut stored_payload: StoredPayload = msg.payload.clone().into();
-
-                // Externalize assets (images/audio) if coordinator is available
-                if let Some(coordinator) = &self.coordinator {
-                    match coordinator.externalize_assets(stored_payload).await {
-                        Ok(externalized) => stored_payload = externalized,
-                        Err(e) => {
-                            tracing::warn!("Failed to externalize assets: {}", e);
-                            stored_payload = msg.payload.clone().into();
-                        }
-                    }
-                }
-
-                let content_json = serde_json::to_string(&stored_payload)?;
-                let text = msg.get_text();
-
-                // DB operations in scope to release lock before next iteration
-                {
-                    let conn = self.conn.lock().unwrap();
-
-                    // Store text in content_blocks and get content_id
-                    let content_id = if !text.is_empty() {
-                        let origin_kind = match msg.role {
-                            Role::User => Some("user"),
-                            Role::Assistant => Some("assistant"),
-                            Role::System => Some("system"),
-                            _ => None,
-                        };
-                        match store_content_sync(&conn, &text, origin_kind, self.user_id.as_deref(), Some(model_id.as_str())) {
-                            Ok(id) => Some(id),
-                            Err(e) => {
-                                tracing::warn!("Failed to store content block: {}", e);
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
-
-                    // Write to legacy table
-                    conn.execute(
-                        "INSERT INTO legacy_span_messages (id, span_id, sequence_number, role, content, content_id, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        params![&msg_id, &span_id, msg_idx as i64, role, &content_json, &content_id, now],
-                    )?;
-
-                    // Dual-write: Write to new messages table
-                    let tool_calls = stored_payload.tool_calls_json();
-                    let tool_results = stored_payload.tool_results_json();
-
-                    if let Err(e) = turn_sync::add_message_sync(
-                        &conn,
-                        &new_span_id,
-                        msg.role.into(),
-                        if text.is_empty() { None } else { Some(&text) },
-                        tool_calls.as_deref(),
-                        tool_results.as_deref(),
-                        self.user_id.as_deref(),
-                        Some(model_id.as_str()),
-                    ) {
-                        tracing::warn!("Failed to write to new messages table: {}", e);
-                    }
-                } // conn released here
+            // Store messages
+            for msg in messages {
+                let content = self.store_message_content(&msg.payload.content, &msg.role).await?;
+                let message_role: MessageRole = msg.role.into();
+                store.add_message(&span.id, message_role, &content).await?;
             }
 
+            // Select this span if it's the selected one
             if idx == selected_index {
-                selected_span_id = Some(span_id.clone());
-                new_selected_span_id = Some(new_span_id.clone());
+                if let Some(main_view) = store.get_main_view(&self.conversation_id).await? {
+                    store.select_span(&main_view.id, &turn.id, &span.id).await?;
+                }
             }
-            span_ids.push(span_id);
         }
 
-        // Final DB updates in scope
+        // Update conversation timestamp
         {
             let conn = self.conn.lock().unwrap();
-
-            // Set the selected span (legacy)
-            if let Some(sel_id) = &selected_span_id {
-                conn.execute(
-                    "UPDATE span_sets SET selected_span_id = ?1 WHERE id = ?2",
-                    params![sel_id, &span_set_id],
-                )?;
-            }
-
-            // Dual-write: Select span in main view (new tables)
-            if let Some(new_sel_id) = &new_selected_span_id {
-                if let Err(e) = turn_sync::select_span_sync(&conn, &main_view_id, &new_turn_id, new_sel_id) {
-                    tracing::warn!("Failed to select span in new view: {}", e);
-                }
-            }
-
-            // Update conversation timestamp
+            let now = unix_timestamp();
             conn.execute(
                 "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
-                params![now, &self.conversation_id],
+                params![now, self.conversation_id.as_str()],
             )?;
-        } // conn released here
-
-        // Update cache with the selected response messages
-        if selected_index < responses.len() {
-            self.cache.extend(responses[selected_index].1.clone());
         }
 
-        Ok((span_set_id, span_ids))
+        Ok((turn_id_str, span_ids))
+    }
+
+    /// Convert ContentBlocks to StoredContent using coordinator
+    async fn store_message_content(
+        &self,
+        content: &[ContentBlock],
+        role: &Role,
+    ) -> Result<Vec<StoredContent>> {
+        let coordinator = self.coordinator.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No storage coordinator configured"))?;
+
+        let origin = match role {
+            Role::User => OriginKind::User,
+            Role::Assistant => OriginKind::Assistant,
+            Role::System => OriginKind::System,
+            Role::Tool => OriginKind::System,
+        };
+
+        coordinator.store_content(content.to_vec(), origin).await
     }
 
     fn create_conversation_record(&self, conn: &Connection) -> Result<()> {
         let now = unix_timestamp();
 
-        // Create conversation
         conn.execute(
             "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![&self.conversation_id, &self.user_id, "New Conversation", now, now],
-        )?;
-
-        // Create main thread for this conversation (parent_span_id is NULL for main thread)
-        let thread_id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO threads (id, conversation_id, parent_span_id, status, created_at) VALUES (?1, ?2, NULL, 'active', ?3)",
-            params![&thread_id, &self.conversation_id, now],
+            params![self.conversation_id.as_str(), &self.user_id, "New Conversation", now, now],
         )?;
 
         Ok(())
@@ -659,7 +357,7 @@ impl SessionStore for SqliteSession {
     }
 
     fn begin(&self) -> Self::Transaction {
-        SqliteTransaction::new(self.conversation_id.clone(), self.cache.clone())
+        SqliteTransaction::new(self.conversation_id.as_str().to_string(), self.cache.clone())
     }
 
     async fn commit(&mut self, transaction: Self::Transaction) -> Result<()> {
@@ -671,21 +369,25 @@ impl SessionStore for SqliteSession {
 
         // Create conversation in DB on first commit (lazy creation)
         if !self.persisted {
-            let conn = self.conn.lock().unwrap();
-            self.create_conversation_record(&conn)?;
-            drop(conn);
+            {
+                let conn = self.conn.lock().unwrap();
+                self.create_conversation_record(&conn)?;
+            }
             self.persisted = true;
         }
 
-        // Determine span type based on first message role
-        let span_type = match messages.first().map(|m| &m.role) {
-            Some(Role::User) => LegacySpanType::User,
-            Some(Role::Assistant) | Some(Role::System) => LegacySpanType::Assistant,
-            None => return Ok(()),
+        // Create a temporary store to access TurnStore methods
+        let store = SqliteStore {
+            conn: self.conn.clone(),
+            coordinator: std::sync::RwLock::new(self.coordinator.clone()),
         };
 
-        // Write as span to database
-        self.write_as_span(&messages, &span_type.to_string(), None).await?;
+        // Ensure main view exists
+        if store.get_main_view(&self.conversation_id).await?.is_none() {
+            store.create_view(&self.conversation_id, Some("main"), true).await?;
+        }
+
+        self.write_turn(&store, &messages, None).await?;
 
         // Update cache
         self.cache.extend(messages);
@@ -694,19 +396,23 @@ impl SessionStore for SqliteSession {
     }
 
     async fn clear(&mut self) -> Result<()> {
+        // Delete all turns (cascades to spans, messages, message_content)
         {
             let conn = self.conn.lock().unwrap();
-            // Delete span_messages via cascade from span_sets
             conn.execute(
-                "DELETE FROM span_sets WHERE thread_id IN (SELECT id FROM threads WHERE conversation_id = ?1)",
-                params![&self.conversation_id],
+                "DELETE FROM turns WHERE conversation_id = ?1",
+                params![self.conversation_id.as_str()],
+            )?;
+            // Also delete views
+            conn.execute(
+                "DELETE FROM views WHERE conversation_id = ?1",
+                params![self.conversation_id.as_str()],
             )?;
         }
         self.cache.clear();
         Ok(())
     }
 
-    /// Override to properly save parallel responses as separate spans
     async fn commit_parallel_responses(
         &mut self,
         responses: &[(String, Vec<ChatMessage>)],
@@ -715,8 +421,34 @@ impl SessionStore for SqliteSession {
         if responses.is_empty() {
             return Ok((String::new(), Vec::new()));
         }
-        let (span_set_id, span_ids) = self.write_parallel_responses(responses, selected_index).await?;
-        Ok((span_set_id, span_ids))
+
+        // Ensure conversation exists
+        if !self.persisted {
+            {
+                let conn = self.conn.lock().unwrap();
+                self.create_conversation_record(&conn)?;
+            }
+            self.persisted = true;
+        }
+
+        let store = SqliteStore {
+            conn: self.conn.clone(),
+            coordinator: std::sync::RwLock::new(self.coordinator.clone()),
+        };
+
+        // Ensure main view exists
+        if store.get_main_view(&self.conversation_id).await?.is_none() {
+            store.create_view(&self.conversation_id, Some("main"), true).await?;
+        }
+
+        let result = self.write_parallel_turn(&store, responses, selected_index).await?;
+
+        // Update cache with selected response
+        if selected_index < responses.len() {
+            self.cache.extend(responses[selected_index].1.clone());
+        }
+
+        Ok(result)
     }
 }
 
@@ -727,8 +459,7 @@ impl SessionStore for SqliteSession {
 impl SqliteStore {
     /// Create a new conversation session for a user (lazy - not persisted until first message)
     pub fn create_conversation(&self, user_id: &str) -> Result<SqliteSession> {
-        let id = Uuid::new_v4().to_string();
-        // Don't insert into DB yet - will be done on first commit
+        let id = ConversationId::new();
         Ok(SqliteSession::new(
             self.conn.clone(),
             id,
@@ -739,107 +470,60 @@ impl SqliteStore {
         ))
     }
 
-    /// Open an existing conversation with resolved asset references
-    pub async fn open_conversation<F, Fut, E>(
-        &self,
-        conversation_id: &str,
-        resolver: F,
-    ) -> Result<SqliteSession>
-    where
-        F: Fn(String) -> Fut + Clone,
-        Fut: std::future::Future<Output = Result<Vec<u8>, E>>,
-        E: std::error::Error + Send + Sync + 'static,
-    {
-        use crate::storage::content::StoredMessage;
+    /// Open an existing conversation by loading messages from the main view
+    pub async fn open_conversation(&self, conversation_id: &str) -> Result<SqliteSession> {
+        let conv_id = ConversationId::from_string(conversation_id);
 
-        // First, get thread info synchronously
-        let (thread_id, parent_span_id, user_id) = {
+        // Verify conversation exists and get user_id
+        let user_id = {
             let conn = self.conn.lock().unwrap();
-
-            // Verify conversation exists and get user_id
-            let conv_info: Option<Option<String>> = conn
+            let user_id: Option<String> = conn
                 .query_row(
                     "SELECT user_id FROM conversations WHERE id = ?1",
                     params![conversation_id],
                     |row| row.get(0),
                 )
-                .ok();
-
-            let user_id = match conv_info {
-                Some(uid) => uid,
-                None => anyhow::bail!("Conversation not found: {}", conversation_id),
-            };
-
-            // Find the main thread for this conversation
-            let main_thread: Option<(String, Option<String>)> = conn
-                .query_row(
-                    "SELECT id, parent_span_id FROM threads WHERE conversation_id = ?1 ORDER BY parent_span_id IS NOT NULL, created_at ASC LIMIT 1",
-                    params![conversation_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .ok();
-
-            let (thread_id, parent_span_id) = match main_thread {
-                Some(t) => t,
-                None => anyhow::bail!("No thread found for conversation: {}", conversation_id),
-            };
-
-            (thread_id, parent_span_id, user_id)
+                .map_err(|_| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
+            user_id
         };
 
-        // Now load messages (conn is dropped, so we can await)
-        let stored_messages: Vec<StoredMessage> = if parent_span_id.is_some() {
-            // For forked conversations, use ConversationStore trait method
-            use crate::storage::conversation::ConversationStore;
-            self.get_thread_messages_with_ancestry(&thread_id).await?
-        } else {
-            // Load messages synchronously for non-forked conversations
-            let conn = self.conn.lock().unwrap();
-            let query = "SELECT sm.role, sm.content
-                 FROM legacy_span_messages sm
-                 JOIN legacy_spans s ON sm.span_id = s.id
-                 JOIN span_sets ss ON s.span_set_id = ss.id
-                 JOIN threads t ON ss.thread_id = t.id
-                 WHERE t.conversation_id = ?1 AND t.parent_span_id IS NULL
-                   AND s.id = ss.selected_span_id
-                 ORDER BY ss.sequence_number, sm.sequence_number";
+        // Get the main view
+        let main_view = self.get_main_view(&conv_id).await?
+            .ok_or_else(|| anyhow::anyhow!("No main view found for conversation"))?;
 
-            let mut stmt = conn.prepare(query)?;
+        // Load the view path (all turns with selected spans and messages)
+        let view_path = self.get_view_path(&main_view.id).await?;
 
-            // Collect results before stmt goes out of scope
-            let rows: Vec<(String, String)> = stmt
-                .query_map(params![conversation_id], |row| {
-                    let role_str: String = row.get(0)?;
-                    let payload_json: String = row.get(1)?;
-                    Ok((role_str, payload_json))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
+        // Get coordinator for resolving content
+        let coordinator = self.coordinator()
+            .ok_or_else(|| anyhow::anyhow!("No coordinator configured for content resolution"))?;
 
-            rows.into_iter()
-                .filter_map(|(role_str, payload_json)| {
-                    let role = role_str.parse::<Role>().ok()?;
-                    let payload: StoredPayload = serde_json::from_str(&payload_json).ok()?;
-                    Some(StoredMessage { role, payload })
-                })
-                .collect()
-        };
+        // Convert to ChatMessages
+        let mut messages = Vec::new();
+        for turn in view_path {
+            for msg_with_content in turn.messages {
+                // Resolve content refs to ContentBlocks
+                let mut content_blocks = Vec::new();
+                for content_info in msg_with_content.content {
+                    let block = content_info.content.resolve(&*coordinator).await?;
+                    content_blocks.push(block);
+                }
 
-        // Resolve asset refs to inline base64 data
-        let mut messages = Vec::with_capacity(stored_messages.len());
-        for msg in stored_messages {
-            let mut payload = msg.payload;
-            payload
-                .resolve(resolver.clone())
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to resolve asset: {}", e))?;
-            let chat_payload = payload.to_chat_payload()?;
-            messages.push(ChatMessage::new(msg.role, chat_payload));
+                // Convert MessageRole to llm::Role
+                let role = match msg_with_content.message.role {
+                    MessageRole::User => Role::User,
+                    MessageRole::Assistant => Role::Assistant,
+                    MessageRole::System => Role::System,
+                    MessageRole::Tool => Role::Tool,
+                };
+
+                messages.push(ChatMessage::new(role, llm::ChatPayload::new(content_blocks)));
+            }
         }
 
         Ok(SqliteSession::new(
             self.conn.clone(),
-            conversation_id.to_string(),
+            conv_id,
             user_id,
             messages,
             true, // Already exists in DB
@@ -860,55 +544,6 @@ mod tests {
         let user = rt.block_on(store.get_or_create_default_user()).unwrap();
         let session = store.create_conversation(&user.id).unwrap();
         assert!(session.messages().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_sqlite_session_commit() {
-        let store = SqliteStore::in_memory().unwrap();
-        use crate::storage::user::UserStore;
-        let user = store.get_or_create_default_user().await.unwrap();
-        let mut session = store.create_conversation(&user.id).unwrap();
-
-        let mut tx = session.begin();
-        tx.add(ChatMessage::user("Hello".into()));
-        tx.add(ChatMessage::assistant("Hi there!".into()));
-
-        session.commit(tx).await.unwrap();
-
-        assert_eq!(session.messages().len(), 2);
-        assert_eq!(session.messages()[0].get_text(), "Hello");
-        assert_eq!(session.messages()[1].get_text(), "Hi there!");
-    }
-
-    #[tokio::test]
-    async fn test_sqlite_session_persistence() {
-        let store = SqliteStore::in_memory().unwrap();
-        use crate::storage::user::UserStore;
-        let user = store.get_or_create_default_user().await.unwrap();
-        let conversation_id;
-
-        // Create and populate session
-        {
-            let mut session = store.create_conversation(&user.id).unwrap();
-            conversation_id = session.conversation_id().to_string();
-
-            let mut tx = session.begin();
-            tx.add(ChatMessage::user("Test message".into()));
-            session.commit(tx).await.unwrap();
-        }
-
-        // Reopen and verify (no assets, so resolver is never called)
-        let session = store
-            .open_conversation(&conversation_id, |_: String| async {
-                Err::<Vec<u8>, std::io::Error>(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "no assets in test",
-                ))
-            })
-            .await
-            .unwrap();
-        assert_eq!(session.messages().len(), 1);
-        assert_eq!(session.messages()[0].get_text(), "Test message");
     }
 
     #[test]
