@@ -30,33 +30,33 @@ use crate::storage::types::{
 /// Type parameters:
 /// - `B`: Blob storage (filesystem)
 /// - `A`: Asset metadata storage
-/// - `C`: Content block storage
-/// - `Conv`: Conversation storage (includes TurnStore via supertrait)
+/// - `T`: Text content storage
+/// - `C`: Conversation storage (includes TurnStore via supertrait)
 /// - `U`: User storage
 /// - `D`: Document storage
-pub struct StorageCoordinator<B, A, C, Conv, U, D>
+pub struct StorageCoordinator<B, A, T, C, U, D>
 where
     B: BlobStore,
     A: AssetStore,
-    C: TextStore,
-    Conv: ConversationStore,
+    T: TextStore,
+    C: ConversationStore,
     U: UserStore,
     D: DocumentStore,
 {
     blob_store: Arc<B>,
     asset_store: Arc<A>,
-    content_block_store: Arc<C>,
-    conversation_store: Arc<Conv>,
+    content_block_store: Arc<T>,
+    conversation_store: Arc<C>,
     user_store: Arc<U>,
     document_store: Arc<D>,
 }
 
-impl<B, A, C, Conv, U, D> StorageCoordinator<B, A, C, Conv, U, D>
+impl<B, A, T, C, U, D> StorageCoordinator<B, A, T, C, U, D>
 where
     B: BlobStore,
     A: AssetStore,
-    C: TextStore,
-    Conv: ConversationStore,
+    T: TextStore,
+    C: ConversationStore,
     U: UserStore,
     D: DocumentStore,
 {
@@ -64,8 +64,8 @@ where
     pub fn new(
         blob_store: Arc<B>,
         asset_store: Arc<A>,
-        content_block_store: Arc<C>,
-        conversation_store: Arc<Conv>,
+        content_block_store: Arc<T>,
+        conversation_store: Arc<C>,
         user_store: Arc<U>,
         document_store: Arc<D>,
     ) -> Self {
@@ -159,12 +159,12 @@ where
     }
 
     /// Get access to the content block store
-    pub fn content_block_store(&self) -> &Arc<C> {
+    pub fn content_block_store(&self) -> &Arc<T> {
         &self.content_block_store
     }
 
     /// Get access to the conversation store (includes TurnStore methods)
-    pub fn conversation_store(&self) -> &Arc<Conv> {
+    pub fn conversation_store(&self) -> &Arc<C> {
         &self.conversation_store
     }
 

@@ -3,7 +3,7 @@
 use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
 use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::storage::ids::{ConversationId, UserId, ViewId};
+use noema_core::storage::ids::{ConversationId, UserId};
 use noema_core::storage::{FsBlobStore, SqliteStore};
 use noema_core::ChatEngine;
 use std::collections::HashMap;
@@ -30,10 +30,8 @@ pub type AppEngine =
 
 pub struct AppState {
     pub coordinator: Mutex<Option<Arc<AppCoordinator>>>,
-    pub engine: Mutex<Option<AppEngine>>,
-    pub current_conversation_id: Mutex<String>,
-    /// Current thread ID within the conversation (None = main thread)
-    pub current_thread_id: Mutex<Option<String>>,
+    /// Engines per conversation - enables parallel conversations
+    pub engines: Mutex<HashMap<ConversationId, AppEngine>>,
     /// Current user ID (from database)
     pub user_id: Mutex<UserId>,
     /// Full model ID in "provider/model" format
@@ -41,7 +39,8 @@ pub struct AppState {
     /// Display name for the model
     pub model_name: Mutex<String>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
-    pub is_processing: Mutex<bool>,
+    /// Maps conversation ID to processing state
+    pub processing: Mutex<HashMap<ConversationId, bool>>,
     /// Maps OAuth state parameter to server ID for pending OAuth flows
     pub pending_oauth_states: Mutex<HashMap<String, String>>,
     /// Browser voice controller for WebAudio-based input
@@ -57,18 +56,34 @@ impl AppState {
 
         Self {
             coordinator: Mutex::new(None),
-            engine: Mutex::new(None),
-            current_conversation_id: Mutex::new(String::new()),
-            current_thread_id: Mutex::new(None),
+            engines: Mutex::new(HashMap::new()),
             user_id: Mutex::new(UserId::from_string(String::new())),
             model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
             voice_coordinator: Mutex::new(None),
-            is_processing: Mutex::new(false),
+            processing: Mutex::new(HashMap::new()),
             pending_oauth_states: Mutex::new(pending_states),
             browser_audio_controller: Mutex::new(None),
             init_lock: std::sync::Mutex::new(false),
         }
+    }
+
+    /// Check if a conversation is currently processing
+    pub async fn is_processing(&self, conversation_id: &ConversationId) -> bool {
+        self.processing
+            .lock()
+            .await
+            .get(conversation_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Set processing state for a conversation
+    pub async fn set_processing(&self, conversation_id: &ConversationId, processing: bool) {
+        self.processing
+            .lock()
+            .await
+            .insert(conversation_id.clone(), processing);
     }
 }
 

@@ -3,6 +3,7 @@
 use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
+use noema_core::storage::ids::ConversationId;
 use noema_core::storage::{DocumentResolver, FsBlobStore, Session, SqliteStore};
 use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::{ChatEngine, McpRegistry};
@@ -81,6 +82,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
         log_message(&format!("ERROR in init_session: {}", e));
         e
     })?;
+    let conversation_id = session.conversation_id().clone();
     log_message("Session initialized");
 
     // Start embedded Google Docs MCP server
@@ -97,7 +99,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     log_message("Event loop started");
 
     // Start auto-connect for MCP servers (runs in background)
-    start_mcp_auto_connect(app, state).await;
+    start_mcp_auto_connect(app, state, &conversation_id).await;
     log_message("MCP auto-connect started");
 
     Ok(result)
@@ -117,19 +119,18 @@ async fn start_gdocs_server(app: &AppHandle) {
 }
 
 /// Start auto-connect for all configured MCP servers
-async fn start_mcp_auto_connect(app: AppHandle, state: &AppState) {
+async fn start_mcp_auto_connect(app: AppHandle, state: &AppState, conversation_id: &ConversationId) {
     // Get the MCP registry from the engine
-    let engine_guard = state.engine.lock().await;
-    let engine = match engine_guard.as_ref() {
-        Some(e) => e,
-        None => {
-            log_message("Cannot start MCP auto-connect: engine not initialized");
-            return;
+    let mcp_registry = {
+        let engines = state.engines.lock().await;
+        match engines.get(conversation_id) {
+            Some(engine) => engine.get_mcp_registry(),
+            None => {
+                log_message("Cannot start MCP auto-connect: engine not initialized");
+                return;
+            }
         }
     };
-
-    let mcp_registry = engine.get_mcp_registry();
-    drop(engine_guard);
 
     // Create callback that emits events to frontend
     let app_handle = app.clone();
@@ -181,15 +182,15 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     let store = Arc::new(store);
 
     // Create storage coordinator with all stores
-    // StorageCoordinator<B, A, C, Conv, U, D>
+    // StorageCoordinator<B, A, T, C, U, D>
     // SqliteStore implements: AssetStore, TextStore, ConversationStore, UserStore, DocumentStore
     let coordinator = Arc::new(StorageCoordinator::new(
-        Arc::clone(&blob_store),      // B: BlobStore
-        Arc::clone(&store),           // A: AssetStore
-        Arc::clone(&store),           // C: TextStore
-        Arc::clone(&store),           // Conv: ConversationStore
-        Arc::clone(&store),           // U: UserStore
-        Arc::clone(&store),           // D: DocumentStore
+        blob_store,      // B: BlobStore
+        store.clone(),   // A: AssetStore
+        store.clone(),   // T: TextStore
+        store.clone(),   // C: ConversationStore
+        store.clone(),   // U: UserStore
+        store.clone(),   // D: DocumentStore
     ));
 
     *state.coordinator.lock().await = Some(coordinator);
@@ -272,11 +273,9 @@ async fn init_session(state: &AppState) -> Result<(AppSession, Arc<AppCoordinato
     };
 
     // Open session for the conversation
-    let session = Session::open(coordinator.clone(), conversation_id.clone())
+    let session = Session::open(coordinator.clone(), conversation_id)
         .await
         .map_err(|e| format!("Failed to open session: {}", e))?;
-
-    *state.current_conversation_id.lock().await = conversation_id.as_str().to_string();
 
     Ok((session, coordinator))
 }
@@ -311,11 +310,14 @@ async fn init_engine(
     *state.model_id.lock().await = model_id;
     *state.model_name.lock().await = model_display_name.clone();
 
+    // Get conversation ID from session
+    let conversation_id = session.conversation_id().clone();
+
     // Coordinator implements DocumentResolver
     let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
-    *state.engine.lock().await = Some(engine);
+    state.engines.lock().await.insert(conversation_id, engine);
 
     Ok(model_display_name)
 }
