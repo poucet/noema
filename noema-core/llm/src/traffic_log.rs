@@ -10,11 +10,13 @@ use std::io::Write;
 const MAX_CONTENT_LOG_CHARS: usize = 200;
 
 /// Truncate a string for logging, adding ellipsis if truncated
-fn truncate_for_log(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+fn truncate_for_log(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
         s.to_string()
     } else {
-        format!("{}... ({} chars total)", &s[..max_len], s.len())
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{}... ({} chars total)", truncated, char_count)
     }
 }
 
