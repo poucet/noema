@@ -1,19 +1,6 @@
-//! Asset storage - content-addressed binary storage
-//!
-//! Assets are the binary counterpart to content blocks in the Unified Content Model.
-//! This stores metadata about binary assets (images, audio, PDFs), while the actual
-//! binary data is stored in a `BlobStore` (filesystem-based).
-//!
-//! Asset IDs are SHA-256 hashes of the binary content, enabling deduplication.
-
-use anyhow::Result;
-use async_trait::async_trait;
+//! Asset types for storage
 
 use crate::storage::ids::AssetId;
-
-// ============================================================================
-// Types
-// ============================================================================
 
 /// Asset metadata for storage (input form)
 #[derive(Debug, Clone)]
@@ -114,37 +101,3 @@ pub struct AssetStoreResult {
     /// Whether this was a new insertion (false = deduplicated)
     pub is_new: bool,
 }
-
-// ============================================================================
-// Trait
-// ============================================================================
-
-/// Trait for asset storage operations
-///
-/// Assets are stored with content-addressing (SHA-256 hash as ID).
-/// The binary data is stored separately in a BlobStore; this trait
-/// manages the metadata.
-#[async_trait]
-pub trait AssetStore: Send + Sync {
-    /// Store asset metadata for a blob
-    ///
-    /// The caller is responsible for storing the actual binary data in a BlobStore
-    /// and providing the hash as the asset ID. If an asset with the same hash
-    /// already exists, this returns the existing asset (deduplication).
-    async fn store(&self, id: AssetId, asset: Asset) -> Result<AssetStoreResult>;
-
-    /// Get an asset by ID (hash)
-    async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>>;
-
-    /// Check if an asset exists
-    async fn exists(&self, id: &AssetId) -> Result<bool>;
-
-    /// Delete an asset by ID
-    ///
-    /// Note: This only removes the metadata. The caller should also remove
-    /// the blob from the BlobStore if no other references exist.
-    async fn delete(&self, id: &AssetId) -> Result<bool>;
-}
-
-#[cfg(feature = "sqlite")]
-pub(crate) mod sqlite;

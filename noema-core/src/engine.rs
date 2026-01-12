@@ -7,9 +7,8 @@
 //! - Tool execution via MCP registry
 
 use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry};
-use crate::storage::document::resolver::DocumentResolver;
 use crate::storage::session::Session;
-use crate::storage::conversation::TurnStore;
+use crate::storage::traits::TurnStore;
 use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};

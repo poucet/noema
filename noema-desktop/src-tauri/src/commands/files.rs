@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use std::sync::Arc;
 
-use noema_core::storage::asset::{Asset, AssetStore};
+use noema_core::storage::{Asset, AssetStore};
 use noema_core::storage::ids::AssetId;
 use crate::logging::log_message;
 use crate::state::AppState;

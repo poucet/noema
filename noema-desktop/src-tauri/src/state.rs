@@ -2,16 +2,15 @@
 
 use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
-use noema_core::storage::blob::BlobStore;
-use noema_core::{ChatEngine};
-use noema_core::storage::session::{SqliteStore, SqliteSession};
+use noema_core::storage::{BlobStore, SqliteStore};
+use noema_core::ChatEngine;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct AppState {
     pub store: Mutex<Option<Arc<SqliteStore>>>,
-    pub engine: Mutex<Option<ChatEngine<SqliteSession>>>,
+    pub engine: Mutex<Option<ChatEngine<SqliteStore>>>,
     pub current_conversation_id: Mutex<String>,
     /// Current thread ID within the conversation (None = main thread)
     pub current_thread_id: Mutex<Option<String>>,

@@ -3,14 +3,14 @@
 use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
-use noema_core::storage::asset::AssetStore;
-use noema_core::storage::blob::{BlobStore, FsBlobStore};
+use noema_core::storage::{
+    AssetStore, BlobStore, FsBlobStore, ConversationStore, UserStore,
+    DocumentResolver, SqliteStore,
+};
 use noema_core::storage::coordinator::DynStorageCoordinator;
-use noema_core::storage::document::resolver::DocumentResolver;
-use noema_core::storage::conversation::ConversationStore;
-use noema_core::storage::user::UserStore;
+use noema_core::storage::session::Session;
 use noema_core::{ChatEngine, McpRegistry};
-use noema_core::storage::session::{SqliteSession, SqliteStore};
+use noema_core::storage::ids::{ConversationId, UserId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 

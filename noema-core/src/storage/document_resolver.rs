@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use futures::future::join_all;
 use llm::{ChatRequest, ContentBlock};
 
-use crate::storage::document::{DocumentStore, FullDocumentInfo};
+use crate::storage::traits::DocumentStore;
+use crate::storage::types::FullDocumentInfo;
 
 /// Trait for resolving document references to their content
 #[async_trait]

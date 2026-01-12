@@ -3,8 +3,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::types::ConversationInfo;
 use crate::storage::ids::{ConversationId, UserId};
+use crate::storage::types::conversation::ConversationInfo;
 
 /// Trait for conversation CRUD operations
 ///

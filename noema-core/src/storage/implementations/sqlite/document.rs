@@ -5,9 +5,10 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
-use super::{DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentStore, DocumentTabInfo};
-use crate::storage::session::SqliteStore;
+use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
+use crate::storage::traits::DocumentStore;
+use crate::storage::types::{DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo};
 
 pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(

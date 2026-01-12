@@ -1,28 +1,11 @@
-//! Content resolution traits for Session
+//! Asset resolution traits for Session
 //!
-//! Two resolver traits:
-//! - `ContentBlockResolver` - resolves text refs from content_blocks table
-//! - `AssetResolver` - resolves assets and documents for LLM
+//! AssetResolver resolves assets and documents for LLM context.
+//! Text resolution uses ContentBlockStore::require_text() directly.
 
 use anyhow::Result;
 use async_trait::async_trait;
 use llm::ContentBlock;
-
-use crate::storage::ids::ContentBlockId;
-
-// ============================================================================
-// ContentBlockResolver - for text lookup
-// ============================================================================
-
-/// Trait for resolving text references from the content_blocks table
-///
-/// This is used during Session::open() and Session::commit() to resolve
-/// StoredContent::TextRef to actual text content.
-#[async_trait]
-pub trait ContentBlockResolver: Send + Sync {
-    /// Get text content by content block ID
-    async fn get_text(&self, content_block_id: &ContentBlockId) -> Result<String>;
-}
 
 // ============================================================================
 // AssetResolver - for assets and documents

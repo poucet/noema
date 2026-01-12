@@ -14,11 +14,10 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use llm::ContentBlock;
 use std::sync::Arc;
 
-use crate::storage::asset::{Asset, AssetStore};
-use crate::storage::blob::BlobStore;
 use crate::storage::content::{ContentResolver, StoredContent};
-use crate::storage::content_block::{ContentBlock as ContentBlockData, ContentBlockStore, ContentOrigin, OriginKind};
 use crate::storage::ids::{AssetId, ContentBlockId};
+use crate::storage::traits::{AssetStore, BlobStore, ContentBlockStore};
+use crate::storage::types::{Asset, ContentBlock as ContentBlockData, ContentOrigin, OriginKind};
 
 /// Type-erased storage coordinator using trait objects.
 ///
@@ -280,9 +279,7 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> ContentResolver
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::asset::{AssetStoreResult, StoredAsset};
-    use crate::storage::blob::StoredBlob;
-    use crate::storage::content_block::{StoreResult, StoredContentBlock};
+    use crate::storage::types::{AssetStoreResult, StoredAsset, StoredBlob, StoreResult, StoredContentBlock};
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -416,8 +413,8 @@ mod tests {
             let blocks = self.blocks.lock().unwrap();
             Ok(blocks.get(id.as_str()).map(|text| StoredContentBlock {
                 id: id.clone(),
-                hash: "hash".to_string(),
-                block: ContentBlockData::plain(text),
+                content_hash: "hash".to_string(),
+                content: ContentBlockData::plain(text),
                 created_at: 0,
             }))
         }

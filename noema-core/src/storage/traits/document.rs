@@ -1,95 +1,11 @@
-//! Document storage trait and implementations
-//!
-//! Provides the `DocumentStore` trait for managing documents, tabs, and revisions.
-//! Compatible with the Episteme document model.
+//! DocumentStore trait for document, tab, and revision storage
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::str::FromStr;
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/// Document source type (matches episteme)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DocumentSource {
-    GoogleDrive,
-    AiGenerated,
-    UserCreated,
-}
-
-impl ToString for DocumentSource {
-    fn to_string(&self) -> String {
-        match self {
-            DocumentSource::GoogleDrive => "google_drive".to_string(),
-            DocumentSource::AiGenerated => "ai_generated".to_string(),
-            DocumentSource::UserCreated => "user_created".to_string(),
-        }
-    }
-}
-
-impl FromStr for DocumentSource {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "google_drive" => Ok(DocumentSource::GoogleDrive),
-            "ai_generated" => Ok(DocumentSource::AiGenerated),
-            "user_created" => Ok(DocumentSource::UserCreated),
-            _ => Err(format!("{s} is not a valid DocumentSource")),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DocumentInfo {
-    pub id: String,
-    pub user_id: String,
-    pub title: String,
-    pub source: DocumentSource,
-    pub source_id: Option<String>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct DocumentTabInfo {
-    pub id: String,
-    pub document_id: String,
-    pub parent_tab_id: Option<String>,
-    pub tab_index: i32,
-    pub title: String,
-    pub icon: Option<String>,
-    pub content_markdown: Option<String>,
-    pub referenced_assets: Vec<String>,
-    pub source_tab_id: Option<String>,
-    pub current_revision_id: Option<String>,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct DocumentRevisionInfo {
-    pub id: String,
-    pub tab_id: String,
-    pub revision_number: i32,
-    pub parent_revision_id: Option<String>,
-    pub content_markdown: String,
-    pub content_hash: String,
-    pub referenced_assets: Vec<String>,
-    pub created_at: i64,
-    pub created_by: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct FullDocumentInfo {
-    pub document: DocumentInfo,
-    pub tabs: Vec<DocumentTabInfo>,
-}
-// ============================================================================
-// Trait
-// ============================================================================
+use crate::storage::types::document::{
+    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
+};
 
 /// Trait for document storage operations
 #[async_trait]
@@ -173,6 +89,7 @@ pub trait DocumentStore: Send + Sync {
     async fn delete_document_tab(&self, id: &str) -> Result<bool>;
 
     // ========== Full Document Fetch Method =========
+
     /// Fetch the entire content of the document along with the tabs.
     async fn fetch_full_document(&self, doc_id: &str) -> Result<Option<FullDocumentInfo>> {
         let document = match self.get_document(doc_id).await? {
@@ -203,8 +120,3 @@ pub trait DocumentStore: Send + Sync {
     /// List revisions for a tab
     async fn list_document_revisions(&self, tab_id: &str) -> Result<Vec<DocumentRevisionInfo>>;
 }
-
-pub mod resolver;
-
-#[cfg(feature = "sqlite")]
-pub (crate) mod sqlite;

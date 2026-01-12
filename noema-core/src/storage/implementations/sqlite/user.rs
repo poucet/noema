@@ -3,12 +3,12 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
-
 use uuid::Uuid;
 
-use super::{UserInfo, UserStore};
-use crate::storage::session::SqliteStore;
-use crate::storage::helper::{unix_timestamp};
+use super::SqliteStore;
+use crate::storage::helper::unix_timestamp;
+use crate::storage::traits::UserStore;
+use crate::storage::types::UserInfo;
 
 /// Default user email for single-tenant local mode
 pub const DEFAULT_USER_EMAIL: &str = "human@noema";

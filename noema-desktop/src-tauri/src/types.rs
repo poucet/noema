@@ -28,8 +28,8 @@ pub struct ConversationInfo {
     pub updated_at: i64,
 }
 
-impl From<noema_core::storage::conversation::ConversationInfo> for ConversationInfo {
-    fn from(info: noema_core::storage::conversation::ConversationInfo) -> Self {
+impl From<noema_core::storage::ConversationInfo> for ConversationInfo {
+    fn from(info: noema_core::storage::ConversationInfo) -> Self {
         Self {
             id: info.id.as_str().to_string(),
             name: info.name,
@@ -401,8 +401,8 @@ pub struct ThreadInfoResponse {
     pub is_main: bool,
 }
 
-impl From<noema_core::storage::conversation::ViewInfo> for ThreadInfoResponse {
-    fn from(info: noema_core::storage::conversation::ViewInfo) -> Self {
+impl From<noema_core::storage::ViewInfo> for ThreadInfoResponse {
+    fn from(info: noema_core::storage::ViewInfo) -> Self {
         Self {
             id: info.id.as_str().to_string(),
             conversation_id: info.conversation_id.as_str().to_string(),

@@ -1,6 +1,6 @@
 //! Agent with dynamic MCP tool support
 
-use crate::storage::document::resolver::{DocumentFormatter, DocumentResolver};
+use crate::storage::document_resolver::{DocumentFormatter, DocumentResolver};
 use crate::mcp::McpToolRegistry;
 use crate::traffic_log;
 use crate::Agent;

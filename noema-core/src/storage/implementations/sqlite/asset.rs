@@ -4,10 +4,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 
-use super::{Asset, AssetStore, AssetStoreResult, StoredAsset};
+use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::AssetId;
-use crate::storage::session::SqliteStore;
+use crate::storage::traits::AssetStore;
+use crate::storage::types::{Asset, AssetStoreResult, StoredAsset};
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(

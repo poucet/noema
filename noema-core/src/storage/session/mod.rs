@@ -4,22 +4,18 @@
 //!
 //! - `Session<S: TurnStore>` - DB-agnostic session with lazy resolution
 //! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
-//! - `ContentBlockResolver` / `AssetResolver` - Resolution traits
-//! - `SqliteStore` - SQLite storage backend (requires `sqlite` feature)
+//! - `AssetResolver` - Resolution trait for assets and documents
 //!
 //! Session implements `ConversationContext` directly.
+//! Text resolution uses `ContentBlockStore::require_text()` directly.
+//!
+//! For SQLite storage, use `storage::SqliteStore`.
 
 mod resolver;
 mod session;
 mod types;
 
-#[cfg(feature = "sqlite")]
-mod sqlite;
-
 // Re-export session types
-pub use resolver::{AssetResolver, ContentBlockResolver};
+pub use resolver::AssetResolver;
 pub use session::{ContentStorer, Session};
 pub use types::{ResolvedContent, ResolvedMessage};
-
-#[cfg(feature = "sqlite")]
-pub use sqlite::SqliteStore;

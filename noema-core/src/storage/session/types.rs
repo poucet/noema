@@ -8,7 +8,7 @@
 use llm::{ContentBlock, ToolCall, ToolResult};
 
 use crate::storage::content::StoredContent;
-use crate::storage::conversation::MessageRole;
+use crate::storage::types::MessageRole;
 
 // ============================================================================
 // PendingMessage - not yet committed

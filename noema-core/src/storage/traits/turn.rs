@@ -6,11 +6,12 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::types::{
-    MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo,
-};
 use crate::storage::content::StoredContent;
 use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, ViewId};
+use crate::storage::types::conversation::{
+    MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole,
+    TurnInfo, TurnWithContent, ViewInfo,
+};
 
 /// Trait for Turn/Span/Message storage operations
 #[async_trait]

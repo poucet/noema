@@ -3,35 +3,89 @@
 //! This module provides traits and implementations for storing conversations,
 //! documents, users, and assets.
 //!
-//! ## Session API
+//! ## Module Structure
 //!
-//! - `Session<S: TurnStore>` - DB-agnostic session with lazy content resolution
-//! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
-//! - `ContentBlockResolver` / `AssetResolver` - Resolution traits
+//! - `traits/` - All storage trait definitions
+//! - `types/` - All storage type definitions
+//! - `implementations/` - Storage backends (sqlite, memory, fs)
+//! - `session/` - Session runtime for managing conversation state
 //!
 //! ## Storage Traits
 //!
 //! - `TurnStore` - Turn/Span/Message conversation storage
 //! - `ConversationStore` - Conversation-level CRUD
-//! - `UserStore` - User account management
+//! - `ContentBlockStore` - Content-addressed text storage
 //! - `AssetStore` - Asset metadata storage
-//! - `DocumentStore` - Document, tab, and revision storage
 //! - `BlobStore` - Content-addressable binary storage
-mod helper;
+//! - `DocumentStore` - Document, tab, and revision storage
+//! - `UserStore` - User account management
+//!
+//! ## Session API
+//!
+//! - `Session<S: TurnStore>` - DB-agnostic session with lazy content resolution
+//! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
+//! - `AssetResolver` - Resolution trait for assets and documents
+
+pub(crate) mod helper;
 
 // Type-safe ID newtypes
 pub mod ids;
 
-// Session module contains traits and all session implementations
-
-// Domain-specific storage modules
-pub mod asset;
-pub mod blob;
+// StoredContent type for message content references
 pub mod content;
-pub mod content_block;
-pub mod conversation;
-pub mod coordinator;
-pub mod document;
-pub mod session;
-pub mod user;
 
+// Storage coordinator for asset externalization
+pub mod coordinator;
+
+// Trait definitions
+pub mod traits;
+
+// Type definitions
+pub mod types;
+
+// Session runtime
+pub mod session;
+
+// Implementations
+pub mod implementations;
+
+// Document resolution for RAG
+pub mod document_resolver;
+
+// ============================================================================
+// Re-exports for convenience
+// ============================================================================
+
+// Traits
+pub use traits::{
+    AssetStore, BlobStore, ContentBlockStore, ConversationStore, DocumentStore, TurnStore, UserStore,
+};
+
+// Types
+pub use types::{
+    // Asset
+    Asset, AssetStoreResult, StoredAsset,
+    // Blob
+    StoredBlob,
+    // ContentBlock
+    ContentBlock, ContentOrigin, ContentType, OriginKind, StoredContentBlock, StoreResult,
+    // Conversation
+    ConversationInfo, MessageContentInfo, MessageInfo, MessageRole, MessageWithContent,
+    SpanInfo, SpanRole, SpanWithMessages, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
+    // Document
+    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
+    // User
+    UserInfo,
+};
+
+// Session
+pub use session::{AssetResolver, ContentStorer, ResolvedContent, ResolvedMessage, Session};
+
+// Implementations (feature-gated)
+#[cfg(feature = "sqlite")]
+pub use implementations::sqlite::SqliteStore;
+
+pub use implementations::fs::FsBlobStore;
+
+// Document resolution
+pub use document_resolver::{DocumentFormatter, DocumentResolver};

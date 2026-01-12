@@ -4,8 +4,8 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
-use noema_core::storage::document::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo};
-use noema_core::storage::user::UserStore;
+use noema_core::storage::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo};
+use noema_core::storage::UserStore;
 use rmcp::model::RawContent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

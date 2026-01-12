@@ -5,7 +5,8 @@
 //! - Integrity verification (hash validates content)
 //! - Efficient storage (no Base64 overhead)
 
-use crate::storage::blob::{BlobStore, StoredBlob};
+use crate::storage::traits::BlobStore;
+use crate::storage::types::StoredBlob;
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;

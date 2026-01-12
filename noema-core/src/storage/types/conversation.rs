@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::storage::content::StoredContent;
 use crate::storage::ids::{ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId};
 
 // ============================================================================
@@ -215,7 +216,7 @@ pub struct MessageContentInfo {
     /// Order within message (0-indexed)
     pub sequence_number: i32,
     /// Content (uses StoredContent - refs-only)
-    pub content: crate::storage::content::StoredContent,
+    pub content: StoredContent,
 }
 
 // ============================================================================

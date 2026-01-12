@@ -2,11 +2,10 @@
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
-use noema_core::storage::conversation::{ConversationStore, TurnStore, ViewInfo};
-use noema_core::storage::conversation::types::{SpanRole, MessageRole};
-use noema_core::storage::document::resolver::DocumentResolver;
+use noema_core::storage::{ConversationStore, TurnStore, ViewInfo};
+use noema_core::storage::{SpanRole, MessageRole};
+use noema_core::storage::DocumentResolver;
 use noema_core::storage::content::ResolvedContent;
-use noema_core::storage::session::SessionStore;
 use noema_core::storage::ids::{ConversationId, ViewId, TurnId, SpanId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};

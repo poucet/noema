@@ -4,11 +4,11 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 
-use super::{ContentBlock, ContentBlockStore, StoredContentBlock, StoreResult};
-use crate::storage::content_block::types::{ContentOrigin, ContentType, OriginKind};
+use super::SqliteStore;
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
-use crate::storage::session::SqliteStore;
+use crate::storage::traits::ContentBlockStore;
+use crate::storage::types::{ContentBlock, ContentOrigin, ContentType, OriginKind, StoredContentBlock, StoreResult};
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {

@@ -13,10 +13,11 @@ use std::sync::Arc;
 
 use crate::context::{ConversationContext, MessagesGuard};
 use crate::storage::content::StoredContent;
-use crate::storage::conversation::{MessageRole, SpanRole, TurnStore, TurnWithContent};
 use crate::storage::ids::{ConversationId, TurnId, ViewId};
+use crate::storage::traits::{ContentBlockStore, TurnStore};
+use crate::storage::types::{MessageRole, SpanRole, TurnWithContent};
 
-use super::resolver::{AssetResolver, ContentBlockResolver};
+use super::resolver::AssetResolver;
 use super::types::{ResolvedContent, ResolvedMessage};
 
 // ============================================================================
@@ -44,7 +45,7 @@ pub struct Session<S: TurnStore> {
 
 impl<S: TurnStore + Send + Sync> Session<S> {
     /// Open a session for an existing conversation
-    pub async fn open<R: ContentBlockResolver>(
+    pub async fn open<R: ContentBlockStore>(
         store: Arc<S>,
         conversation_id: ConversationId,
         resolver: &R,
@@ -141,7 +142,7 @@ impl<S: TurnStore + Send + Sync> Session<S> {
     ) -> Result<TurnId>
     where
         C: ContentStorer,
-        R: ContentBlockResolver,
+        R: ContentBlockStore,
     {
         if self.pending.is_empty() {
             return Err(anyhow::anyhow!("No pending messages to commit"));
@@ -227,7 +228,7 @@ pub trait ContentStorer: Send + Sync {
 // Resolution helpers
 // ============================================================================
 
-async fn resolve_path<R: ContentBlockResolver>(
+async fn resolve_path<R: ContentBlockStore>(
     path: &[TurnWithContent],
     resolver: &R,
 ) -> Result<Vec<ResolvedMessage>> {
@@ -249,7 +250,7 @@ async fn resolve_path<R: ContentBlockResolver>(
     Ok(messages)
 }
 
-async fn resolve_stored_content<R: ContentBlockResolver>(
+async fn resolve_stored_content<R: ContentBlockStore>(
     content: &[StoredContent],
     resolver: &R,
 ) -> Result<Vec<ResolvedContent>> {
@@ -258,7 +259,7 @@ async fn resolve_stored_content<R: ContentBlockResolver>(
     for item in content {
         let r = match item {
             StoredContent::TextRef { content_block_id } => {
-                let text = resolver.get_text(content_block_id).await?;
+                let text = resolver.require_text(content_block_id).await?;
                 ResolvedContent::text(text)
             }
             StoredContent::AssetRef {

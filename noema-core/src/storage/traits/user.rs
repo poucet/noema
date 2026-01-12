@@ -1,16 +1,9 @@
-//! User storage trait and implementations
-//!
-//! Provides the `UserStore` trait for managing user accounts.
+//! UserStore trait for user account management
 
 use anyhow::Result;
 use async_trait::async_trait;
 
-/// Information about a user
-#[derive(Debug, Clone)]
-pub struct UserInfo {
-    pub id: String,
-    pub email: String,
-}
+use crate::storage::types::user::UserInfo;
 
 /// Trait for user storage operations
 #[async_trait]
@@ -27,6 +20,3 @@ pub trait UserStore: Send + Sync {
     /// List all users in the database
     async fn list_users(&self) -> Result<Vec<UserInfo>>;
 }
-
-#[cfg(feature = "sqlite")]
-pub (crate) mod sqlite;
