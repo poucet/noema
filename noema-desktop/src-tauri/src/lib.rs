@@ -43,9 +43,8 @@ async fn handle_asset_request(
     }
 
     // Get coordinator from app state
-    let coordinator_guard = app_state.coordinator.lock().await;
-    let coordinator = match coordinator_guard.as_ref() {
-        Some(c) => c.clone(),
+    let coordinator = match app_state.coordinator.lock().await.clone() {
+        Some(c) => c,
         None => {
             return Response::builder()
                 .status(500)
@@ -54,7 +53,6 @@ async fn handle_asset_request(
                 .unwrap();
         }
     };
-    drop(coordinator_guard);
 
     // Fetch blob directly by hash
     let data = match coordinator.get_blob(blob_hash).await {
