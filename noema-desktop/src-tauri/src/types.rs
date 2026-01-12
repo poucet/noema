@@ -1,7 +1,7 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
-use noema_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId, ViewId};
+use noema_core::storage::ids::{ConversationId, DocumentId, SpanId, TurnId, ViewId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -60,11 +60,10 @@ pub enum DisplayContent {
         #[serde(rename = "mimeType")] 
         mime_type: String
     },
-    /// Asset stored in blob storage - client should fetch via asset API
+    /// Asset stored in blob storage - URL provided by backend
     AssetRef {
-        #[serde(rename = "assetId")]
-        #[ts(type = "string")]
-        asset_id: AssetId,
+        /// URL to fetch the asset (e.g., noema-asset://localhost/{blob_hash})
+        url: String,
         #[serde(rename = "mimeType")]
         mime_type: String,
         filename: Option<String>
@@ -229,12 +228,16 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
         match content {
             ResolvedContent::Text { text } => DisplayContent::Text(text.clone()),
             ResolvedContent::Asset {
-                asset_id,
+                blob_hash,
                 mime_type,
                 filename,
                 ..
             } => DisplayContent::AssetRef {
-                asset_id: asset_id.clone(),
+                url: format!(
+                    "noema-asset://localhost/{}?mime_type={}",
+                    blob_hash,
+                    urlencoding::encode(mime_type)
+                ),
                 mime_type: mime_type.clone(),
                 filename: filename.clone(),
             },

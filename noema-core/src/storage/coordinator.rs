@@ -141,20 +141,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.blob_store.get(hash).await
     }
 
-    /// Get asset data by asset ID (for asset protocol handler)
-    ///
-    /// Returns (data, mime_type) for the asset.
-    pub async fn get_asset_data(&self, asset_id: &AssetId) -> Result<(Vec<u8>, String)> {
-        let stored_asset = self
-            .asset_store
-            .get(asset_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", asset_id))?;
-
-        let data = self.blob_store.get(&stored_asset.asset.blob_hash).await?;
-        Ok((data, stored_asset.asset.mime_type))
-    }
-
     /// Get access to the content block store
     pub fn content_block_store(&self) -> &Arc<S::Text> {
         &self.content_block_store
@@ -320,9 +306,14 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     mime_type,
                     filename,
                 } => {
-                    // Load asset data and create resolved ContentBlock
-                    let resolved_block = match self.get_asset(asset_id).await {
-                        Ok((data, _)) => {
+                    // Look up asset to get blob_hash and load data for LLM
+                    let stored_asset = self.asset_store.get(asset_id).await?
+                        .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", asset_id))?;
+                    let blob_hash = stored_asset.asset.blob_hash.clone();
+
+                    // Load blob data and create resolved ContentBlock for LLM
+                    let resolved_block = match self.blob_store.get(&blob_hash).await {
+                        Ok(data) => {
                             let base64_data = STANDARD.encode(&data);
                             if mime_type.starts_with("image/") {
                                 Some(ContentBlock::Image {
@@ -342,6 +333,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     };
                     ResolvedContent::Asset {
                         asset_id: asset_id.clone(),
+                        blob_hash,
                         mime_type: mime_type.clone(),
                         filename: filename.clone(),
                         resolved: resolved_block,

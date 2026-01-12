@@ -62,6 +62,8 @@ pub enum ResolvedContent {
     /// Asset reference with lazy LLM resolution
     Asset {
         asset_id: AssetId,
+        /// Blob hash for serving via asset protocol
+        blob_hash: String,
         mime_type: String,
         filename: Option<String>,
         /// Cached base64-encoded ContentBlock for LLM - populated on first use
@@ -91,11 +93,13 @@ impl ResolvedContent {
     /// Create an asset reference (unresolved)
     pub fn asset(
         asset_id: impl Into<AssetId>,
+        blob_hash: impl Into<String>,
         mime_type: impl Into<String>,
         filename: Option<String>,
     ) -> Self {
         Self::Asset {
             asset_id: asset_id.into(),
+            blob_hash: blob_hash.into(),
             mime_type: mime_type.into(),
             filename,
             resolved: None,
@@ -152,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_resolved_content_asset_unresolved() {
-        let content = ResolvedContent::asset("asset-123", "image/png", Some("photo.png".into()));
+        let content = ResolvedContent::asset("asset-123", "abc123hash", "image/png", Some("photo.png".into()));
         assert!(content.needs_resolution());
         assert!(content.cached_block().is_none());
     }

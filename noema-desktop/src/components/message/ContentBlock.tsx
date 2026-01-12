@@ -26,7 +26,7 @@ export function ContentBlock({ block, onDocumentClick }: ContentBlockProps) {
   if ("assetRef" in block) {
     return (
       <AssetBlock
-        assetId={block.assetRef.assetId}
+        url={block.assetRef.url}
         mimeType={block.assetRef.mimeType}
         filename={block.assetRef.filename}
       />
