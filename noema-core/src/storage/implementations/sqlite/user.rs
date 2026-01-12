@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
+use crate::storage::ids::UserId;
 use crate::storage::traits::UserStore;
 use crate::storage::types::UserInfo;
 
@@ -45,7 +46,7 @@ impl UserStore for SqliteStore {
                 params![DEFAULT_USER_EMAIL],
                 |row| {
                     Ok(UserInfo {
-                        id: row.get(0)?,
+                        id: UserId::from_string(row.get::<_, String>(0)?),
                         email: row.get(1)?,
                     })
                 },
@@ -57,11 +58,11 @@ impl UserStore for SqliteStore {
         }
 
         // Create default user
-        let id = Uuid::new_v4().to_string();
+        let id = UserId::from_string(Uuid::new_v4().to_string());
         let now = unix_timestamp();
         conn.execute(
             "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![&id, DEFAULT_USER_EMAIL, now, now],
+            params![id.as_str(), DEFAULT_USER_EMAIL, now, now],
         )?;
 
         Ok(UserInfo {
@@ -78,7 +79,7 @@ impl UserStore for SqliteStore {
                 params![email],
                 |row| {
                     Ok(UserInfo {
-                        id: row.get(0)?,
+                        id: UserId::from_string(row.get::<_, String>(0)?),
                         email: row.get(1)?,
                     })
                 },
@@ -95,12 +96,12 @@ impl UserStore for SqliteStore {
 
         // Create new user
         let conn = self.conn().lock().unwrap();
-        let id = Uuid::new_v4().to_string();
+        let id = UserId::from_string(Uuid::new_v4().to_string());
         let now = unix_timestamp();
 
         conn.execute(
             "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-            params![&id, email, now, now],
+            params![id.as_str(), email, now, now],
         )?;
 
         Ok(UserInfo {
@@ -115,7 +116,7 @@ impl UserStore for SqliteStore {
         let users = stmt
             .query_map([], |row| {
                 Ok(UserInfo {
-                    id: row.get(0)?,
+                    id: UserId::from_string(row.get::<_, String>(0)?),
                     email: row.get(1)?,
                 })
             })?

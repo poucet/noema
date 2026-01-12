@@ -245,7 +245,7 @@ async fn init_user(state: &AppState) -> Result<(), String> {
     };
 
     drop(store_guard);
-    *state.user_id.lock().await = noema_core::storage::ids::UserId::from_string(user.id);
+    *state.user_id.lock().await = user.id;
     Ok(())
 }
 
