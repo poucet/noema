@@ -7,7 +7,7 @@ use noema_core::storage::asset::AssetStore;
 use noema_core::storage::blob::{BlobStore, FsBlobStore};
 use noema_core::storage::coordinator::DynStorageCoordinator;
 use noema_core::storage::document::resolver::DocumentResolver;
-use noema_core::storage::session::ConversationManagement;
+use noema_core::storage::conversation::ConversationStore;
 use noema_core::storage::user::UserStore;
 use noema_core::{ChatEngine, McpRegistry};
 use noema_core::storage::session::{SqliteSession, SqliteStore};

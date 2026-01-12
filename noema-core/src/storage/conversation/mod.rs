@@ -9,16 +9,14 @@
 //!
 //! Two traits are provided:
 //! - `TurnStore`: Low-level operations on turns, spans, messages, and views
-//! - `ConversationManagement`: High-level conversation CRUD (list, delete, rename)
-
-use anyhow::Result;
-use async_trait::async_trait;
+//! - `ConversationStore`: High-level conversation CRUD (list, delete, rename)
 
 // Types
 pub mod types;
 
-// Trait definition
+// Trait definitions
 pub mod turn_store;
+pub mod conversation_store;
 
 // SQLite implementation
 #[cfg(feature = "sqlite")]
@@ -31,32 +29,6 @@ pub use types::{
     TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
 };
 
-// Re-export trait
+// Re-export traits
 pub use turn_store::TurnStore;
-
-// ============================================================================
-// ConversationManagement Trait
-// ============================================================================
-
-/// Trait for conversation CRUD operations
-///
-/// This trait provides high-level operations for managing conversations as a whole
-/// (listing, deleting, renaming) - separate from `TurnStore` which handles the
-/// internal Turn/Span/Message/View structure.
-#[async_trait]
-pub trait ConversationManagement: Send + Sync {
-    /// List all conversations for a user
-    async fn list_conversations(&self, user_id: &str) -> Result<Vec<ConversationInfo>>;
-
-    /// Delete a conversation and all its data
-    async fn delete_conversation(&self, conversation_id: &str) -> Result<()>;
-
-    /// Rename a conversation
-    async fn rename_conversation(&self, conversation_id: &str, name: Option<&str>) -> Result<()>;
-
-    /// Get privacy setting for a conversation
-    async fn get_conversation_private(&self, conversation_id: &str) -> Result<bool>;
-
-    /// Set privacy setting for a conversation
-    async fn set_conversation_private(&self, conversation_id: &str, is_private: bool) -> Result<()>;
-}
+pub use conversation_store::ConversationStore;

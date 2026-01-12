@@ -2,7 +2,7 @@
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
-use noema_core::storage::conversation::{ConversationManagement, TurnStore, ViewInfo};
+use noema_core::storage::conversation::{ConversationStore, TurnStore, ViewInfo};
 use noema_core::storage::conversation::types::{SpanRole, MessageRole};
 use noema_core::storage::document::resolver::DocumentResolver;
 use noema_core::storage::content::ResolvedContent;
