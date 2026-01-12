@@ -8,6 +8,7 @@
 use llm::{ContentBlock, ToolCall, ToolResult};
 
 use crate::storage::content::StoredContent;
+use crate::storage::ids::AssetId;
 use crate::storage::types::MessageRole;
 
 // ============================================================================
@@ -60,7 +61,7 @@ pub enum ResolvedContent {
 
     /// Asset reference with lazy LLM resolution
     Asset {
-        asset_id: String,
+        asset_id: AssetId,
         mime_type: String,
         filename: Option<String>,
         /// Cached base64-encoded ContentBlock for LLM - populated on first use
@@ -89,7 +90,7 @@ impl ResolvedContent {
 
     /// Create an asset reference (unresolved)
     pub fn asset(
-        asset_id: impl Into<String>,
+        asset_id: impl Into<AssetId>,
         mime_type: impl Into<String>,
         filename: Option<String>,
     ) -> Self {

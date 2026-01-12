@@ -9,7 +9,7 @@ use super::SqliteStore;
 use crate::storage::content::StoredContent;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{
-    ContentBlockId, ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId,
+    AssetId, ContentBlockId, ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId,
 };
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
@@ -158,7 +158,7 @@ fn load_message_content(
                         }
                     }
                     "asset_ref" => StoredContent::AssetRef {
-                        asset_id: asset_id?,
+                        asset_id: AssetId::from(asset_id?),
                         mime_type: mime_type?,
                         filename,
                     },
@@ -1013,7 +1013,7 @@ fn insert_message_content(
                         message_id.as_str(),
                         content_seq as i32,
                         "asset_ref",
-                        asset_id,
+                        asset_id.as_str(),
                         mime_type,
                         filename.as_deref()
                     ],

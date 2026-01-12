@@ -16,7 +16,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use llm::{ContentBlock, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 
-use crate::storage::ids::ContentBlockId;
+use crate::storage::ids::{AssetId, ContentBlockId};
 
 // ============================================================================
 // ContentResolver Trait
@@ -33,7 +33,7 @@ pub trait ContentResolver: Send + Sync {
     async fn get_text(&self, id: &ContentBlockId) -> Result<String>;
 
     /// Get binary asset data and mime type by asset ID
-    async fn get_asset(&self, id: &str) -> Result<(Vec<u8>, String)>;
+    async fn get_asset(&self, id: &AssetId) -> Result<(Vec<u8>, String)>;
 }
 
 // ============================================================================
@@ -56,7 +56,7 @@ pub enum StoredContent {
 
     /// Binary asset - images, audio, documents stored in blob storage
     AssetRef {
-        asset_id: String,
+        asset_id: AssetId,
         mime_type: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         filename: Option<String>,
@@ -100,7 +100,7 @@ impl StoredContent {
     }
 
     /// Get the asset_id if this is an asset reference
-    pub fn asset_id(&self) -> Option<&str> {
+    pub fn asset_id(&self) -> Option<&AssetId> {
         match self {
             StoredContent::AssetRef { asset_id, .. } => Some(asset_id),
             _ => None,
@@ -114,7 +114,7 @@ impl StoredContent {
 
     /// Create an asset reference
     pub fn asset_ref(
-        asset_id: impl Into<String>,
+        asset_id: impl Into<AssetId>,
         mime_type: impl Into<String>,
         filename: Option<String>,
     ) -> Self {
@@ -196,7 +196,7 @@ impl StoredContent {
                 mime_type,
                 filename,
             } => Ok(ResolvedContent::AssetRef {
-                asset_id: asset_id.clone(),
+                asset_id: asset_id.to_string(),
                 mime_type: mime_type.clone(),
                 filename: filename.clone(),
             }),
@@ -264,7 +264,7 @@ impl StoredPayload {
     }
 
     /// Get all asset IDs referenced in this payload
-    pub fn get_asset_refs(&self) -> Vec<&str> {
+    pub fn get_asset_refs(&self) -> Vec<&AssetId> {
         self.content.iter().filter_map(|c| c.asset_id()).collect()
     }
 
@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn test_asset_id() {
         let asset_ref = StoredContent::asset_ref("abc123", "image/png", Some("photo.png".into()));
-        assert_eq!(asset_ref.asset_id(), Some("abc123"));
+        assert_eq!(asset_ref.asset_id(), Some(&AssetId::from("abc123")));
 
         let text_ref = StoredContent::text_ref(ContentBlockId::from_string("xyz"));
         assert_eq!(text_ref.asset_id(), None);
