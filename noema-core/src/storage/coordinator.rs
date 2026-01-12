@@ -15,32 +15,33 @@ use llm::ContentBlock;
 use std::sync::Arc;
 
 use crate::storage::content::{ContentResolver, StoredContent};
-use crate::storage::ids::{AssetId, ContentBlockId};
-use crate::storage::traits::{AssetStore, BlobStore, ContentBlockStore};
-use crate::storage::types::{Asset, ContentBlock as ContentBlockData, ContentOrigin, OriginKind};
+use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, ViewId};
+use crate::storage::session::{ResolvedContent, ResolvedMessage};
+use crate::storage::traits::{AssetStore, BlobStore, ContentBlockStore, TurnStore};
+use crate::storage::types::{
+    Asset, ContentBlock as ContentBlockData, ContentOrigin, MessageInfo, MessageRole, OriginKind,
+    TurnWithContent,
+};
 
-/// Type-erased storage coordinator using trait objects.
+/// Coordinates storage across all store types.
 ///
-/// This version can be passed around without generic parameters, making it
-/// easier to integrate into existing code that doesn't want to be generic
-/// over storage implementations.
-pub struct DynStorageCoordinator {
-    blob_store: Arc<dyn BlobStore>,
-    asset_store: Arc<dyn AssetStore>,
-    content_block_store: Arc<dyn ContentBlockStore>,
+/// This generic version is useful when you have concrete types and want
+/// to avoid dynamic dispatch overhead.
+pub struct StorageCoordinator<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> {
+    blob_store: Arc<B>,
+    asset_store: Arc<A>,
+    content_block_store: Arc<C>,
+    turn_store: Arc<T>,
 }
 
-impl DynStorageCoordinator {
-    /// Create a new storage coordinator with trait objects
-    pub fn new(
-        blob_store: Arc<dyn BlobStore>,
-        asset_store: Arc<dyn AssetStore>,
-        content_block_store: Arc<dyn ContentBlockStore>,
-    ) -> Self {
+impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> StorageCoordinator<B, A, C, T> {
+    /// Create a new storage coordinator
+    pub fn new(blob_store: Arc<B>, asset_store: Arc<A>, content_block_store: Arc<C>, turn_store: Arc<T>) -> Self {
         Self {
             blob_store,
             asset_store,
             content_block_store,
+            turn_store,
         }
     }
 
@@ -72,7 +73,6 @@ impl DynStorageCoordinator {
     ) -> Result<StoredContent> {
         match block {
             ContentBlock::Text { text } => {
-                // Store text in content_blocks
                 let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
                 let content_block = ContentBlockData::plain(&text).with_origin(content_origin);
                 let result = self.content_block_store.store(content_block).await?;
@@ -95,161 +95,150 @@ impl DynStorageCoordinator {
     /// Decode base64 data, store in blob storage, register in asset storage,
     /// and return the asset ID.
     async fn store_base64_asset(&self, base64_data: &str, mime_type: &str) -> Result<AssetId> {
-        // Decode base64
         let bytes = STANDARD.decode(base64_data)?;
-        let size = bytes.len() as i64;
+        self.store_asset(&bytes, mime_type, None).await
+    }
 
-        // Store in blob storage (returns hash)
-        let stored_blob = self.blob_store.store(&bytes).await?;
+    /// Store raw bytes as an asset with optional filename.
+    ///
+    /// Stores the data in blob storage and registers metadata in the asset store.
+    /// Returns the asset ID for referencing.
+    pub async fn store_asset(
+        &self,
+        data: &[u8],
+        mime_type: &str,
+        filename: Option<String>,
+    ) -> Result<AssetId> {
+        let stored_blob = self.blob_store.store(data).await?;
 
-        // Register metadata in asset storage with blob_hash reference
-        let asset = Asset::new(&stored_blob.hash, mime_type, size);
+        let mut asset = Asset::new(&stored_blob.hash, mime_type, data.len() as i64);
+        if let Some(name) = filename {
+            asset = asset.with_filename(name);
+        }
+
         self.asset_store.create_asset(asset).await
     }
 
-    /// Get access to the blob store for asset resolution
-    pub fn blob_store(&self) -> Arc<dyn BlobStore> {
-        Arc::clone(&self.blob_store)
-    }
-
-    /// Get access to the asset store
-    pub fn asset_store(&self) -> Arc<dyn AssetStore> {
-        Arc::clone(&self.asset_store)
-    }
-
-    /// Get access to the content block store
-    pub fn content_block_store(&self) -> Arc<dyn ContentBlockStore> {
-        Arc::clone(&self.content_block_store)
-    }
-}
-
-/// Implement ContentResolver to allow resolving StoredContent back to ContentBlock
-#[async_trait]
-impl ContentResolver for DynStorageCoordinator {
-    async fn get_text(&self, id: &ContentBlockId) -> Result<String> {
-        self.content_block_store
-            .get_text(id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Content block not found: {}", id))
-    }
-
-    async fn get_asset(&self, id: &str) -> Result<(Vec<u8>, String)> {
-        // Get asset metadata for mime type and blob_hash
-        let asset_id = AssetId::from_string(id.to_string());
-        let stored_asset = self
-            .asset_store
-            .get(&asset_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", id))?;
-
-        // Get blob data using the blob_hash from the asset
-        let data = self.blob_store.get(&stored_asset.asset.blob_hash).await?;
-
-        Ok((data, stored_asset.asset.mime_type))
-    }
-}
-
-/// Coordinates storage across content blocks, blob, and asset stores.
-///
-/// This generic version is useful when you have concrete types and want
-/// to avoid dynamic dispatch overhead.
-pub struct StorageCoordinator<B: BlobStore, A: AssetStore, C: ContentBlockStore> {
-    blob_store: Arc<B>,
-    asset_store: Arc<A>,
-    content_block_store: Arc<C>,
-}
-
-impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> StorageCoordinator<B, A, C> {
-    /// Create a new storage coordinator
-    pub fn new(blob_store: Arc<B>, asset_store: Arc<A>, content_block_store: Arc<C>) -> Self {
-        Self {
-            blob_store,
-            asset_store,
-            content_block_store,
-        }
-    }
-
-    /// Convert LLM ContentBlocks to StoredContent refs
-    ///
-    /// - Text is stored in content_blocks and converted to TextRef
-    /// - Inline images/audio are stored in blob/assets and converted to AssetRef
-    /// - DocumentRef, ToolCall, ToolResult pass through
-    pub async fn store_content(
-        &self,
-        blocks: Vec<ContentBlock>,
-        origin: OriginKind,
-    ) -> Result<Vec<StoredContent>> {
-        let mut stored = Vec::with_capacity(blocks.len());
-
-        for block in blocks {
-            let content = self.store_content_block(block, origin).await?;
-            stored.push(content);
-        }
-
-        Ok(stored)
-    }
-
-    /// Store a single ContentBlock and return its StoredContent reference
-    async fn store_content_block(
-        &self,
-        block: ContentBlock,
-        origin: OriginKind,
-    ) -> Result<StoredContent> {
-        match block {
-            ContentBlock::Text { text } => {
-                let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
-                let content_block = ContentBlockData::plain(&text).with_origin(content_origin);
-                let result = self.content_block_store.store(content_block).await?;
-                Ok(StoredContent::text_ref(result.id))
-            }
-            ContentBlock::Image { data, mime_type } => {
-                let asset_id = self.store_base64_asset(&data, &mime_type).await?;
-                Ok(StoredContent::asset_ref(asset_id, mime_type, None))
-            }
-            ContentBlock::Audio { data, mime_type } => {
-                let asset_id = self.store_base64_asset(&data, &mime_type).await?;
-                Ok(StoredContent::asset_ref(asset_id, mime_type, None))
-            }
-            ContentBlock::DocumentRef { id, .. } => Ok(StoredContent::document_ref(id)),
-            ContentBlock::ToolCall(call) => Ok(StoredContent::ToolCall(call)),
-            ContentBlock::ToolResult(result) => Ok(StoredContent::ToolResult(result)),
-        }
-    }
-
-    /// Decode base64 data, store in blob storage, register in asset storage,
-    /// and return the asset ID.
-    async fn store_base64_asset(&self, base64_data: &str, mime_type: &str) -> Result<String> {
-        let bytes = STANDARD.decode(base64_data)?;
-        let size = bytes.len() as i64;
-
-        let stored_blob = self.blob_store.store(&bytes).await?;
-
-        let asset = Asset::new(&stored_blob.hash, mime_type, size);
-        let asset_id = self.asset_store.create_asset(asset).await?;
-
-        Ok(asset_id.into())
-    }
-
-    /// Get access to the blob store for asset resolution
-    pub fn blob_store(&self) -> &Arc<B> {
-        &self.blob_store
-    }
-
-    /// Get access to the asset store
-    pub fn asset_store(&self) -> &Arc<A> {
-        &self.asset_store
+    /// Get blob data by hash (for asset protocol handler)
+    pub async fn get_blob(&self, hash: &str) -> Result<Vec<u8>> {
+        self.blob_store.get(hash).await
     }
 
     /// Get access to the content block store
     pub fn content_block_store(&self) -> &Arc<C> {
         &self.content_block_store
     }
+
+    /// Get access to the turn store
+    pub fn turn_store(&self) -> &Arc<T> {
+        &self.turn_store
+    }
+
+    /// Open a session for a conversation, resolving or creating the main view.
+    ///
+    /// This method handles the multi-store coordination of:
+    /// 1. Getting or creating the main view for the conversation
+    /// 2. Loading the view path (turns with content)
+    /// 3. Resolving stored content to resolved messages
+    ///
+    /// Returns (view_id, resolved_messages) for Session construction.
+    pub async fn open_session(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<(ViewId, Vec<ResolvedMessage>)> {
+        // Get or create main view
+        let view_id = match self.turn_store.get_main_view(conversation_id).await? {
+            Some(v) => v.id,
+            None => {
+                self.turn_store
+                    .create_view(conversation_id, Some("main"), true)
+                    .await?
+                    .id
+            }
+        };
+
+        // Load view path and resolve content
+        let path = self.turn_store.get_view_path(&view_id).await?;
+        let resolved_cache = self.resolve_path(&path).await?;
+
+        Ok((view_id, resolved_cache))
+    }
+
+    /// Resolve a view path (turns with content) to resolved messages.
+    async fn resolve_path(&self, path: &[TurnWithContent]) -> Result<Vec<ResolvedMessage>> {
+        let mut messages = Vec::new();
+
+        for turn in path {
+            for msg in &turn.messages {
+                let content_refs: Vec<StoredContent> =
+                    msg.content.iter().map(|c| c.content.clone()).collect();
+
+                let resolved = self.resolve_stored_content(&content_refs).await?;
+                messages.push(ResolvedMessage::new(msg.message.role, resolved));
+            }
+        }
+
+        Ok(messages)
+    }
+
+    /// Resolve stored content references to resolved content.
+    pub async fn resolve_stored_content(
+        &self,
+        content: &[StoredContent],
+    ) -> Result<Vec<ResolvedContent>> {
+        let mut resolved = Vec::with_capacity(content.len());
+
+        for item in content {
+            let r = match item {
+                StoredContent::TextRef { content_block_id } => {
+                    let text = self.content_block_store.require_text(content_block_id).await?;
+                    ResolvedContent::text(text)
+                }
+                StoredContent::AssetRef {
+                    asset_id,
+                    mime_type,
+                    filename,
+                } => ResolvedContent::asset(asset_id.clone(), mime_type, filename.clone()),
+                StoredContent::DocumentRef { document_id } => {
+                    ResolvedContent::document(document_id)
+                }
+                StoredContent::ToolCall(call) => ResolvedContent::tool_call(call.clone()),
+                StoredContent::ToolResult(result) => ResolvedContent::tool_result(result.clone()),
+            };
+            resolved.push(r);
+        }
+
+        Ok(resolved)
+    }
+
+    /// Store a message and add it to a span, returning the resolved content.
+    ///
+    /// This coordinates storing content blocks, adding the message to the turn store,
+    /// and resolving the content for caching.
+    pub async fn store_message(
+        &self,
+        span_id: &SpanId,
+        role: MessageRole,
+        content: Vec<ContentBlock>,
+        origin: OriginKind,
+    ) -> Result<(MessageInfo, Vec<ResolvedContent>)> {
+        // Store content blocks
+        let stored = self.store_content(content, origin).await?;
+
+        // Add message to turn store
+        let message_info = self.turn_store.add_message(span_id, role, &stored).await?;
+
+        // Resolve for caching
+        let resolved = self.resolve_stored_content(&stored).await?;
+
+        Ok((message_info, resolved))
+    }
 }
 
 /// Implement ContentResolver for the generic coordinator
 #[async_trait]
-impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> ContentResolver
-    for StorageCoordinator<B, A, C>
+impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> ContentResolver
+    for StorageCoordinator<B, A, C, T>
 {
     async fn get_text(&self, id: &ContentBlockId) -> Result<String> {
         self.content_block_store
@@ -258,11 +247,10 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> ContentResolver
             .ok_or_else(|| anyhow::anyhow!("Content block not found: {}", id))
     }
 
-    async fn get_asset(&self, id: &str) -> Result<(Vec<u8>, String)> {
-        let asset_id = AssetId::from_string(id.to_string());
+    async fn get_asset(&self, id: &AssetId) -> Result<(Vec<u8>, String)> {
         let stored_asset = self
             .asset_store
-            .get(&asset_id)
+            .get(id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", id))?;
 
@@ -276,10 +264,88 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> ContentResolver
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::types::{StoredAsset, StoredBlob, StoreResult, StoredContentBlock};
+    use crate::storage::content::StoredContent;
+    use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, ViewId};
+    use crate::storage::types::{
+        MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, StoredAsset,
+        StoredBlob, StoreResult, StoredContentBlock, TurnInfo, TurnWithContent, ViewInfo,
+    };
     use std::collections::HashMap;
     use std::sync::Mutex;
     use uuid::Uuid;
+
+    // Mock turn store (not used in these tests, just needs to exist)
+    struct MockTurnStore;
+
+    #[async_trait]
+    impl TurnStore for MockTurnStore {
+        async fn add_turn(&self, _: &ConversationId, _: SpanRole) -> Result<TurnInfo> {
+            unimplemented!()
+        }
+        async fn get_turns(&self, _: &ConversationId) -> Result<Vec<TurnInfo>> {
+            unimplemented!()
+        }
+        async fn get_turn(&self, _: &TurnId) -> Result<Option<TurnInfo>> {
+            unimplemented!()
+        }
+        async fn add_span(&self, _: &TurnId, _: Option<&str>) -> Result<SpanInfo> {
+            unimplemented!()
+        }
+        async fn get_spans(&self, _: &TurnId) -> Result<Vec<SpanInfo>> {
+            unimplemented!()
+        }
+        async fn get_span(&self, _: &SpanId) -> Result<Option<SpanInfo>> {
+            unimplemented!()
+        }
+        async fn add_message(&self, _: &SpanId, _: MessageRole, _: &[StoredContent]) -> Result<MessageInfo> {
+            unimplemented!()
+        }
+        async fn get_messages(&self, _: &SpanId) -> Result<Vec<MessageInfo>> {
+            unimplemented!()
+        }
+        async fn get_messages_with_content(&self, _: &SpanId) -> Result<Vec<MessageWithContent>> {
+            unimplemented!()
+        }
+        async fn get_message(&self, _: &MessageId) -> Result<Option<MessageInfo>> {
+            unimplemented!()
+        }
+        async fn create_view(&self, _: &ConversationId, _: Option<&str>, _: bool) -> Result<ViewInfo> {
+            unimplemented!()
+        }
+        async fn get_main_view(&self, _: &ConversationId) -> Result<Option<ViewInfo>> {
+            unimplemented!()
+        }
+        async fn get_views(&self, _: &ConversationId) -> Result<Vec<ViewInfo>> {
+            unimplemented!()
+        }
+        async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_selected_span(&self, _: &ViewId, _: &TurnId) -> Result<Option<SpanId>> {
+            unimplemented!()
+        }
+        async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> {
+            unimplemented!()
+        }
+        async fn fork_view(&self, _: &ViewId, _: &TurnId, _: Option<&str>) -> Result<ViewInfo> {
+            unimplemented!()
+        }
+        async fn fork_view_with_selections(&self, _: &ViewId, _: &TurnId, _: Option<&str>, _: &[(TurnId, SpanId)]) -> Result<ViewInfo> {
+            unimplemented!()
+        }
+        async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> {
+            unimplemented!()
+        }
+        async fn edit_turn(&self, _: &ViewId, _: &TurnId, _: Vec<(MessageRole, Vec<StoredContent>)>, _: Option<&str>, _: bool, _: Option<&str>) -> Result<(SpanInfo, Option<ViewInfo>)> {
+            unimplemented!()
+        }
+        async fn add_user_turn(&self, _: &ConversationId, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
+            unimplemented!()
+        }
+        async fn add_assistant_turn(&self, _: &ConversationId, _: &str, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
+            unimplemented!()
+        }
+    }
 
     // Mock blob store for testing
     struct MockBlobStore {
@@ -436,8 +502,9 @@ mod tests {
         let blob_store = Arc::new(MockBlobStore::new());
         let asset_store = Arc::new(MockAssetStore::new());
         let content_block_store = Arc::new(MockContentBlockStore::new());
+        let turn_store = Arc::new(MockTurnStore);
         let coordinator =
-            StorageCoordinator::new(blob_store, asset_store, content_block_store.clone());
+            StorageCoordinator::new(blob_store, asset_store, content_block_store.clone(), turn_store);
 
         let blocks = vec![ContentBlock::Text {
             text: "Hello world".to_string(),
@@ -464,10 +531,12 @@ mod tests {
         let blob_store = Arc::new(MockBlobStore::new());
         let asset_store = Arc::new(MockAssetStore::new());
         let content_block_store = Arc::new(MockContentBlockStore::new());
+        let turn_store = Arc::new(MockTurnStore);
         let coordinator = StorageCoordinator::new(
             blob_store.clone(),
             asset_store.clone(),
             content_block_store,
+            turn_store,
         );
 
         let image_data = STANDARD.encode(b"fake image bytes");
@@ -506,10 +575,12 @@ mod tests {
         let blob_store = Arc::new(MockBlobStore::new());
         let asset_store = Arc::new(MockAssetStore::new());
         let content_block_store = Arc::new(MockContentBlockStore::new());
+        let turn_store = Arc::new(MockTurnStore);
         let coordinator = StorageCoordinator::new(
             blob_store,
             asset_store,
             content_block_store.clone(),
+            turn_store,
         );
 
         // Store some text
@@ -537,10 +608,12 @@ mod tests {
         let blob_store = Arc::new(MockBlobStore::new());
         let asset_store = Arc::new(MockAssetStore::new());
         let content_block_store = Arc::new(MockContentBlockStore::new());
+        let turn_store = Arc::new(MockTurnStore);
         let coordinator = StorageCoordinator::new(
             blob_store.clone(),
             asset_store.clone(),
             content_block_store,
+            turn_store,
         );
 
         let original_data = b"fake image bytes";
@@ -573,7 +646,8 @@ mod tests {
         let blob_store = Arc::new(MockBlobStore::new());
         let asset_store = Arc::new(MockAssetStore::new());
         let content_block_store = Arc::new(MockContentBlockStore::new());
-        let coordinator = StorageCoordinator::new(blob_store, asset_store, content_block_store);
+        let turn_store = Arc::new(MockTurnStore);
+        let coordinator = StorageCoordinator::new(blob_store, asset_store, content_block_store, turn_store);
 
         let tool_call = llm::ToolCall {
             id: "call-1".to_string(),

@@ -1,6 +1,6 @@
 //! DB-agnostic Session implementation
 //!
-//! Session<T, C> provides:
+//! Session<T, C, B, A> provides:
 //! - Runtime state management (conversation_id, view_id, cache)
 //! - Pending message buffer for uncommitted changes
 //! - Lazy resolution of assets/documents for LLM
@@ -12,10 +12,10 @@ use llm::{ChatMessage, ChatPayload, ContentBlock};
 use std::sync::Arc;
 
 use crate::context::{ConversationContext, MessagesGuard};
-use crate::storage::content::StoredContent;
+use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, ViewId};
-use crate::storage::traits::{ContentBlockStore, TurnStore};
-use crate::storage::types::{ContentBlock as ContentBlockData, ContentOrigin, MessageRole, OriginKind, SpanRole, TurnWithContent};
+use crate::storage::traits::{AssetStore, BlobStore, ContentBlockStore, TurnStore};
+use crate::storage::types::{MessageRole, OriginKind, SpanRole};
 
 use super::types::{ResolvedContent, ResolvedMessage};
 
@@ -25,13 +25,18 @@ use super::types::{ResolvedContent, ResolvedMessage};
 
 /// Runtime session state - DB-agnostic
 ///
-/// Generic over TurnStore (T) and ContentBlockStore (C) implementations.
-/// These can be the same type (e.g., SqliteStore) or different backends.
+/// Generic over:
+/// - T: TurnStore implementation
+/// - C: ContentBlockStore implementation
+/// - B: BlobStore implementation (for binary asset storage)
+/// - A: AssetStore implementation (for asset metadata)
+///
+/// T and C can be the same type (e.g., SqliteStore).
 /// Session is runtime state: conversation context, current view, cached resolved messages.
 /// Implements ConversationContext for direct use with agents.
-pub struct Session<T: TurnStore, C: ContentBlockStore> {
-    turn_store: Arc<T>,
-    content_store: Arc<C>,
+pub struct Session<T: TurnStore, C: ContentBlockStore, B: BlobStore, A: AssetStore> {
+    /// Storage coordinator - provides access to all stores
+    coordinator: Arc<StorageCoordinator<B, A, C, T>>,
     conversation_id: ConversationId,
     view_id: ViewId,
     /// Cached resolved messages (text resolved, assets/docs cached lazily)
@@ -44,24 +49,25 @@ pub struct Session<T: TurnStore, C: ContentBlockStore> {
     pending: Vec<ChatMessage>,
 }
 
-impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Session<T, C> {
+impl<T, C, B, A> Session<T, C, B, A>
+where
+    T: TurnStore + Send + Sync,
+    C: ContentBlockStore + Send + Sync,
+    B: BlobStore + Send + Sync,
+    A: AssetStore + Send + Sync,
+{
     /// Open a session for an existing conversation
+    ///
+    /// Delegates view resolution to the StorageCoordinator which handles
+    /// the multi-store coordination of getting/creating views and resolving content.
     pub async fn open(
-        turn_store: Arc<T>,
-        content_store: Arc<C>,
+        coordinator: Arc<StorageCoordinator<B, A, C, T>>,
         conversation_id: ConversationId,
     ) -> Result<Self> {
-        let view_id = match turn_store.get_main_view(&conversation_id).await? {
-            Some(v) => v.id,
-            None => turn_store.create_view(&conversation_id, Some("main"), true).await?.id,
-        };
-
-        let path = turn_store.get_view_path(&view_id).await?;
-        let resolved_cache = resolve_path(&path, content_store.as_ref()).await?;
+        let (view_id, resolved_cache) = coordinator.open_session(&conversation_id).await?;
 
         Ok(Self {
-            turn_store,
-            content_store,
+            coordinator,
             conversation_id,
             view_id,
             resolved_cache,
@@ -73,14 +79,12 @@ impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Session<T, 
 
     /// Create a new session for a new conversation (not yet persisted)
     pub fn new(
-        turn_store: Arc<T>,
-        content_store: Arc<C>,
+        coordinator: Arc<StorageCoordinator<B, A, C, T>>,
         conversation_id: ConversationId,
         view_id: ViewId,
     ) -> Self {
         Self {
-            turn_store,
-            content_store,
+            coordinator,
             conversation_id,
             view_id,
             resolved_cache: Vec::new(),
@@ -98,12 +102,19 @@ impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Session<T, 
         &self.view_id
     }
 
-    pub fn turn_store(&self) -> &Arc<T> {
-        &self.turn_store
+    /// Get access to the storage coordinator
+    pub fn coordinator(&self) -> &Arc<StorageCoordinator<B, A, C, T>> {
+        &self.coordinator
     }
 
+    /// Get access to the turn store (via coordinator)
+    pub fn turn_store(&self) -> &Arc<T> {
+        self.coordinator.turn_store()
+    }
+
+    /// Get access to the content store (via coordinator)
     pub fn content_store(&self) -> &Arc<C> {
-        &self.content_store
+        self.coordinator.content_block_store()
     }
 
     /// Get committed messages for display - returns cached ResolvedContent
@@ -130,8 +141,8 @@ impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Session<T, 
 
     /// Commit pending messages to storage
     ///
-    /// Converts ChatMessages to StoredContent, stores text in content_store,
-    /// creates turns/spans/messages in turn_store, and updates cache.
+    /// Groups messages by role, creates turns/spans, and delegates storage
+    /// coordination to the StorageCoordinator.
     pub async fn commit(&mut self, model_id: Option<&str>) -> Result<()> {
         if self.pending.is_empty() {
             return Ok(()); // Nothing to commit
@@ -147,6 +158,7 @@ impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Session<T, 
 
         for msg in messages {
             let msg_role = llm_role_to_message_role(msg.role);
+            let origin = llm_role_to_origin(msg.role);
             let span_role = match msg_role {
                 MessageRole::User | MessageRole::System => SpanRole::User,
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
@@ -154,71 +166,26 @@ impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Session<T, 
 
             // Create new turn if role changed
             if current_role != Some(span_role) {
-                let turn = self.turn_store.add_turn(&self.conversation_id, span_role).await?;
-                let span = self.turn_store.add_span(&turn.id, model_id).await?;
-                self.turn_store.select_span(&self.view_id, &turn.id, &span.id).await?;
+                let turn_store = self.turn_store();
+                let turn = turn_store.add_turn(&self.conversation_id, span_role).await?;
+                let span = turn_store.add_span(&turn.id, model_id).await?;
+                turn_store.select_span(&self.view_id, &turn.id, &span.id).await?;
                 current_span = Some(span.id);
                 current_role = Some(span_role);
             }
 
             let span_id = current_span.as_ref().unwrap();
 
-            // Convert ChatMessage content to StoredContent
-            let stored = self.store_chat_content(&msg).await?;
+            // Delegate storage coordination to the coordinator
+            let (_msg_info, resolved) = self.coordinator
+                .store_message(span_id, msg_role, msg.payload.content, origin)
+                .await?;
 
-            // Add message to turn store
-            self.turn_store.add_message(span_id, msg_role, &stored).await?;
-
-            // Resolve and cache for display
-            let resolved = resolve_stored_content(&stored, self.content_store.as_ref()).await?;
             self.resolved_cache.push(ResolvedMessage::new(msg_role, resolved));
         }
 
         self.llm_cache_valid = false;
         Ok(())
-    }
-
-    /// Convert ChatMessage content blocks to StoredContent
-    async fn store_chat_content(&self, message: &ChatMessage) -> Result<Vec<StoredContent>> {
-        let mut stored = Vec::with_capacity(message.payload.content.len());
-        let origin = match message.role {
-            llm::Role::User => OriginKind::User,
-            llm::Role::Assistant => OriginKind::Assistant,
-            llm::Role::System => OriginKind::System,
-        };
-
-        for block in &message.payload.content {
-            let s = match block {
-                ContentBlock::Text { text } => {
-                    // Store text in content_store
-                    let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
-                    let content_block = ContentBlockData::plain(text).with_origin(content_origin);
-                    let result = self.content_store.store(content_block).await?;
-                    StoredContent::text_ref(result.id)
-                }
-                ContentBlock::Image { data, mime_type } => {
-                    // For now, store inline (TODO: use blob store)
-                    StoredContent::AssetRef {
-                        asset_id: format!("inline:{}", &data[..20.min(data.len())]),
-                        mime_type: mime_type.clone(),
-                        filename: None,
-                    }
-                }
-                ContentBlock::Audio { data, mime_type } => {
-                    StoredContent::AssetRef {
-                        asset_id: format!("inline:{}", &data[..20.min(data.len())]),
-                        mime_type: mime_type.clone(),
-                        filename: None,
-                    }
-                }
-                ContentBlock::DocumentRef { id, .. } => StoredContent::document_ref(id),
-                ContentBlock::ToolCall(call) => StoredContent::ToolCall(call.clone()),
-                ContentBlock::ToolResult(result) => StoredContent::ToolResult(result.clone()),
-            };
-            stored.push(s);
-        }
-
-        Ok(stored)
     }
 }
 
@@ -227,7 +194,13 @@ impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Session<T, 
 // ============================================================================
 
 #[async_trait]
-impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> ConversationContext for Session<T, C> {
+impl<T, C, B, A> ConversationContext for Session<T, C, B, A>
+where
+    T: TurnStore + Send + Sync,
+    C: ContentBlockStore + Send + Sync,
+    B: BlobStore + Send + Sync,
+    A: AssetStore + Send + Sync,
+{
     async fn messages(&mut self) -> Result<MessagesGuard<'_>> {
         // Rebuild llm_cache if invalid or pending messages changed
         let needs_rebuild = !self.llm_cache_valid ||
@@ -274,59 +247,8 @@ impl<T: TurnStore + Send + Sync, C: ContentBlockStore + Send + Sync> Conversatio
 }
 
 // ============================================================================
-// Resolution helpers
+// Conversion helpers
 // ============================================================================
-
-async fn resolve_path<R: ContentBlockStore>(
-    path: &[TurnWithContent],
-    resolver: &R,
-) -> Result<Vec<ResolvedMessage>> {
-    let mut messages = Vec::new();
-
-    for turn in path {
-        for msg in &turn.messages {
-            let content_refs: Vec<StoredContent> = msg
-                .content
-                .iter()
-                .map(|c| c.content.clone())
-                .collect();
-
-            let resolved = resolve_stored_content(&content_refs, resolver).await?;
-            messages.push(ResolvedMessage::new(msg.message.role, resolved));
-        }
-    }
-
-    Ok(messages)
-}
-
-async fn resolve_stored_content<R: ContentBlockStore>(
-    content: &[StoredContent],
-    resolver: &R,
-) -> Result<Vec<ResolvedContent>> {
-    let mut resolved = Vec::with_capacity(content.len());
-
-    for item in content {
-        let r = match item {
-            StoredContent::TextRef { content_block_id } => {
-                let text = resolver.require_text(content_block_id).await?;
-                ResolvedContent::text(text)
-            }
-            StoredContent::AssetRef {
-                asset_id,
-                mime_type,
-                filename,
-            } => ResolvedContent::asset(asset_id, mime_type, filename.clone()),
-            StoredContent::DocumentRef { document_id } => {
-                ResolvedContent::document(document_id)
-            }
-            StoredContent::ToolCall(call) => ResolvedContent::tool_call(call.clone()),
-            StoredContent::ToolResult(result) => ResolvedContent::tool_result(result.clone()),
-        };
-        resolved.push(r);
-    }
-
-    Ok(resolved)
-}
 
 /// Convert ResolvedMessage to ContentBlocks (sync, without asset resolution)
 fn resolved_message_to_blocks(msg: &ResolvedMessage) -> Vec<ContentBlock> {
@@ -363,6 +285,14 @@ fn llm_role_to_message_role(role: llm::Role) -> MessageRole {
         llm::Role::User => MessageRole::User,
         llm::Role::Assistant => MessageRole::Assistant,
         llm::Role::System => MessageRole::System,
+    }
+}
+
+fn llm_role_to_origin(role: llm::Role) -> OriginKind {
+    match role {
+        llm::Role::User => OriginKind::User,
+        llm::Role::Assistant => OriginKind::Assistant,
+        llm::Role::System => OriginKind::System,
     }
 }
 

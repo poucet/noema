@@ -348,9 +348,16 @@ pub async fn switch_conversation(
             .ok_or("App not initialized")?
             .clone()
     };
+    let coordinator = {
+        let coord_guard = state.coordinator.lock().await;
+        coord_guard
+            .as_ref()
+            .ok_or("Coordinator not initialized")?
+            .clone()
+    };
 
     // Open session for the conversation
-    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conversation_id.clone())
+    let session = Session::open(coordinator, conversation_id.clone())
         .await
         .map_err(|e| format!("Failed to open conversation: {}", e))?;
 
@@ -390,6 +397,13 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
             .ok_or("App not initialized")?
             .clone()
     };
+    let coordinator = {
+        let coord_guard = state.coordinator.lock().await;
+        coord_guard
+            .as_ref()
+            .ok_or("Coordinator not initialized")?
+            .clone()
+    };
     let user_id = state.user_id.lock().await.clone();
 
     // Create a new conversation
@@ -399,7 +413,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
     // Open session for the new conversation
-    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conv_id.clone())
+    let session = Session::open(coordinator, conv_id.clone())
         .await
         .map_err(|e| format!("Failed to open new conversation: {}", e))?;
 
@@ -609,7 +623,6 @@ pub async fn get_span_messages(
         .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
 
-    let span_id_str = span_id.into();
     // TODO: Need to resolve content through coordinator
     // For now, return basic messages without resolved content
     Ok(messages
@@ -622,8 +635,8 @@ pub async fn get_span_messages(
                 MessageRole::Tool => Role::Assistant, // Tool results rendered like assistant
             },
             content: vec![], // Content needs resolution via coordinator
-            span_set_id: None,
-            span_id: Some(span_id_str.clone()),
+            turn_id: None,
+            span_id: Some(span_id.clone()),
             alternates: None,
         })
         .collect())

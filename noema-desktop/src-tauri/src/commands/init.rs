@@ -4,11 +4,9 @@ use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::{
-    AssetStore, BlobStore, ContentBlockStore, ConversationStore, DocumentResolver, FsBlobStore,
-    Session, SqliteStore, UserStore,
+    ConversationStore, DocumentResolver, FsBlobStore, Session, SqliteStore, UserStore,
 };
-use noema_core::storage::coordinator::DynStorageCoordinator;
-use noema_core::storage::ids::ConversationId;
+use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::{ChatEngine, McpRegistry};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -17,6 +15,11 @@ use crate::commands::chat::start_engine_event_loop;
 use crate::gdocs_server::{self, GDocsServerState};
 use crate::logging::log_message;
 use crate::state::AppState;
+
+/// Type alias for our concrete coordinator type
+pub type AppCoordinator = StorageCoordinator<FsBlobStore, SqliteStore, SqliteStore, SqliteStore>;
+/// Type alias for our concrete session type
+pub type AppSession = Session<SqliteStore, SqliteStore, FsBlobStore, SqliteStore>;
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {
@@ -171,32 +174,25 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     std::fs::create_dir_all(&blob_dir)
         .map_err(|e| format!("Failed to create blob storage dir: {}", e))?;
 
-    // Create blob store first (needed for coordinator)
-    let blob_store = Arc::new(FsBlobStore::new(blob_dir)) as Arc<dyn BlobStore>;
+    // Create blob store
+    let blob_store = Arc::new(FsBlobStore::new(blob_dir));
 
     // Create the SQL store
     let store = SqliteStore::open(&db_path)
         .map_err(|e| format!("Failed to open database: {}", e))?;
-
-    // Wrap store in Arc so we can share it
     let store = Arc::new(store);
 
-    // Create storage coordinator for automatic asset externalization
-    // The coordinator uses the blob store for binary data and the SQL store for asset metadata
-    // Note: SqliteStore implements AssetStore and ContentBlockStore
-    let asset_store = Arc::clone(&store) as Arc<dyn AssetStore>;
-    let content_block_store = Arc::clone(&store) as Arc<dyn ContentBlockStore>;
-    let coordinator = Arc::new(DynStorageCoordinator::new(
-        blob_store.clone(),
-        asset_store,
-        content_block_store,
+    // Create storage coordinator with all stores
+    // SqliteStore implements AssetStore, ContentBlockStore, and TurnStore
+    let coordinator = Arc::new(StorageCoordinator::new(
+        Arc::clone(&blob_store),
+        Arc::clone(&store),
+        Arc::clone(&store),
+        Arc::clone(&store),
     ));
 
-    // Set the coordinator on the store (uses interior mutability)
-    store.set_coordinator(coordinator);
-
     *state.store.lock().await = Some(store);
-    *state.blob_store.lock().await = Some(blob_store);
+    *state.coordinator.lock().await = Some(coordinator);
     Ok(())
 }
 
@@ -249,12 +245,19 @@ async fn init_user(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-async fn init_session(state: &AppState) -> Result<(Session<SqliteStore, SqliteStore>, Arc<SqliteStore>), String> {
+async fn init_session(state: &AppState) -> Result<(AppSession, Arc<SqliteStore>), String> {
     let store = {
         let store_guard = state.store.lock().await;
         store_guard
             .as_ref()
             .ok_or("Storage not initialized")?
+            .clone()
+    };
+    let coordinator = {
+        let coord_guard = state.coordinator.lock().await;
+        coord_guard
+            .as_ref()
+            .ok_or("Coordinator not initialized")?
             .clone()
     };
     let user_id = state.user_id.lock().await.clone();
@@ -276,8 +279,7 @@ async fn init_session(state: &AppState) -> Result<(Session<SqliteStore, SqliteSt
     };
 
     // Open session for the conversation
-    // Session::open takes TurnStore and ContentBlockStore - SqliteStore implements both
-    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conversation_id.clone())
+    let session = Session::open(coordinator, conversation_id.clone())
         .await
         .map_err(|e| format!("Failed to open session: {}", e))?;
 
@@ -292,7 +294,7 @@ fn init_mcp() -> Result<McpRegistry, String> {
 
 async fn init_engine(
     state: &AppState,
-    session: Session<SqliteStore, SqliteStore>,
+    session: AppSession,
     store: Arc<SqliteStore>,
     mcp_registry: McpRegistry,
 ) -> Result<String, String> {

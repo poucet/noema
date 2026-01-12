@@ -31,8 +31,8 @@ pub(crate) mod helper;
 // Type-safe ID newtypes
 pub mod ids;
 
-// StoredContent type for message content references
-pub mod content;
+// StoredContent type for message content references (internal to storage layer)
+pub(crate) mod content;
 
 // Storage coordinator for asset externalization
 pub mod coordinator;
