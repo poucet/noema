@@ -250,31 +250,7 @@ export async function listMcpServers(): Promise<McpServerInfo[]> {
   return invoke<McpServerInfo[]>("list_mcp_servers");
 }
 
-// Helper type for addMcpServer with optional fields
-type AddMcpServerOptions = {
-  id: string;
-  name: string;
-  url: string;
-  authType: string;
-  token?: string | null;
-  clientId?: string | null;
-  clientSecret?: string | null;
-  scopes?: string[];
-  useWellKnown?: boolean;
-};
-
-export async function addMcpServer(options: AddMcpServerOptions): Promise<void> {
-  const request: AddMcpServerRequest = {
-    id: options.id,
-    name: options.name,
-    url: options.url,
-    authType: options.authType,
-    token: options.token ?? null,
-    clientId: options.clientId ?? null,
-    clientSecret: options.clientSecret ?? null,
-    scopes: options.scopes ?? [],
-    useWellKnown: options.useWellKnown ?? false,
-  };
+export async function addMcpServer(request: AddMcpServerRequest): Promise<void> {
   return invoke<void>("add_mcp_server", { request });
 }
 

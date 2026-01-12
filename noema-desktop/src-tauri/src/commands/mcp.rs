@@ -78,7 +78,7 @@ pub async fn add_mcp_server(
                 client_secret: request.client_secret,
                 authorization_url: None,
                 token_url: None,
-                scopes: request.scopes,
+                scopes: request.scopes.unwrap_or_default(),
                 access_token: None,
                 refresh_token: None,
                 expires_at: None,
