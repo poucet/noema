@@ -468,7 +468,7 @@ impl ConversationStore for SqliteStore {
 
     // ========== SpanSet Methods ==========
 
-    async fn create_span_set(&self, thread_id: &str, span_type: SpanType) -> Result<String> {
+    async fn create_span_set(&self, thread_id: &str, span_type: LegacySpanType) -> Result<String> {
         let conn = self.conn().lock().unwrap();
         let id = Uuid::new_v4().to_string();
         let now = unix_timestamp();
@@ -1432,7 +1432,7 @@ impl TurnStore for SqliteStore {
         };
 
         // Get turns up to (but not including) the specified turn
-        let turns = {
+        let turns: Vec<TurnInfo> = {
             let conn = self.conn().lock().unwrap();
             let mut stmt = conn.prepare(
                 "SELECT id, conversation_id, role, sequence_number, created_at
@@ -1441,26 +1441,30 @@ impl TurnStore for SqliteStore {
                  ORDER BY sequence_number",
             )?;
 
-            stmt.query_map(params![&conversation_id, up_to_seq], |row| {
+            let rows = stmt.query_map(params![&conversation_id, up_to_seq], |row| {
                 let id: String = row.get(0)?;
                 let conv_id: String = row.get(1)?;
                 let role_str: String = row.get(2)?;
                 let seq: i32 = row.get(3)?;
                 let created: i64 = row.get(4)?;
                 Ok((id, conv_id, role_str, seq, created))
-            })?
-            .filter_map(|r| r.ok())
-            .filter_map(|(id, conv_id, role_str, seq, created)| {
-                let role = role_str.parse::<SpanRole>().ok()?;
-                Some(TurnInfo {
-                    id: TurnId::from_string(id),
-                    conversation_id: ConversationId::from_string(conv_id),
-                    role,
-                    sequence_number: seq,
-                    created_at: created,
-                })
-            })
-            .collect::<Vec<_>>()
+            })?;
+
+            let mut turns = Vec::new();
+            for row in rows {
+                if let Ok((id, conv_id, role_str, seq, created)) = row {
+                    if let Ok(role) = role_str.parse::<SpanRole>() {
+                        turns.push(TurnInfo {
+                            id: TurnId::from_string(id),
+                            conversation_id: ConversationId::from_string(conv_id),
+                            role,
+                            sequence_number: seq,
+                            created_at: created,
+                        });
+                    }
+                }
+            }
+            turns
         };
 
         // Build the result with selected spans
