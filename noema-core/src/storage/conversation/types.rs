@@ -304,54 +304,13 @@ pub struct MessageWithContent {
     pub content: Vec<MessageContentInfo>,
 }
 
-/// Content type discriminator for message_content rows
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContentType {
-    Text,
-    AssetRef,
-    DocumentRef,
-    ToolCall,
-    ToolResult,
-}
-
-impl ContentType {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            ContentType::Text => "text",
-            ContentType::AssetRef => "asset_ref",
-            ContentType::DocumentRef => "document_ref",
-            ContentType::ToolCall => "tool_call",
-            ContentType::ToolResult => "tool_result",
-        }
-    }
-}
-
-impl std::str::FromStr for ContentType {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "text" => Ok(ContentType::Text),
-            "asset_ref" => Ok(ContentType::AssetRef),
-            "document_ref" => Ok(ContentType::DocumentRef),
-            "tool_call" => Ok(ContentType::ToolCall),
-            "tool_result" => Ok(ContentType::ToolResult),
-            _ => Err(()),
-        }
-    }
-}
-
-impl std::fmt::Display for ContentType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// Note: ContentType enum removed - StoredContent enum discriminant is used directly
+// for content_type column values ("text", "asset_ref", "document_ref", "tool_call", "tool_result")
 
 /// A single content item within a message
 ///
 /// Maps directly to a row in the `message_content` table.
-/// Each variant stores its data in the appropriate columns.
+/// Uses `StoredContent` directly - no separate `MessageContentData` needed.
 #[derive(Clone, Debug)]
 pub struct MessageContentInfo {
     /// Unique identifier
@@ -360,35 +319,8 @@ pub struct MessageContentInfo {
     pub message_id: MessageId,
     /// Order within message (0-indexed)
     pub sequence_number: i32,
-    /// Content type and data
-    pub content: MessageContentData,
-}
-
-/// The actual content data for a message content item
-#[derive(Clone, Debug)]
-pub enum MessageContentData {
-    /// Text content - stored in content_blocks for deduplication/search
-    Text {
-        content_block_id: ContentBlockId,
-    },
-    /// Asset reference - points to blob in CAS
-    AssetRef {
-        asset_id: String,
-        mime_type: String,
-        filename: Option<String>,
-    },
-    /// Document reference - for RAG (title looked up from documents table)
-    DocumentRef {
-        document_id: String,
-    },
-    /// Tool call - structured JSON
-    ToolCall {
-        data: String,
-    },
-    /// Tool result - structured JSON
-    ToolResult {
-        data: String,
-    },
+    /// Content (uses StoredContent - refs-only)
+    pub content: crate::storage::content::StoredContent,
 }
 
 // ============================================================================

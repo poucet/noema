@@ -12,8 +12,8 @@ use super::types::{
     // Legacy types
     LegacyConversationInfo, LegacySpanInfo, LegacySpanSetInfo, LegacySpanSetWithContent,
     LegacySpanType, LegacyThreadInfo,
-    // New types
-    ContentType, MessageContentData, MessageContentInfo, MessageInfo, MessageRole,
+    // New types (ContentType removed - using StoredContent discriminant directly)
+    MessageContentInfo, MessageInfo, MessageRole,
     MessageWithContent, SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo,
 };
 use crate::storage::content::{StoredContent, StoredMessage, StoredPayload};
@@ -827,36 +827,20 @@ fn load_message_content(conn: &Connection, message_id: &MessageId) -> Result<Vec
         })?
         .filter_map(|r| r.ok())
         .filter_map(|(id, mid, seq, content_type_str, content_block_id, asset_id, mime_type, filename, document_id, tool_data)| {
-            let content_type = content_type_str.parse::<ContentType>().ok()?;
-
-            let content = match content_type {
-                ContentType::Text => {
-                    MessageContentData::Text {
-                        content_block_id: ContentBlockId::from_string(content_block_id?),
-                    }
+            // Convert content_type to StoredContent
+            let content: StoredContent = match content_type_str.as_str() {
+                "text" => StoredContent::text_ref(ContentBlockId::from_string(content_block_id?)),
+                "asset_ref" => StoredContent::asset_ref(asset_id?, mime_type?, filename),
+                "document_ref" => StoredContent::document_ref(document_id?),
+                "tool_call" => {
+                    let call: llm::ToolCall = serde_json::from_str(&tool_data?).ok()?;
+                    StoredContent::ToolCall(call)
                 }
-                ContentType::AssetRef => {
-                    MessageContentData::AssetRef {
-                        asset_id: asset_id?,
-                        mime_type: mime_type?,
-                        filename,
-                    }
+                "tool_result" => {
+                    let result: llm::ToolResult = serde_json::from_str(&tool_data?).ok()?;
+                    StoredContent::ToolResult(result)
                 }
-                ContentType::DocumentRef => {
-                    MessageContentData::DocumentRef {
-                        document_id: document_id?,
-                    }
-                }
-                ContentType::ToolCall => {
-                    MessageContentData::ToolCall {
-                        data: tool_data?,
-                    }
-                }
-                ContentType::ToolResult => {
-                    MessageContentData::ToolResult {
-                        data: tool_data?,
-                    }
-                }
+                _ => return None,
             };
 
             Some(MessageContentInfo {
@@ -1113,7 +1097,7 @@ impl TurnStore for SqliteStore {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::Text.as_str(),
+                            "text",
                             content_block_id.as_str()
                         ],
                     )?;
@@ -1126,7 +1110,7 @@ impl TurnStore for SqliteStore {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::AssetRef.as_str(),
+                            "asset_ref",
                             asset_id,
                             mime_type,
                             filename.as_deref()
@@ -1141,7 +1125,7 @@ impl TurnStore for SqliteStore {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::DocumentRef.as_str(),
+                            "document_ref",
                             document_id
                         ],
                     )?;
@@ -1155,7 +1139,7 @@ impl TurnStore for SqliteStore {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::ToolCall.as_str(),
+                            "tool_call",
                             tool_data
                         ],
                     )?;
@@ -1169,7 +1153,7 @@ impl TurnStore for SqliteStore {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::ToolResult.as_str(),
+                            "tool_result",
                             tool_data
                         ],
                     )?;
@@ -1826,16 +1810,14 @@ pub mod sync_helpers {
 
     /// Add a message to the messages table with content stored in message_content.
     /// Each StoredContent item is stored as a separate row.
+    /// Note: StoredContent must contain refs (TextRef, not Text) - use coordinator first.
     pub fn add_message_sync(
         conn: &Connection,
         span_id: &SpanId,
         role: MessageRole,
         content: &[crate::storage::content::StoredContent],
-        user_id: Option<&str>,
-        model_id: Option<&str>,
     ) -> Result<MessageId> {
         use crate::storage::content::StoredContent;
-        use crate::storage::conversation::types::ContentType;
         use crate::storage::ids::MessageContentId;
 
         let message_id = MessageId::new();
@@ -1863,20 +1845,12 @@ pub mod sync_helpers {
             ],
         )?;
 
-        // Insert content items
+        // Insert content items (already refs - coordinator handles text/asset storage)
         for (content_seq, stored_content) in content.iter().enumerate() {
             let content_id = MessageContentId::new();
 
             match stored_content {
-                StoredContent::Text { text } => {
-                    let origin_kind = match role {
-                        MessageRole::User => Some("user"),
-                        MessageRole::Assistant => Some("assistant"),
-                        MessageRole::System => Some("system"),
-                        MessageRole::Tool => Some("system"),
-                    };
-                    let content_block_id = store_content_sync(conn, text, origin_kind, user_id, model_id)?;
-
+                StoredContent::TextRef { content_block_id } => {
                     conn.execute(
                         "INSERT INTO message_content (id, message_id, sequence_number, content_type, content_block_id)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -1884,8 +1858,8 @@ pub mod sync_helpers {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::Text.as_str(),
-                            content_block_id
+                            "text",
+                            content_block_id.as_str()
                         ],
                     )?;
                 }
@@ -1897,7 +1871,7 @@ pub mod sync_helpers {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::AssetRef.as_str(),
+                            "asset_ref",
                             asset_id,
                             mime_type,
                             filename.as_deref()
@@ -1912,7 +1886,7 @@ pub mod sync_helpers {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::DocumentRef.as_str(),
+                            "document_ref",
                             document_id
                         ],
                     )?;
@@ -1926,7 +1900,7 @@ pub mod sync_helpers {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::ToolCall.as_str(),
+                            "tool_call",
                             tool_data
                         ],
                     )?;
@@ -1940,7 +1914,7 @@ pub mod sync_helpers {
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
-                            ContentType::ToolResult.as_str(),
+                            "tool_result",
                             tool_data
                         ],
                     )?;

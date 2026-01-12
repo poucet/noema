@@ -32,7 +32,8 @@ pub use conversation_store::ConversationStore;
 
 // Re-export new types and trait
 pub use types::{
-    MessageInfo, MessageRole, NewMessage, SpanInfo as NewSpanInfo, SpanRole, SpanWithMessages,
+    MessageContentInfo, MessageInfo, MessageRole, MessageWithContent,
+    SpanInfo as NewSpanInfo, SpanRole, SpanWithMessages,
     TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
 };
 pub use turn_store::TurnStore;
