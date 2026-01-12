@@ -93,8 +93,8 @@ impl DynStorageCoordinator {
     }
 
     /// Decode base64 data, store in blob storage, register in asset storage,
-    /// and return the asset ID (hash).
-    async fn store_base64_asset(&self, base64_data: &str, mime_type: &str) -> Result<String> {
+    /// and return the asset ID.
+    async fn store_base64_asset(&self, base64_data: &str, mime_type: &str) -> Result<AssetId> {
         // Decode base64
         let bytes = STANDARD.decode(base64_data)?;
         let size = bytes.len() as i64;
@@ -102,12 +102,9 @@ impl DynStorageCoordinator {
         // Store in blob storage (returns hash)
         let stored_blob = self.blob_store.store(&bytes).await?;
 
-        // Register metadata in asset storage
-        let asset_id = AssetId::from_string(&stored_blob.hash);
-        let asset = Asset::new(mime_type, size);
-        self.asset_store.store(asset_id, asset).await?;
-
-        Ok(stored_blob.hash)
+        // Register metadata in asset storage with blob_hash reference
+        let asset = Asset::new(&stored_blob.hash, mime_type, size);
+        self.asset_store.create_asset(asset).await
     }
 
     /// Get access to the blob store for asset resolution
@@ -137,16 +134,16 @@ impl ContentResolver for DynStorageCoordinator {
     }
 
     async fn get_asset(&self, id: &str) -> Result<(Vec<u8>, String)> {
-        // Get asset metadata for mime type
-        let asset_id = AssetId::from_string(id);
+        // Get asset metadata for mime type and blob_hash
+        let asset_id = AssetId::from_string(id.to_string());
         let stored_asset = self
             .asset_store
             .get(&asset_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", id))?;
 
-        // Get blob data
-        let data = self.blob_store.get(id).await?;
+        // Get blob data using the blob_hash from the asset
+        let data = self.blob_store.get(&stored_asset.asset.blob_hash).await?;
 
         Ok((data, stored_asset.asset.mime_type))
     }
@@ -220,18 +217,17 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> StorageCoordinator<B, A,
     }
 
     /// Decode base64 data, store in blob storage, register in asset storage,
-    /// and return the asset ID (hash).
+    /// and return the asset ID.
     async fn store_base64_asset(&self, base64_data: &str, mime_type: &str) -> Result<String> {
         let bytes = STANDARD.decode(base64_data)?;
         let size = bytes.len() as i64;
 
         let stored_blob = self.blob_store.store(&bytes).await?;
 
-        let asset_id = AssetId::from_string(&stored_blob.hash);
-        let asset = Asset::new(mime_type, size);
-        self.asset_store.store(asset_id, asset).await?;
+        let asset = Asset::new(&stored_blob.hash, mime_type, size);
+        let asset_id = self.asset_store.create_asset(asset).await?;
 
-        Ok(stored_blob.hash)
+        Ok(asset_id.into())
     }
 
     /// Get access to the blob store for asset resolution
@@ -263,14 +259,15 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> ContentResolver
     }
 
     async fn get_asset(&self, id: &str) -> Result<(Vec<u8>, String)> {
-        let asset_id = AssetId::from_string(id);
+        let asset_id = AssetId::from_string(id.to_string());
         let stored_asset = self
             .asset_store
             .get(&asset_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", id))?;
 
-        let data = self.blob_store.get(id).await?;
+        // Use blob_hash to fetch from blob store
+        let data = self.blob_store.get(&stored_asset.asset.blob_hash).await?;
 
         Ok((data, stored_asset.asset.mime_type))
     }
@@ -279,9 +276,10 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> ContentResolver
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::types::{AssetStoreResult, StoredAsset, StoredBlob, StoreResult, StoredContentBlock};
+    use crate::storage::types::{StoredAsset, StoredBlob, StoreResult, StoredContentBlock};
     use std::collections::HashMap;
     use std::sync::Mutex;
+    use uuid::Uuid;
 
     // Mock blob store for testing
     struct MockBlobStore {
@@ -351,11 +349,11 @@ mod tests {
 
     #[async_trait]
     impl AssetStore for MockAssetStore {
-        async fn store(&self, id: AssetId, asset: Asset) -> Result<AssetStoreResult> {
+        async fn create_asset(&self, asset: Asset) -> Result<AssetId> {
             let mut assets = self.assets.lock().unwrap();
-            let is_new = !assets.contains_key(id.as_str());
+            let id = AssetId::from_string(Uuid::new_v4().to_string());
             assets.insert(id.as_str().to_string(), asset);
-            Ok(AssetStoreResult { id, is_new })
+            Ok(id)
         }
 
         async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>> {
