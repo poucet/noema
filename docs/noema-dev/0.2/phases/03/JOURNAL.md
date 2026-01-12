@@ -386,3 +386,29 @@ Implemented dual-write for session write paths. When messages are committed, the
 - **3.2.13**: SQL verification - `SELECT * FROM turns`, `SELECT * FROM spans`, `SELECT * FROM messages` should show data
 
 ---
+
+## 2026-01-12: Feature 3.2 Complete
+
+### Verification Results (3.2.12-3.2.13)
+
+User verified E2E and SQL:
+- App runs, messages send/receive correctly
+- All UCM tables populated:
+
+```sql
+-- turns: 1 row with conversation_id, role=user, sequence=0
+-- spans: 1 row linked to turn
+-- messages: 2 rows (user + assistant) with content_ids
+-- views: main view created
+-- view_selections: span selected for turn
+```
+
+### Bug Fix: Role::as_str()
+
+Added `Role::as_str() -> &'static str` method to `llm::Role` enum. `ToString` now delegates to it. Keeps serialization logic with the type definition, not in business logic.
+
+**Feature 3.2 Complete** - All 13 tasks done.
+
+**Next**: Feature 3.3 Views and Forking (3.3.7 `edit_turn` remaining)
+
+---

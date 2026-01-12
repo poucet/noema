@@ -3,12 +3,13 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.2"
-feature_name: "Conversation Structure"
-task: "3.2.1"
-task_name: "Define Turn, Span, Message types"
+feature: "3.3"
+feature_name: "Views and Forking"
+task: "3.3.7"
+task_name: "Implement edit_turn (splice)"
 
 # Completed
 completed_features:
   - "3.1"   # Content blocks - Content-addressed text storage with origin tracking
   - "3.1b"  # Asset storage - Binary blob storage (images, audio, PDFs)
+  - "3.2"   # Conversation structure - Turns, spans, messages with content references

@@ -12,7 +12,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 |--------|-----|---|---------|-------------|
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
-| 🔄 | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
+| ✅ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
 | 🔄 | P0 | 3.3 | Views and forking | Named paths through conversations, fork support |
 | ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
@@ -76,8 +76,8 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.2.9 | ⚡ Implement add_message, get_messages, get_message |
 | ✅ | 3.2.10 | ✅ Unit tests for TurnStore |
 | ✅ | 3.2.11 | 🔧 Wire existing write paths to TurnStore (dual-write) |
-| ⬜ | 3.2.12 | 🔧 User: E2E verification in noema app |
-| ⬜ | 3.2.13 | 🔧 User: SQL verify data in new tables |
+| ✅ | 3.2.12 | 🔧 User: E2E verification in noema app |
+| ✅ | 3.2.13 | 🔧 User: SQL verify data in new tables |
 
 ### 3.3 Views and Forking (11 tasks)
 

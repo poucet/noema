@@ -11,13 +11,19 @@ pub enum Role {
     System,
 }
 
+impl Role {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Role::User => "user",
+            Role::Assistant => "assistant",
+            Role::System => "system",
+        }
+    }
+}
+
 impl ToString for Role {
     fn to_string(&self) -> String {
-        match self {
-            Role::User => "user".to_string(),
-            Role::Assistant => "assistant".to_string(),
-            Role::System => "system".to_string(),
-        }
+        self.as_str().to_string()
     }
 }
 
