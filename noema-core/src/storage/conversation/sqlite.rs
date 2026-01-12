@@ -123,13 +123,31 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             span_id TEXT NOT NULL REFERENCES spans(id) ON DELETE CASCADE,
             sequence_number INTEGER NOT NULL,
             role TEXT CHECK(role IN ('user', 'assistant', 'system', 'tool')) NOT NULL,
-            content_id TEXT REFERENCES content_blocks(id),
-            tool_calls TEXT,
-            tool_results TEXT,
             created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_messages_span ON messages(span_id, sequence_number);
-        CREATE INDEX IF NOT EXISTS idx_messages_content ON messages(content_id);
+
+        -- Message content: individual content items within a message
+        -- Each row is one StoredContent item (text, asset_ref, tool_call, etc.)
+        CREATE TABLE IF NOT EXISTS message_content (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            sequence_number INTEGER NOT NULL,
+            content_type TEXT CHECK(content_type IN ('text', 'asset_ref', 'document_ref', 'tool_call', 'tool_result')) NOT NULL,
+            -- For text: reference to content_blocks (shared with documents, searchable)
+            content_block_id TEXT REFERENCES content_blocks(id),
+            -- For asset_ref: reference to blob storage
+            asset_id TEXT,
+            mime_type TEXT,
+            filename TEXT,
+            -- For document_ref: reference to document
+            document_id TEXT,
+            document_title TEXT,
+            -- For tool_call/tool_result: structured JSON
+            tool_data TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_message_content_message ON message_content(message_id, sequence_number);
+        CREATE INDEX IF NOT EXISTS idx_message_content_block ON message_content(content_block_id);
 
         -- Views: named paths through conversation (replaces threads)
         CREATE TABLE IF NOT EXISTS views (

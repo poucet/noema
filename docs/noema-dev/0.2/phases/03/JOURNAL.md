@@ -480,3 +480,55 @@ User raised concern about legacy system coexisting too long (3.4-3.7 before migr
 **Feature 3.3.7 Complete**
 
 ---
+
+## 2026-01-12: Feature 3.3.9 Schema Redesign (Message Content)
+
+### Problem Identified
+
+Initial approach tried to store messages with a single `content TEXT` JSON blob. User feedback:
+1. `NewMessage` type reinvents role and doesn't cover multimodal
+2. Storing protobufs as JSON is not ideal - should map to DB structure
+3. Binary content (images, audio) in tool calls/results needs handling
+4. Text should be stored in `content_blocks` for deduplication and search
+
+### Solution: Normalized message_content Table
+
+Each message now has content stored in a separate `message_content` table where each row is one `StoredContent` item:
+
+**Schema:**
+```sql
+messages (
+    id, span_id, sequence_number, role, created_at
+    -- No content column
+)
+
+message_content (
+    id, message_id, sequence_number, content_type,
+    -- For text: reference to content_blocks (shared, searchable)
+    content_block_id,
+    -- For asset_ref: blob storage reference
+    asset_id, mime_type, filename,
+    -- For document_ref: RAG reference
+    document_id, document_title,
+    -- For tool_call/tool_result: structured JSON
+    tool_data
+)
+```
+
+**Type Changes:**
+- `MessageInfo` no longer has content field
+- `MessageWithContent` - message + content items
+- `MessageContentInfo` - single content item row
+- `MessageContentData` - enum for content variants (Text, AssetRef, DocumentRef, ToolCall, ToolResult)
+- `ContentType` - discriminator enum
+- Removed `NewMessage` - `add_message()` now takes `(role, &[StoredContent])`
+- `TurnWithContent` now has `Vec<MessageWithContent>` instead of `Vec<MessageInfo>`
+
+**Benefits:**
+- Text content goes to `content_blocks` (shared with documents, searchable)
+- `StoredContent` maps directly to/from DB rows
+- Ordering preserved via `sequence_number`
+- No JSON blob for structured content
+- Asset externalization layer above DB can convert inline binary to refs
+
+---

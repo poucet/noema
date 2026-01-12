@@ -8,8 +8,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::types::{
-    MessageInfo, NewMessage, SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo,
+    MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo,
 };
+use crate::storage::content::StoredContent;
 use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, ViewId};
 
 /// Trait for Turn/Span/Message storage operations
@@ -51,12 +52,23 @@ pub trait TurnStore: Send + Sync {
 
     /// Add a message to a span
     ///
-    /// The message text is stored in the content_blocks table and referenced
-    /// by content_id.
-    async fn add_message(&self, span_id: &SpanId, message: NewMessage) -> Result<MessageInfo>;
+    /// Each StoredContent item is stored in message_content:
+    /// - Text → stored in content_blocks, referenced by content_block_id
+    /// - AssetRef → stored directly (asset_id, mime_type, filename)
+    /// - DocumentRef → stored directly (document_id, title)
+    /// - ToolCall/ToolResult → stored as JSON in tool_data
+    async fn add_message(
+        &self,
+        span_id: &SpanId,
+        role: MessageRole,
+        content: &[StoredContent],
+    ) -> Result<MessageInfo>;
 
-    /// Get all messages for a span in sequence order
+    /// Get all messages for a span in sequence order (metadata only)
     async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageInfo>>;
+
+    /// Get all messages for a span with content loaded
+    async fn get_messages_with_content(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>>;
 
     /// Get a specific message by ID
     async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>>;
@@ -139,12 +151,13 @@ pub trait TurnStore: Send + Sync {
     /// If `create_fork` is true, also creates a forked view that selects
     /// this new span at the edited turn.
     ///
+    /// Each message is a (role, content) pair.
     /// Returns the new span and optionally the new view.
     async fn edit_turn(
         &self,
         view_id: &ViewId,
         turn_id: &TurnId,
-        messages: Vec<NewMessage>,
+        messages: Vec<(MessageRole, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
         fork_name: Option<&str>,

@@ -22,7 +22,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use crate::storage::content::StoredMessage;
-use crate::storage::ids::{ContentBlockId, ConversationId, MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ContentBlockId, ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId};
 
 // ============================================================================
 // Legacy Types (for migration compatibility)
@@ -280,8 +280,7 @@ pub struct SpanInfo {
 /// A message within a span
 ///
 /// Messages are ordered within their span by sequence_number.
-/// Text content is stored in ContentBlocks (referenced by content_id).
-/// Tool calls and results are stored inline as JSON.
+/// Content is stored in the `message_content` table as individual items.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageInfo {
     /// Unique identifier
@@ -292,83 +291,105 @@ pub struct MessageInfo {
     pub sequence_number: i32,
     /// Message role (can differ from span role for tool messages)
     pub role: MessageRole,
-    /// Reference to text content (stored in content_blocks table)
-    pub content_id: Option<ContentBlockId>,
-    /// Tool calls as JSON (for assistant messages that invoke tools)
-    pub tool_calls: Option<String>,
-    /// Tool results as JSON (for tool response messages)
-    pub tool_results: Option<String>,
     /// Unix timestamp when created
     pub created_at: i64,
 }
 
-// ============================================================================
-// Input Types (for creating entities)
-// ============================================================================
-
-/// Input for creating a new message
+/// A message with its content items loaded
 #[derive(Clone, Debug)]
-pub struct NewMessage {
-    /// Message role
-    pub role: MessageRole,
-    /// Text content (will be stored in content_blocks)
-    pub text: Option<String>,
-    /// Tool calls JSON
-    pub tool_calls: Option<String>,
-    /// Tool results JSON
-    pub tool_results: Option<String>,
+pub struct MessageWithContent {
+    /// The message metadata
+    pub message: MessageInfo,
+    /// Content items in order
+    pub content: Vec<MessageContentInfo>,
 }
 
-impl NewMessage {
-    /// Create a user message with text
-    pub fn user(text: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::User,
-            text: Some(text.into()),
-            tool_calls: None,
-            tool_results: None,
-        }
-    }
+/// Content type discriminator for message_content rows
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentType {
+    Text,
+    AssetRef,
+    DocumentRef,
+    ToolCall,
+    ToolResult,
+}
 
-    /// Create an assistant message with text
-    pub fn assistant(text: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::Assistant,
-            text: Some(text.into()),
-            tool_calls: None,
-            tool_results: None,
+impl ContentType {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            ContentType::Text => "text",
+            ContentType::AssetRef => "asset_ref",
+            ContentType::DocumentRef => "document_ref",
+            ContentType::ToolCall => "tool_call",
+            ContentType::ToolResult => "tool_result",
         }
     }
+}
 
-    /// Create an assistant message with tool calls
-    pub fn assistant_with_tools(text: Option<String>, tool_calls: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::Assistant,
-            text,
-            tool_calls: Some(tool_calls.into()),
-            tool_results: None,
-        }
-    }
+impl std::str::FromStr for ContentType {
+    type Err = ();
 
-    /// Create a tool result message
-    pub fn tool_result(tool_results: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::Tool,
-            text: None,
-            tool_calls: None,
-            tool_results: Some(tool_results.into()),
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "text" => Ok(ContentType::Text),
+            "asset_ref" => Ok(ContentType::AssetRef),
+            "document_ref" => Ok(ContentType::DocumentRef),
+            "tool_call" => Ok(ContentType::ToolCall),
+            "tool_result" => Ok(ContentType::ToolResult),
+            _ => Err(()),
         }
     }
+}
 
-    /// Create a system message
-    pub fn system(text: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::System,
-            text: Some(text.into()),
-            tool_calls: None,
-            tool_results: None,
-        }
+impl std::fmt::Display for ContentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
+}
+
+/// A single content item within a message
+///
+/// Maps directly to a row in the `message_content` table.
+/// Each variant stores its data in the appropriate columns.
+#[derive(Clone, Debug)]
+pub struct MessageContentInfo {
+    /// Unique identifier
+    pub id: MessageContentId,
+    /// Parent message
+    pub message_id: MessageId,
+    /// Order within message (0-indexed)
+    pub sequence_number: i32,
+    /// Content type and data
+    pub content: MessageContentData,
+}
+
+/// The actual content data for a message content item
+#[derive(Clone, Debug)]
+pub enum MessageContentData {
+    /// Text content - stored in content_blocks for deduplication/search
+    Text {
+        content_block_id: ContentBlockId,
+    },
+    /// Asset reference - points to blob in CAS
+    AssetRef {
+        asset_id: String,
+        mime_type: String,
+        filename: Option<String>,
+    },
+    /// Document reference - for RAG
+    DocumentRef {
+        document_id: String,
+        title: String,
+    },
+    /// Tool call - structured JSON
+    ToolCall {
+        data: String,
+    },
+    /// Tool result - structured JSON
+    ToolResult {
+        data: String,
+    },
 }
 
 // ============================================================================
@@ -419,8 +440,8 @@ pub struct TurnWithContent {
     pub turn: TurnInfo,
     /// Selected span at this turn
     pub span: SpanInfo,
-    /// Messages in the selected span
-    pub messages: Vec<MessageInfo>,
+    /// Messages in the selected span (with content loaded)
+    pub messages: Vec<MessageWithContent>,
 }
 
 /// A span with its messages
@@ -428,8 +449,8 @@ pub struct TurnWithContent {
 pub struct SpanWithMessages {
     /// The span
     pub span: SpanInfo,
-    /// Messages in the span
-    pub messages: Vec<MessageInfo>,
+    /// Messages in the span (with content loaded)
+    pub messages: Vec<MessageWithContent>,
 }
 
 #[cfg(test)]
@@ -459,26 +480,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_new_message_user() {
-        let msg = NewMessage::user("Hello");
-        assert_eq!(msg.role, MessageRole::User);
-        assert_eq!(msg.text.as_deref(), Some("Hello"));
-        assert!(msg.tool_calls.is_none());
-    }
-
-    #[test]
-    fn test_new_message_assistant() {
-        let msg = NewMessage::assistant("Hi there");
-        assert_eq!(msg.role, MessageRole::Assistant);
-        assert_eq!(msg.text.as_deref(), Some("Hi there"));
-    }
-
-    #[test]
-    fn test_new_message_tool() {
-        let msg = NewMessage::tool_result(r#"{"result": "ok"}"#);
-        assert_eq!(msg.role, MessageRole::Tool);
-        assert!(msg.text.is_none());
-        assert!(msg.tool_results.is_some());
-    }
 }
