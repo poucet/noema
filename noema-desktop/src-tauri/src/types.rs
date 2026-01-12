@@ -1,6 +1,7 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
+use noema_core::storage::ids::{AssetId, SpanId, TurnId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -61,7 +62,8 @@ pub enum DisplayContent {
     /// Asset stored in blob storage - client should fetch via asset API
     AssetRef {
         #[serde(rename = "assetId")]
-        asset_id: String,
+        #[ts(type = "string")]
+        asset_id: AssetId,
         #[serde(rename = "mimeType")]
         mime_type: String,
         filename: Option<String>
@@ -104,7 +106,8 @@ pub enum DisplayToolResultContent {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct AlternateInfo {
-    pub span_id: String,
+    #[ts(type = "string")]
+    pub span_id: SpanId,
     pub model_id: Option<String>,
     pub model_display_name: Option<String>,
     pub message_count: usize,
@@ -118,13 +121,15 @@ pub struct DisplayMessage {
     #[ts(type = "string")]
     pub role: Role,
     pub content: Vec<DisplayContent>,
-    /// Span set ID this message belongs to (for switching alternates)
+    /// Turn ID this message belongs to (for switching alternates)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub span_set_id: Option<String>,
+    #[ts(type = "string | undefined")]
+    pub turn_id: Option<TurnId>,
     /// Span ID for this specific message (for fork/edit actions)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub span_id: Option<String>,
-    /// Available alternates for this message's span set (only populated for assistant messages with alternatives)
+    #[ts(type = "string | undefined")]
+    pub span_id: Option<SpanId>,
+    /// Available alternates for this message's turn (only populated for assistant messages with alternatives)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alternates: Option<Vec<AlternateInfo>>,
 }
@@ -141,7 +146,7 @@ impl From<&ChatMessage> for DisplayMessage {
         Self {
             role: msg.role,
             content,
-            span_set_id: None,
+            turn_id: None,
             span_id: None,
             alternates: None,
         }
@@ -153,14 +158,14 @@ impl DisplayMessage {
     pub fn with_alternates(
         role: Role,
         content: Vec<DisplayContent>,
-        span_set_id: String,
-        span_id: String,
+        turn_id: TurnId,
+        span_id: SpanId,
         alternates: Vec<AlternateInfo>,
     ) -> Self {
         Self {
-            role: role,
+            role,
             content,
-            span_set_id: Some(span_set_id),
+            turn_id: Some(turn_id),
             span_id: Some(span_id),
             alternates: if alternates.len() > 1 { Some(alternates) } else { None },
         }
@@ -215,36 +220,6 @@ impl From<&ToolResultContent> for DisplayToolResultContent {
     }
 }
 
-impl From<noema_core::storage::content::ResolvedContent> for DisplayContent {
-    fn from(content: noema_core::storage::content::ResolvedContent) -> Self {
-        use noema_core::storage::content::ResolvedContent;
-        match content {
-            ResolvedContent::Text { text } => DisplayContent::Text(text),
-            ResolvedContent::AssetRef { asset_id, mime_type, filename } => DisplayContent::AssetRef {
-                asset_id,
-                mime_type,
-                filename,
-            },
-            ResolvedContent::DocumentRef { document_id } => DisplayContent::DocumentRef {
-                id: document_id,
-            },
-            ResolvedContent::ToolCall(call) => DisplayContent::ToolCall {
-                name: call.name.clone(),
-                id: call.id.clone(),
-                arguments: call.arguments.clone(),
-            },
-            ResolvedContent::ToolResult(result) => DisplayContent::ToolResult {
-                id: result.tool_call_id.clone(),
-                content: result
-                    .content
-                    .iter()
-                    .map(DisplayToolResultContent::from)
-                    .collect(),
-            },
-        }
-    }
-}
-
 // Session ResolvedContent/ResolvedMessage -> Display types
 impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
     fn from(content: &noema_core::storage::ResolvedContent) -> Self {
@@ -294,7 +269,7 @@ impl From<&noema_core::storage::ResolvedMessage> for DisplayMessage {
         Self {
             role,
             content: msg.content.iter().map(DisplayContent::from).collect(),
-            span_set_id: None,
+            turn_id: None,
             span_id: None,
             alternates: None,
         }
