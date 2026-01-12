@@ -86,10 +86,7 @@ pub async fn store_asset(
         .decode(&data)
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
-    let coordinator_guard = state.coordinator.lock().await;
-    let coordinator = coordinator_guard
-        .as_ref()
-        .ok_or("Coordinator not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     coordinator
         .store_asset(&bytes, &mime_type, filename)

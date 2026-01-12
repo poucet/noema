@@ -43,9 +43,9 @@ async fn handle_asset_request(
     }
 
     // Get coordinator from app state
-    let coordinator = match app_state.coordinator.lock().await.clone() {
-        Some(c) => c,
-        None => {
+    let coordinator = match app_state.get_coordinator() {
+        Ok(c) => c,
+        Err(_) => {
             return Response::builder()
                 .status(500)
                 .header("Content-Type", "text/plain")

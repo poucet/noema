@@ -341,11 +341,10 @@ pub async fn list_models(_state: State<'_, Arc<AppState>>) -> Result<Vec<ModelIn
 /// List all conversations for the current user
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("App not initialized")?;
+    let coordinator = state.get_coordinator()?;
     let user_id = state.user_id.lock().await.clone();
 
-    store
+    coordinator
         .list_conversations(&user_id)
         .await
         .map(|convos| convos.into_iter().map(ConversationInfo::from).collect())
@@ -375,13 +374,7 @@ pub async fn load_conversation(
     }
 
     // Not loaded, create engine
-    let coordinator = {
-        let coord_guard = state.coordinator.lock().await;
-        coord_guard
-            .as_ref()
-            .ok_or("Coordinator not initialized")?
-            .clone()
-    };
+    let coordinator = state.get_coordinator()?;
 
     // Open session for the conversation
     let session = Session::open(coordinator.clone(), conversation_id.clone())
@@ -416,13 +409,7 @@ pub async fn load_conversation(
 /// Returns the conversation ID
 #[tauri::command]
 pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    let coordinator = {
-        let coord_guard = state.coordinator.lock().await;
-        coord_guard
-            .as_ref()
-            .ok_or("Coordinator not initialized")?
-            .clone()
-    };
+    let coordinator = state.get_coordinator()?;
     let user_id = state.user_id.lock().await.clone();
 
     // Create a new conversation
@@ -462,8 +449,7 @@ pub async fn delete_conversation(
     // Remove engine if loaded
     state.engines.lock().await.remove(&conversation_id);
 
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("App not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     coordinator
         .delete_conversation(&conversation_id)
@@ -478,8 +464,7 @@ pub async fn rename_conversation(
     conversation_id: ConversationId,
     name: String,
 ) -> Result<(), String> {
-    let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("App not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let name_opt = if name.trim().is_empty() {
         None
@@ -487,7 +472,7 @@ pub async fn rename_conversation(
         Some(name.as_str())
     };
 
-    store
+    coordinator
         .rename_conversation(&conversation_id, name_opt)
         .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
@@ -499,10 +484,9 @@ pub async fn get_conversation_private(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<bool, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("App not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
-    store
+    coordinator
         .is_conversation_private(&conversation_id)
         .await
         .map_err(|e| format!("Failed to get conversation privacy: {}", e))
@@ -515,10 +499,9 @@ pub async fn set_conversation_private(
     conversation_id: ConversationId,
     is_private: bool,
 ) -> Result<(), String> {
-    let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("App not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
-    store
+    coordinator
         .set_conversation_private(&conversation_id, is_private)
         .await
         .map_err(|e| format!("Failed to set conversation privacy: {}", e))
@@ -598,8 +581,7 @@ pub async fn get_turn_alternates(
     state: State<'_, Arc<AppState>>,
     turn_id: TurnId,
 ) -> Result<Vec<SpanInfoResponse>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let spans = coordinator
         .conversation_store()
@@ -625,8 +607,7 @@ pub async fn get_span_messages(
     state: State<'_, Arc<AppState>>,
     span_id: SpanId,
 ) -> Result<Vec<DisplayMessage>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let messages = coordinator
         .conversation_store()
@@ -659,8 +640,7 @@ pub async fn list_conversation_views(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<ThreadInfoResponse>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let views = coordinator
         .conversation_store()

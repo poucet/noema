@@ -178,7 +178,7 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
         store.clone(),   // D: DocumentStore
     ));
 
-    *state.coordinator.lock().await = Some(coordinator);
+    let _ = state.coordinator.set(coordinator);
     Ok(())
 }
 
@@ -188,8 +188,7 @@ fn init_config() -> Result<(), String> {
 }
 
 async fn init_user(state: &AppState) -> Result<(), String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     // First check if user email is explicitly configured in settings
     let settings = config::Settings::load();
@@ -226,19 +225,12 @@ async fn init_user(state: &AppState) -> Result<(), String> {
         }
     };
 
-    drop(coord_guard);
     *state.user_id.lock().await = user.id;
     Ok(())
 }
 
 async fn init_session(state: &AppState) -> Result<(AppSession, Arc<AppCoordinator>), String> {
-    let coordinator = {
-        let coord_guard = state.coordinator.lock().await;
-        coord_guard
-            .as_ref()
-            .ok_or("Coordinator not initialized")?
-            .clone()
-    };
+    let coordinator = state.get_coordinator()?;
     let user_id = state.user_id.lock().await.clone();
 
     // Try to open the most recent conversation, or create a new one if none exist
@@ -305,7 +297,7 @@ async fn init_engine(
 
     // Get the MCP registry Arc from the engine to store in AppState
     let mcp_registry_arc = engine.get_mcp_registry();
-    *state.mcp_registry.lock().await = Some(mcp_registry_arc.clone());
+    let _ = state.mcp_registry.set(mcp_registry_arc.clone());
 
     state.engines.lock().await.insert(conversation_id, engine);
 

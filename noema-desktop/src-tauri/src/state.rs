@@ -10,7 +10,7 @@ use noema_core::storage::{FsBlobStore, SqliteStore};
 use noema_core::{ChatEngine, McpRegistry};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
 // ============================================================================
 // App Storage Types - Define once via StorageTypes
@@ -35,11 +35,12 @@ pub type AppCoordinator = StorageCoordinator<AppStorage>;
 pub type AppEngine = ChatEngine<AppStorage>;
 
 pub struct AppState {
-    pub coordinator: Mutex<Option<Arc<AppCoordinator>>>,
+    /// Storage coordinator - initialized once at startup
+    pub coordinator: OnceCell<Arc<AppCoordinator>>,
     /// Engines per conversation - enables parallel conversations
     pub engines: Mutex<HashMap<ConversationId, AppEngine>>,
-    /// MCP registry (shared across all conversations)
-    pub mcp_registry: Mutex<Option<Arc<Mutex<McpRegistry>>>>,
+    /// MCP registry (shared across all conversations) - initialized once at startup
+    pub mcp_registry: OnceCell<Arc<Mutex<McpRegistry>>>,
     /// Current user ID (from database)
     pub user_id: Mutex<UserId>,
     /// Full model ID in "provider/model" format
@@ -65,9 +66,9 @@ impl AppState {
         let pending_states = load_pending_oauth_states().unwrap_or_default();
 
         Self {
-            coordinator: Mutex::new(None),
+            coordinator: OnceCell::new(),
             engines: Mutex::new(HashMap::new()),
-            mcp_registry: Mutex::new(None),
+            mcp_registry: OnceCell::new(),
             user_id: Mutex::new(UserId::from_string(String::new())),
             model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
@@ -80,12 +81,19 @@ impl AppState {
         }
     }
 
+    /// Get the coordinator, returns error if not initialized
+    pub fn get_coordinator(&self) -> Result<Arc<AppCoordinator>, String> {
+        self.coordinator
+            .get()
+            .cloned()
+            .ok_or_else(|| "Storage not initialized".to_string())
+    }
+
     /// Get the MCP registry, returns error if not initialized
-    pub async fn get_mcp_registry(&self) -> Result<Arc<Mutex<McpRegistry>>, String> {
+    pub fn get_mcp_registry(&self) -> Result<Arc<Mutex<McpRegistry>>, String> {
         self.mcp_registry
-            .lock()
-            .await
-            .clone()
+            .get()
+            .cloned()
             .ok_or_else(|| "MCP registry not initialized".to_string())
     }
 

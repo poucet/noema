@@ -13,7 +13,7 @@ use crate::types::{AddMcpServerRequest, McpServerInfo, McpToolInfo};
 /// List all configured MCP servers
 #[tauri::command]
 pub async fn list_mcp_servers(state: State<'_, Arc<AppState>>) -> Result<Vec<McpServerInfo>, String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let registry = mcp_registry.lock().await;
 
     let mut servers = Vec::new();
@@ -124,7 +124,7 @@ pub async fn add_mcp_server(
         auto_retry: true,
     };
 
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
     registry.add_server(request.id, config);
     registry.save_config().map_err(|e| e.to_string())?;
@@ -135,7 +135,7 @@ pub async fn add_mcp_server(
 /// Remove an MCP server configuration
 #[tauri::command]
 pub async fn remove_mcp_server(state: State<'_, Arc<AppState>>, server_id: String) -> Result<(), String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
     registry
         .remove_server(&server_id)
@@ -149,7 +149,7 @@ pub async fn remove_mcp_server(state: State<'_, Arc<AppState>>, server_id: Strin
 /// Connect to an MCP server
 #[tauri::command]
 pub async fn connect_mcp_server(state: State<'_, Arc<AppState>>, server_id: String) -> Result<usize, String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     let server = registry
@@ -166,7 +166,7 @@ pub async fn disconnect_mcp_server(
     state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<(), String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
     registry
         .disconnect(&server_id)
@@ -182,7 +182,7 @@ pub async fn get_mcp_server_tools(
     state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<Vec<McpToolInfo>, String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let registry = mcp_registry.lock().await;
 
     let server = registry
@@ -205,7 +205,7 @@ pub async fn get_mcp_server_tools(
 /// Test connection to an MCP server (connect and immediately disconnect)
 #[tauri::command]
 pub async fn test_mcp_server(state: State<'_, Arc<AppState>>, server_id: String) -> Result<usize, String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     // Connect to test
@@ -300,7 +300,7 @@ pub async fn start_mcp_oauth(
     state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<String, String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let config = {
         let registry = mcp_registry.lock().await;
         registry
@@ -538,7 +538,7 @@ async fn save_oauth_tokens(
     scopes: &[String],
 ) -> Result<(), String> {
     let state = app.state::<Arc<AppState>>();
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     // Calculate expiration timestamp
@@ -595,7 +595,7 @@ pub async fn complete_mcp_oauth(
     server_id: String,
     code: String,
 ) -> Result<(), String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     let config = registry
@@ -723,7 +723,7 @@ pub async fn complete_oauth_internal(
     code: &str,
 ) -> Result<(), String> {
     let state = app.state::<Arc<AppState>>();
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     let config = registry
@@ -852,7 +852,7 @@ pub async fn update_mcp_server_settings(
     auto_connect: bool,
     auto_retry: bool,
 ) -> Result<(), String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     // Get existing config
@@ -920,7 +920,7 @@ pub async fn update_mcp_server_settings(
 /// Stop retry attempts for an MCP server
 #[tauri::command]
 pub async fn stop_mcp_retry(state: State<'_, Arc<AppState>>, server_id: String) -> Result<(), String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     registry.cancel_retry(&server_id);
@@ -941,7 +941,7 @@ pub async fn start_mcp_retry(
     state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<(), String> {
-    let mcp_registry = state.get_mcp_registry().await?;
+    let mcp_registry = state.get_mcp_registry()?;
     let mut registry = mcp_registry.lock().await;
 
     // Check if already connected or retry in progress

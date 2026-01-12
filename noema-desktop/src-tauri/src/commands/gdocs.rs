@@ -102,8 +102,7 @@ pub struct DocumentContentResponse {
 /// List all documents for the current user
 #[tauri::command]
 pub async fn list_documents(state: State<'_, Arc<AppState>>) -> Result<Vec<DocumentInfoResponse>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     // Get default user
     let user = coordinator
@@ -125,8 +124,7 @@ pub async fn get_document(
     state: State<'_, Arc<AppState>>,
     doc_id: DocumentId,
 ) -> Result<Option<DocumentInfoResponse>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let doc = coordinator.document_store().get_document(&doc_id).await.map_err(|e| e.to_string())?;
     Ok(doc.map(DocumentInfoResponse::from))
@@ -138,8 +136,7 @@ pub async fn get_document_by_google_id(
     state: State<'_, Arc<AppState>>,
     google_doc_id: String,
 ) -> Result<Option<DocumentInfoResponse>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let user = coordinator
         .get_or_create_default_user()
@@ -160,8 +157,7 @@ pub async fn get_document_content(
     state: State<'_, Arc<AppState>>,
     doc_id: DocumentId,
 ) -> Result<DocumentContentResponse, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     // Get document metadata
     let doc = coordinator
@@ -190,8 +186,7 @@ pub async fn get_document_tab(
     state: State<'_, Arc<AppState>>,
     tab_id: TabId,
 ) -> Result<Option<DocumentTabResponse>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let tab = coordinator
         .document_store()
@@ -204,8 +199,7 @@ pub async fn get_document_tab(
 /// Delete a document and all its tabs/revisions
 #[tauri::command]
 pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: DocumentId) -> Result<bool, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     coordinator.document_store().delete_document(&doc_id).await.map_err(|e| e.to_string())
 }
@@ -308,7 +302,7 @@ pub async fn configure_gdocs_oauth(
     };
 
     // Update the in-memory MCP registry if available, otherwise save to config file
-    if let Ok(mcp_registry) = state.get_mcp_registry().await {
+    if let Ok(mcp_registry) = state.get_mcp_registry() {
         let mut registry = mcp_registry.lock().await;
         registry.add_server("gdocs".to_string(), server_config.clone());
         registry.save_config().map_err(|e| format!("Failed to save config: {}", e))?;
@@ -351,7 +345,7 @@ pub async fn list_google_docs(
 ) -> Result<Vec<GoogleDocListItem>, String> {
     // Get a cloneable tool caller so we don't hold the lock during the async call
     let tool_caller = {
-        let mcp_registry = state.get_mcp_registry().await?;
+        let mcp_registry = state.get_mcp_registry()?;
         let registry = mcp_registry.lock().await;
 
         // Find the gdocs server connection and get a cloneable tool caller
@@ -447,28 +441,25 @@ pub async fn import_google_doc(
     info!("Importing Google Doc: {}", google_doc_id);
 
     // First check if this doc is already imported
-    {
-        let coord_guard = state.coordinator.lock().await;
-        let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
-        let user = coordinator
-            .get_or_create_default_user()
-            .await
-            .map_err(|e| e.to_string())?;
+    let coordinator = state.get_coordinator()?;
+    let user = coordinator
+        .get_or_create_default_user()
+        .await
+        .map_err(|e| e.to_string())?;
 
-        if let Some(existing) = coordinator
-            .document_store()
-            .get_document_by_source(&user.id, DocumentSource::GoogleDrive, &google_doc_id)
-            .await
-            .map_err(|e| e.to_string())?
-        {
-            info!("Document already imported, returning existing: {}", existing.id);
-            return Ok(DocumentInfoResponse::from(existing));
-        }
+    if let Some(existing) = coordinator
+        .document_store()
+        .get_document_by_source(&user.id, DocumentSource::GoogleDrive, &google_doc_id)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        info!("Document already imported, returning existing: {}", existing.id);
+        return Ok(DocumentInfoResponse::from(existing));
     }
 
     // Get a cloneable tool caller so we don't hold the lock during the async call
     let tool_caller = {
-        let mcp_registry = state.get_mcp_registry().await?;
+        let mcp_registry = state.get_mcp_registry()?;
         let registry = mcp_registry.lock().await;
 
         registry
@@ -526,15 +517,7 @@ pub async fn import_google_doc(
     );
 
     // Store the document and its content
-    debug!("Acquiring coordinator lock for document storage...");
-    let coord_guard = state.coordinator.lock().await;
-    debug!("Coordinator lock acquired");
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
-
-    let user = coordinator
-        .get_or_create_default_user()
-        .await
-        .map_err(|e| e.to_string())?;
+    // (We already have the coordinator and user from the check above)
 
     // Create the document
     let doc_id = coordinator
@@ -664,8 +647,7 @@ pub async fn search_documents(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<DocumentInfoResponse>, String> {
-    let coord_guard = state.coordinator.lock().await;
-    let coordinator = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = state.get_coordinator()?;
 
     let user = coordinator
         .get_or_create_default_user()
