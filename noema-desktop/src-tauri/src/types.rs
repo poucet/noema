@@ -28,12 +28,12 @@ pub struct ConversationInfo {
     pub updated_at: i64,
 }
 
-impl From<noema_core::storage::conversation::LegacyConversationInfo> for ConversationInfo {
-    fn from(info: noema_core::storage::conversation::LegacyConversationInfo) -> Self {
+impl From<noema_core::storage::conversation::ConversationInfo> for ConversationInfo {
+    fn from(info: noema_core::storage::conversation::ConversationInfo) -> Self {
         Self {
-            id: info.id,
+            id: info.id.as_str().to_string(),
             name: info.name,
-            message_count: info.message_count,
+            message_count: info.turn_count,
             is_private: info.is_private,
             created_at: info.created_at,
             updated_at: info.updated_at,
@@ -217,34 +217,26 @@ impl From<&ToolResultContent> for DisplayToolResultContent {
     }
 }
 
-impl From<noema_core::storage::content::StoredContent> for DisplayContent {
-    fn from(content: noema_core::storage::content::StoredContent) -> Self {
-        use noema_core::storage::content::StoredContent;
+impl From<noema_core::storage::content::ResolvedContent> for DisplayContent {
+    fn from(content: noema_core::storage::content::ResolvedContent) -> Self {
+        use noema_core::storage::content::ResolvedContent;
         match content {
-            StoredContent::Text { text } => DisplayContent::Text(text.clone()),
-            StoredContent::Image { data, mime_type } => DisplayContent::Image {
-                data: data,
-                mime_type: mime_type,
+            ResolvedContent::Text { text } => DisplayContent::Text(text),
+            ResolvedContent::AssetRef { asset_id, mime_type, filename } => DisplayContent::AssetRef {
+                asset_id,
+                mime_type,
+                filename,
             },
-            StoredContent::Audio { data, mime_type } => DisplayContent::Audio {
-                data: data.clone(),
-                mime_type: mime_type.clone(),
+            ResolvedContent::DocumentRef { document_id } => DisplayContent::DocumentRef {
+                id: document_id,
+                title: String::new(), // Title fetched separately by UI
             },
-            StoredContent::AssetRef { asset_id, mime_type, filename } => DisplayContent::AssetRef {
-                asset_id: asset_id.clone(),
-                mime_type: mime_type.clone(),
-                filename: filename.clone(),
-            },
-            StoredContent::DocumentRef { id, title } => DisplayContent::DocumentRef {
-                id: id.clone(),
-                title: title.clone(),
-            },
-            StoredContent::ToolCall(call) => DisplayContent::ToolCall {
+            ResolvedContent::ToolCall(call) => DisplayContent::ToolCall {
                 name: call.name.clone(),
                 id: call.id.clone(),
                 arguments: call.arguments.clone(),
             },
-            StoredContent::ToolResult(result) => DisplayContent::ToolResult {
+            ResolvedContent::ToolResult(result) => DisplayContent::ToolResult {
                 id: result.tool_call_id.clone(),
                 content: result
                     .content
@@ -394,7 +386,7 @@ impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
     }
 }
 
-/// Information about a thread/branch in a conversation
+/// Information about a view/branch in a conversation (replaces legacy Thread concept)
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
@@ -405,20 +397,20 @@ pub struct ThreadInfoResponse {
     pub name: Option<String>,
     pub status: String,
     pub created_at: i64,
-    /// Whether this is the main thread (no parent_span_id)
+    /// Whether this is the main view
     pub is_main: bool,
 }
 
-impl From<noema_core::storage::conversation::LegacyThreadInfo> for ThreadInfoResponse {
-    fn from(info: noema_core::storage::conversation::LegacyThreadInfo) -> Self {
+impl From<noema_core::storage::conversation::ViewInfo> for ThreadInfoResponse {
+    fn from(info: noema_core::storage::conversation::ViewInfo) -> Self {
         Self {
-            id: info.id,
-            conversation_id: info.conversation_id,
-            parent_span_id: info.parent_span_id.clone(),
+            id: info.id.as_str().to_string(),
+            conversation_id: info.conversation_id.as_str().to_string(),
+            parent_span_id: info.forked_at_turn_id.map(|t| t.as_str().to_string()),
             name: info.name,
-            status: info.status,
+            status: "active".to_string(), // Views are always active
             created_at: info.created_at,
-            is_main: info.parent_span_id.is_none(),
+            is_main: info.is_main,
         }
     }
 }

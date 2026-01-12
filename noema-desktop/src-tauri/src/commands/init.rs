@@ -7,7 +7,7 @@ use noema_core::storage::asset::AssetStore;
 use noema_core::storage::blob::{BlobStore, FsBlobStore};
 use noema_core::storage::coordinator::DynStorageCoordinator;
 use noema_core::storage::document::resolver::DocumentResolver;
-use noema_core::storage::conversation::ConversationStore;
+use noema_core::storage::session::ConversationManagement;
 use noema_core::storage::user::UserStore;
 use noema_core::{ChatEngine, McpRegistry};
 use noema_core::storage::session::{SqliteSession, SqliteStore};
@@ -260,24 +260,9 @@ async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
     let session = if let Some(most_recent) = conversations.first() {
-        // Get blob store for resolver
-        let blob_store_guard = state.blob_store.lock().await;
-        let blob_store = blob_store_guard
-            .as_ref()
-            .ok_or("Blob store not initialized")?
-            .clone();
-        drop(blob_store_guard);
-
-        // Open the most recent conversation with blob resolver
+        // Open the most recent conversation
         store
-            .open_conversation(&most_recent.id, move |asset_id: String| {
-                let blob_store = blob_store.clone();
-                async move {
-                    blob_store.get(&asset_id)
-                        .await
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                }
-            })
+            .open_conversation(most_recent.id.as_str())
             .await
             .map_err(|e| format!("Failed to open conversation: {}", e))?
     } else {

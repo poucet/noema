@@ -6,6 +6,9 @@
 //! - `MemorySession` / `MemoryTransaction` - in-memory session implementations
 //! - `SqliteStore` - the main SQLite storage backend (requires `sqlite` feature)
 //! - `SqliteSession` / `SqliteTransaction` - SQLite session implementations
+//!
+//! For conversation CRUD operations, see `ConversationManagement` in the
+//! `conversation` module.
 
 mod memory;
 
@@ -21,6 +24,10 @@ pub use memory::{MemorySession, MemoryTransaction};
 
 #[cfg(feature = "sqlite")]
 pub use sqlite::{SqliteSession, SqliteStore, SqliteTransaction};
+
+// Re-export ConversationManagement for convenience (implementation is on SqliteStore)
+#[cfg(feature = "sqlite")]
+pub use crate::storage::conversation::ConversationManagement;
 
 // ============================================================================
 // Traits

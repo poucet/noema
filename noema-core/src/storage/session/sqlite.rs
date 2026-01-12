@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use super::{SessionStore, StorageTransaction};
 use crate::storage::content::{ContentResolver, StoredContent};
 use crate::storage::content_block::OriginKind;
-use crate::storage::conversation::TurnStore;
+use crate::storage::conversation::{ConversationInfo, ConversationManagement, TurnStore};
 use crate::storage::conversation::types::{MessageRole, SpanRole};
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::ConversationId;
@@ -529,6 +529,87 @@ impl SqliteStore {
             true, // Already exists in DB
             self.coordinator(),
         ))
+    }
+}
+
+// ============================================================================
+// ConversationManagement Implementation
+// ============================================================================
+
+#[async_trait]
+impl ConversationManagement for SqliteStore {
+    async fn list_conversations(&self, user_id: &str) -> Result<Vec<ConversationInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.title, c.is_private, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) as turn_count
+             FROM conversations c
+             WHERE c.user_id = ?1
+             ORDER BY c.updated_at DESC"
+        )?;
+
+        let conversations = stmt
+            .query_map(params![user_id], |row| {
+                let id: String = row.get(0)?;
+                let name: Option<String> = row.get(1)?;
+                let is_private: i32 = row.get(2)?;
+                let created_at: i64 = row.get(3)?;
+                let updated_at: i64 = row.get(4)?;
+                let turn_count: usize = row.get(5)?;
+                Ok((id, name, is_private, created_at, updated_at, turn_count))
+            })?
+            .filter_map(|r| r.ok())
+            .map(|(id, name, is_private, created_at, updated_at, turn_count)| {
+                ConversationInfo {
+                    id: ConversationId::from_string(id),
+                    name,
+                    turn_count,
+                    is_private: is_private != 0,
+                    created_at,
+                    updated_at,
+                }
+            })
+            .collect();
+
+        Ok(conversations)
+    }
+
+    async fn delete_conversation(&self, conversation_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // Cascade delete handles turns, spans, messages, message_content, views, view_selections
+        conn.execute(
+            "DELETE FROM conversations WHERE id = ?1",
+            params![conversation_id],
+        )?;
+        Ok(())
+    }
+
+    async fn rename_conversation(&self, conversation_id: &str, name: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET title = ?1, updated_at = ?2 WHERE id = ?3",
+            params![name, unix_timestamp(), conversation_id],
+        )?;
+        Ok(())
+    }
+
+    async fn get_conversation_private(&self, conversation_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let is_private: i32 = conn.query_row(
+            "SELECT is_private FROM conversations WHERE id = ?1",
+            params![conversation_id],
+            |row| row.get(0),
+        )?;
+        Ok(is_private != 0)
+    }
+
+    async fn set_conversation_private(&self, conversation_id: &str, is_private: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET is_private = ?1, updated_at = ?2 WHERE id = ?3",
+            params![is_private as i32, unix_timestamp(), conversation_id],
+        )?;
+        Ok(())
     }
 }
 

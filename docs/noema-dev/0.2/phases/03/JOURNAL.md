@@ -776,3 +776,43 @@ User requested not to make strong decisions without input.
 - **Deleted**: `noema-core/src/storage/conversation/conversation_store.rs`
 
 ---
+
+## 2026-01-12: Design Review and Architecture Questions
+
+### Design Observations Captured
+
+Created `OBSERVATIONS.md` to track architectural questions raised during development.
+
+**Questions for decision:**
+1. **TurnStore Size** - Split into TurnStore + ViewStore, or keep unified?
+2. **ConversationManagement Placement** - Moved to `conversation/mod.rs`, confirm or rollback?
+3. **Session Abstraction** - DB-agnostic Session struct, or keep current SqliteSession design?
+4. **Desktop Update Strategy** - Patch incrementally, rewrite commands, or hold until core stable?
+
+### Implementation Work Done
+
+- Added `ConversationManagement` trait to `conversation/mod.rs`
+- Implemented for `SqliteStore`
+- Re-exported from `session/mod.rs`
+- Started desktop patches (can be reverted if direction changes)
+
+### SqliteSession Foundation Verified
+
+Session properly uses TurnStore:
+- `write_turn` creates Turn → Span → Messages
+- `write_parallel_turn` handles parallel model responses
+- `open_conversation` loads via `get_main_view` → `get_view_path`
+- Content resolution through StorageCoordinator
+
+### Files Changed
+
+- **noema-core/src/storage/conversation/mod.rs** - Added ConversationManagement trait
+- **noema-core/src/storage/session/mod.rs** - Re-export ConversationManagement
+- **noema-core/src/storage/session/sqlite.rs** - Implement ConversationManagement for SqliteStore
+- **docs/noema-dev/0.2/phases/03/OBSERVATIONS.md** - Design observations and questions
+
+### noema-core Status
+
+Compiles cleanly with only warnings about unused helper functions.
+
+---

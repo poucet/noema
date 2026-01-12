@@ -2,17 +2,19 @@
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
-use noema_core::storage::conversation::{ConversationStore, LegacySpanType};
+use noema_core::storage::conversation::{ConversationManagement, TurnStore, ViewInfo};
+use noema_core::storage::conversation::types::{SpanRole, MessageRole};
 use noema_core::storage::document::resolver::DocumentResolver;
-use noema_core::storage::content::{StoredContent, StoredPayload};
+use noema_core::storage::content::ResolvedContent;
 use noema_core::storage::session::SessionStore;
+use noema_core::storage::ids::{ConversationId, ViewId, TurnId, SpanId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::DisplayContent;
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{AlternateInfo, Attachment, ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ReferencedDocument, ToolConfig};
+use crate::types::{AlternateInfo, ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ToolConfig};
 
 
 /// Get current messages in the conversation
@@ -326,33 +328,12 @@ pub async fn switch_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> Result<Vec<DisplayMessage>, String> {
-    // Get blob store for resolving asset refs
-    let blob_store = {
-        let blob_guard = state.blob_store.lock().await;
-        blob_guard
-            .clone()
-            .ok_or("Blob store not initialized")?
-    };
-
     let session = {
         let store_guard = state.store.lock().await;
         let store = store_guard.as_ref().ok_or("App not initialized")?;
 
-        // Create resolver that reads from blob store
-        let resolver = {
-            let blob = blob_store.clone();
-            move |asset_id: String| {
-                let blob = blob.clone();
-                async move {
-                    blob.get(&asset_id)
-                        .await
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                }
-            }
-        };
-
         store
-            .open_conversation(&conversation_id, resolver)
+            .open_conversation(&conversation_id)
             .await
             .map_err(|e| format!("Failed to open conversation: {}", e))?
     };
@@ -367,12 +348,10 @@ pub async fn switch_conversation(
 
     // Get messages before creating new engine
     let chat_messages = session.messages();
-    eprintln!("switch_conversation: got {} messages from session", chat_messages.len());
     let messages: Vec<DisplayMessage> = chat_messages
         .iter()
         .map(DisplayMessage::from)
         .collect();
-    eprintln!("switch_conversation: converted to {} display messages", messages.len());
 
     // Get document resolver (store implements DocumentResolver directly)
     let document_resolver: Arc<dyn DocumentResolver> = {
@@ -552,6 +531,27 @@ pub async fn send_parallel_message(
     Ok(())
 }
 
+// ============================================================================
+// Turn/Span/View Commands (Phase 3 - Pending Implementation)
+// ============================================================================
+//
+// The following commands are pending reimplementation with the new Turn/Span/View model:
+// - get_span_set_alternates -> use TurnStore::get_spans(turn_id)
+// - set_selected_span -> use TurnStore::select_span(view_id, turn_id, span_id)
+// - get_span_messages -> use TurnStore::get_messages_with_content(span_id)
+// - get_messages_with_alternates -> use TurnStore::get_view_path(view_id)
+// - list_conversation_threads -> use TurnStore::get_views(conversation_id)
+// - fork_from_span -> use TurnStore::fork_view(view_id, at_turn_id, name)
+// - switch_thread -> use TurnStore::get_view_path(view_id)
+// - rename_thread -> (view rename not yet implemented)
+// - delete_thread -> (view delete not yet implemented)
+// - edit_user_message -> use TurnStore::edit_turn(view_id, turn_id, ...)
+//
+// For now, the basic get_messages command works through SqliteSession
+// which uses get_view_path internally.
+
+use crate::types::ThreadInfoResponse;
+
 /// Information about a span (alternate response) for UI display
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -563,46 +563,32 @@ pub struct SpanInfoResponse {
     pub created_at: i64,
 }
 
-/// Get all alternates (spans) for a SpanSet
+/// Get all alternates (spans) for a turn
+/// In the new model, this returns spans at a specific turn
 #[tauri::command]
-pub async fn get_span_set_alternates(
+pub async fn get_turn_alternates(
     state: State<'_, Arc<AppState>>,
-    span_set_id: String,
+    turn_id: String,
 ) -> Result<Vec<SpanInfoResponse>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
-    let alternates = store
-        .get_span_set_alternates(&span_set_id)
+    let turn_id = TurnId::from_string(turn_id);
+    let spans = store
+        .get_spans(&turn_id)
         .await
-        .map_err(|e| format!("Failed to get alternates: {}", e))?;
+        .map_err(|e| format!("Failed to get spans: {}", e))?;
 
-    Ok(alternates
+    Ok(spans
         .into_iter()
-        .map(|a| SpanInfoResponse {
-            id: a.id,
-            model_id: a.model_id,
-            message_count: a.message_count,
-            is_selected: a.is_selected,
-            created_at: a.created_at,
+        .map(|s| SpanInfoResponse {
+            id: s.id.as_str().to_string(),
+            model_id: s.model_id,
+            message_count: s.message_count as usize,
+            is_selected: false, // Would need view context to determine
+            created_at: s.created_at,
         })
         .collect())
-}
-
-/// Set the selected span for a SpanSet (switch active alternate)
-#[tauri::command]
-pub async fn set_selected_span(
-    state: State<'_, Arc<AppState>>,
-    span_set_id: String,
-    span_id: String,
-) -> Result<(), String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-
-    store
-        .set_selected_span(&span_set_id, &span_id)
-        .await
-        .map_err(|e| format!("Failed to set selected span: {}", e))
 }
 
 /// Get messages from a specific span
@@ -614,404 +600,51 @@ pub async fn get_span_messages(
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
+    let span_id = SpanId::from_string(span_id);
     let messages = store
-        .get_span_messages(&span_id)
+        .get_messages_with_content(&span_id)
         .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
 
+    // TODO: Need to resolve content through coordinator
+    // For now, return basic messages without resolved content
     Ok(messages
         .into_iter()
-        .map(|m| {
-            let content = m.payload.content.into_iter().map(DisplayContent::from).collect();
-            DisplayMessage {
-                role: m.role,
-                content,
-                span_set_id: None,
-                span_id: None,
-                alternates: None,
-            }
+        .map(|m| DisplayMessage {
+            role: match m.message.role {
+                MessageRole::User => Role::User,
+                MessageRole::Assistant => Role::Assistant,
+                MessageRole::System => Role::System,
+                MessageRole::Tool => Role::Tool,
+            },
+            content: vec![], // Content needs resolution via coordinator
+            span_set_id: None,
+            span_id: Some(span_id.as_str().to_string()),
+            alternates: None,
         })
         .collect())
 }
 
-/// Get all messages for the current conversation with alternates info
-/// This is the main entry point for loading a conversation with full span awareness
+/// List all views (branches) for a conversation
 #[tauri::command]
-pub async fn get_messages_with_alternates(state: State<'_, Arc<AppState>>) -> Result<Vec<DisplayMessage>, String> {
-    let engine_guard = state.engine.lock().await;
-    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-
-    let session_arc = engine.get_session();
-    let session = session_arc.lock().await;
-    let conversation_id = session.conversation_id().to_string();
-    drop(session); // Release session lock before accessing store
-
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-
-    // Get the main thread for this conversation
-    let thread_id = store
-        .get_main_thread_id(&conversation_id)
-        .await
-        .map_err(|e| format!("Failed to get thread: {}", e))?;
-
-    let thread_id = match thread_id {
-        Some(id) => id,
-        None => return Ok(vec![]), // No thread yet = no messages
-    };
-
-    // Get all span sets for this thread
-    let span_sets = store
-        .get_thread_span_sets(&thread_id)
-        .await
-        .map_err(|e| format!("Failed to get span sets: {}", e))?;
-
-    let mut result = Vec::new();
-
-    for span_set_info in span_sets {
-        // Get full content for this span set
-        let span_set = store
-            .get_span_set_with_content(&span_set_info.id)
-            .await
-            .map_err(|e| format!("Failed to get span set content: {}", e))?;
-
-        if let Some(span_set) = span_set {
-            // Get the selected span_id (the one we're showing messages from)
-            let selected_span_id = span_set
-                .alternates
-                .iter()
-                .find(|a| a.is_selected)
-                .map(|a| a.id.clone())
-                .or_else(|| span_set.alternates.first().map(|a| a.id.clone()))
-                .unwrap_or_default();
-
-            // Convert alternates to AlternateInfo
-            let alternates: Vec<AlternateInfo> = span_set
-                .alternates
-                .iter()
-                .map(|a| {
-                    let model_display_name = a.model_id.as_ref().map(|id| {
-                        id.split('/').last().unwrap_or(id).to_string()
-                    });
-                    AlternateInfo {
-                        span_id: a.id.clone(),
-                        model_id: a.model_id.clone(),
-                        model_display_name,
-                        message_count: a.message_count,
-                        is_selected: a.is_selected,
-                    }
-                })
-                .collect();
-
-            // Convert messages to display content
-            for msg in span_set.messages {
-                let content = msg.payload.content.into_iter().map(DisplayContent::from).collect();
-
-                result.push(DisplayMessage::with_alternates(
-                    msg.role,
-                    content,
-                    span_set_info.id.clone(),
-                    selected_span_id.clone(),
-                    alternates.clone(),
-                ));
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-// ========== Thread/Fork Commands ==========
-
-use crate::types::ThreadInfoResponse;
-
-/// List all threads (branches) for a conversation
-#[tauri::command]
-pub async fn list_conversation_threads(
+pub async fn list_conversation_views(
     state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> Result<Vec<ThreadInfoResponse>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
-    let threads = store
-        .list_conversation_threads(&conversation_id)
+    let conv_id = ConversationId::from_string(conversation_id);
+    let views = store
+        .get_views(&conv_id)
         .await
-        .map_err(|e| format!("Failed to list threads: {}", e))?;
+        .map_err(|e| format!("Failed to list views: {}", e))?;
 
-    Ok(threads.into_iter().map(ThreadInfoResponse::from).collect())
+    Ok(views.into_iter().map(ThreadInfoResponse::from).collect())
 }
 
-/// Fork result containing both conversation and thread IDs
-#[derive(serde::Serialize, ts_rs::TS)]
-#[ts(export)]
-pub struct ForkResult {
-    pub conversation_id: String,
-    pub thread_id: String,
-}
-
-/// Fork a conversation from a specific span
-/// Creates a NEW CONVERSATION that shares history up to the fork point
-/// Returns both conversation_id and thread_id so the frontend can switch to it
+/// Get the current view ID
 #[tauri::command]
-pub async fn fork_from_span(
-    state: State<'_, Arc<AppState>>,
-    span_id: String,
-    name: Option<String>,
-) -> Result<ForkResult, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-    let user_id = state.user_id.lock().await.clone();
-
-    // Create a new forked conversation (this creates both conversation and thread)
-    let (conversation_id, thread_id) = store
-        .create_fork_conversation(&user_id, &span_id, name.as_deref())
-        .await
-        .map_err(|e| format!("Failed to create fork: {}", e))?;
-
-    Ok(ForkResult {
-        conversation_id,
-        thread_id,
-    })
-}
-
-/// Switch to a different thread in the current conversation
-#[tauri::command]
-pub async fn switch_thread(
-    state: State<'_, Arc<AppState>>,
-    thread_id: String,
-) -> Result<Vec<DisplayMessage>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-
-    // Get thread info to verify it exists
-    let thread = store
-        .get_thread(&thread_id)
-        .await
-        .map_err(|e| format!("Failed to get thread: {}", e))?
-        .ok_or("Thread not found")?;
-
-    // Update current thread in state
-    *state.current_thread_id.lock().await = Some(thread_id.clone());
-
-    // Convert to DisplayMessage
-    // For forked threads, we need to walk through span_sets properly
-    let span_sets = store
-        .get_thread_span_sets(&thread_id)
-        .await
-        .map_err(|e| format!("Failed to get span sets: {}", e))?;
-
-    let mut result = Vec::new();
-
-    // If this is a forked thread, first get ancestry messages
-    if thread.parent_span_id.is_some() {
-        let ancestry_messages = store
-            .get_thread_messages_with_ancestry(&thread_id)
-            .await
-            .map_err(|e| format!("Failed to get ancestry messages: {}", e))?;
-
-        for msg in ancestry_messages {
-            let content = msg.payload.content.into_iter().map(DisplayContent::from).collect();
-            result.push(DisplayMessage {
-                role: msg.role,
-                content,
-                span_set_id: None,
-                span_id: None,
-                alternates: None,
-            });
-        }
-    } else {
-        // Main thread - just get span_sets directly
-        for span_set_info in span_sets {
-            let span_set = store
-                .get_span_set_with_content(&span_set_info.id)
-                .await
-                .map_err(|e| format!("Failed to get span set content: {}", e))?;
-
-            if let Some(span_set) = span_set {
-                let selected_span_id = span_set
-                    .alternates
-                    .iter()
-                    .find(|a| a.is_selected)
-                    .map(|a| a.id.clone())
-                    .or_else(|| span_set.alternates.first().map(|a| a.id.clone()))
-                    .unwrap_or_default();
-
-                let alternates: Vec<AlternateInfo> = span_set
-                    .alternates
-                    .iter()
-                    .map(|a| {
-                        let model_display_name = a.model_id.as_ref().map(|id| {
-                            id.split('/').last().unwrap_or(id).to_string()
-                        });
-                        AlternateInfo {
-                            span_id: a.id.clone(),
-                            model_id: a.model_id.clone(),
-                            model_display_name,
-                            message_count: a.message_count,
-                            is_selected: a.is_selected,
-                        }
-                    })
-                    .collect();
-
-                for msg in span_set.messages {
-                    let content = msg.payload.content.into_iter().map(DisplayContent::from).collect();
-
-                    result.push(DisplayMessage::with_alternates(
-                        msg.role,
-                        content,
-                        span_set_info.id.clone(),
-                        selected_span_id.clone(),
-                        alternates.clone(),
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok(result)
-}
-
-/// Rename a thread
-#[tauri::command]
-pub async fn rename_thread(
-    state: State<'_, Arc<AppState>>,
-    thread_id: String,
-    name: String,
-) -> Result<(), String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-
-    let name_opt = if name.trim().is_empty() {
-        None
-    } else {
-        Some(name.as_str())
-    };
-
-    store
-        .rename_thread(&thread_id, name_opt)
-        .await
-        .map_err(|e| format!("Failed to rename thread: {}", e))
-}
-
-/// Delete a thread (cannot delete main thread)
-#[tauri::command]
-pub async fn delete_thread(
-    state: State<'_, Arc<AppState>>,
-    thread_id: String,
-) -> Result<(), String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-
-    store
-        .delete_thread(&thread_id)
-        .await
-        .map_err(|e| format!("Failed to delete thread: {}", e))?;
-
-    Ok(())
-}
-
-/// Get the current thread ID
-#[tauri::command]
-pub async fn get_current_thread_id(state: State<'_, Arc<AppState>>) -> Result<Option<String>, String> {
+pub async fn get_current_view_id(state: State<'_, Arc<AppState>>) -> Result<Option<String>, String> {
     Ok(state.current_thread_id.lock().await.clone())
-}
-
-/// Edit a user message by creating a fork with the new content
-/// Returns the new thread ID
-#[tauri::command]
-pub async fn edit_user_message(
-    state: State<'_, Arc<AppState>>,
-    span_id: String,
-    new_content: String,
-) -> Result<String, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-
-    // Get the span_set this span belongs to
-    let span_set_id = store
-        .get_span_parent_span_set(&span_id)
-        .await
-        .map_err(|e| format!("Failed to get span's span_set: {}", e))?
-        .ok_or("Span not found")?;
-
-    // Get the thread this span_set belongs to
-    let thread_id = store
-        .get_span_set_thread(&span_set_id)
-        .await
-        .map_err(|e| format!("Failed to get span_set's thread: {}", e))?
-        .ok_or("Thread not found")?;
-
-    // Get the thread to find its conversation_id
-    let thread = store
-        .get_thread(&thread_id)
-        .await
-        .map_err(|e| format!("Failed to get thread: {}", e))?
-        .ok_or("Thread not found")?;
-
-    // Get span_set info to find the previous span_set (we fork from the span before the edited one)
-    let span_sets = store
-        .get_thread_span_sets(&thread_id)
-        .await
-        .map_err(|e| format!("Failed to get span sets: {}", e))?;
-
-    // Find the span_set that contains our span and the one before it
-    let mut parent_span_id: Option<String> = None;
-    for (i, ss) in span_sets.iter().enumerate() {
-        if ss.id == span_set_id {
-            // If this is the first span_set, we fork from the thread's parent (if any) or start fresh
-            if i > 0 {
-                // Get the selected span from the previous span_set
-                let prev_ss = &span_sets[i - 1];
-                if let Some(ref selected) = prev_ss.selected_span_id {
-                    parent_span_id = Some(selected.clone());
-                }
-            }
-            break;
-        }
-    }
-
-    // Create the forked thread
-    let new_thread_id = if let Some(ref parent_id) = parent_span_id {
-        store
-            .create_fork_thread(&thread.conversation_id, parent_id, Some("Edited"))
-            .await
-            .map_err(|e| format!("Failed to create fork: {}", e))?
-    } else {
-        // No previous message to fork from - create a fresh thread
-        // This shouldn't happen in normal usage (editing the first message)
-        store
-            .create_fork_thread(&thread.conversation_id, &span_id, Some("Edited"))
-            .await
-            .map_err(|e| format!("Failed to create fork: {}", e))?
-    };
-
-
-    // Create a span_set for the user message in the new thread
-    let span_set_id = store
-        .create_span_set(&new_thread_id, LegacySpanType::User)
-        .await
-        .map_err(|e| format!("Failed to create span_set: {}", e))?;
-
-    // Create a span within the span_set
-    let span_id = store
-        .create_span(&span_set_id, None)
-        .await
-        .map_err(|e| format!("Failed to create span: {}", e))?;
-
-    // Create the stored payload with the edited text
-    let content = StoredPayload::new(vec![StoredContent::Text {
-        text: new_content,
-    }]);
-
-    // Add the message to the span
-    store
-        .add_span_message(&span_id, Role::User, &content)
-        .await
-        .map_err(|e| format!("Failed to write edited message: {}", e))?;
-
-    // Update current thread in state
-    *state.current_thread_id.lock().await = Some(new_thread_id.clone());
-
-    Ok(new_thread_id)
 }
