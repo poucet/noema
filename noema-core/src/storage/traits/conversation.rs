@@ -1,20 +1,22 @@
 //! ConversationStore trait for conversation lifecycle operations
 //!
 //! This trait handles conversation-level CRUD: create, list, delete, rename, privacy.
-//! The internal structure (turns, spans, messages, views) is managed by TurnStore.
+//! It extends TurnStore, which manages the internal structure (turns, spans, messages, views).
 
 use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::storage::ids::{ConversationId, UserId};
+use crate::storage::traits::TurnStore;
 use crate::storage::types::conversation::ConversationInfo;
 
 /// Trait for conversation lifecycle operations
 ///
-/// Manages conversations as entities: creation, listing, deletion, metadata.
-/// For internal structure (turns/spans/messages/views), see TurnStore.
+/// Extends TurnStore to provide both:
+/// - Conversation lifecycle: creation, listing, deletion, metadata
+/// - Internal structure: turns, spans, messages, views (from TurnStore)
 #[async_trait]
-pub trait ConversationStore: Send + Sync {
+pub trait ConversationStore: TurnStore {
     /// Create a new conversation for a user
     ///
     /// Creates the conversation record and a main view. Returns the conversation ID.

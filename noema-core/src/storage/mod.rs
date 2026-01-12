@@ -14,7 +14,7 @@
 //!
 //! - `TurnStore` - Turn/Span/Message conversation storage
 //! - `ConversationStore` - Conversation-level CRUD
-//! - `ContentBlockStore` - Content-addressed text storage
+//! - `TextStore` - Content-addressed text storage
 //! - `AssetStore` - Asset metadata storage
 //! - `BlobStore` - Content-addressable binary storage
 //! - `DocumentStore` - Document, tab, and revision storage
@@ -22,7 +22,7 @@
 //!
 //! ## Session API
 //!
-//! - `Session<T: TurnStore, C: ContentBlockStore>` - DB-agnostic session with lazy content resolution
+//! - `Session<T: TurnStore, C: TextStore>` - DB-agnostic session with lazy content resolution
 //! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
 //! - `AssetResolver` - Resolution trait for assets and documents
 
@@ -58,7 +58,7 @@ pub mod document_resolver;
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, ContentBlockStore, ConversationStore, DocumentStore, TurnStore, UserStore,
+    AssetStore, BlobStore, TextStore, ConversationStore, DocumentStore, TurnStore, UserStore,
 };
 
 // Types
@@ -89,7 +89,7 @@ pub use implementations::fs::FsBlobStore;
 
 // Memory implementations (for testing)
 pub use implementations::memory::{
-    MemoryAssetStore, MemoryBlobStore, MemoryContentBlockStore, MemoryConversationStore,
+    MemoryAssetStore, MemoryBlobStore, MemoryTextStore, MemoryConversationStore,
     MemoryDocumentStore, MemoryTurnStore,
 };
 

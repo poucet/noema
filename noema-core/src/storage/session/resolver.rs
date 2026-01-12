@@ -1,7 +1,7 @@
 //! Asset resolution traits for Session
 //!
 //! AssetResolver resolves assets and documents for LLM context.
-//! Text resolution uses ContentBlockStore::require_text() directly.
+//! Text resolution uses TextStore::require_text() directly.
 
 use anyhow::Result;
 use async_trait::async_trait;

@@ -1,6 +1,6 @@
 //! DB-agnostic Session implementation
 //!
-//! Session<T, C, B, A> provides:
+//! Session provides:
 //! - Runtime state management (conversation_id, view_id, cache)
 //! - Pending message buffer for uncommitted changes
 //! - Lazy resolution of assets/documents for LLM
@@ -14,7 +14,9 @@ use std::sync::Arc;
 use crate::context::{ConversationContext, MessagesGuard};
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, ViewId};
-use crate::storage::traits::{AssetStore, BlobStore, ContentBlockStore, TurnStore};
+use crate::storage::traits::{
+    AssetStore, BlobStore, TextStore, ConversationStore, DocumentStore, UserStore,
+};
 use crate::storage::types::{MessageRole, OriginKind, SpanRole};
 
 use super::types::{ResolvedContent, ResolvedMessage};
@@ -26,17 +28,26 @@ use super::types::{ResolvedContent, ResolvedMessage};
 /// Runtime session state - DB-agnostic
 ///
 /// Generic over:
-/// - T: TurnStore implementation
-/// - C: ContentBlockStore implementation
 /// - B: BlobStore implementation (for binary asset storage)
 /// - A: AssetStore implementation (for asset metadata)
+/// - C: TextStore implementation
+/// - Conv: ConversationStore implementation (includes TurnStore)
+/// - U: UserStore implementation
+/// - D: DocumentStore implementation
 ///
-/// T and C can be the same type (e.g., SqliteStore).
 /// Session is runtime state: conversation context, current view, cached resolved messages.
 /// Implements ConversationContext for direct use with agents.
-pub struct Session<T: TurnStore, C: ContentBlockStore, B: BlobStore, A: AssetStore> {
+pub struct Session<B, A, C, Conv, U, D>
+where
+    B: BlobStore,
+    A: AssetStore,
+    C: TextStore,
+    Conv: ConversationStore,
+    U: UserStore,
+    D: DocumentStore,
+{
     /// Storage coordinator - provides access to all stores
-    coordinator: Arc<StorageCoordinator<B, A, C, T>>,
+    coordinator: Arc<StorageCoordinator<B, A, C, Conv, U, D>>,
     conversation_id: ConversationId,
     view_id: ViewId,
     /// Cached resolved messages (text resolved, assets/docs cached lazily)
@@ -49,19 +60,21 @@ pub struct Session<T: TurnStore, C: ContentBlockStore, B: BlobStore, A: AssetSto
     pending: Vec<ChatMessage>,
 }
 
-impl<T, C, B, A> Session<T, C, B, A>
+impl<B, A, C, Conv, U, D> Session<B, A, C, Conv, U, D>
 where
-    T: TurnStore + Send + Sync,
-    C: ContentBlockStore + Send + Sync,
     B: BlobStore + Send + Sync,
     A: AssetStore + Send + Sync,
+    C: TextStore + Send + Sync,
+    Conv: ConversationStore + Send + Sync,
+    U: UserStore + Send + Sync,
+    D: DocumentStore + Send + Sync,
 {
     /// Open a session for an existing conversation
     ///
     /// Delegates view resolution to the StorageCoordinator which handles
     /// the multi-store coordination of getting/creating views and resolving content.
     pub async fn open(
-        coordinator: Arc<StorageCoordinator<B, A, C, T>>,
+        coordinator: Arc<StorageCoordinator<B, A, C, Conv, U, D>>,
         conversation_id: ConversationId,
     ) -> Result<Self> {
         let (view_id, resolved_cache) = coordinator.open_session(&conversation_id).await?;
@@ -79,7 +92,7 @@ where
 
     /// Create a new session for a new conversation (not yet persisted)
     pub fn new(
-        coordinator: Arc<StorageCoordinator<B, A, C, T>>,
+        coordinator: Arc<StorageCoordinator<B, A, C, Conv, U, D>>,
         conversation_id: ConversationId,
         view_id: ViewId,
     ) -> Self {
@@ -103,13 +116,13 @@ where
     }
 
     /// Get access to the storage coordinator
-    pub fn coordinator(&self) -> &Arc<StorageCoordinator<B, A, C, T>> {
+    pub fn coordinator(&self) -> &Arc<StorageCoordinator<B, A, C, Conv, U, D>> {
         &self.coordinator
     }
 
-    /// Get access to the turn store (via coordinator)
-    pub fn turn_store(&self) -> &Arc<T> {
-        self.coordinator.turn_store()
+    /// Get access to the conversation store (via coordinator)
+    pub fn conversation_store(&self) -> &Arc<Conv> {
+        self.coordinator.conversation_store()
     }
 
     /// Get access to the content store (via coordinator)
@@ -166,10 +179,10 @@ where
 
             // Create new turn if role changed
             if current_role != Some(span_role) {
-                let turn_store = self.turn_store();
-                let turn = turn_store.add_turn(&self.conversation_id, span_role).await?;
-                let span = turn_store.add_span(&turn.id, model_id).await?;
-                turn_store.select_span(&self.view_id, &turn.id, &span.id).await?;
+                let conv_store = self.conversation_store();
+                let turn = conv_store.add_turn(&self.conversation_id, span_role).await?;
+                let span = conv_store.add_span(&turn.id, model_id).await?;
+                conv_store.select_span(&self.view_id, &turn.id, &span.id).await?;
                 current_span = Some(span.id);
                 current_role = Some(span_role);
             }
@@ -194,12 +207,14 @@ where
 // ============================================================================
 
 #[async_trait]
-impl<T, C, B, A> ConversationContext for Session<T, C, B, A>
+impl<B, A, C, Conv, U, D> ConversationContext for Session<B, A, C, Conv, U, D>
 where
-    T: TurnStore + Send + Sync,
-    C: ContentBlockStore + Send + Sync,
     B: BlobStore + Send + Sync,
     A: AssetStore + Send + Sync,
+    C: TextStore + Send + Sync,
+    Conv: ConversationStore + Send + Sync,
+    U: UserStore + Send + Sync,
+    D: DocumentStore + Send + Sync,
 {
     async fn messages(&mut self) -> Result<MessagesGuard<'_>> {
         // Rebuild llm_cache if invalid or pending messages changed

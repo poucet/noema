@@ -1,12 +1,12 @@
-//! Storage coordinator - orchestrates content, blob, and asset storage
+//! Storage coordinator - orchestrates all storage operations
 //!
-//! The coordinator provides a unified interface for converting LLM content
-//! to stored references. It handles:
-//! - Text → stored in content_blocks → TextRef
-//! - Inline images/audio → stored in blob/assets → AssetRef
-//! - DocumentRef, ToolCall, ToolResult → pass through
+//! The coordinator provides a unified interface for:
+//! - Converting LLM content to stored references (text, assets, documents)
+//! - Conversation lifecycle and structure (via ConversationStore)
+//! - User management (via UserStore)
+//! - Document management (via DocumentStore)
 //!
-//! It also implements `ContentResolver` for converting refs back to content.
+//! It also implements `ContentResolver` and `DocumentResolver` for resolving refs.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -15,33 +15,67 @@ use llm::ContentBlock;
 use std::sync::Arc;
 
 use crate::storage::content::{ContentResolver, StoredContent};
-use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, ViewId};
+use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
-use crate::storage::traits::{AssetStore, BlobStore, ContentBlockStore, TurnStore};
+use crate::storage::traits::{
+    AssetStore, BlobStore, TextStore, ConversationStore, DocumentStore, UserStore,
+};
 use crate::storage::types::{
-    Asset, ContentBlock as ContentBlockData, ContentOrigin, MessageInfo, MessageRole, OriginKind,
-    TurnWithContent,
+    Asset, ContentBlock as ContentBlockData, ContentOrigin, ConversationInfo, MessageInfo,
+    MessageRole, OriginKind, TurnWithContent, UserInfo,
 };
 
 /// Coordinates storage across all store types.
 ///
-/// This generic version is useful when you have concrete types and want
-/// to avoid dynamic dispatch overhead.
-pub struct StorageCoordinator<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> {
+/// Type parameters:
+/// - `B`: Blob storage (filesystem)
+/// - `A`: Asset metadata storage
+/// - `C`: Content block storage
+/// - `Conv`: Conversation storage (includes TurnStore via supertrait)
+/// - `U`: User storage
+/// - `D`: Document storage
+pub struct StorageCoordinator<B, A, C, Conv, U, D>
+where
+    B: BlobStore,
+    A: AssetStore,
+    C: TextStore,
+    Conv: ConversationStore,
+    U: UserStore,
+    D: DocumentStore,
+{
     blob_store: Arc<B>,
     asset_store: Arc<A>,
     content_block_store: Arc<C>,
-    turn_store: Arc<T>,
+    conversation_store: Arc<Conv>,
+    user_store: Arc<U>,
+    document_store: Arc<D>,
 }
 
-impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> StorageCoordinator<B, A, C, T> {
+impl<B, A, C, Conv, U, D> StorageCoordinator<B, A, C, Conv, U, D>
+where
+    B: BlobStore,
+    A: AssetStore,
+    C: TextStore,
+    Conv: ConversationStore,
+    U: UserStore,
+    D: DocumentStore,
+{
     /// Create a new storage coordinator
-    pub fn new(blob_store: Arc<B>, asset_store: Arc<A>, content_block_store: Arc<C>, turn_store: Arc<T>) -> Self {
+    pub fn new(
+        blob_store: Arc<B>,
+        asset_store: Arc<A>,
+        content_block_store: Arc<C>,
+        conversation_store: Arc<Conv>,
+        user_store: Arc<U>,
+        document_store: Arc<D>,
+    ) -> Self {
         Self {
             blob_store,
             asset_store,
             content_block_store,
-            turn_store,
+            conversation_store,
+            user_store,
+            document_store,
         }
     }
 
@@ -129,9 +163,80 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> StorageCoo
         &self.content_block_store
     }
 
-    /// Get access to the turn store
-    pub fn turn_store(&self) -> &Arc<T> {
-        &self.turn_store
+    /// Get access to the conversation store (includes TurnStore methods)
+    pub fn conversation_store(&self) -> &Arc<Conv> {
+        &self.conversation_store
+    }
+
+    /// Get access to the user store
+    pub fn user_store(&self) -> &Arc<U> {
+        &self.user_store
+    }
+
+    /// Get access to the document store
+    pub fn document_store(&self) -> &Arc<D> {
+        &self.document_store
+    }
+
+    // ========== Conversation Delegation Methods ==========
+
+    /// Create a new conversation for a user
+    pub async fn create_conversation(
+        &self,
+        user_id: &UserId,
+        name: Option<&str>,
+    ) -> Result<ConversationId> {
+        self.conversation_store.create_conversation(user_id, name).await
+    }
+
+    /// List all conversations for a user
+    pub async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
+        self.conversation_store.list_conversations(user_id).await
+    }
+
+    /// Delete a conversation and all its data
+    pub async fn delete_conversation(&self, conversation_id: &ConversationId) -> Result<()> {
+        self.conversation_store.delete_conversation(conversation_id).await
+    }
+
+    /// Rename a conversation
+    pub async fn rename_conversation(
+        &self,
+        conversation_id: &ConversationId,
+        name: Option<&str>,
+    ) -> Result<()> {
+        self.conversation_store.rename_conversation(conversation_id, name).await
+    }
+
+    /// Get privacy setting for a conversation
+    pub async fn is_conversation_private(&self, conversation_id: &ConversationId) -> Result<bool> {
+        self.conversation_store.is_conversation_private(conversation_id).await
+    }
+
+    /// Set privacy setting for a conversation
+    pub async fn set_conversation_private(
+        &self,
+        conversation_id: &ConversationId,
+        is_private: bool,
+    ) -> Result<()> {
+        self.conversation_store.set_conversation_private(conversation_id, is_private).await
+    }
+
+    // ========== User Delegation Methods ==========
+
+    /// Get or create the default user
+    pub async fn get_or_create_default_user(&self) -> Result<UserInfo> {
+        self.user_store.get_or_create_default_user().await
+    }
+
+    /// Get or create a user by email
+    pub async fn get_or_create_user_by_email(&self, email: &str) -> Result<UserInfo> {
+        self.user_store.get_or_create_user_by_email(email).await
+    }
+
+    /// List all users
+    pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
+        self.user_store.list_users().await
     }
 
     /// Open a session for a conversation, resolving or creating the main view.
@@ -147,10 +252,10 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> StorageCoo
         conversation_id: &ConversationId,
     ) -> Result<(ViewId, Vec<ResolvedMessage>)> {
         // Get or create main view
-        let view_id = match self.turn_store.get_main_view(conversation_id).await? {
+        let view_id = match self.conversation_store.get_main_view(conversation_id).await? {
             Some(v) => v.id,
             None => {
-                self.turn_store
+                self.conversation_store
                     .create_view(conversation_id, Some("main"), true)
                     .await?
                     .id
@@ -158,7 +263,7 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> StorageCoo
         };
 
         // Load view path and resolve content
-        let path = self.turn_store.get_view_path(&view_id).await?;
+        let path = self.conversation_store.get_view_path(&view_id).await?;
         let resolved_cache = self.resolve_path(&path).await?;
 
         Ok((view_id, resolved_cache))
@@ -226,7 +331,7 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> StorageCoo
         let stored = self.store_content(content, origin).await?;
 
         // Add message to turn store
-        let message_info = self.turn_store.add_message(span_id, role, &stored).await?;
+        let message_info = self.conversation_store.add_message(span_id, role, &stored).await?;
 
         // Resolve for caching
         let resolved = self.resolve_stored_content(&stored).await?;
@@ -237,8 +342,14 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> StorageCoo
 
 /// Implement ContentResolver for the generic coordinator
 #[async_trait]
-impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> ContentResolver
-    for StorageCoordinator<B, A, C, T>
+impl<B, A, C, Conv, U, D> ContentResolver for StorageCoordinator<B, A, C, Conv, U, D>
+where
+    B: BlobStore,
+    A: AssetStore,
+    C: TextStore,
+    Conv: ConversationStore,
+    U: UserStore,
+    D: DocumentStore,
 {
     async fn get_text(&self, id: &ContentBlockId) -> Result<String> {
         self.content_block_store
@@ -261,12 +372,33 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore, T: TurnStore> ContentRes
     }
 }
 
+/// Implement DocumentResolver by delegating to the document store
+#[async_trait]
+impl<B, A, C, Conv, U, D> crate::storage::DocumentResolver for StorageCoordinator<B, A, C, Conv, U, D>
+where
+    B: BlobStore,
+    A: AssetStore,
+    C: TextStore,
+    Conv: ConversationStore,
+    U: UserStore,
+    D: DocumentStore,
+{
+    async fn resolve_documents(
+        &self,
+        doc_ids: &[crate::storage::ids::DocumentId],
+    ) -> std::collections::HashMap<crate::storage::ids::DocumentId, crate::storage::types::FullDocumentInfo> {
+        self.document_store.resolve_documents(doc_ids).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::content::StoredContent;
-    use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, ViewId};
+    use crate::storage::ids::{ConversationId, DocumentId, MessageId, RevisionId, SpanId, TabId, TurnId, ViewId};
+    use crate::storage::traits::TurnStore;
     use crate::storage::types::{
+        DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
         MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, StoredAsset,
         StoredBlob, StoreResult, StoredContentBlock, TurnInfo, TurnWithContent, ViewInfo,
     };
@@ -274,77 +406,79 @@ mod tests {
     use std::sync::Mutex;
     use uuid::Uuid;
 
-    // Mock turn store (not used in these tests, just needs to exist)
-    struct MockTurnStore;
+    // Mock conversation store (implements TurnStore + ConversationStore)
+    struct MockConversationStore;
 
     #[async_trait]
-    impl TurnStore for MockTurnStore {
-        async fn add_turn(&self, _: &ConversationId, _: SpanRole) -> Result<TurnInfo> {
-            unimplemented!()
-        }
-        async fn get_turns(&self, _: &ConversationId) -> Result<Vec<TurnInfo>> {
-            unimplemented!()
-        }
-        async fn get_turn(&self, _: &TurnId) -> Result<Option<TurnInfo>> {
-            unimplemented!()
-        }
-        async fn add_span(&self, _: &TurnId, _: Option<&str>) -> Result<SpanInfo> {
-            unimplemented!()
-        }
-        async fn get_spans(&self, _: &TurnId) -> Result<Vec<SpanInfo>> {
-            unimplemented!()
-        }
-        async fn get_span(&self, _: &SpanId) -> Result<Option<SpanInfo>> {
-            unimplemented!()
-        }
-        async fn add_message(&self, _: &SpanId, _: MessageRole, _: &[StoredContent]) -> Result<MessageInfo> {
-            unimplemented!()
-        }
-        async fn get_messages(&self, _: &SpanId) -> Result<Vec<MessageInfo>> {
-            unimplemented!()
-        }
-        async fn get_messages_with_content(&self, _: &SpanId) -> Result<Vec<MessageWithContent>> {
-            unimplemented!()
-        }
-        async fn get_message(&self, _: &MessageId) -> Result<Option<MessageInfo>> {
-            unimplemented!()
-        }
-        async fn create_view(&self, _: &ConversationId, _: Option<&str>, _: bool) -> Result<ViewInfo> {
-            unimplemented!()
-        }
-        async fn get_main_view(&self, _: &ConversationId) -> Result<Option<ViewInfo>> {
-            unimplemented!()
-        }
-        async fn get_views(&self, _: &ConversationId) -> Result<Vec<ViewInfo>> {
-            unimplemented!()
-        }
-        async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> {
-            unimplemented!()
-        }
-        async fn get_selected_span(&self, _: &ViewId, _: &TurnId) -> Result<Option<SpanId>> {
-            unimplemented!()
-        }
-        async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> {
-            unimplemented!()
-        }
-        async fn fork_view(&self, _: &ViewId, _: &TurnId, _: Option<&str>) -> Result<ViewInfo> {
-            unimplemented!()
-        }
-        async fn fork_view_with_selections(&self, _: &ViewId, _: &TurnId, _: Option<&str>, _: &[(TurnId, SpanId)]) -> Result<ViewInfo> {
-            unimplemented!()
-        }
-        async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> {
-            unimplemented!()
-        }
-        async fn edit_turn(&self, _: &ViewId, _: &TurnId, _: Vec<(MessageRole, Vec<StoredContent>)>, _: Option<&str>, _: bool, _: Option<&str>) -> Result<(SpanInfo, Option<ViewInfo>)> {
-            unimplemented!()
-        }
-        async fn add_user_turn(&self, _: &ConversationId, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
-            unimplemented!()
-        }
-        async fn add_assistant_turn(&self, _: &ConversationId, _: &str, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
-            unimplemented!()
-        }
+    impl TurnStore for MockConversationStore {
+        async fn add_turn(&self, _: &ConversationId, _: SpanRole) -> Result<TurnInfo> { unimplemented!() }
+        async fn get_turns(&self, _: &ConversationId) -> Result<Vec<TurnInfo>> { unimplemented!() }
+        async fn get_turn(&self, _: &TurnId) -> Result<Option<TurnInfo>> { unimplemented!() }
+        async fn add_span(&self, _: &TurnId, _: Option<&str>) -> Result<SpanInfo> { unimplemented!() }
+        async fn get_spans(&self, _: &TurnId) -> Result<Vec<SpanInfo>> { unimplemented!() }
+        async fn get_span(&self, _: &SpanId) -> Result<Option<SpanInfo>> { unimplemented!() }
+        async fn add_message(&self, _: &SpanId, _: MessageRole, _: &[StoredContent]) -> Result<MessageInfo> { unimplemented!() }
+        async fn get_messages(&self, _: &SpanId) -> Result<Vec<MessageInfo>> { unimplemented!() }
+        async fn get_messages_with_content(&self, _: &SpanId) -> Result<Vec<MessageWithContent>> { unimplemented!() }
+        async fn get_message(&self, _: &MessageId) -> Result<Option<MessageInfo>> { unimplemented!() }
+        async fn create_view(&self, _: &ConversationId, _: Option<&str>, _: bool) -> Result<ViewInfo> { unimplemented!() }
+        async fn get_main_view(&self, _: &ConversationId) -> Result<Option<ViewInfo>> { unimplemented!() }
+        async fn get_views(&self, _: &ConversationId) -> Result<Vec<ViewInfo>> { unimplemented!() }
+        async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> { unimplemented!() }
+        async fn get_selected_span(&self, _: &ViewId, _: &TurnId) -> Result<Option<SpanId>> { unimplemented!() }
+        async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
+        async fn fork_view(&self, _: &ViewId, _: &TurnId, _: Option<&str>) -> Result<ViewInfo> { unimplemented!() }
+        async fn fork_view_with_selections(&self, _: &ViewId, _: &TurnId, _: Option<&str>, _: &[(TurnId, SpanId)]) -> Result<ViewInfo> { unimplemented!() }
+        async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
+        async fn edit_turn(&self, _: &ViewId, _: &TurnId, _: Vec<(MessageRole, Vec<StoredContent>)>, _: Option<&str>, _: bool, _: Option<&str>) -> Result<(SpanInfo, Option<ViewInfo>)> { unimplemented!() }
+        async fn add_user_turn(&self, _: &ConversationId, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> { unimplemented!() }
+        async fn add_assistant_turn(&self, _: &ConversationId, _: &str, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> { unimplemented!() }
+    }
+
+    #[async_trait]
+    impl ConversationStore for MockConversationStore {
+        async fn create_conversation(&self, _: &UserId, _: Option<&str>) -> Result<ConversationId> { unimplemented!() }
+        async fn get_conversation(&self, _: &ConversationId) -> Result<Option<ConversationInfo>> { unimplemented!() }
+        async fn list_conversations(&self, _: &UserId) -> Result<Vec<ConversationInfo>> { unimplemented!() }
+        async fn delete_conversation(&self, _: &ConversationId) -> Result<()> { unimplemented!() }
+        async fn rename_conversation(&self, _: &ConversationId, _: Option<&str>) -> Result<()> { unimplemented!() }
+        async fn is_conversation_private(&self, _: &ConversationId) -> Result<bool> { unimplemented!() }
+        async fn set_conversation_private(&self, _: &ConversationId, _: bool) -> Result<()> { unimplemented!() }
+    }
+
+    // Mock user store
+    struct MockUserStore;
+
+    #[async_trait]
+    impl UserStore for MockUserStore {
+        async fn get_or_create_default_user(&self) -> Result<UserInfo> { unimplemented!() }
+        async fn get_user_by_email(&self, _: &str) -> Result<Option<UserInfo>> { unimplemented!() }
+        async fn get_or_create_user_by_email(&self, _: &str) -> Result<UserInfo> { unimplemented!() }
+        async fn list_users(&self) -> Result<Vec<UserInfo>> { unimplemented!() }
+    }
+
+    // Mock document store
+    struct MockDocumentStore;
+
+    #[async_trait]
+    impl DocumentStore for MockDocumentStore {
+        async fn create_document(&self, _: &UserId, _: &str, _: DocumentSource, _: Option<&str>) -> Result<DocumentId> { unimplemented!() }
+        async fn get_document(&self, _: &DocumentId) -> Result<Option<DocumentInfo>> { unimplemented!() }
+        async fn get_document_by_source(&self, _: &UserId, _: DocumentSource, _: &str) -> Result<Option<DocumentInfo>> { unimplemented!() }
+        async fn list_documents(&self, _: &UserId) -> Result<Vec<DocumentInfo>> { unimplemented!() }
+        async fn search_documents(&self, _: &UserId, _: &str, _: usize) -> Result<Vec<DocumentInfo>> { unimplemented!() }
+        async fn update_document_title(&self, _: &DocumentId, _: &str) -> Result<()> { unimplemented!() }
+        async fn delete_document(&self, _: &DocumentId) -> Result<bool> { unimplemented!() }
+        async fn create_document_tab(&self, _: &DocumentId, _: Option<&TabId>, _: i32, _: &str, _: Option<&str>, _: Option<&str>, _: &[AssetId], _: Option<&TabId>) -> Result<TabId> { unimplemented!() }
+        async fn get_document_tab(&self, _: &TabId) -> Result<Option<DocumentTabInfo>> { unimplemented!() }
+        async fn list_document_tabs(&self, _: &DocumentId) -> Result<Vec<DocumentTabInfo>> { unimplemented!() }
+        async fn update_document_tab_content(&self, _: &TabId, _: &str, _: &[AssetId]) -> Result<()> { unimplemented!() }
+        async fn update_document_tab_parent(&self, _: &TabId, _: Option<&TabId>) -> Result<()> { unimplemented!() }
+        async fn set_document_tab_revision(&self, _: &TabId, _: &RevisionId) -> Result<()> { unimplemented!() }
+        async fn delete_document_tab(&self, _: &TabId) -> Result<bool> { unimplemented!() }
+        async fn create_document_revision(&self, _: &TabId, _: &str, _: &str, _: &[AssetId], _: &UserId) -> Result<RevisionId> { unimplemented!() }
+        async fn get_document_revision(&self, _: &RevisionId) -> Result<Option<DocumentRevisionInfo>> { unimplemented!() }
+        async fn list_document_revisions(&self, _: &TabId) -> Result<Vec<DocumentRevisionInfo>> { unimplemented!() }
     }
 
     // Mock blob store for testing
@@ -441,12 +575,12 @@ mod tests {
     }
 
     // Mock content block store for testing
-    struct MockContentBlockStore {
+    struct MockTextStore {
         blocks: Mutex<HashMap<String, String>>,
         counter: Mutex<u64>,
     }
 
-    impl MockContentBlockStore {
+    impl MockTextStore {
         fn new() -> Self {
             Self {
                 blocks: Mutex::new(HashMap::new()),
@@ -456,7 +590,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl ContentBlockStore for MockContentBlockStore {
+    impl TextStore for MockTextStore {
         async fn store(&self, block: ContentBlockData) -> Result<StoreResult> {
             let mut counter = self.counter.lock().unwrap();
             *counter += 1;
@@ -497,14 +631,36 @@ mod tests {
         }
     }
 
+    fn make_coordinator(content_block_store: Arc<MockTextStore>) -> StorageCoordinator<MockBlobStore, MockAssetStore, MockTextStore, MockConversationStore, MockUserStore, MockDocumentStore> {
+        StorageCoordinator::new(
+            Arc::new(MockBlobStore::new()),
+            Arc::new(MockAssetStore::new()),
+            content_block_store,
+            Arc::new(MockConversationStore),
+            Arc::new(MockUserStore),
+            Arc::new(MockDocumentStore),
+        )
+    }
+
+    fn make_coordinator_with_stores(
+        blob_store: Arc<MockBlobStore>,
+        asset_store: Arc<MockAssetStore>,
+        content_block_store: Arc<MockTextStore>,
+    ) -> StorageCoordinator<MockBlobStore, MockAssetStore, MockTextStore, MockConversationStore, MockUserStore, MockDocumentStore> {
+        StorageCoordinator::new(
+            blob_store,
+            asset_store,
+            content_block_store,
+            Arc::new(MockConversationStore),
+            Arc::new(MockUserStore),
+            Arc::new(MockDocumentStore),
+        )
+    }
+
     #[tokio::test]
     async fn test_store_text_content() {
-        let blob_store = Arc::new(MockBlobStore::new());
-        let asset_store = Arc::new(MockAssetStore::new());
-        let content_block_store = Arc::new(MockContentBlockStore::new());
-        let turn_store = Arc::new(MockTurnStore);
-        let coordinator =
-            StorageCoordinator::new(blob_store, asset_store, content_block_store.clone(), turn_store);
+        let content_block_store = Arc::new(MockTextStore::new());
+        let coordinator = make_coordinator(content_block_store.clone());
 
         let blocks = vec![ContentBlock::Text {
             text: "Hello world".to_string(),
@@ -530,13 +686,11 @@ mod tests {
     async fn test_store_image_content() {
         let blob_store = Arc::new(MockBlobStore::new());
         let asset_store = Arc::new(MockAssetStore::new());
-        let content_block_store = Arc::new(MockContentBlockStore::new());
-        let turn_store = Arc::new(MockTurnStore);
-        let coordinator = StorageCoordinator::new(
+        let content_block_store = Arc::new(MockTextStore::new());
+        let coordinator = make_coordinator_with_stores(
             blob_store.clone(),
             asset_store.clone(),
             content_block_store,
-            turn_store,
         );
 
         let image_data = STANDARD.encode(b"fake image bytes");
@@ -558,13 +712,8 @@ mod tests {
                 ..
             } => {
                 assert_eq!(mime_type, "image/png");
-                // Verify blob was stored
-                assert!(blob_store.exists(asset_id).await);
                 // Verify asset metadata was stored
-                assert!(asset_store
-                    .exists(&AssetId::from_string(asset_id))
-                    .await
-                    .unwrap());
+                assert!(asset_store.exists(asset_id).await.unwrap());
             }
             other => panic!("Expected AssetRef, got {:?}", other),
         }
@@ -572,16 +721,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_text() {
-        let blob_store = Arc::new(MockBlobStore::new());
-        let asset_store = Arc::new(MockAssetStore::new());
-        let content_block_store = Arc::new(MockContentBlockStore::new());
-        let turn_store = Arc::new(MockTurnStore);
-        let coordinator = StorageCoordinator::new(
-            blob_store,
-            asset_store,
-            content_block_store.clone(),
-            turn_store,
-        );
+        let content_block_store = Arc::new(MockTextStore::new());
+        let coordinator = make_coordinator(content_block_store.clone());
 
         // Store some text
         let blocks = vec![ContentBlock::Text {
@@ -607,13 +748,11 @@ mod tests {
     async fn test_resolve_image() {
         let blob_store = Arc::new(MockBlobStore::new());
         let asset_store = Arc::new(MockAssetStore::new());
-        let content_block_store = Arc::new(MockContentBlockStore::new());
-        let turn_store = Arc::new(MockTurnStore);
-        let coordinator = StorageCoordinator::new(
+        let content_block_store = Arc::new(MockTextStore::new());
+        let coordinator = make_coordinator_with_stores(
             blob_store.clone(),
             asset_store.clone(),
             content_block_store,
-            turn_store,
         );
 
         let original_data = b"fake image bytes";
@@ -643,11 +782,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_tool_call_passthrough() {
-        let blob_store = Arc::new(MockBlobStore::new());
-        let asset_store = Arc::new(MockAssetStore::new());
-        let content_block_store = Arc::new(MockContentBlockStore::new());
-        let turn_store = Arc::new(MockTurnStore);
-        let coordinator = StorageCoordinator::new(blob_store, asset_store, content_block_store, turn_store);
+        let content_block_store = Arc::new(MockTextStore::new());
+        let coordinator = make_coordinator(content_block_store);
 
         let tool_call = llm::ToolCall {
             id: "call-1".to_string(),

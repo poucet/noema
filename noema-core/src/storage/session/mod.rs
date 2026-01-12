@@ -2,12 +2,12 @@
 //!
 //! This module provides:
 //!
-//! - `Session<T: TurnStore, C: ContentBlockStore>` - DB-agnostic session with lazy resolution
+//! - `Session<T: TurnStore, C: TextStore>` - DB-agnostic session with lazy resolution
 //! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
 //! - `AssetResolver` - Resolution trait for assets and documents
 //!
 //! Session implements `ConversationContext` directly.
-//! Text resolution uses `ContentBlockStore::require_text()` directly.
+//! Text resolution uses `TextStore::require_text()` directly.
 //!
 //! For SQLite storage, use `storage::SqliteStore`.
 

@@ -324,8 +324,8 @@ pub async fn list_models(_state: State<'_, Arc<AppState>>) -> Result<Vec<ModelIn
 /// List all conversations for the current user
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("App not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("App not initialized")?;
     let user_id = state.user_id.lock().await.clone();
 
     store
@@ -341,13 +341,6 @@ pub async fn switch_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
-    let store = {
-        let store_guard = state.store.lock().await;
-        store_guard
-            .as_ref()
-            .ok_or("App not initialized")?
-            .clone()
-    };
     let coordinator = {
         let coord_guard = state.coordinator.lock().await;
         coord_guard
@@ -376,8 +369,8 @@ pub async fn switch_conversation(
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
-    // Store implements DocumentResolver directly
-    let document_resolver: Arc<dyn DocumentResolver> = store;
+    // Coordinator implements DocumentResolver
+    let document_resolver: Arc<dyn DocumentResolver> = coordinator.clone();
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
@@ -390,13 +383,6 @@ pub async fn switch_conversation(
 /// Create a new conversation
 #[tauri::command]
 pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    let store = {
-        let store_guard = state.store.lock().await;
-        store_guard
-            .as_ref()
-            .ok_or("App not initialized")?
-            .clone()
-    };
     let coordinator = {
         let coord_guard = state.coordinator.lock().await;
         coord_guard
@@ -407,7 +393,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     let user_id = state.user_id.lock().await.clone();
 
     // Create a new conversation
-    let conv_id = store
+    let conv_id = coordinator
         .create_conversation(&user_id, None)
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
@@ -425,8 +411,8 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
-    // Store implements DocumentResolver directly
-    let document_resolver: Arc<dyn DocumentResolver> = store;
+    // Coordinator implements DocumentResolver
+    let document_resolver: Arc<dyn DocumentResolver> = coordinator.clone();
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
@@ -447,8 +433,8 @@ pub async fn delete_conversation(
         return Err("Cannot delete current conversation".to_string());
     }
 
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("App not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("App not initialized")?;
 
     store
         .delete_conversation(&conversation_id)
@@ -463,8 +449,8 @@ pub async fn rename_conversation(
     conversation_id: ConversationId,
     name: String,
 ) -> Result<(), String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("App not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("App not initialized")?;
 
     let name_opt = if name.trim().is_empty() {
         None
@@ -484,8 +470,8 @@ pub async fn get_conversation_private(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<bool, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("App not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("App not initialized")?;
 
     store
         .is_conversation_private(&conversation_id)
@@ -500,8 +486,8 @@ pub async fn set_conversation_private(
     conversation_id: ConversationId,
     is_private: bool,
 ) -> Result<(), String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("App not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("App not initialized")?;
 
     store
         .set_conversation_private(&conversation_id, is_private)
@@ -589,8 +575,8 @@ pub async fn get_turn_alternates(
     state: State<'_, Arc<AppState>>,
     turn_id: TurnId,
 ) -> Result<Vec<SpanInfoResponse>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let spans = store
         .get_spans(&turn_id)
@@ -615,8 +601,8 @@ pub async fn get_span_messages(
     state: State<'_, Arc<AppState>>,
     span_id: SpanId,
 ) -> Result<Vec<DisplayMessage>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let messages = store
         .get_messages_with_content(&span_id)
@@ -648,8 +634,8 @@ pub async fn list_conversation_views(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<ThreadInfoResponse>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let views = store
         .get_views(&conversation_id)

@@ -103,8 +103,8 @@ pub struct DocumentContentResponse {
 /// List all documents for the current user
 #[tauri::command]
 pub async fn list_documents(state: State<'_, Arc<AppState>>) -> Result<Vec<DocumentInfoResponse>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     // Get default user
     let user = store
@@ -125,8 +125,8 @@ pub async fn get_document(
     state: State<'_, Arc<AppState>>,
     doc_id: DocumentId,
 ) -> Result<Option<DocumentInfoResponse>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let doc = store.get_document(&doc_id).await.map_err(|e| e.to_string())?;
     Ok(doc.map(DocumentInfoResponse::from))
@@ -138,8 +138,8 @@ pub async fn get_document_by_google_id(
     state: State<'_, Arc<AppState>>,
     google_doc_id: String,
 ) -> Result<Option<DocumentInfoResponse>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let user = store
         .get_or_create_default_user()
@@ -159,8 +159,8 @@ pub async fn get_document_content(
     state: State<'_, Arc<AppState>>,
     doc_id: DocumentId,
 ) -> Result<DocumentContentResponse, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     // Get document metadata
     let doc = store
@@ -187,8 +187,8 @@ pub async fn get_document_tab(
     state: State<'_, Arc<AppState>>,
     tab_id: TabId,
 ) -> Result<Option<DocumentTabResponse>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let tab = store
         .get_document_tab(&tab_id)
@@ -200,8 +200,8 @@ pub async fn get_document_tab(
 /// Delete a document and all its tabs/revisions
 #[tauri::command]
 pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: DocumentId) -> Result<bool, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     store.delete_document(&doc_id).await.map_err(|e| e.to_string())
 }
@@ -449,8 +449,8 @@ pub async fn import_google_doc(
 
     // First check if this doc is already imported
     {
-        let store_guard = state.store.lock().await;
-        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+        let coord_guard = state.coordinator.lock().await;
+        let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
         let user = store
             .get_or_create_default_user()
             .await
@@ -530,9 +530,9 @@ pub async fn import_google_doc(
 
     // Store the document and its content
     debug!("Acquiring store lock for document storage...");
-    let store_guard = state.store.lock().await;
+    let coord_guard = state.coordinator.lock().await;
     debug!("Store lock acquired");
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let user = store
         .get_or_create_default_user()
@@ -668,8 +668,8 @@ pub async fn search_documents(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<DocumentInfoResponse>, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
 
     let user = store
         .get_or_create_default_user()

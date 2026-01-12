@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 
-use super::content_block::store_content_sync;
+use super::text::store_content_sync;
 use super::SqliteStore;
 use crate::storage::content::StoredContent;
 use crate::storage::helper::unix_timestamp;

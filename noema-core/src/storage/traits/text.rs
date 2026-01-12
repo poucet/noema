@@ -1,4 +1,4 @@
-//! ContentBlockStore trait for content-addressed text storage
+//! TextStore trait for content-addressed text storage
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -8,7 +8,7 @@ use crate::storage::types::content_block::{ContentBlock, StoredContentBlock, Sto
 
 /// Trait for content block storage operations
 #[async_trait]
-pub trait ContentBlockStore: Send + Sync {
+pub trait TextStore: Send + Sync {
     /// Store text content, returning ID and hash
     ///
     /// If content with the same hash already exists, returns the existing ID

@@ -3,7 +3,7 @@
 use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
 use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::storage::ids::UserId;
+use noema_core::storage::ids::{ConversationId, UserId, ViewId};
 use noema_core::storage::{FsBlobStore, SqliteStore};
 use noema_core::ChatEngine;
 use std::collections::HashMap;
@@ -11,12 +11,24 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Type alias for our concrete coordinator type
-pub type AppCoordinator = StorageCoordinator<FsBlobStore, SqliteStore, SqliteStore, SqliteStore>;
+/// StorageCoordinator<B, A, C, Conv, U, D> where:
+/// - B = FsBlobStore (filesystem blob storage)
+/// - A = SqliteStore (asset metadata)
+/// - C = SqliteStore (text blocks, formerly content blocks)
+/// - Conv = SqliteStore (conversation + turn storage)
+/// - U = SqliteStore (user storage)
+/// - D = SqliteStore (document storage)
+pub type AppCoordinator =
+    StorageCoordinator<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
+
 /// Type alias for our concrete engine type
-pub type AppEngine = ChatEngine<SqliteStore, SqliteStore, FsBlobStore, SqliteStore>;
+/// ChatEngine<B, A, T, C, U, D> where:
+/// - B = FsBlobStore, A = SqliteStore, T = SqliteStore (text)
+/// - C = SqliteStore (conversation), U = SqliteStore (user), D = SqliteStore (document)
+pub type AppEngine =
+    ChatEngine<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
 
 pub struct AppState {
-    pub store: Mutex<Option<Arc<SqliteStore>>>,
     pub coordinator: Mutex<Option<Arc<AppCoordinator>>>,
     pub engine: Mutex<Option<AppEngine>>,
     pub current_conversation_id: Mutex<String>,
@@ -44,7 +56,6 @@ impl AppState {
         let pending_states = load_pending_oauth_states().unwrap_or_default();
 
         Self {
-            store: Mutex::new(None),
             coordinator: Mutex::new(None),
             engine: Mutex::new(None),
             current_conversation_id: Mutex::new(String::new()),

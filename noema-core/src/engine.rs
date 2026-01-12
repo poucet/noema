@@ -8,7 +8,9 @@
 
 use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry};
 use crate::storage::session::Session;
-use crate::storage::traits::{AssetStore, BlobStore, ContentBlockStore, TurnStore};
+use crate::storage::traits::{
+    AssetStore, BlobStore, ConversationStore, DocumentStore, TextStore, UserStore,
+};
 use crate::storage::DocumentResolver;
 use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
@@ -77,17 +79,18 @@ pub struct ParallelAlternateInfo {
 
 /// Chat engine that manages conversation sessions
 ///
-/// Uses Session<T, C, B, A> which implements ConversationContext directly.
-/// T = TurnStore, C = ContentBlockStore, B = BlobStore, A = AssetStore
-/// (T and C may be the same type, e.g. SqliteStore)
-pub struct ChatEngine<T, C, B, A>
+/// Uses Session which implements ConversationContext directly.
+/// Generic over storage traits: B=Blob, A=Asset, T=Text, C=Conversation, U=User, D=Document
+pub struct ChatEngine<B, A, T, C, U, D>
 where
-    T: TurnStore + Send + Sync + 'static,
-    C: ContentBlockStore + Send + Sync + 'static,
     B: BlobStore + Send + Sync + 'static,
     A: AssetStore + Send + Sync + 'static,
+    T: TextStore + Send + Sync + 'static,
+    C: ConversationStore + Send + Sync + 'static,
+    U: UserStore + Send + Sync + 'static,
+    D: DocumentStore + Send + Sync + 'static,
 {
-    session: Arc<Mutex<Session<T, C, B, A>>>,
+    session: Arc<Mutex<Session<B, A, T, C, U, D>>>,
     mcp_registry: Arc<Mutex<McpRegistry>>,
     cmd_tx: mpsc::UnboundedSender<EngineCommand>,
     event_rx: mpsc::UnboundedReceiver<EngineEvent>,
@@ -98,15 +101,17 @@ where
     document_resolver: Arc<dyn DocumentResolver>,
 }
 
-impl<T, C, B, A> ChatEngine<T, C, B, A>
+impl<B, A, T, C, U, D> ChatEngine<B, A, T, C, U, D>
 where
-    T: TurnStore + Send + Sync + 'static,
-    C: ContentBlockStore + Send + Sync + 'static,
     B: BlobStore + Send + Sync + 'static,
     A: AssetStore + Send + Sync + 'static,
+    T: TextStore + Send + Sync + 'static,
+    C: ConversationStore + Send + Sync + 'static,
+    U: UserStore + Send + Sync + 'static,
+    D: DocumentStore + Send + Sync + 'static,
 {
     pub fn new(
-        session: Session<T, C, B, A>,
+        session: Session<B, A, T, C, U, D>,
         model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: McpRegistry,
         document_resolver: Arc<dyn DocumentResolver>,
@@ -145,7 +150,7 @@ where
     }
 
     async fn processor_loop(
-        session: Arc<Mutex<Session<T, C, B, A>>>,
+        session: Arc<Mutex<Session<B, A, T, C, U, D>>>,
         mut model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         document_resolver: Arc<dyn DocumentResolver>,
@@ -241,7 +246,7 @@ where
         self.event_rx.recv().await
     }
 
-    pub fn get_session(&self) -> Arc<Mutex<Session<T, C, B, A>>> {
+    pub fn get_session(&self) -> Arc<Mutex<Session<B, A, T, C, U, D>>> {
         Arc::clone(&self.session)
     }
 

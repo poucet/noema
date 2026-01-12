@@ -1,4 +1,4 @@
-//! In-memory ContentBlockStore implementation
+//! In-memory TextStore implementation
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -7,17 +7,17 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::storage::ids::ContentBlockId;
-use crate::storage::traits::ContentBlockStore;
+use crate::storage::traits::TextStore;
 use crate::storage::types::{ContentBlock, StoredContentBlock, StoreResult};
 
 /// In-memory content block store for testing
 #[derive(Debug, Default)]
-pub struct MemoryContentBlockStore {
+pub struct MemoryTextStore {
     blocks: Mutex<HashMap<String, StoredContentBlock>>,
     hash_index: Mutex<HashMap<String, ContentBlockId>>,
 }
 
-impl MemoryContentBlockStore {
+impl MemoryTextStore {
     pub fn new() -> Self {
         Self::default()
     }
@@ -37,7 +37,7 @@ impl MemoryContentBlockStore {
 }
 
 #[async_trait]
-impl ContentBlockStore for MemoryContentBlockStore {
+impl TextStore for MemoryTextStore {
     async fn store(&self, content: ContentBlock) -> Result<StoreResult> {
         let hash = Self::compute_hash(&content.text);
 
@@ -102,7 +102,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_and_get() {
-        let store = MemoryContentBlockStore::new();
+        let store = MemoryTextStore::new();
         let content = ContentBlock::plain("Hello, world!");
 
         let result = store.store(content).await.unwrap();
@@ -114,7 +114,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deduplication() {
-        let store = MemoryContentBlockStore::new();
+        let store = MemoryTextStore::new();
 
         let first = store.store(ContentBlock::plain("same")).await.unwrap();
         assert!(first.is_new);
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_text() {
-        let store = MemoryContentBlockStore::new();
+        let store = MemoryTextStore::new();
         let content = ContentBlock::plain("test text");
 
         let result = store.store(content).await.unwrap();
@@ -136,7 +136,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_by_hash() {
-        let store = MemoryContentBlockStore::new();
+        let store = MemoryTextStore::new();
         let content = ContentBlock::plain("findme");
 
         let result = store.store(content).await.unwrap();
@@ -149,7 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_require_text() {
-        let store = MemoryContentBlockStore::new();
+        let store = MemoryTextStore::new();
         let content = ContentBlock::plain("required");
 
         let result = store.store(content).await.unwrap();

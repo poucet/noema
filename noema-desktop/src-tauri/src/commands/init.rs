@@ -3,23 +3,21 @@
 use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
-use noema_core::storage::{
-    ConversationStore, DocumentResolver, FsBlobStore, Session, SqliteStore, UserStore,
-};
+use noema_core::storage::{DocumentResolver, FsBlobStore, Session, SqliteStore};
 use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::{ChatEngine, McpRegistry};
+use noema_core::McpRegistry;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::chat::start_engine_event_loop;
 use crate::gdocs_server::{self, GDocsServerState};
 use crate::logging::log_message;
-use crate::state::AppState;
+use crate::state::{AppCoordinator, AppState};
 
-/// Type alias for our concrete coordinator type
-pub type AppCoordinator = StorageCoordinator<FsBlobStore, SqliteStore, SqliteStore, SqliteStore>;
 /// Type alias for our concrete session type
-pub type AppSession = Session<SqliteStore, SqliteStore, FsBlobStore, SqliteStore>;
+/// Session<B, A, C, Conv, U, D>
+pub type AppSession =
+    Session<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {
@@ -79,7 +77,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     })?;
     log_message("User initialized");
 
-    let (session, store) = init_session(state).await.map_err(|e| {
+    let (session, coordinator) = init_session(state).await.map_err(|e| {
         log_message(&format!("ERROR in init_session: {}", e));
         e
     })?;
@@ -91,7 +89,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     let mcp_registry = init_mcp()?;
     log_message("MCP registry loaded");
 
-    let result = init_engine(state, session, store, mcp_registry).await?;
+    let result = init_engine(state, session, coordinator, mcp_registry).await?;
     log_message(&format!("Engine initialized with model: {}", result));
 
     // Start the engine event loop (runs continuously)
@@ -183,15 +181,17 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     let store = Arc::new(store);
 
     // Create storage coordinator with all stores
-    // SqliteStore implements AssetStore, ContentBlockStore, and TurnStore
+    // StorageCoordinator<B, A, C, Conv, U, D>
+    // SqliteStore implements: AssetStore, TextStore, ConversationStore, UserStore, DocumentStore
     let coordinator = Arc::new(StorageCoordinator::new(
-        Arc::clone(&blob_store),
-        Arc::clone(&store),
-        Arc::clone(&store),
-        Arc::clone(&store),
+        Arc::clone(&blob_store),      // B: BlobStore
+        Arc::clone(&store),           // A: AssetStore
+        Arc::clone(&store),           // C: TextStore
+        Arc::clone(&store),           // Conv: ConversationStore
+        Arc::clone(&store),           // U: UserStore
+        Arc::clone(&store),           // D: DocumentStore
     ));
 
-    *state.store.lock().await = Some(store);
     *state.coordinator.lock().await = Some(coordinator);
     Ok(())
 }
@@ -202,20 +202,20 @@ fn init_config() -> Result<(), String> {
 }
 
 async fn init_user(state: &AppState) -> Result<(), String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+    let coord_guard = state.coordinator.lock().await;
+    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
 
     // First check if user email is explicitly configured in settings
     let settings = config::Settings::load();
     let user = if let Some(email) = settings.user_email {
         // User has configured a specific email - get or create that user
-        store
+        coordinator
             .get_or_create_user_by_email(&email)
             .await
             .map_err(|e| format!("Failed to get/create user: {}", e))?
     } else {
         // No email configured - use smart selection logic
-        let users = store
+        let users = coordinator
             .list_users()
             .await
             .map_err(|e| format!("Failed to list users: {}", e))?;
@@ -223,7 +223,7 @@ async fn init_user(state: &AppState) -> Result<(), String> {
         match users.len() {
             0 => {
                 // No users exist - create default user
-                store
+                coordinator
                     .get_or_create_default_user()
                     .await
                     .map_err(|e| format!("Failed to create default user: {}", e))?
@@ -240,19 +240,12 @@ async fn init_user(state: &AppState) -> Result<(), String> {
         }
     };
 
-    drop(store_guard);
+    drop(coord_guard);
     *state.user_id.lock().await = user.id;
     Ok(())
 }
 
-async fn init_session(state: &AppState) -> Result<(AppSession, Arc<SqliteStore>), String> {
-    let store = {
-        let store_guard = state.store.lock().await;
-        store_guard
-            .as_ref()
-            .ok_or("Storage not initialized")?
-            .clone()
-    };
+async fn init_session(state: &AppState) -> Result<(AppSession, Arc<AppCoordinator>), String> {
     let coordinator = {
         let coord_guard = state.coordinator.lock().await;
         coord_guard
@@ -263,7 +256,7 @@ async fn init_session(state: &AppState) -> Result<(AppSession, Arc<SqliteStore>)
     let user_id = state.user_id.lock().await.clone();
 
     // Try to open the most recent conversation, or create a new one if none exist
-    let conversations = store
+    let conversations = coordinator
         .list_conversations(&user_id)
         .await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
@@ -272,20 +265,20 @@ async fn init_session(state: &AppState) -> Result<(AppSession, Arc<SqliteStore>)
         most_recent.id.clone()
     } else {
         // No conversations exist, create a new one
-        store
+        coordinator
             .create_conversation(&user_id, None)
             .await
             .map_err(|e| format!("Failed to create conversation: {}", e))?
     };
 
     // Open session for the conversation
-    let session = Session::open(coordinator, conversation_id.clone())
+    let session = Session::open(coordinator.clone(), conversation_id.clone())
         .await
         .map_err(|e| format!("Failed to open session: {}", e))?;
 
     *state.current_conversation_id.lock().await = conversation_id.as_str().to_string();
 
-    Ok((session, store))
+    Ok((session, coordinator))
 }
 
 fn init_mcp() -> Result<McpRegistry, String> {
@@ -295,7 +288,7 @@ fn init_mcp() -> Result<McpRegistry, String> {
 async fn init_engine(
     state: &AppState,
     session: AppSession,
-    store: Arc<SqliteStore>,
+    coordinator: Arc<AppCoordinator>,
     mcp_registry: McpRegistry,
 ) -> Result<String, String> {
     const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
@@ -318,8 +311,8 @@ async fn init_engine(
     *state.model_id.lock().await = model_id;
     *state.model_name.lock().await = model_display_name.clone();
 
-    // Store implements DocumentResolver directly
-    let document_resolver: Arc<dyn DocumentResolver> = store;
+    // Coordinator implements DocumentResolver
+    let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
     *state.engine.lock().await = Some(engine);
