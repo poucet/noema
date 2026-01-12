@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::storage::ids::{ContentBlockId, UserId};
 
 /// Kind of entity that created the content
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OriginKind {
     /// Created by a human user

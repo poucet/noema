@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::storage::asset::{Asset, AssetStore};
 use crate::storage::blob::BlobStore;
 use crate::storage::content::{ContentResolver, StoredContent};
-use crate::storage::content_block::{ContentBlock as ContentBlockData, ContentBlockStore, OriginKind};
+use crate::storage::content_block::{ContentBlock as ContentBlockData, ContentBlockStore, ContentOrigin, OriginKind};
 use crate::storage::ids::{AssetId, ContentBlockId};
 
 /// Type-erased storage coordinator using trait objects.
@@ -74,7 +74,8 @@ impl DynStorageCoordinator {
         match block {
             ContentBlock::Text { text } => {
                 // Store text in content_blocks
-                let content_block = ContentBlockData::plain(&text).with_origin(origin, None, None);
+                let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
+                let content_block = ContentBlockData::plain(&text).with_origin(content_origin);
                 let result = self.content_block_store.store(content_block).await?;
                 Ok(StoredContent::text_ref(result.id))
             }
@@ -200,7 +201,8 @@ impl<B: BlobStore, A: AssetStore, C: ContentBlockStore> StorageCoordinator<B, A,
     ) -> Result<StoredContent> {
         match block {
             ContentBlock::Text { text } => {
-                let content_block = ContentBlockData::plain(&text).with_origin(origin, None, None);
+                let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
+                let content_block = ContentBlockData::plain(&text).with_origin(content_origin);
                 let result = self.content_block_store.store(content_block).await?;
                 Ok(StoredContent::text_ref(result.id))
             }

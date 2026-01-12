@@ -5,9 +5,8 @@ edition.workspace = true
 
 [features]
 default = []
-sqlite = ["rusqlite", "uuid"]
+sqlite = ["rusqlite"]
 rusqlite = ["dep:rusqlite"]
-uuid = ["dep:uuid"]
 
 [dependencies]
 anyhow = "1.0"
@@ -34,10 +33,11 @@ base64 = "0.22"
 
 # Optional SQLite support
 rusqlite = { version = "0.34", features = ["bundled"], optional = true }
-uuid = { version = "1.0", features = ["v4"], optional = true }
+
+# UUID for ID generation (always required)
+uuid = { version = "1.0", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 schemars = { version = "0.8", features = ["derive"] }
-uuid = { version = "1.0", features = ["v4"] }
