@@ -3,10 +3,10 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
-use uuid::Uuid;
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
+use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
 use crate::storage::types::{DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo};
 
@@ -75,36 +75,36 @@ impl DocumentStore for SqliteStore {
 
     async fn create_document(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         title: &str,
         source: DocumentSource,
         source_id: Option<&str>,
-    ) -> Result<String> {
+    ) -> Result<DocumentId> {
         let conn = self.conn().lock().unwrap();
-        let id = Uuid::new_v4().to_string();
+        let id = DocumentId::new();
         let now = unix_timestamp();
 
         conn.execute(
             "INSERT INTO documents (id, user_id, title, source, source_id, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![&id, user_id, title, source.to_string(), source_id, now, now],
+            params![id.as_str(), user_id.as_str(), title, source.as_str(), source_id, now, now],
         )?;
 
         Ok(id)
     }
 
-    async fn get_document(&self, id: &str) -> Result<Option<DocumentInfo>> {
+    async fn get_document(&self, id: &DocumentId) -> Result<Option<DocumentInfo>> {
         let conn = self.conn().lock().unwrap();
         let doc = conn
             .query_row(
                 "SELECT id, user_id, title, source, source_id, created_at, updated_at
                  FROM documents WHERE id = ?1",
-                params![id],
+                params![id.as_str()],
                 |row| {
                     let source_str: String = row.get(3)?;
                     Ok(DocumentInfo {
-                        id: row.get(0)?,
-                        user_id: row.get(1)?,
+                        id: DocumentId::from_string(row.get::<_, String>(0)?),
+                        user_id: UserId::from_string(row.get::<_, String>(1)?),
                         title: row.get(2)?,
                         source: source_str
                             .parse::<DocumentSource>()
@@ -121,7 +121,7 @@ impl DocumentStore for SqliteStore {
 
     async fn get_document_by_source(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         source: DocumentSource,
         source_id: &str,
     ) -> Result<Option<DocumentInfo>> {
@@ -130,12 +130,12 @@ impl DocumentStore for SqliteStore {
             .query_row(
                 "SELECT id, user_id, title, source, source_id, created_at, updated_at
                  FROM documents WHERE user_id = ?1 AND source = ?2 AND source_id = ?3",
-                params![user_id, source.to_string(), source_id],
+                params![user_id.as_str(), source.as_str(), source_id],
                 |row| {
                     let source_str: String = row.get(3)?;
                     Ok(DocumentInfo {
-                        id: row.get(0)?,
-                        user_id: row.get(1)?,
+                        id: DocumentId::from_string(row.get::<_, String>(0)?),
+                        user_id: UserId::from_string(row.get::<_, String>(1)?),
                         title: row.get(2)?,
                         source: source_str
                             .parse::<DocumentSource>()
@@ -150,7 +150,7 @@ impl DocumentStore for SqliteStore {
         Ok(doc)
     }
 
-    async fn list_documents(&self, user_id: &str) -> Result<Vec<DocumentInfo>> {
+    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<DocumentInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, user_id, title, source, source_id, created_at, updated_at
@@ -158,11 +158,11 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let docs = stmt
-            .query_map(params![user_id], |row| {
+            .query_map(params![user_id.as_str()], |row| {
                 let source_str: String = row.get(3)?;
                 Ok(DocumentInfo {
-                    id: row.get(0)?,
-                    user_id: row.get(1)?,
+                    id: DocumentId::from_string(row.get::<_, String>(0)?),
+                    user_id: UserId::from_string(row.get::<_, String>(1)?),
                     title: row.get(2)?,
                     source: source_str
                         .parse::<DocumentSource>()
@@ -180,7 +180,7 @@ impl DocumentStore for SqliteStore {
 
     async fn search_documents(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         query: &str,
         limit: usize,
     ) -> Result<Vec<DocumentInfo>> {
@@ -195,11 +195,11 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let docs = stmt
-            .query_map(params![user_id, &pattern, limit as i64], |row| {
+            .query_map(params![user_id.as_str(), &pattern, limit as i64], |row| {
                 let source_str: String = row.get(3)?;
                 Ok(DocumentInfo {
-                    id: row.get(0)?,
-                    user_id: row.get(1)?,
+                    id: DocumentId::from_string(row.get::<_, String>(0)?),
+                    user_id: UserId::from_string(row.get::<_, String>(1)?),
                     title: row.get(2)?,
                     source: source_str
                         .parse::<DocumentSource>()
@@ -215,20 +215,20 @@ impl DocumentStore for SqliteStore {
         Ok(docs)
     }
 
-    async fn update_document_title(&self, id: &str, title: &str) -> Result<()> {
+    async fn update_document_title(&self, id: &DocumentId, title: &str) -> Result<()> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();
         conn.execute(
             "UPDATE documents SET title = ?1, updated_at = ?2 WHERE id = ?3",
-            params![title, now, id],
+            params![title, now, id.as_str()],
         )?;
         Ok(())
     }
 
-    async fn delete_document(&self, id: &str) -> Result<bool> {
+    async fn delete_document(&self, id: &DocumentId) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
         // Revisions and tabs will be cascade deleted
-        let rows = conn.execute("DELETE FROM documents WHERE id = ?1", params![id])?;
+        let rows = conn.execute("DELETE FROM documents WHERE id = ?1", params![id.as_str()])?;
         Ok(rows > 0)
     }
 
@@ -236,52 +236,69 @@ impl DocumentStore for SqliteStore {
 
     async fn create_document_tab(
         &self,
-        document_id: &str,
-        parent_tab_id: Option<&str>,
+        document_id: &DocumentId,
+        parent_tab_id: Option<&TabId>,
         tab_index: i32,
         title: &str,
         icon: Option<&str>,
         content_markdown: Option<&str>,
-        referenced_assets: &[String],
-        source_tab_id: Option<&str>,
-    ) -> Result<String> {
+        referenced_assets: &[AssetId],
+        source_tab_id: Option<&TabId>,
+    ) -> Result<TabId> {
         let conn = self.conn().lock().unwrap();
-        let id = Uuid::new_v4().to_string();
+        let id = TabId::new();
         let now = unix_timestamp();
-        let assets_json = serde_json::to_string(referenced_assets)?;
+        // Convert AssetId slice to strings for JSON serialization
+        let asset_strings: Vec<&str> = referenced_assets.iter().map(|a| a.as_str()).collect();
+        let assets_json = serde_json::to_string(&asset_strings)?;
 
         conn.execute(
             "INSERT INTO document_tabs (id, document_id, parent_tab_id, tab_index, title, icon, content_markdown, referenced_assets, source_tab_id, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![&id, document_id, parent_tab_id, tab_index, title, icon, content_markdown, &assets_json, source_tab_id, now, now],
+            params![
+                id.as_str(),
+                document_id.as_str(),
+                parent_tab_id.map(|t| t.as_str()),
+                tab_index,
+                title,
+                icon,
+                content_markdown,
+                &assets_json,
+                source_tab_id.map(|t| t.as_str()),
+                now,
+                now
+            ],
         )?;
 
         Ok(id)
     }
 
-    async fn get_document_tab(&self, id: &str) -> Result<Option<DocumentTabInfo>> {
+    async fn get_document_tab(&self, id: &TabId) -> Result<Option<DocumentTabInfo>> {
         let conn = self.conn().lock().unwrap();
         let tab = conn
             .query_row(
                 "SELECT id, document_id, parent_tab_id, tab_index, title, icon, content_markdown, referenced_assets, source_tab_id, current_revision_id, created_at, updated_at
                  FROM document_tabs WHERE id = ?1",
-                params![id],
+                params![id.as_str()],
                 |row| {
                     let assets_json: Option<String> = row.get(7)?;
-                    let referenced_assets: Vec<String> = assets_json
-                        .map(|j| serde_json::from_str(&j).unwrap_or_default())
+                    let referenced_assets: Vec<AssetId> = assets_json
+                        .map(|j| {
+                            let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
+                            strings.into_iter().map(AssetId::from_string).collect()
+                        })
                         .unwrap_or_default();
                     Ok(DocumentTabInfo {
-                        id: row.get(0)?,
-                        document_id: row.get(1)?,
-                        parent_tab_id: row.get(2)?,
+                        id: TabId::from_string(row.get::<_, String>(0)?),
+                        document_id: DocumentId::from_string(row.get::<_, String>(1)?),
+                        parent_tab_id: row.get::<_, Option<String>>(2)?.map(TabId::from_string),
                         tab_index: row.get(3)?,
                         title: row.get(4)?,
                         icon: row.get(5)?,
                         content_markdown: row.get(6)?,
                         referenced_assets,
-                        source_tab_id: row.get(8)?,
-                        current_revision_id: row.get(9)?,
+                        source_tab_id: row.get::<_, Option<String>>(8)?.map(TabId::from_string),
+                        current_revision_id: row.get::<_, Option<String>>(9)?.map(RevisionId::from_string),
                         created_at: row.get(10)?,
                         updated_at: row.get(11)?,
                     })
@@ -291,7 +308,7 @@ impl DocumentStore for SqliteStore {
         Ok(tab)
     }
 
-    async fn list_document_tabs(&self, document_id: &str) -> Result<Vec<DocumentTabInfo>> {
+    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<DocumentTabInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, document_id, parent_tab_id, tab_index, title, icon, content_markdown, referenced_assets, source_tab_id, current_revision_id, created_at, updated_at
@@ -299,22 +316,25 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let tabs = stmt
-            .query_map(params![document_id], |row| {
+            .query_map(params![document_id.as_str()], |row| {
                 let assets_json: Option<String> = row.get(7)?;
-                let referenced_assets: Vec<String> = assets_json
-                    .map(|j| serde_json::from_str(&j).unwrap_or_default())
+                let referenced_assets: Vec<AssetId> = assets_json
+                    .map(|j| {
+                        let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
+                        strings.into_iter().map(AssetId::from_string).collect()
+                    })
                     .unwrap_or_default();
                 Ok(DocumentTabInfo {
-                    id: row.get(0)?,
-                    document_id: row.get(1)?,
-                    parent_tab_id: row.get(2)?,
+                    id: TabId::from_string(row.get::<_, String>(0)?),
+                    document_id: DocumentId::from_string(row.get::<_, String>(1)?),
+                    parent_tab_id: row.get::<_, Option<String>>(2)?.map(TabId::from_string),
                     tab_index: row.get(3)?,
                     title: row.get(4)?,
                     icon: row.get(5)?,
                     content_markdown: row.get(6)?,
                     referenced_assets,
-                    source_tab_id: row.get(8)?,
-                    current_revision_id: row.get(9)?,
+                    source_tab_id: row.get::<_, Option<String>>(8)?.map(TabId::from_string),
+                    current_revision_id: row.get::<_, Option<String>>(9)?.map(RevisionId::from_string),
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
@@ -327,17 +347,18 @@ impl DocumentStore for SqliteStore {
 
     async fn update_document_tab_content(
         &self,
-        id: &str,
+        id: &TabId,
         content_markdown: &str,
-        referenced_assets: &[String],
+        referenced_assets: &[AssetId],
     ) -> Result<()> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();
-        let assets_json = serde_json::to_string(referenced_assets)?;
+        let asset_strings: Vec<&str> = referenced_assets.iter().map(|a| a.as_str()).collect();
+        let assets_json = serde_json::to_string(&asset_strings)?;
 
         conn.execute(
             "UPDATE document_tabs SET content_markdown = ?1, referenced_assets = ?2, updated_at = ?3 WHERE id = ?4",
-            params![content_markdown, &assets_json, now, id],
+            params![content_markdown, &assets_json, now, id.as_str()],
         )?;
 
         Ok(())
@@ -345,31 +366,31 @@ impl DocumentStore for SqliteStore {
 
     async fn update_document_tab_parent(
         &self,
-        id: &str,
-        parent_tab_id: Option<&str>,
+        id: &TabId,
+        parent_tab_id: Option<&TabId>,
     ) -> Result<()> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();
         conn.execute(
             "UPDATE document_tabs SET parent_tab_id = ?1, updated_at = ?2 WHERE id = ?3",
-            params![parent_tab_id, now, id],
+            params![parent_tab_id.map(|t| t.as_str()), now, id.as_str()],
         )?;
         Ok(())
     }
 
-    async fn set_document_tab_revision(&self, tab_id: &str, revision_id: &str) -> Result<()> {
+    async fn set_document_tab_revision(&self, tab_id: &TabId, revision_id: &RevisionId) -> Result<()> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();
         conn.execute(
             "UPDATE document_tabs SET current_revision_id = ?1, updated_at = ?2 WHERE id = ?3",
-            params![revision_id, now, tab_id],
+            params![revision_id.as_str(), now, tab_id.as_str()],
         )?;
         Ok(())
     }
 
-    async fn delete_document_tab(&self, id: &str) -> Result<bool> {
+    async fn delete_document_tab(&self, id: &TabId) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
-        let rows = conn.execute("DELETE FROM document_tabs WHERE id = ?1", params![id])?;
+        let rows = conn.execute("DELETE FROM document_tabs WHERE id = ?1", params![id.as_str()])?;
         Ok(rows > 0)
     }
 
@@ -377,22 +398,23 @@ impl DocumentStore for SqliteStore {
 
     async fn create_document_revision(
         &self,
-        tab_id: &str,
+        tab_id: &TabId,
         content_markdown: &str,
         content_hash: &str,
-        referenced_assets: &[String],
-        created_by: &str,
-    ) -> Result<String> {
+        referenced_assets: &[AssetId],
+        created_by: &UserId,
+    ) -> Result<RevisionId> {
         let conn = self.conn().lock().unwrap();
-        let id = Uuid::new_v4().to_string();
+        let id = RevisionId::new();
         let now = unix_timestamp();
-        let assets_json = serde_json::to_string(referenced_assets)?;
+        let asset_strings: Vec<&str> = referenced_assets.iter().map(|a| a.as_str()).collect();
+        let assets_json = serde_json::to_string(&asset_strings)?;
 
         // Get next revision number
         let revision_number: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(revision_number), 0) + 1 FROM document_revisions WHERE tab_id = ?1",
-                params![tab_id],
+                params![tab_id.as_str()],
                 |row| row.get(0),
             )
             .unwrap_or(1);
@@ -401,7 +423,7 @@ impl DocumentStore for SqliteStore {
         let parent_revision_id: Option<String> = conn
             .query_row(
                 "SELECT current_revision_id FROM document_tabs WHERE id = ?1",
-                params![tab_id],
+                params![tab_id.as_str()],
                 |row| row.get(0),
             )
             .ok()
@@ -410,34 +432,37 @@ impl DocumentStore for SqliteStore {
         conn.execute(
             "INSERT INTO document_revisions (id, tab_id, revision_number, parent_revision_id, content_markdown, content_hash, referenced_assets, created_at, created_by)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![&id, tab_id, revision_number, &parent_revision_id, content_markdown, content_hash, &assets_json, now, created_by],
+            params![id.as_str(), tab_id.as_str(), revision_number, &parent_revision_id, content_markdown, content_hash, &assets_json, now, created_by.as_str()],
         )?;
 
         Ok(id)
     }
 
-    async fn get_document_revision(&self, id: &str) -> Result<Option<DocumentRevisionInfo>> {
+    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<DocumentRevisionInfo>> {
         let conn = self.conn().lock().unwrap();
         let rev = conn
             .query_row(
                 "SELECT id, tab_id, revision_number, parent_revision_id, content_markdown, content_hash, referenced_assets, created_at, created_by
                  FROM document_revisions WHERE id = ?1",
-                params![id],
+                params![id.as_str()],
                 |row| {
                     let assets_json: Option<String> = row.get(6)?;
-                    let referenced_assets: Vec<String> = assets_json
-                        .map(|j| serde_json::from_str(&j).unwrap_or_default())
+                    let referenced_assets: Vec<AssetId> = assets_json
+                        .map(|j| {
+                            let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
+                            strings.into_iter().map(AssetId::from_string).collect()
+                        })
                         .unwrap_or_default();
                     Ok(DocumentRevisionInfo {
-                        id: row.get(0)?,
-                        tab_id: row.get(1)?,
+                        id: RevisionId::from_string(row.get::<_, String>(0)?),
+                        tab_id: TabId::from_string(row.get::<_, String>(1)?),
                         revision_number: row.get(2)?,
-                        parent_revision_id: row.get(3)?,
+                        parent_revision_id: row.get::<_, Option<String>>(3)?.map(RevisionId::from_string),
                         content_markdown: row.get(4)?,
                         content_hash: row.get(5)?,
                         referenced_assets,
                         created_at: row.get(7)?,
-                        created_by: row.get(8)?,
+                        created_by: UserId::from_string(row.get::<_, String>(8)?),
                     })
                 },
             )
@@ -445,7 +470,7 @@ impl DocumentStore for SqliteStore {
         Ok(rev)
     }
 
-    async fn list_document_revisions(&self, tab_id: &str) -> Result<Vec<DocumentRevisionInfo>> {
+    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<DocumentRevisionInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, tab_id, revision_number, parent_revision_id, content_markdown, content_hash, referenced_assets, created_at, created_by
@@ -453,21 +478,24 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let revs = stmt
-            .query_map(params![tab_id], |row| {
+            .query_map(params![tab_id.as_str()], |row| {
                 let assets_json: Option<String> = row.get(6)?;
-                let referenced_assets: Vec<String> = assets_json
-                    .map(|j| serde_json::from_str(&j).unwrap_or_default())
+                let referenced_assets: Vec<AssetId> = assets_json
+                    .map(|j| {
+                        let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
+                        strings.into_iter().map(AssetId::from_string).collect()
+                    })
                     .unwrap_or_default();
                 Ok(DocumentRevisionInfo {
-                    id: row.get(0)?,
-                    tab_id: row.get(1)?,
+                    id: RevisionId::from_string(row.get::<_, String>(0)?),
+                    tab_id: TabId::from_string(row.get::<_, String>(1)?),
                     revision_number: row.get(2)?,
-                    parent_revision_id: row.get(3)?,
+                    parent_revision_id: row.get::<_, Option<String>>(3)?.map(RevisionId::from_string),
                     content_markdown: row.get(4)?,
                     content_hash: row.get(5)?,
                     referenced_assets,
                     created_at: row.get(7)?,
-                    created_by: row.get(8)?,
+                    created_by: UserId::from_string(row.get::<_, String>(8)?),
                 })
             })?
             .filter_map(|r| r.ok())

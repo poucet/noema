@@ -1,4 +1,7 @@
-//! ConversationStore trait for high-level conversation CRUD operations
+//! ConversationStore trait for conversation lifecycle operations
+//!
+//! This trait handles conversation-level CRUD: create, list, delete, rename, privacy.
+//! The internal structure (turns, spans, messages, views) is managed by TurnStore.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -6,11 +9,10 @@ use async_trait::async_trait;
 use crate::storage::ids::{ConversationId, UserId};
 use crate::storage::types::conversation::ConversationInfo;
 
-/// Trait for conversation CRUD operations
+/// Trait for conversation lifecycle operations
 ///
-/// This trait provides high-level operations for managing conversations as a whole
-/// (creating, listing, deleting, renaming) - separate from `TurnStore` which handles
-/// the internal Turn/Span/Message/View structure.
+/// Manages conversations as entities: creation, listing, deletion, metadata.
+/// For internal structure (turns/spans/messages/views), see TurnStore.
 #[async_trait]
 pub trait ConversationStore: Send + Sync {
     /// Create a new conversation for a user
@@ -23,8 +25,10 @@ pub trait ConversationStore: Send + Sync {
     ) -> Result<ConversationId>;
 
     /// Get conversation info by ID
-    async fn get_conversation(&self, conversation_id: &ConversationId)
-        -> Result<Option<ConversationInfo>>;
+    async fn get_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Option<ConversationInfo>>;
 
     /// List all conversations for a user
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>>;

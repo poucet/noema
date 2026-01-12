@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
 use crate::storage::types::document::{
     DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
@@ -15,10 +16,6 @@ fn now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64
-}
-
-fn new_id() -> String {
-    uuid::Uuid::new_v4().to_string()
 }
 
 /// In-memory document store for testing
@@ -41,17 +38,17 @@ impl DocumentStore for MemoryDocumentStore {
 
     async fn create_document(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         title: &str,
         source: DocumentSource,
         source_id: Option<&str>,
-    ) -> Result<String> {
-        let id = new_id();
+    ) -> Result<DocumentId> {
+        let id = DocumentId::new();
         let now = now();
 
         let doc = DocumentInfo {
             id: id.clone(),
-            user_id: user_id.to_string(),
+            user_id: user_id.clone(),
             title: title.to_string(),
             source,
             source_id: source_id.map(|s| s.to_string()),
@@ -59,17 +56,17 @@ impl DocumentStore for MemoryDocumentStore {
             updated_at: now,
         };
 
-        self.documents.lock().unwrap().insert(id.clone(), doc);
+        self.documents.lock().unwrap().insert(id.as_str().to_string(), doc);
         Ok(id)
     }
 
-    async fn get_document(&self, id: &str) -> Result<Option<DocumentInfo>> {
-        Ok(self.documents.lock().unwrap().get(id).cloned())
+    async fn get_document(&self, id: &DocumentId) -> Result<Option<DocumentInfo>> {
+        Ok(self.documents.lock().unwrap().get(id.as_str()).cloned())
     }
 
     async fn get_document_by_source(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         source: DocumentSource,
         source_id: &str,
     ) -> Result<Option<DocumentInfo>> {
@@ -77,25 +74,25 @@ impl DocumentStore for MemoryDocumentStore {
         Ok(documents
             .values()
             .find(|d| {
-                d.user_id == user_id
+                d.user_id == *user_id
                     && d.source == source
                     && d.source_id.as_deref() == Some(source_id)
             })
             .cloned())
     }
 
-    async fn list_documents(&self, user_id: &str) -> Result<Vec<DocumentInfo>> {
+    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<DocumentInfo>> {
         let documents = self.documents.lock().unwrap();
         Ok(documents
             .values()
-            .filter(|d| d.user_id == user_id)
+            .filter(|d| d.user_id == *user_id)
             .cloned()
             .collect())
     }
 
     async fn search_documents(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         query: &str,
         limit: usize,
     ) -> Result<Vec<DocumentInfo>> {
@@ -103,95 +100,95 @@ impl DocumentStore for MemoryDocumentStore {
         let query_lower = query.to_lowercase();
         let mut results: Vec<_> = documents
             .values()
-            .filter(|d| d.user_id == user_id && d.title.to_lowercase().contains(&query_lower))
+            .filter(|d| d.user_id == *user_id && d.title.to_lowercase().contains(&query_lower))
             .cloned()
             .collect();
         results.truncate(limit);
         Ok(results)
     }
 
-    async fn update_document_title(&self, id: &str, title: &str) -> Result<()> {
-        if let Some(doc) = self.documents.lock().unwrap().get_mut(id) {
+    async fn update_document_title(&self, id: &DocumentId, title: &str) -> Result<()> {
+        if let Some(doc) = self.documents.lock().unwrap().get_mut(id.as_str()) {
             doc.title = title.to_string();
             doc.updated_at = now();
         }
         Ok(())
     }
 
-    async fn delete_document(&self, id: &str) -> Result<bool> {
+    async fn delete_document(&self, id: &DocumentId) -> Result<bool> {
         // Delete associated tabs and revisions
         {
             let tabs = self.tabs.lock().unwrap();
             let tab_ids: Vec<_> = tabs
                 .values()
-                .filter(|t| t.document_id == id)
-                .map(|t| t.id.clone())
+                .filter(|t| t.document_id == *id)
+                .map(|t| t.id.as_str().to_string())
                 .collect();
 
             drop(tabs);
 
             let mut revisions = self.revisions.lock().unwrap();
             revisions.retain(|_, r| {
-                !tab_ids.iter().any(|tid| r.tab_id == *tid)
+                !tab_ids.iter().any(|tid| r.tab_id.as_str() == tid)
             });
 
             let mut tabs = self.tabs.lock().unwrap();
-            tabs.retain(|_, t| t.document_id != id);
+            tabs.retain(|_, t| t.document_id != *id);
         }
 
-        Ok(self.documents.lock().unwrap().remove(id).is_some())
+        Ok(self.documents.lock().unwrap().remove(id.as_str()).is_some())
     }
 
     // ========== Document Tab Methods ==========
 
     async fn create_document_tab(
         &self,
-        document_id: &str,
-        parent_tab_id: Option<&str>,
+        document_id: &DocumentId,
+        parent_tab_id: Option<&TabId>,
         tab_index: i32,
         title: &str,
         icon: Option<&str>,
         content_markdown: Option<&str>,
-        referenced_assets: &[String],
-        source_tab_id: Option<&str>,
-    ) -> Result<String> {
-        let id = new_id();
+        referenced_assets: &[AssetId],
+        source_tab_id: Option<&TabId>,
+    ) -> Result<TabId> {
+        let id = TabId::new();
         let now = now();
 
         let tab = DocumentTabInfo {
             id: id.clone(),
-            document_id: document_id.to_string(),
-            parent_tab_id: parent_tab_id.map(|s| s.to_string()),
+            document_id: document_id.clone(),
+            parent_tab_id: parent_tab_id.cloned(),
             tab_index,
             title: title.to_string(),
             icon: icon.map(|s| s.to_string()),
             content_markdown: content_markdown.map(|s| s.to_string()),
             referenced_assets: referenced_assets.to_vec(),
-            source_tab_id: source_tab_id.map(|s| s.to_string()),
+            source_tab_id: source_tab_id.cloned(),
             current_revision_id: None,
             created_at: now,
             updated_at: now,
         };
 
-        self.tabs.lock().unwrap().insert(id.clone(), tab);
+        self.tabs.lock().unwrap().insert(id.as_str().to_string(), tab);
 
         // Update document updated_at
-        if let Some(doc) = self.documents.lock().unwrap().get_mut(document_id) {
+        if let Some(doc) = self.documents.lock().unwrap().get_mut(document_id.as_str()) {
             doc.updated_at = now;
         }
 
         Ok(id)
     }
 
-    async fn get_document_tab(&self, id: &str) -> Result<Option<DocumentTabInfo>> {
-        Ok(self.tabs.lock().unwrap().get(id).cloned())
+    async fn get_document_tab(&self, id: &TabId) -> Result<Option<DocumentTabInfo>> {
+        Ok(self.tabs.lock().unwrap().get(id.as_str()).cloned())
     }
 
-    async fn list_document_tabs(&self, document_id: &str) -> Result<Vec<DocumentTabInfo>> {
+    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<DocumentTabInfo>> {
         let tabs = self.tabs.lock().unwrap();
         let mut result: Vec<_> = tabs
             .values()
-            .filter(|t| t.document_id == document_id)
+            .filter(|t| t.document_id == *document_id)
             .cloned()
             .collect();
         result.sort_by_key(|t| t.tab_index);
@@ -200,19 +197,19 @@ impl DocumentStore for MemoryDocumentStore {
 
     async fn update_document_tab_content(
         &self,
-        id: &str,
+        id: &TabId,
         content_markdown: &str,
-        referenced_assets: &[String],
+        referenced_assets: &[AssetId],
     ) -> Result<()> {
         let now = now();
         let mut tabs = self.tabs.lock().unwrap();
-        if let Some(tab) = tabs.get_mut(id) {
+        if let Some(tab) = tabs.get_mut(id.as_str()) {
             tab.content_markdown = Some(content_markdown.to_string());
             tab.referenced_assets = referenced_assets.to_vec();
             tab.updated_at = now;
 
             // Update document updated_at
-            let doc_id = tab.document_id.clone();
+            let doc_id = tab.document_id.as_str().to_string();
             drop(tabs);
             if let Some(doc) = self.documents.lock().unwrap().get_mut(&doc_id) {
                 doc.updated_at = now;
@@ -223,52 +220,52 @@ impl DocumentStore for MemoryDocumentStore {
 
     async fn update_document_tab_parent(
         &self,
-        id: &str,
-        parent_tab_id: Option<&str>,
+        id: &TabId,
+        parent_tab_id: Option<&TabId>,
     ) -> Result<()> {
-        if let Some(tab) = self.tabs.lock().unwrap().get_mut(id) {
-            tab.parent_tab_id = parent_tab_id.map(|s| s.to_string());
+        if let Some(tab) = self.tabs.lock().unwrap().get_mut(id.as_str()) {
+            tab.parent_tab_id = parent_tab_id.cloned();
             tab.updated_at = now();
         }
         Ok(())
     }
 
-    async fn set_document_tab_revision(&self, tab_id: &str, revision_id: &str) -> Result<()> {
-        if let Some(tab) = self.tabs.lock().unwrap().get_mut(tab_id) {
-            tab.current_revision_id = Some(revision_id.to_string());
+    async fn set_document_tab_revision(&self, tab_id: &TabId, revision_id: &RevisionId) -> Result<()> {
+        if let Some(tab) = self.tabs.lock().unwrap().get_mut(tab_id.as_str()) {
+            tab.current_revision_id = Some(revision_id.clone());
             tab.updated_at = now();
         }
         Ok(())
     }
 
-    async fn delete_document_tab(&self, id: &str) -> Result<bool> {
+    async fn delete_document_tab(&self, id: &TabId) -> Result<bool> {
         // Delete associated revisions
         self.revisions
             .lock()
             .unwrap()
-            .retain(|_, r| r.tab_id != id);
+            .retain(|_, r| r.tab_id != *id);
 
-        Ok(self.tabs.lock().unwrap().remove(id).is_some())
+        Ok(self.tabs.lock().unwrap().remove(id.as_str()).is_some())
     }
 
     // ========== Document Revision Methods ==========
 
     async fn create_document_revision(
         &self,
-        tab_id: &str,
+        tab_id: &TabId,
         content_markdown: &str,
         content_hash: &str,
-        referenced_assets: &[String],
-        created_by: &str,
-    ) -> Result<String> {
-        let id = new_id();
+        referenced_assets: &[AssetId],
+        created_by: &UserId,
+    ) -> Result<RevisionId> {
+        let id = RevisionId::new();
         let now = now();
 
         // Get next revision number
         let revisions = self.revisions.lock().unwrap();
         let revision_number = revisions
             .values()
-            .filter(|r| r.tab_id == tab_id)
+            .filter(|r| r.tab_id == *tab_id)
             .map(|r| r.revision_number)
             .max()
             .map(|n| n + 1)
@@ -277,37 +274,37 @@ impl DocumentStore for MemoryDocumentStore {
         // Get parent revision
         let parent_revision_id = revisions
             .values()
-            .filter(|r| r.tab_id == tab_id)
+            .filter(|r| r.tab_id == *tab_id)
             .max_by_key(|r| r.revision_number)
             .map(|r| r.id.clone());
         drop(revisions);
 
         let revision = DocumentRevisionInfo {
             id: id.clone(),
-            tab_id: tab_id.to_string(),
+            tab_id: tab_id.clone(),
             revision_number,
             parent_revision_id,
             content_markdown: content_markdown.to_string(),
             content_hash: content_hash.to_string(),
             referenced_assets: referenced_assets.to_vec(),
             created_at: now,
-            created_by: created_by.to_string(),
+            created_by: created_by.clone(),
         };
 
-        self.revisions.lock().unwrap().insert(id.clone(), revision);
+        self.revisions.lock().unwrap().insert(id.as_str().to_string(), revision);
 
         Ok(id)
     }
 
-    async fn get_document_revision(&self, id: &str) -> Result<Option<DocumentRevisionInfo>> {
-        Ok(self.revisions.lock().unwrap().get(id).cloned())
+    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<DocumentRevisionInfo>> {
+        Ok(self.revisions.lock().unwrap().get(id.as_str()).cloned())
     }
 
-    async fn list_document_revisions(&self, tab_id: &str) -> Result<Vec<DocumentRevisionInfo>> {
+    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<DocumentRevisionInfo>> {
         let revisions = self.revisions.lock().unwrap();
         let mut result: Vec<_> = revisions
             .values()
-            .filter(|r| r.tab_id == tab_id)
+            .filter(|r| r.tab_id == *tab_id)
             .cloned()
             .collect();
         result.sort_by_key(|r| r.revision_number);
@@ -322,10 +319,11 @@ mod tests {
     #[tokio::test]
     async fn test_document_crud() {
         let store = MemoryDocumentStore::new();
+        let user_id = UserId::new();
 
         // Create document
         let doc_id = store
-            .create_document("user1", "Test Doc", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Test Doc", DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
@@ -350,10 +348,11 @@ mod tests {
     #[tokio::test]
     async fn test_document_tabs() {
         let store = MemoryDocumentStore::new();
+        let user_id = UserId::new();
 
         // Create document
         let doc_id = store
-            .create_document("user1", "Test Doc", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Test Doc", DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
@@ -363,7 +362,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tab2_id = store
+        let _tab2_id = store
             .create_document_tab(&doc_id, None, 1, "Tab 2", None, Some("# Tab 2"), &[], None)
             .await
             .unwrap();
@@ -375,14 +374,15 @@ mod tests {
         assert_eq!(tabs[1].title, "Tab 2");
 
         // Update tab content
+        let asset_id = AssetId::from_string("asset1");
         store
-            .update_document_tab_content(&tab1_id, "# Updated Tab 1", &["asset1".to_string()])
+            .update_document_tab_content(&tab1_id, "# Updated Tab 1", &[asset_id.clone()])
             .await
             .unwrap();
 
         let tab = store.get_document_tab(&tab1_id).await.unwrap().unwrap();
         assert_eq!(tab.content_markdown, Some("# Updated Tab 1".to_string()));
-        assert_eq!(tab.referenced_assets, vec!["asset1".to_string()]);
+        assert_eq!(tab.referenced_assets, vec![asset_id]);
 
         // Delete tab
         assert!(store.delete_document_tab(&tab1_id).await.unwrap());
@@ -393,10 +393,11 @@ mod tests {
     #[tokio::test]
     async fn test_document_revisions() {
         let store = MemoryDocumentStore::new();
+        let user_id = UserId::new();
 
         // Create document and tab
         let doc_id = store
-            .create_document("user1", "Test Doc", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Test Doc", DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
@@ -407,12 +408,12 @@ mod tests {
 
         // Create revisions
         let rev1_id = store
-            .create_document_revision(&tab_id, "# Version 1", "hash1", &[], "user1")
+            .create_document_revision(&tab_id, "# Version 1", "hash1", &[], &user_id)
             .await
             .unwrap();
 
         let rev2_id = store
-            .create_document_revision(&tab_id, "# Version 2", "hash2", &[], "user1")
+            .create_document_revision(&tab_id, "# Version 2", "hash2", &[], &user_id)
             .await
             .unwrap();
 
@@ -434,24 +435,25 @@ mod tests {
     #[tokio::test]
     async fn test_search_documents() {
         let store = MemoryDocumentStore::new();
+        let user_id = UserId::new();
 
         // Create documents
         store
-            .create_document("user1", "Meeting Notes", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Meeting Notes", DocumentSource::UserCreated, None)
             .await
             .unwrap();
         store
-            .create_document("user1", "Project Plan", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Project Plan", DocumentSource::UserCreated, None)
             .await
             .unwrap();
         store
-            .create_document("user1", "Meeting Summary", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Meeting Summary", DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
         // Search
         let results = store
-            .search_documents("user1", "meeting", 10)
+            .search_documents(&user_id, "meeting", 10)
             .await
             .unwrap();
         assert_eq!(results.len(), 2);
@@ -460,11 +462,12 @@ mod tests {
     #[tokio::test]
     async fn test_get_document_by_source() {
         let store = MemoryDocumentStore::new();
+        let user_id = UserId::new();
 
         // Create document with source_id
         let doc_id = store
             .create_document(
-                "user1",
+                &user_id,
                 "Google Doc",
                 DocumentSource::GoogleDrive,
                 Some("gdoc123"),
@@ -474,7 +477,7 @@ mod tests {
 
         // Find by source
         let found = store
-            .get_document_by_source("user1", DocumentSource::GoogleDrive, "gdoc123")
+            .get_document_by_source(&user_id, DocumentSource::GoogleDrive, "gdoc123")
             .await
             .unwrap();
         assert!(found.is_some());
@@ -482,7 +485,7 @@ mod tests {
 
         // Not found
         let not_found = store
-            .get_document_by_source("user1", DocumentSource::GoogleDrive, "nonexistent")
+            .get_document_by_source(&user_id, DocumentSource::GoogleDrive, "nonexistent")
             .await
             .unwrap();
         assert!(not_found.is_none());

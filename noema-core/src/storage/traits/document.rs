@@ -3,6 +3,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::types::document::{
     DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
 };
@@ -15,83 +16,87 @@ pub trait DocumentStore: Send + Sync {
     /// Create a new document
     async fn create_document(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         title: &str,
         source: DocumentSource,
         source_id: Option<&str>,
-    ) -> Result<String>;
+    ) -> Result<DocumentId>;
 
     /// Get a document by ID
-    async fn get_document(&self, id: &str) -> Result<Option<DocumentInfo>>;
+    async fn get_document(&self, id: &DocumentId) -> Result<Option<DocumentInfo>>;
 
     /// Get a document by source and source_id (e.g., find by Google Doc ID)
     async fn get_document_by_source(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         source: DocumentSource,
         source_id: &str,
     ) -> Result<Option<DocumentInfo>>;
 
     /// List all documents for a user
-    async fn list_documents(&self, user_id: &str) -> Result<Vec<DocumentInfo>>;
+    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<DocumentInfo>>;
 
     /// Search documents by title (case-insensitive)
     async fn search_documents(
         &self,
-        user_id: &str,
+        user_id: &UserId,
         query: &str,
         limit: usize,
     ) -> Result<Vec<DocumentInfo>>;
 
     /// Update document title
-    async fn update_document_title(&self, id: &str, title: &str) -> Result<()>;
+    async fn update_document_title(&self, id: &DocumentId, title: &str) -> Result<()>;
 
     /// Delete a document and all its tabs/revisions
-    async fn delete_document(&self, id: &str) -> Result<bool>;
+    async fn delete_document(&self, id: &DocumentId) -> Result<bool>;
 
     // ========== Document Tab Methods ==========
 
     /// Create a new document tab
     async fn create_document_tab(
         &self,
-        document_id: &str,
-        parent_tab_id: Option<&str>,
+        document_id: &DocumentId,
+        parent_tab_id: Option<&TabId>,
         tab_index: i32,
         title: &str,
         icon: Option<&str>,
         content_markdown: Option<&str>,
-        referenced_assets: &[String],
-        source_tab_id: Option<&str>,
-    ) -> Result<String>;
+        referenced_assets: &[AssetId],
+        source_tab_id: Option<&TabId>,
+    ) -> Result<TabId>;
 
     /// Get a document tab by ID
-    async fn get_document_tab(&self, id: &str) -> Result<Option<DocumentTabInfo>>;
+    async fn get_document_tab(&self, id: &TabId) -> Result<Option<DocumentTabInfo>>;
 
     /// List all tabs for a document
-    async fn list_document_tabs(&self, document_id: &str) -> Result<Vec<DocumentTabInfo>>;
+    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<DocumentTabInfo>>;
 
     /// Update tab content
     async fn update_document_tab_content(
         &self,
-        id: &str,
+        id: &TabId,
         content_markdown: &str,
-        referenced_assets: &[String],
+        referenced_assets: &[AssetId],
     ) -> Result<()>;
 
     /// Update the parent tab reference for a tab
-    async fn update_document_tab_parent(&self, id: &str, parent_tab_id: Option<&str>)
-        -> Result<()>;
+    async fn update_document_tab_parent(
+        &self,
+        id: &TabId,
+        parent_tab_id: Option<&TabId>,
+    ) -> Result<()>;
 
     /// Set current revision for a tab
-    async fn set_document_tab_revision(&self, tab_id: &str, revision_id: &str) -> Result<()>;
+    async fn set_document_tab_revision(&self, tab_id: &TabId, revision_id: &RevisionId)
+        -> Result<()>;
 
     /// Delete a document tab
-    async fn delete_document_tab(&self, id: &str) -> Result<bool>;
+    async fn delete_document_tab(&self, id: &TabId) -> Result<bool>;
 
     // ========== Full Document Fetch Method =========
 
     /// Fetch the entire content of the document along with the tabs.
-    async fn fetch_full_document(&self, doc_id: &str) -> Result<Option<FullDocumentInfo>> {
+    async fn fetch_full_document(&self, doc_id: &DocumentId) -> Result<Option<FullDocumentInfo>> {
         let document = match self.get_document(doc_id).await? {
             Some(doc) => doc,
             None => return Ok(None),
@@ -107,16 +112,16 @@ pub trait DocumentStore: Send + Sync {
     /// Create a new revision for a tab
     async fn create_document_revision(
         &self,
-        tab_id: &str,
+        tab_id: &TabId,
         content_markdown: &str,
         content_hash: &str,
-        referenced_assets: &[String],
-        created_by: &str,
-    ) -> Result<String>;
+        referenced_assets: &[AssetId],
+        created_by: &UserId,
+    ) -> Result<RevisionId>;
 
     /// Get a revision by ID
-    async fn get_document_revision(&self, id: &str) -> Result<Option<DocumentRevisionInfo>>;
+    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<DocumentRevisionInfo>>;
 
     /// List revisions for a tab
-    async fn list_document_revisions(&self, tab_id: &str) -> Result<Vec<DocumentRevisionInfo>>;
+    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<DocumentRevisionInfo>>;
 }
