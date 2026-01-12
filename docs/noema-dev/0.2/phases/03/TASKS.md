@@ -114,7 +114,7 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.17 | 🧹 Remove `SqliteSession`/`SqliteTransaction` from sqlite.rs |
 | ✅ | 3.3.18 | 🧹 Update docs (lib.rs, mod.rs) for new API |
 
-#### Part C.2: Storage Module Restructure (4 tasks)
+#### Part C.2: Storage Module Restructure (6 tasks)
 
 | Status | # | Task |
 |--------|---|------|
@@ -122,6 +122,8 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.18b | 🧹 Create `storage/types/` with all type definitions |
 | ✅ | 3.3.18c | 🧹 Move implementations to `storage/implementations/` (sqlite/, fs/, memory/) |
 | ✅ | 3.3.18d | ⚡ Add in-memory store implementations (MemoryBlobStore, MemoryContentBlockStore, MemoryAssetStore) |
+| ✅ | 3.3.18e | 🧹 Split sqlite/conversation.rs into turn.rs and conversation.rs to match traits layout |
+| ✅ | 3.3.18f | ⚡ Add MemoryTurnStore, MemoryConversationStore, MemoryDocumentStore implementations |
 
 #### Part D: Final Verification (3 tasks)
 
