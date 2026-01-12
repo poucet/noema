@@ -42,22 +42,22 @@ async fn handle_asset_request(
             .unwrap();
     }
 
-    // Get blob store from app state
-    let blob_store_guard = app_state.blob_store.lock().await;
-    let blob_store = match blob_store_guard.as_ref() {
-        Some(store) => store.clone(),
+    // Get coordinator from app state
+    let coordinator_guard = app_state.coordinator.lock().await;
+    let coordinator = match coordinator_guard.as_ref() {
+        Some(c) => c.clone(),
         None => {
             return Response::builder()
                 .status(500)
                 .header("Content-Type", "text/plain")
-                .body("Blob storage not initialized".as_bytes().to_vec())
+                .body("Storage not initialized".as_bytes().to_vec())
                 .unwrap();
         }
     };
-    drop(blob_store_guard);
+    drop(coordinator_guard);
 
-    // Read the asset
-    let data = match blob_store.get(asset_id).await {
+    // Read the asset from blob store (asset_id here is actually the blob hash)
+    let data = match coordinator.get_blob(asset_id).await {
         Ok(data) => data,
         Err(_) => {
             return Response::builder()

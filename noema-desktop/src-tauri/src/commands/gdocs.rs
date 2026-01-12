@@ -551,24 +551,25 @@ pub async fn import_google_doc(
         .map_err(|e| format!("Failed to create document: {}", e))?;
 
     // Store images first so we can reference them in tabs
-    let blob_store_guard = state.blob_store.lock().await;
+    let coordinator_guard = state.coordinator.lock().await;
+    let coordinator = coordinator_guard
+        .as_ref()
+        .ok_or("Coordinator not initialized")?;
     let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
-    if let Some(blob_store) = blob_store_guard.as_ref() {
-        for image in &extract_response.images {
-            let data = BASE64
-                .decode(&image.data_base64)
-                .map_err(|e| format!("Failed to decode image: {}", e))?;
+    for image in &extract_response.images {
+        let data = BASE64
+            .decode(&image.data_base64)
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
 
-            let stored = blob_store
-                .store(&data)
-                .await
-                .map_err(|e| format!("Failed to store image: {}", e))?;
+        let asset_id = coordinator
+            .store_asset(&data, &image.mime_type, None)
+            .await
+            .map_err(|e| format!("Failed to store image: {}", e))?;
 
-            // Use the blob hash as the asset ID
-            image_id_map.insert(image.object_id.clone(), stored.hash);
-        }
+        image_id_map.insert(image.object_id.clone(), asset_id.into());
     }
+    drop(coordinator_guard);
 
     // Build a map of source_tab_id -> internal tab_id for parent references
     let mut tab_id_map: std::collections::HashMap<String, TabId> = std::collections::HashMap::new();

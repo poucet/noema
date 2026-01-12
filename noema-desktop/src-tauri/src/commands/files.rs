@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use std::sync::Arc;
 
-use noema_core::storage::{Asset, AssetStore, ids::AssetId};
+use noema_core::storage::ids::AssetId;
 use crate::logging::log_message;
 use crate::state::AppState;
 
@@ -86,28 +86,13 @@ pub async fn store_asset(
         .decode(&data)
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
-    let blob_store_guard = state.blob_store.lock().await;
-    let blob_store = blob_store_guard
+    let coordinator_guard = state.coordinator.lock().await;
+    let coordinator = coordinator_guard
         .as_ref()
-        .ok_or("Blob store not initialized")?;
+        .ok_or("Coordinator not initialized")?;
 
-    // Store in blob storage (returns hash for deduplication)
-    let stored = blob_store
-        .store(&bytes)
+    coordinator
+        .store_asset(&bytes, &mime_type, filename)
         .await
-        .map_err(|e| format!("Failed to store blob: {}", e))?;
-
-    // Register metadata in SQLite with blob_hash reference
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Store not initialized")?;
-
-    let mut asset = Asset::new(&stored.hash, &mime_type, bytes.len() as i64);
-    if let Some(name) = filename {
-        asset = asset.with_filename(name);
-    }
-
-    store
-        .create_asset(asset)
-        .await
-        .map_err(|e| format!("Failed to register asset: {}", e))
+        .map_err(|e| format!("Failed to store asset: {}", e))
 }

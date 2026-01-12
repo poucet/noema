@@ -2,16 +2,23 @@
 
 use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
+use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::storage::ids::UserId;
-use noema_core::storage::{BlobStore, SqliteStore};
+use noema_core::storage::{FsBlobStore, SqliteStore};
 use noema_core::ChatEngine;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Type alias for our concrete coordinator type
+pub type AppCoordinator = StorageCoordinator<FsBlobStore, SqliteStore, SqliteStore, SqliteStore>;
+/// Type alias for our concrete engine type
+pub type AppEngine = ChatEngine<SqliteStore, SqliteStore, FsBlobStore, SqliteStore>;
+
 pub struct AppState {
     pub store: Mutex<Option<Arc<SqliteStore>>>,
-    pub engine: Mutex<Option<ChatEngine<SqliteStore, SqliteStore>>>,
+    pub coordinator: Mutex<Option<Arc<AppCoordinator>>>,
+    pub engine: Mutex<Option<AppEngine>>,
     pub current_conversation_id: Mutex<String>,
     /// Current thread ID within the conversation (None = main thread)
     pub current_thread_id: Mutex<Option<String>>,
@@ -27,8 +34,6 @@ pub struct AppState {
     pub pending_oauth_states: Mutex<HashMap<String, String>>,
     /// Browser voice controller for WebAudio-based input
     pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
-    /// Content-addressable blob storage for assets
-    pub blob_store: Mutex<Option<Arc<dyn BlobStore>>>,
     /// Lock to prevent concurrent initialization (React StrictMode calls init twice)
     pub init_lock: std::sync::Mutex<bool>,
 }
@@ -40,6 +45,7 @@ impl AppState {
 
         Self {
             store: Mutex::new(None),
+            coordinator: Mutex::new(None),
             engine: Mutex::new(None),
             current_conversation_id: Mutex::new(String::new()),
             current_thread_id: Mutex::new(None),
@@ -50,7 +56,6 @@ impl AppState {
             is_processing: Mutex::new(false),
             pending_oauth_states: Mutex::new(pending_states),
             browser_audio_controller: Mutex::new(None),
-            blob_store: Mutex::new(None),
             init_lock: std::sync::Mutex::new(false),
         }
     }
