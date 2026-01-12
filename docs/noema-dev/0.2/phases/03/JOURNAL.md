@@ -531,4 +531,20 @@ message_content (
 - No JSON blob for structured content
 - Asset externalization layer above DB can convert inline binary to refs
 
+### Implementation Complete
+
+Updated TurnStore implementation:
+- `add_message()` now takes `(role: MessageRole, content: &[StoredContent])`
+- Added `get_messages_with_content()` for loading messages with their content
+- Updated `edit_turn()` to use `Vec<(MessageRole, Vec<StoredContent>)>`
+- Updated convenience methods to use new format
+- Added `load_message_content()` helper for reading from message_content table
+- Updated `sync_helpers::add_message_sync()` for new schema
+- All tests updated for new API
+
+**Next Steps:**
+- Update SqliteSession to use TurnStore directly (remove dual-write)
+- Remove legacy tables and ConversationStore trait
+- Update engine and commands
+
 ---
