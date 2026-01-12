@@ -5,28 +5,12 @@ use crate::mcp::McpToolRegistry;
 use crate::traffic_log;
 use crate::Agent;
 use crate::ConversationContext;
+use anyhow::Result;
 use async_trait::async_trait;
 use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest, ContentBlock, ToolResultContent};
 use std::sync::Arc;
 
 /// Agent that dynamically uses tools from connected MCP servers.
-///
-/// Unlike `ToolAgent` which uses a static `ToolRegistry`, this agent
-/// queries the `McpToolRegistry` on each turn to get the latest tools
-/// from all connected MCP servers.
-///
-/// # Example
-///
-/// ```ignore
-/// use noema_core::McpAgent;
-/// use mcp::{McpRegistry, McpToolRegistry};
-/// use std::sync::Arc;
-/// use tokio::sync::Mutex;
-///
-/// let mcp_registry = Arc::new(Mutex::new(McpRegistry::load()?));
-/// let tool_registry = McpToolRegistry::new(mcp_registry);
-/// let agent = McpAgent::new(Arc::new(tool_registry), 10);
-/// ```
 pub struct McpAgent {
     tools: Arc<McpToolRegistry>,
     max_iterations: usize,
@@ -35,13 +19,6 @@ pub struct McpAgent {
 }
 
 impl McpAgent {
-    /// Create a new MCP agent
-    ///
-    /// # Arguments
-    ///
-    /// * `tools` - Dynamic MCP tool registry
-    /// * `max_iterations` - Maximum number of turn cycles before stopping
-    /// * `document_resolver` - Resolver for document references (required for RAG support)
     pub fn new(
         tools: Arc<McpToolRegistry>,
         max_iterations: usize,
@@ -55,34 +32,29 @@ impl McpAgent {
         }
     }
 
-    /// Get reference to the tool registry
     pub fn tools(&self) -> &McpToolRegistry {
         &self.tools
     }
 
-    /// Get maximum iterations
     pub fn max_iterations(&self) -> usize {
         self.max_iterations
     }
 
-    /// Execute streaming without any tools (for models that don't support tools or when disabled)
+    /// Execute streaming without any tools
     pub async fn execute_stream_no_tools(
         &self,
-        context: &mut (impl ConversationContext + Send),
+        context: &mut dyn ConversationContext,
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         use futures::StreamExt;
 
-        // Make request WITHOUT tools
-        let mut request = ChatRequest::new(context.iter());
+        let messages = context.messages().await?;
+        let mut request = ChatRequest::new(messages.iter());
 
-        // Resolve any document refs before sending to LLM
         self.resolve_documents(&mut request).await;
 
-        // Stream the response
         let mut stream = model.stream_chat(&request).await?;
 
-        // Accumulate chunks into a single message, merging text blocks
         let mut accumulated_text = String::new();
         let mut other_blocks: Vec<ContentBlock> = Vec::new();
         let mut role = llm::api::Role::default();
@@ -101,7 +73,6 @@ impl McpAgent {
             }
         }
 
-        // Build the final message with merged text content
         let mut content = Vec::new();
         if !accumulated_text.is_empty() {
             content.push(ContentBlock::Text { text: accumulated_text });
@@ -110,18 +81,14 @@ impl McpAgent {
 
         let accumulated = ChatMessage::new(role, ChatPayload::new(content));
 
-        // Log the accumulated response
         traffic_log::log_llm_response(model.name(), &accumulated);
 
-        // Add the complete accumulated message to context
         context.add(accumulated);
 
         Ok(())
     }
 
-    /// Resolve document refs in a request
     async fn resolve_documents(&self, request: &mut ChatRequest) {
-        // Extract doc IDs from the request
         let doc_ids: Vec<String> = request
             .get_document_refs()
             .into_iter()
@@ -132,17 +99,13 @@ impl McpAgent {
             return;
         }
 
-        // Resolve documents
         let resolved = self.document_resolver.resolve_documents(&doc_ids).await;
-
-        // Inject formatted documents into the request
         self.document_formatter.inject_documents(request, &resolved);
     }
 
-    /// Process tool calls and add results to context
     async fn process_tool_calls(
         &self,
-        context: &mut (impl ConversationContext + Send),
+        context: &mut dyn ConversationContext,
         tool_calls: Vec<&llm::ToolCall>,
     ) {
         for tool_call in tool_calls {
@@ -164,39 +127,32 @@ impl McpAgent {
 impl Agent for McpAgent {
     async fn execute(
         &self,
-        context: &mut (impl ConversationContext + Send),
+        context: &mut dyn ConversationContext,
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         for iteration in 0..self.max_iterations {
-            // Get current tool definitions dynamically
             let tool_definitions = self.tools.get_all_definitions().await;
 
-            // Make request - only include tools if we have any definitions
-            // This avoids errors with models that don't support tools
+            let messages = context.messages().await?;
             let mut request = if tool_definitions.is_empty() {
-                ChatRequest::new(context.iter())
+                ChatRequest::new(messages.iter())
             } else {
-                ChatRequest::with_tools(context.iter(), tool_definitions)
+                ChatRequest::with_tools(messages.iter(), tool_definitions)
             };
 
-            // Resolve any document refs before sending to LLM
             self.resolve_documents(&mut request).await;
 
             let response = model.chat(&request).await?;
             let tool_calls = response.get_tool_calls();
 
-            // Add response to context
             context.add(response.clone());
 
-            // If no tool calls, we're done
             if tool_calls.is_empty() {
                 break;
             }
 
-            // Execute all tool calls and add results to context
             self.process_tool_calls(context, tool_calls).await;
 
-            // Check if we've hit max iterations
             if iteration == self.max_iterations - 1 {
                 tracing::warn!(
                     "McpAgent reached max iterations ({}), stopping",
@@ -210,30 +166,25 @@ impl Agent for McpAgent {
 
     async fn execute_stream(
         &self,
-        context: &mut (impl ConversationContext + Send),
+        context: &mut dyn ConversationContext,
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         use futures::StreamExt;
 
         for iteration in 0..self.max_iterations {
-            // Get current tool definitions dynamically
             let tool_definitions = self.tools.get_all_definitions().await;
 
-            // Make request - only include tools if we have any definitions
-            // This avoids errors with models that don't support tools
+            let messages = context.messages().await?;
             let mut request = if tool_definitions.is_empty() {
-                ChatRequest::new(context.iter())
+                ChatRequest::new(messages.iter())
             } else {
-                ChatRequest::with_tools(context.iter(), tool_definitions)
+                ChatRequest::with_tools(messages.iter(), tool_definitions)
             };
 
-            // Resolve any document refs before sending to LLM
             self.resolve_documents(&mut request).await;
 
-            // Stream the response
             let mut stream = model.stream_chat(&request).await?;
 
-            // Accumulate chunks into a single message, merging text blocks
             let mut accumulated_text = String::new();
             let mut other_blocks: Vec<ContentBlock> = Vec::new();
             let mut role = llm::api::Role::default();
@@ -252,7 +203,6 @@ impl Agent for McpAgent {
                 }
             }
 
-            // Build the final message with merged text content
             let mut content = Vec::new();
             if !accumulated_text.is_empty() {
                 content.push(ContentBlock::Text { text: accumulated_text });
@@ -261,20 +211,16 @@ impl Agent for McpAgent {
 
             let accumulated = ChatMessage::new(role, ChatPayload::new(content));
 
-            // Log the accumulated response
             traffic_log::log_llm_response(model.name(), &accumulated);
 
-            // Add the complete accumulated message to context
             context.add(accumulated.clone());
 
             let tool_calls = accumulated.get_tool_calls();
 
-            // If no tool calls, we're done
             if tool_calls.is_empty() {
                 break;
             }
 
-            // Execute tools and add results to context
             self.process_tool_calls(context, tool_calls).await;
 
             if iteration == self.max_iterations - 1 {

@@ -2,6 +2,7 @@
 
 use crate::Agent;
 use crate::ConversationContext;
+use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 use llm::{ChatMessage, ChatModel, ChatRequest};
@@ -10,21 +11,9 @@ use std::sync::Arc;
 /// Simple single-turn agent
 ///
 /// Makes one call to the model and adds the response to the context.
-/// This is the most basic agent - just forwards the context to the model.
-///
-/// # Example
-///
-/// ```ignore
-/// use noema_core::{SimpleAgent, Agent};
-///
-/// let agent = SimpleAgent::new();
-/// agent.execute(&mut context, model).await?;
-/// // Context now contains the assistant response
-/// ```
 pub struct SimpleAgent;
 
 impl SimpleAgent {
-    /// Create a new simple agent
     pub fn new() -> Self {
         Self
     }
@@ -40,10 +29,11 @@ impl Default for SimpleAgent {
 impl Agent for SimpleAgent {
     async fn execute(
         &self,
-        context: &mut (impl ConversationContext + Send),
+        context: &mut dyn ConversationContext,
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<()> {
-        let request = ChatRequest::new(context.iter());
+    ) -> Result<()> {
+        let messages = context.messages().await?;
+        let request = ChatRequest::new(messages.iter());
         let response = model.chat(&request).await?;
 
         context.add(response);
@@ -52,13 +42,13 @@ impl Agent for SimpleAgent {
 
     async fn execute_stream(
         &self,
-        context: &mut (impl ConversationContext + Send),
+        context: &mut dyn ConversationContext,
         model: Arc<dyn ChatModel + Send + Sync>,
-    ) -> anyhow::Result<()> {
-        let request = ChatRequest::new(context.iter());
+    ) -> Result<()> {
+        let messages = context.messages().await?;
+        let request = ChatRequest::new(messages.iter());
         let mut stream = model.stream_chat(&request).await?;
 
-        // Stream chunks and add each as a message to context
         while let Some(chunk) = stream.next().await {
             let message = ChatMessage::from(chunk);
             context.add(message);
@@ -71,7 +61,8 @@ impl Agent for SimpleAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llm::{ChatPayload, ChatRequest, ChatChunk};
+    use crate::MessagesGuard;
+    use llm::{ChatChunk, ChatPayload, ChatRequest};
     use futures::stream;
     use std::pin::Pin;
     use futures::stream::Stream;
@@ -98,23 +89,30 @@ mod tests {
 
     struct MockContext {
         messages: Vec<ChatMessage>,
+        pending: Vec<ChatMessage>,
     }
 
+    #[async_trait]
     impl ConversationContext for MockContext {
-        fn iter(&self) -> impl Iterator<Item = &ChatMessage> {
-            self.messages.iter()
+        async fn messages(&mut self) -> Result<MessagesGuard<'_>> {
+            Ok(MessagesGuard::new(&self.messages))
         }
 
         fn len(&self) -> usize {
-            self.messages.len()
+            self.messages.len() + self.pending.len()
         }
 
         fn add(&mut self, message: ChatMessage) {
-            self.messages.push(message);
+            self.pending.push(message);
         }
 
-        fn extend(&mut self, messages: impl IntoIterator<Item = ChatMessage>) {
-            self.messages.extend(messages);
+        fn pending(&self) -> &[ChatMessage] {
+            &self.pending
+        }
+
+        async fn commit(&mut self) -> Result<()> {
+            self.messages.append(&mut self.pending);
+            Ok(())
         }
     }
 
@@ -126,13 +124,14 @@ mod tests {
 
         let mut context = MockContext {
             messages: vec![ChatMessage::user(ChatPayload::text("Hi"))],
+            pending: vec![],
         };
 
         let agent = SimpleAgent::new();
         agent.execute(&mut context, model).await.unwrap();
 
-        assert_eq!(context.len(), 2); // User + assistant
-        assert_eq!(context.messages[1].get_text(), "Hello!");
+        assert_eq!(context.pending.len(), 1);
+        assert_eq!(context.pending[0].get_text(), "Hello!");
     }
 
     #[tokio::test]
@@ -143,12 +142,13 @@ mod tests {
 
         let mut context = MockContext {
             messages: vec![ChatMessage::user(ChatPayload::text("Hi"))],
+            pending: vec![],
         };
 
         let agent = SimpleAgent::new();
         agent.execute_stream(&mut context, model).await.unwrap();
 
-        assert_eq!(context.len(), 2); // User + assistant chunk
-        assert_eq!(context.messages[1].get_text(), "Hello!");
+        assert_eq!(context.pending.len(), 1);
+        assert_eq!(context.pending[0].get_text(), "Hello!");
     }
 }

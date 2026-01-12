@@ -7,8 +7,7 @@
 //! - `ContentBlockResolver` / `AssetResolver` - Resolution traits
 //! - `SqliteStore` - SQLite storage backend (requires `sqlite` feature)
 //!
-//! For conversation CRUD operations, see `ConversationStore` in the
-//! `conversation` module.
+//! Session implements `ConversationContext` directly.
 
 mod resolver;
 mod session;
@@ -19,8 +18,8 @@ mod sqlite;
 
 // Re-export session types
 pub use resolver::{AssetResolver, ContentBlockResolver};
-pub use session::Session;
-pub use types::{PendingMessage, ResolvedContent, ResolvedMessage};
+pub use session::{ContentStorer, Session};
+pub use types::{ResolvedContent, ResolvedMessage};
 
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteStore;

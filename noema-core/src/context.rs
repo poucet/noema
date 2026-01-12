@@ -1,45 +1,62 @@
 //! Conversation context abstractions
 //!
-//! `ConversationContext` provides access to conversation history and allows
+//! `ConversationContext` provides async access to conversation history and allows
 //! adding new messages during agent execution.
-//!
-//! Note: This trait is intentionally synchronous for reading. Writing (adding
-//! messages) is also synchronous, but committing the context may be async.
 
+use anyhow::Result;
+use async_trait::async_trait;
 use llm::ChatMessage;
+use std::ops::Deref;
 
-/// Access to conversation messages with mutation support
+/// Guard that provides access to resolved messages
 ///
-/// This trait provides synchronous access to conversation history and allows
-/// agents to add new messages during execution. All messages must be
-/// immediately available (in-memory) for reading.
-///
-/// # Design Note
-///
-/// - Reading is synchronous (keeps iteration simple)
-/// - Adding messages is synchronous (buffered in memory)
-/// - Committing may be async (handled at session layer)
-///
-/// For large conversations, consider:
-/// - Loading only recent messages before creating context
-/// - Using windowed contexts (last N messages)
-/// - Filtering contexts to reduce size
-pub trait ConversationContext {
-    /// Get iterator over message references
-    ///
-    /// Returns an iterator that yields references to messages, allowing
-    /// zero-copy iteration over the conversation history.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// for msg in context.iter() {
-    ///     println!("{}: {}", msg.role, msg.get_text());
-    /// }
-    /// ```
-    fn iter(&self) -> impl Iterator<Item = &ChatMessage>;
+/// This guard holds a reference to the internally cached messages,
+/// ensuring they remain valid while the guard is held.
+pub struct MessagesGuard<'a> {
+    messages: &'a [ChatMessage],
+}
 
-    /// Get count of messages in the context
+impl<'a> MessagesGuard<'a> {
+    pub fn new(messages: &'a [ChatMessage]) -> Self {
+        Self { messages }
+    }
+}
+
+impl<'a> Deref for MessagesGuard<'a> {
+    type Target = [ChatMessage];
+
+    fn deref(&self) -> &Self::Target {
+        self.messages
+    }
+}
+
+impl<'a> AsRef<[ChatMessage]> for MessagesGuard<'a> {
+    fn as_ref(&self) -> &[ChatMessage] {
+        self.messages
+    }
+}
+
+/// Async access to conversation messages with mutation support
+///
+/// This trait provides async access to conversation history and allows
+/// agents to add new messages during execution. Resolution of content
+/// (text, assets, documents) happens lazily when messages are accessed.
+///
+/// # Design
+///
+/// - `messages()` is async to support lazy resolution, returns guard to cached data
+/// - `add()` is sync (buffered in memory as pending)
+/// - `commit()` is async (persists to storage)
+#[async_trait]
+pub trait ConversationContext: Send + Sync {
+    /// Get all messages (resolved for LLM consumption)
+    ///
+    /// This resolves any lazy content (assets, documents) and returns
+    /// a guard providing access to the cached ChatMessages.
+    /// Subsequent calls return the cached data without re-resolving.
+    async fn messages(&mut self) -> Result<MessagesGuard<'_>>;
+
+    /// Get count of messages in the context (cached + pending)
     fn len(&self) -> usize;
 
     /// Check if context is empty
@@ -47,16 +64,15 @@ pub trait ConversationContext {
         self.len() == 0
     }
 
-    /// Add a message to the context
+    /// Add a message to the context (pending, not yet committed)
     ///
-    /// This adds the message to the context's buffer. Whether it's immediately
-    /// committed to storage depends on the implementation.
+    /// This adds the message to a pending buffer. Call `commit()` to
+    /// persist to storage.
     fn add(&mut self, message: ChatMessage);
 
-    /// Add multiple messages to the context
-    fn extend(&mut self, messages: impl IntoIterator<Item = ChatMessage>) {
-        for message in messages {
-            self.add(message);
-        }
-    }
+    /// Get pending messages (added but not yet committed)
+    fn pending(&self) -> &[ChatMessage];
+
+    /// Commit pending messages to storage
+    async fn commit(&mut self) -> Result<()>;
 }

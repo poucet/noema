@@ -976,3 +976,72 @@ The new DB-agnostic session API is now the only session API:
 2. **Update desktop commands** - After engine is updated
 
 ---
+
+## 2026-01-12: ConversationContext Made Async + Session Implements Directly
+
+### API Changes
+
+1. **ConversationContext trait** - Now async with guard pattern:
+   ```rust
+   #[async_trait]
+   pub trait ConversationContext: Send + Sync {
+       async fn messages(&mut self) -> Result<MessagesGuard<'_>>;
+       fn len(&self) -> usize;
+       fn add(&mut self, message: ChatMessage);
+       fn pending(&self) -> &[ChatMessage];
+       async fn commit(&mut self) -> Result<()>;
+   }
+   ```
+
+2. **MessagesGuard** - Returns reference to cached `&[ChatMessage]`:
+   - Avoids allocation on each `messages()` call
+   - Session maintains `llm_cache: Vec<ChatMessage>` populated lazily
+   - Guard derefs to `&[ChatMessage]`
+
+3. **Agent trait** - Updated to use `dyn ConversationContext`:
+   ```rust
+   async fn execute(
+       &self,
+       context: &mut dyn ConversationContext,
+       model: Arc<dyn ChatModel + Send + Sync>,
+   ) -> Result<()>;
+   ```
+
+4. **Session** - Now implements `ConversationContext` directly:
+   - Store is `Arc<S>` (shared, not owned)
+   - `pending` is `Vec<ChatMessage>` (not `PendingMessage`)
+   - `messages()` populates and returns guard to `llm_cache`
+   - `add()` pushes to pending
+   - `commit()` returns error (use `commit_pending()` with coordinator)
+
+5. **ContentStorer trait** - For converting `ChatMessage` to `StoredContent`:
+   ```rust
+   pub trait ContentStorer: Send + Sync {
+       async fn store_chat_message(&self, message: &ChatMessage) -> Result<Vec<StoredContent>>;
+   }
+   ```
+
+### Files Changed
+
+- `context.rs` - Async trait with `MessagesGuard`
+- `agent.rs` - Updated trait signature
+- `agents/simple_agent.rs` - Updated impl
+- `agents/tool_agent.rs` - Updated impl
+- `agents/mcp_agent.rs` - Updated impl
+- `storage/session/session.rs` - `Session<S>` implements `ConversationContext`
+- `storage/session/mod.rs` - Removed `AgentContext`, `PendingMessage`
+- `engine.rs` - Simplified to use Session as ConversationContext
+
+### Key Design Decisions
+
+- **No AgentContext** - Session IS the context (no adapter)
+- **Arc<S> for store** - Shared ownership, multiple sessions possible
+- **Lazy LLM cache** - Text resolved on `messages()`, not on open
+- **Pending = ChatMessage** - Agent adds `ChatMessage`, commit converts to `StoredContent`
+- **commit() needs coordinator** - Can't implement fully in trait, use `commit_pending()`
+
+### Compilation Status
+
+`cargo check --package noema-core --package noema-ext` passes. Desktop needs separate update.
+
+---

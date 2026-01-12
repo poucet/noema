@@ -4,17 +4,20 @@
 //! - Runtime state management (conversation_id, view_id, cache)
 //! - Pending message buffer for uncommitted changes
 //! - Lazy resolution of assets/documents for LLM
-//! - Display access via cached ResolvedContent
+//! - Implements ConversationContext directly
 
 use anyhow::Result;
+use async_trait::async_trait;
 use llm::{ChatMessage, ChatPayload, ContentBlock};
+use std::sync::Arc;
 
+use crate::context::{ConversationContext, MessagesGuard};
 use crate::storage::content::StoredContent;
 use crate::storage::conversation::{MessageRole, SpanRole, TurnStore, TurnWithContent};
-use crate::storage::ids::{ConversationId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, TurnId, ViewId};
 
 use super::resolver::{AssetResolver, ContentBlockResolver};
-use super::types::{PendingMessage, ResolvedContent, ResolvedMessage};
+use super::types::{ResolvedContent, ResolvedMessage};
 
 // ============================================================================
 // Session
@@ -22,24 +25,27 @@ use super::types::{PendingMessage, ResolvedContent, ResolvedMessage};
 
 /// Runtime session state - DB-agnostic
 ///
-/// Generic over TurnStore implementation. Session is just runtime state:
+/// Generic over TurnStore implementation. Session is runtime state:
 /// conversation context, current view, cached resolved messages.
+/// Implements ConversationContext for direct use with agents.
 pub struct Session<S: TurnStore> {
-    store: S,
+    store: Arc<S>,
     conversation_id: ConversationId,
     view_id: ViewId,
     /// Cached resolved messages (text resolved, assets/docs cached lazily)
-    cache: Vec<ResolvedMessage>,
-    /// Pending messages not yet committed
-    pending: Vec<PendingMessage>,
+    resolved_cache: Vec<ResolvedMessage>,
+    /// Cached ChatMessages for LLM (lazily populated from resolved_cache)
+    llm_cache: Vec<ChatMessage>,
+    /// Whether llm_cache is valid
+    llm_cache_valid: bool,
+    /// Pending messages (ChatMessage) not yet committed
+    pending: Vec<ChatMessage>,
 }
 
-impl<S: TurnStore> Session<S> {
+impl<S: TurnStore + Send + Sync> Session<S> {
     /// Open a session for an existing conversation
-    ///
-    /// Loads messages from the main view and resolves text content once.
     pub async fn open<R: ContentBlockResolver>(
-        store: S,
+        store: Arc<S>,
         conversation_id: ConversationId,
         resolver: &R,
     ) -> Result<Self> {
@@ -48,58 +54,55 @@ impl<S: TurnStore> Session<S> {
             None => store.create_view(&conversation_id, Some("main"), true).await?.id,
         };
 
-        // Load and resolve text once
         let path = store.get_view_path(&view_id).await?;
-        let cache = resolve_path(&path, resolver).await?;
+        let resolved_cache = resolve_path(&path, resolver).await?;
 
         Ok(Self {
             store,
             conversation_id,
             view_id,
-            cache,
+            resolved_cache,
+            llm_cache: Vec::new(),
+            llm_cache_valid: false,
             pending: Vec::new(),
         })
     }
 
     /// Create a new session for a new conversation (not yet persisted)
-    pub fn new(store: S, conversation_id: ConversationId, view_id: ViewId) -> Self {
+    pub fn new(store: Arc<S>, conversation_id: ConversationId, view_id: ViewId) -> Self {
         Self {
             store,
             conversation_id,
             view_id,
-            cache: Vec::new(),
+            resolved_cache: Vec::new(),
+            llm_cache: Vec::new(),
+            llm_cache_valid: false,
             pending: Vec::new(),
         }
     }
 
-    /// Get the conversation ID
     pub fn conversation_id(&self) -> &ConversationId {
         &self.conversation_id
     }
 
-    /// Get the current view ID
     pub fn view_id(&self) -> &ViewId {
         &self.view_id
     }
 
-    /// Get reference to the underlying store
-    pub fn store(&self) -> &S {
+    pub fn store(&self) -> &Arc<S> {
         &self.store
     }
 
-    /// Add a message to pending (not committed yet)
-    pub fn add(&mut self, role: MessageRole, content: Vec<StoredContent>) {
-        self.pending.push(PendingMessage::new(role, content));
+    /// Get messages for display - returns cached ResolvedContent
+    pub fn messages_for_display(&self) -> &[ResolvedMessage] {
+        &self.resolved_cache
     }
 
-    /// Add a pending message
-    pub fn add_pending(&mut self, message: PendingMessage) {
-        self.pending.push(message);
-    }
-
-    /// Get pending messages
-    pub fn pending(&self) -> &[PendingMessage] {
-        &self.pending
+    /// Clear the session cache (used when switching views)
+    pub fn clear_cache(&mut self) {
+        self.resolved_cache.clear();
+        self.llm_cache.clear();
+        self.llm_cache_valid = false;
     }
 
     /// Clear pending messages without committing
@@ -107,16 +110,39 @@ impl<S: TurnStore> Session<S> {
         self.pending.clear();
     }
 
-    /// Commit pending messages as a turn
+    /// Resolve and cache messages for LLM
+    async fn ensure_llm_cache<R: AssetResolver>(&mut self, resolver: &R) -> Result<()> {
+        if self.llm_cache_valid {
+            return Ok(());
+        }
+
+        self.llm_cache.clear();
+        self.llm_cache.reserve(self.resolved_cache.len() + self.pending.len());
+
+        for msg in &mut self.resolved_cache {
+            let blocks = resolve_message_for_llm(msg, resolver).await?;
+            let role = msg.role.into();
+            self.llm_cache.push(ChatMessage::new(role, ChatPayload::new(blocks)));
+        }
+
+        self.llm_cache_valid = true;
+        Ok(())
+    }
+
+    /// Commit pending messages to storage
     ///
-    /// Creates a turn with a span containing all pending messages,
-    /// resolves text content, and adds to cache.
-    pub async fn commit<R: ContentBlockResolver>(
+    /// Converts ChatMessages to StoredContent, stores them, and updates cache.
+    pub async fn commit_pending<C, R>(
         &mut self,
         role: SpanRole,
         model_id: Option<&str>,
+        coordinator: &C,
         resolver: &R,
-    ) -> Result<TurnId> {
+    ) -> Result<TurnId>
+    where
+        C: ContentStorer,
+        R: ContentBlockResolver,
+    {
         if self.pending.is_empty() {
             return Err(anyhow::anyhow!("No pending messages to commit"));
         }
@@ -125,101 +151,82 @@ impl<S: TurnStore> Session<S> {
         let span = self.store.add_span(&turn.id, model_id).await?;
 
         for msg in self.pending.drain(..) {
-            self.store.add_message(&span.id, msg.role, &msg.content).await?;
-            // Resolve text and cache
-            let resolved = resolve_stored_content(&msg.content, resolver).await?;
-            self.cache.push(ResolvedMessage::new(msg.role, resolved));
+            // Convert ChatMessage to StoredContent
+            let stored = coordinator.store_chat_message(&msg).await?;
+            let msg_role = llm_role_to_message_role(msg.role);
+
+            self.store.add_message(&span.id, msg_role, &stored).await?;
+
+            // Resolve and cache
+            let resolved = resolve_stored_content(&stored, resolver).await?;
+            self.resolved_cache.push(ResolvedMessage::new(msg_role, resolved));
         }
 
         self.store.select_span(&self.view_id, &turn.id, &span.id).await?;
+        self.llm_cache_valid = false;
+
         Ok(turn.id)
     }
+}
 
-    /// Commit parallel responses (multiple model responses at one turn)
-    ///
-    /// Creates a single turn with multiple spans, one per model.
-    /// Returns (turn_id, vec of span_ids).
-    pub async fn commit_parallel<R: ContentBlockResolver>(
-        &mut self,
-        responses: Vec<(String, Vec<PendingMessage>)>,
-        selected_index: usize,
-        resolver: &R,
-    ) -> Result<(TurnId, Vec<SpanId>)> {
-        if responses.is_empty() {
-            return Err(anyhow::anyhow!("No responses to commit"));
-        }
+// ============================================================================
+// ConversationContext Implementation
+// ============================================================================
 
-        let turn = self.store.add_turn(&self.conversation_id, SpanRole::Assistant).await?;
-        let mut span_ids = Vec::with_capacity(responses.len());
-
-        for (idx, (model_id, messages)) in responses.into_iter().enumerate() {
-            let span = self.store.add_span(&turn.id, Some(&model_id)).await?;
-            span_ids.push(span.id.clone());
-
-            for msg in &messages {
-                self.store.add_message(&span.id, msg.role, &msg.content).await?;
+#[async_trait]
+impl<S: TurnStore + Send + Sync> ConversationContext for Session<S> {
+    async fn messages(&mut self) -> Result<MessagesGuard<'_>> {
+        // For now, return resolved messages converted to ChatMessage
+        // TODO: Use proper AssetResolver here
+        if !self.llm_cache_valid {
+            self.llm_cache.clear();
+            for msg in &self.resolved_cache {
+                let blocks = resolved_message_to_blocks(msg);
+                let role = msg.role.into();
+                self.llm_cache.push(ChatMessage::new(role, ChatPayload::new(blocks)));
             }
-
-            // Select this span if it's the selected one, and cache its messages
-            if idx == selected_index {
-                self.store.select_span(&self.view_id, &turn.id, &span.id).await?;
-                for msg in messages {
-                    let resolved = resolve_stored_content(&msg.content, resolver).await?;
-                    self.cache.push(ResolvedMessage::new(msg.role, resolved));
-                }
-            }
+            self.llm_cache_valid = true;
         }
 
-        Ok((turn.id, span_ids))
+        Ok(MessagesGuard::new(&self.llm_cache))
     }
 
-    /// Get messages for display - returns cached ResolvedContent directly
-    ///
-    /// This is a sync operation since content is already resolved.
-    pub fn messages_for_display(&self) -> &[ResolvedMessage] {
-        &self.cache
+    fn len(&self) -> usize {
+        self.resolved_cache.len() + self.pending.len()
     }
 
-    /// Get messages for LLM - resolves assets/docs on first access, caches in-place
-    ///
-    /// This method requires &mut self because it caches resolution results
-    /// in the ResolvedContent variants.
-    pub async fn messages_for_llm<R: AssetResolver>(
-        &mut self,
-        resolver: &R,
-    ) -> Result<Vec<ChatMessage>> {
-        let mut messages = Vec::with_capacity(self.cache.len());
-
-        for msg in &mut self.cache {
-            let blocks = resolve_message_for_llm(msg, resolver).await?;
-            let role = msg.role.into();
-            messages.push(ChatMessage::new(role, ChatPayload::new(blocks)));
-        }
-
-        Ok(messages)
+    fn add(&mut self, message: ChatMessage) {
+        self.pending.push(message);
     }
 
-    /// Clear the session cache (used when switching views)
-    pub fn clear_cache(&mut self) {
-        self.cache.clear();
+    fn pending(&self) -> &[ChatMessage] {
+        &self.pending
     }
 
-    /// Get message count (cached + pending)
-    pub fn len(&self) -> usize {
-        self.cache.len() + self.pending.len()
+    async fn commit(&mut self) -> Result<()> {
+        // This requires external coordinator/resolver - can't implement here
+        // The engine should call commit_pending() with proper dependencies
+        Err(anyhow::anyhow!(
+            "Use commit_pending() with coordinator and resolver instead"
+        ))
     }
+}
 
-    /// Check if session is empty
-    pub fn is_empty(&self) -> bool {
-        self.cache.is_empty() && self.pending.is_empty()
-    }
+// ============================================================================
+// ContentStorer trait - for converting ChatMessage to StoredContent
+// ============================================================================
+
+/// Trait for storing ChatMessage content blocks
+#[async_trait]
+pub trait ContentStorer: Send + Sync {
+    /// Convert a ChatMessage to Vec<StoredContent>
+    async fn store_chat_message(&self, message: &ChatMessage) -> Result<Vec<StoredContent>>;
 }
 
 // ============================================================================
 // Resolution helpers
 // ============================================================================
 
-/// Resolve a view path to ResolvedMessages
 async fn resolve_path<R: ContentBlockResolver>(
     path: &[TurnWithContent],
     resolver: &R,
@@ -242,7 +249,6 @@ async fn resolve_path<R: ContentBlockResolver>(
     Ok(messages)
 }
 
-/// Resolve StoredContent to ResolvedContent (text lookup only)
 async fn resolve_stored_content<R: ContentBlockResolver>(
     content: &[StoredContent],
     resolver: &R,
@@ -272,7 +278,6 @@ async fn resolve_stored_content<R: ContentBlockResolver>(
     Ok(resolved)
 }
 
-/// Resolve a ResolvedMessage to ContentBlocks for LLM
 async fn resolve_message_for_llm<R: AssetResolver>(
     msg: &mut ResolvedMessage,
     resolver: &R,
@@ -319,6 +324,44 @@ async fn resolve_message_for_llm<R: AssetResolver>(
     Ok(blocks)
 }
 
+/// Convert ResolvedMessage to ContentBlocks (sync, without asset resolution)
+fn resolved_message_to_blocks(msg: &ResolvedMessage) -> Vec<ContentBlock> {
+    msg.content
+        .iter()
+        .map(|item| match item {
+            ResolvedContent::Text { text } => ContentBlock::Text { text: text.clone() },
+            ResolvedContent::Asset {
+                asset_id,
+                mime_type,
+                resolved,
+                ..
+            } => resolved.clone().unwrap_or_else(|| {
+                ContentBlock::Text {
+                    text: format!("[Asset: {} ({})]", asset_id, mime_type),
+                }
+            }),
+            ResolvedContent::Document {
+                document_id,
+                resolved,
+            } => resolved.clone().unwrap_or_else(|| {
+                ContentBlock::Text {
+                    text: format!("[Document: {}]", document_id),
+                }
+            }),
+            ResolvedContent::ToolCall(call) => ContentBlock::ToolCall(call.clone()),
+            ResolvedContent::ToolResult(result) => ContentBlock::ToolResult(result.clone()),
+        })
+        .collect()
+}
+
+fn llm_role_to_message_role(role: llm::Role) -> MessageRole {
+    match role {
+        llm::Role::User => MessageRole::User,
+        llm::Role::Assistant => MessageRole::Assistant,
+        llm::Role::System => MessageRole::System,
+    }
+}
+
 // ============================================================================
 // MessageRole -> llm::Role conversion
 // ============================================================================
@@ -329,7 +372,6 @@ impl From<MessageRole> for llm::Role {
             MessageRole::User => llm::Role::User,
             MessageRole::Assistant => llm::Role::Assistant,
             MessageRole::System => llm::Role::System,
-            // Tool messages are treated as user messages for LLM API
             MessageRole::Tool => llm::Role::User,
         }
     }
