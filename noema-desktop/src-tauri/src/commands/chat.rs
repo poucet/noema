@@ -2,7 +2,7 @@
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
-use noema_core::storage::{ConversationStore, TurnStore, Session, SqliteStore, MessageRole};
+use noema_core::storage::{TurnStore, Session, MessageRole};
 use noema_core::storage::DocumentResolver;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
 use std::sync::Arc;
@@ -350,7 +350,7 @@ pub async fn switch_conversation(
     };
 
     // Open session for the conversation
-    let session = Session::open(coordinator, conversation_id.clone())
+    let session = Session::open(coordinator.clone(), conversation_id.clone())
         .await
         .map_err(|e| format!("Failed to open conversation: {}", e))?;
 
@@ -370,7 +370,7 @@ pub async fn switch_conversation(
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
     // Coordinator implements DocumentResolver
-    let document_resolver: Arc<dyn DocumentResolver> = coordinator.clone();
+    let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
@@ -399,7 +399,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
     // Open session for the new conversation
-    let session = Session::open(coordinator, conv_id.clone())
+    let session = Session::open(coordinator.clone(), conv_id.clone())
         .await
         .map_err(|e| format!("Failed to open new conversation: {}", e))?;
 
@@ -412,7 +412,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
     // Coordinator implements DocumentResolver
-    let document_resolver: Arc<dyn DocumentResolver> = coordinator.clone();
+    let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
@@ -576,9 +576,10 @@ pub async fn get_turn_alternates(
     turn_id: TurnId,
 ) -> Result<Vec<SpanInfoResponse>, String> {
     let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
 
-    let spans = store
+    let spans = coordinator
+        .conversation_store()
         .get_spans(&turn_id)
         .await
         .map_err(|e| format!("Failed to get spans: {}", e))?;
@@ -602,9 +603,10 @@ pub async fn get_span_messages(
     span_id: SpanId,
 ) -> Result<Vec<DisplayMessage>, String> {
     let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
 
-    let messages = store
+    let messages = coordinator
+        .conversation_store()
         .get_messages_with_content(&span_id)
         .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
@@ -635,9 +637,10 @@ pub async fn list_conversation_views(
     conversation_id: ConversationId,
 ) -> Result<Vec<ThreadInfoResponse>, String> {
     let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("Storage not initialized")?;
+    let coordinator = coord_guard.as_ref().ok_or("Coordinator not initialized")?;
 
-    let views = store
+    let views = coordinator
+        .conversation_store()
         .get_views(&conversation_id)
         .await
         .map_err(|e| format!("Failed to list views: {}", e))?;

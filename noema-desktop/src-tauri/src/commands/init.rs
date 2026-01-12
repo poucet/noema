@@ -5,7 +5,7 @@ use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::{DocumentResolver, FsBlobStore, Session, SqliteStore};
 use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::McpRegistry;
+use noema_core::{ChatEngine, McpRegistry};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
