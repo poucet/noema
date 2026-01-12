@@ -166,11 +166,11 @@ impl<S: StorageTypes> Session<S> {
             }
 
             // Add message to span and resolve for caching
-            let (_msg_info, resolved) = self.coordinator
+            let resolved = self.coordinator
                 .add_message(current_span.as_ref().unwrap(), msg_role, msg.payload.content, origin)
                 .await?;
 
-            self.resolved_cache.push(ResolvedMessage::new(msg_role, resolved));
+            self.resolved_cache.push(resolved);
         }
 
         self.llm_cache_valid = false;

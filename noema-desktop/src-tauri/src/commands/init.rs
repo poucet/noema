@@ -4,8 +4,9 @@ use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::ids::ConversationId;
-use noema_core::storage::{DocumentResolver, FsBlobStore, Session, SqliteStore};
 use noema_core::storage::coordinator::StorageCoordinator;
+use noema_core::storage::session::Session;
+use noema_core::storage::{DocumentResolver, FsBlobStore, SqliteStore};
 use noema_core::{ChatEngine, McpRegistry};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -13,12 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::commands::chat::start_engine_event_loop;
 use crate::gdocs_server::{self, GDocsServerState};
 use crate::logging::log_message;
-use crate::state::{AppCoordinator, AppState};
-
-/// Type alias for our concrete session type
-/// Session<B, A, C, Conv, U, D>
-pub type AppSession =
-    Session<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
+use crate::state::{AppCoordinator, AppSession, AppState};
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {

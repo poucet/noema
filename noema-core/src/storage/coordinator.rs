@@ -18,7 +18,10 @@ use std::sync::Arc;
 use crate::storage::content::{ContentResolver, StoredContent};
 use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
-use crate::storage::traits::StorageTypes;
+use crate::storage::traits::{
+    AssetStore, BlobStore, ConversationStore, DocumentStore, StorageTypes, TextStore, TurnStore,
+    UserStore,
+};
 use crate::storage::types::{
     Asset, ContentBlock as ContentBlockData, ContentOrigin, ConversationInfo, MessageInfo,
     MessageRole, OriginKind, TurnWithContent, UserInfo,
@@ -315,27 +318,27 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         Ok(resolved)
     }
 
-    /// Add a message to a span, returning the resolved content.
+    /// Add a message to a span, returning a resolved message for caching.
     ///
     /// Stores content blocks, adds the message to the span, and resolves
-    /// content for caching.
+    /// content for display/LLM use.
     pub async fn add_message(
         &self,
         span_id: &SpanId,
         role: MessageRole,
         content: Vec<ContentBlock>,
         origin: OriginKind,
-    ) -> Result<(MessageInfo, Vec<ResolvedContent>)> {
+    ) -> Result<ResolvedMessage> {
         // Store content blocks
         let stored = self.store_content(content, origin).await?;
 
         // Add message to turn store
-        let message_info = self.conversation_store.add_message(span_id, role, &stored).await?;
+        self.conversation_store.add_message(span_id, role, &stored).await?;
 
         // Resolve for caching
         let resolved = self.resolve_stored_content(&stored).await?;
 
-        Ok((message_info, resolved))
+        Ok(ResolvedMessage::new(role, resolved))
     }
 
 }
