@@ -13,7 +13,8 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ✅ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
-| 🔄 | P0 | 3.3 | Views, forking, and migration | Complete conversation model with legacy removal |
+| 🔄 | P0 | 3.3 | Views, forking, and migration | Complete conversation model with user journeys |
+| ⬜ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
 | ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
@@ -77,9 +78,9 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.2.12 | 🔧 User: E2E verification in noema app |
 | ✅ | 3.2.13 | 🔧 User: SQL verify data in new tables |
 
-### 3.3 Views, Forking, and Migration (21 tasks)
+### 3.3 Views, Forking, and Migration (~40 tasks)
 
-**Goal**: Complete the conversation model and remove legacy system. After 3.3, the app runs entirely on Turn/Span/Message/View model.
+**Goal**: Complete the conversation model, remove legacy system, and verify all UCM operations via user journeys. After 3.3, the app runs entirely on Turn/Span/Message/View model with full UI support for forking, regeneration, and view switching.
 
 #### Part A: Views and Forking (8 tasks)
 
@@ -125,13 +126,100 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.18e | 🧹 Split sqlite/conversation.rs into turn.rs and conversation.rs to match traits layout |
 | ✅ | 3.3.18f | ⚡ Add MemoryTurnStore, MemoryConversationStore, MemoryDocumentStore implementations |
 
-#### Part D: Final Verification (3 tasks)
+#### Part D: User Journeys - UCM Verification (6 journeys, ~21 tasks)
+
+**Goal**: Implement and verify all user-facing UCM operations. Each journey is a complete user workflow that exercises the underlying TurnStore/View operations.
+
+##### Journey 1: Regenerate Response (3 tasks)
+
+User clicks "regenerate" on assistant message → creates new span at same turn, selects it.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.19 | 🔧 User: E2E verification - app works with new session API |
-| ⬜ | 3.3.20 | 🔧 User: SQL verify views and view_selections have data |
+| ⬜ | 3.3.D1a | ⚡ Backend: `regenerate_response` command - add_span at turn, select in view |
+| ⬜ | 3.3.D1b | 🔧 Frontend: Wire regenerate button to new command |
+| ⬜ | 3.3.D1c | ✅ User: Verify regenerate creates alternate, can switch between |
+
+##### Journey 2: Select Alternate Span (3 tasks)
+
+User views parallel responses → selects one to use → view updates selection.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.D2a | ⚡ Backend: `select_span` command - calls TurnStore::select_span |
+| ⬜ | 3.3.D2b | 🔧 Frontend: Wire "Use this" button to select_span command |
+| ⬜ | 3.3.D2c | ✅ User: Verify span selection persists, affects subsequent context |
+
+##### Journey 3: Edit User Message (4 tasks)
+
+User edits previous message → creates fork from that turn → new span with edited content.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.D3a | ⚡ Backend: `edit_message` command - fork_view + edit_turn |
+| ⬜ | 3.3.D3b | 🔧 Frontend: Add edit button to user messages |
+| ⬜ | 3.3.D3c | 🔧 Frontend: Edit modal/inline with submit action |
+| ⬜ | 3.3.D3d | ✅ User: Verify edit creates fork, original unchanged |
+
+##### Journey 4: Fork Conversation (4 tasks)
+
+User forks from any turn → new view sharing history up to fork point.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.D4a | ⚡ Backend: `fork_conversation` command - fork_view at turn |
+| ⬜ | 3.3.D4b | 🔧 Frontend: Add fork button/menu to turns |
+| ⬜ | 3.3.D4c | 🔧 Frontend: Show view list, allow switching |
+| ⬜ | 3.3.D4d | ✅ User: Verify fork shares history, diverges after fork point |
+
+##### Journey 5: Switch View (3 tasks)
+
+User has multiple views → switches between them → conversation display updates.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.D5a | ⚡ Backend: `switch_view` command - Session opens with different view_id |
+| ⬜ | 3.3.D5b | 🔧 Frontend: View selector UI (sidebar or dropdown) |
+| ⬜ | 3.3.D5c | ✅ User: Verify switching views shows different conversation paths |
+
+##### Journey 6: View Alternates at Turn (4 tasks)
+
+User inspects a turn → sees all spans (alternatives) → can compare and select.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.D6a | ⚡ Backend: `get_turn_alternates` returns all spans with content |
+| ⬜ | 3.3.D6b | 🔧 Frontend: Alternates panel/popover for turns with multiple spans |
+| ⬜ | 3.3.D6c | 🔧 Frontend: Display span metadata (model, timestamp) |
+| ⬜ | 3.3.D6d | ✅ User: Verify can see all alternatives, select any one |
+
+#### Part E: Final Verification (3 tasks)
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.19 | 🔧 User: E2E verification - all journeys work end-to-end |
+| ⬜ | 3.3.20 | 🔧 User: SQL verify views and view_selections have correct data |
 | ⬜ | 3.3.21 | ✅ Final E2E: fresh install, all conversation features work
+
+### 3.3b Subconversations (5 tasks)
+
+**Goal**: Support spawned subconversations for agents. Main conversation spawns subagent → subagent runs in own conversation → result linked back to parent.
+
+```
+Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
+                  ↓
+       Sub:  Turn 1 → Turn 2 → Turn 3 (result)
+                  ↓
+       Turn 2 (ToolResult: {result, subconversation_id})  → Turn 3
+```
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3b.1 | 🏗️ Schema: Add `parent_conversation_id`, `parent_turn_id` to conversations table |
+| ⬜ | 3.3b.2 | ⚡ Backend: `spawn_subconversation` - create linked conversation with initial context |
+| ⬜ | 3.3b.3 | ⚡ Backend: `link_subconversation_result` - attach result to parent turn |
+| ⬜ | 3.3b.4 | 🔧 Integration: Wire MCP agent spawn to use subconversation API |
+| ⬜ | 3.3b.5 | ✅ User: Verify subconversation runs, result appears in parent |
 
 ### 3.4 Document Structure (10 tasks)
 

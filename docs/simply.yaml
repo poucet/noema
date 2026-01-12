@@ -4,9 +4,9 @@ phase: "03"
 
 # Current Progress
 feature: "3.3"
-feature_name: "Views and Forking"
-task: "3.3.7"
-task_name: "Implement edit_turn (splice)"
+feature_name: "Views, Forking, and User Journeys"
+task: "3.3.D1a"
+task_name: "Journey 1: Regenerate Response - Backend"
 
 # Completed
 completed_features:
