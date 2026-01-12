@@ -82,8 +82,8 @@ fn spawn_voice_loop(app: AppHandle) {
         let mut last_status: Option<String> = None;
 
         loop {
-            // Check if we're currently processing a message - if so, buffer voice input
-            let is_processing = *state.is_processing.lock().await;
+            // Check if the voice conversation is processing - if so, buffer voice input
+            let is_processing = state.is_voice_conversation_processing().await;
 
             let (message, errors, is_listening, is_transcribing, buffered_count) = {
                 let mut coordinator_guard = state.voice_coordinator.lock().await;

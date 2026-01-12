@@ -4,34 +4,38 @@ use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
 use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::storage::ids::{ConversationId, UserId};
+use noema_core::storage::session::Session;
 use noema_core::storage::{FsBlobStore, SqliteStore};
-use noema_core::ChatEngine;
+use noema_core::{ChatEngine, McpRegistry};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Type alias for our concrete coordinator type
-/// StorageCoordinator<B, A, C, Conv, U, D> where:
-/// - B = FsBlobStore (filesystem blob storage)
-/// - A = SqliteStore (asset metadata)
-/// - C = SqliteStore (text blocks, formerly content blocks)
-/// - Conv = SqliteStore (conversation + turn storage)
-/// - U = SqliteStore (user storage)
-/// - D = SqliteStore (document storage)
-pub type AppCoordinator =
-    StorageCoordinator<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
+// ============================================================================
+// App Storage Types - Define once via macro
+// ============================================================================
 
-/// Type alias for our concrete engine type
-/// ChatEngine<B, A, T, C, U, D> where:
-/// - B = FsBlobStore, A = SqliteStore, T = SqliteStore (text)
-/// - C = SqliteStore (conversation), U = SqliteStore (user), D = SqliteStore (document)
-pub type AppEngine =
-    ChatEngine<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
+/// Define all storage-parameterized types from a single set of type parameters.
+/// Usage: define_storage_types!(B, A, T, C, U, D)
+macro_rules! define_storage_types {
+    ($B:ty, $A:ty, $T:ty, $C:ty, $U:ty, $D:ty) => {
+        pub type AppSession = Session<$B, $A, $T, $C, $U, $D>;
+        pub type AppCoordinator = StorageCoordinator<$B, $A, $T, $C, $U, $D>;
+        pub type AppEngine = ChatEngine<$B, $A, $T, $C, $U, $D>;
+    };
+}
+
+// Storage types defined once:
+// B = FsBlobStore, A = SqliteStore (asset), T = SqliteStore (text)
+// C = SqliteStore (conversation), U = SqliteStore (user), D = SqliteStore (document)
+define_storage_types!(FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore);
 
 pub struct AppState {
     pub coordinator: Mutex<Option<Arc<AppCoordinator>>>,
     /// Engines per conversation - enables parallel conversations
     pub engines: Mutex<HashMap<ConversationId, AppEngine>>,
+    /// MCP registry (shared across all conversations)
+    pub mcp_registry: Mutex<Option<Arc<Mutex<McpRegistry>>>>,
     /// Current user ID (from database)
     pub user_id: Mutex<UserId>,
     /// Full model ID in "provider/model" format
@@ -39,6 +43,8 @@ pub struct AppState {
     /// Display name for the model
     pub model_name: Mutex<String>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
+    /// Which conversation voice input is currently associated with
+    pub voice_conversation: Mutex<Option<ConversationId>>,
     /// Maps conversation ID to processing state
     pub processing: Mutex<HashMap<ConversationId, bool>>,
     /// Maps OAuth state parameter to server ID for pending OAuth flows
@@ -57,15 +63,26 @@ impl AppState {
         Self {
             coordinator: Mutex::new(None),
             engines: Mutex::new(HashMap::new()),
+            mcp_registry: Mutex::new(None),
             user_id: Mutex::new(UserId::from_string(String::new())),
             model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
             voice_coordinator: Mutex::new(None),
+            voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),
             pending_oauth_states: Mutex::new(pending_states),
             browser_audio_controller: Mutex::new(None),
             init_lock: std::sync::Mutex::new(false),
         }
+    }
+
+    /// Get the MCP registry, returns error if not initialized
+    pub async fn get_mcp_registry(&self) -> Result<Arc<Mutex<McpRegistry>>, String> {
+        self.mcp_registry
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| "MCP registry not initialized".to_string())
     }
 
     /// Check if a conversation is currently processing
@@ -84,6 +101,25 @@ impl AppState {
             .lock()
             .await
             .insert(conversation_id.clone(), processing);
+    }
+
+    /// Check if the voice conversation is currently processing (for voice buffering)
+    pub async fn is_voice_conversation_processing(&self) -> bool {
+        if let Some(conv_id) = self.voice_conversation.lock().await.as_ref() {
+            self.processing
+                .lock()
+                .await
+                .get(conv_id)
+                .copied()
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    }
+
+    /// Set which conversation voice input is associated with
+    pub async fn set_voice_conversation(&self, conversation_id: Option<ConversationId>) {
+        *self.voice_conversation.lock().await = conversation_id;
     }
 }
 

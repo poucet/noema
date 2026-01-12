@@ -342,12 +342,12 @@ where
 
 /// Implement ContentResolver for the generic coordinator
 #[async_trait]
-impl<B, A, C, Conv, U, D> ContentResolver for StorageCoordinator<B, A, C, Conv, U, D>
+impl<B, A, T, C, U, D> ContentResolver for StorageCoordinator<B, A, T, C, U, D>
 where
     B: BlobStore,
     A: AssetStore,
-    C: TextStore,
-    Conv: ConversationStore,
+    T: TextStore,
+    C: ConversationStore,
     U: UserStore,
     D: DocumentStore,
 {
@@ -374,12 +374,12 @@ where
 
 /// Implement DocumentResolver by delegating to the document store
 #[async_trait]
-impl<B, A, C, Conv, U, D> crate::storage::DocumentResolver for StorageCoordinator<B, A, C, Conv, U, D>
+impl<B, A, T, C, U, D> crate::storage::DocumentResolver for StorageCoordinator<B, A, T, C, U, D>
 where
     B: BlobStore,
     A: AssetStore,
-    C: TextStore,
-    Conv: ConversationStore,
+    T: TextStore,
+    C: ConversationStore,
     U: UserStore,
     D: DocumentStore,
 {

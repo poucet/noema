@@ -682,8 +682,15 @@ pub async fn list_conversation_views(
     Ok(views.into_iter().map(ThreadInfoResponse::from).collect())
 }
 
-/// Get the current view ID
+/// Get the current view ID for a conversation
 #[tauri::command]
-pub async fn get_current_view_id(state: State<'_, Arc<AppState>>) -> Result<Option<String>, String> {
-    Ok(state.current_thread_id.lock().await.clone())
+pub async fn get_current_view_id(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+) -> Result<Option<String>, String> {
+    let engines = state.engines.lock().await;
+    let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
+    let session_arc = engine.get_session();
+    let session = session_arc.lock().await;
+    Ok(Some(session.view_id().to_string()))
 }

@@ -27,27 +27,36 @@ use super::types::{ResolvedContent, ResolvedMessage};
 
 /// Runtime session state - DB-agnostic
 ///
-/// Generic over:
+/// Generic over storage types (B, A, T, C, U, D):
 /// - B: BlobStore implementation (for binary asset storage)
 /// - A: AssetStore implementation (for asset metadata)
-/// - C: TextStore implementation
-/// - Conv: ConversationStore implementation (includes TurnStore)
+/// - T: TextStore implementation
+/// - C: ConversationStore implementation (includes TurnStore)
 /// - U: UserStore implementation
 /// - D: DocumentStore implementation
 ///
 /// Session is runtime state: conversation context, current view, cached resolved messages.
 /// Implements ConversationContext for direct use with agents.
-pub struct Session<B, A, C, Conv, U, D>
+///
+/// # Type Derivation
+///
+/// Define your storage types once in a Session type alias:
+///
+/// ```ignore
+/// type AppSession = Session<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
+/// type AppEngine = ChatEngine<AppSession>;
+/// ```
+pub struct Session<B, A, T, C, U, D>
 where
     B: BlobStore,
     A: AssetStore,
-    C: TextStore,
-    Conv: ConversationStore,
+    T: TextStore,
+    C: ConversationStore,
     U: UserStore,
     D: DocumentStore,
 {
     /// Storage coordinator - provides access to all stores
-    coordinator: Arc<StorageCoordinator<B, A, C, Conv, U, D>>,
+    coordinator: Arc<StorageCoordinator<B, A, T, C, U, D>>,
     conversation_id: ConversationId,
     view_id: ViewId,
     /// Cached resolved messages (text resolved, assets/docs cached lazily)
@@ -60,12 +69,12 @@ where
     pending: Vec<ChatMessage>,
 }
 
-impl<B, A, C, Conv, U, D> Session<B, A, C, Conv, U, D>
+impl<B, A, T, C, U, D> Session<B, A, T, C, U, D>
 where
     B: BlobStore + Send + Sync,
     A: AssetStore + Send + Sync,
-    C: TextStore + Send + Sync,
-    Conv: ConversationStore + Send + Sync,
+    T: TextStore + Send + Sync,
+    C: ConversationStore + Send + Sync,
     U: UserStore + Send + Sync,
     D: DocumentStore + Send + Sync,
 {
@@ -74,7 +83,7 @@ where
     /// Delegates view resolution to the StorageCoordinator which handles
     /// the multi-store coordination of getting/creating views and resolving content.
     pub async fn open(
-        coordinator: Arc<StorageCoordinator<B, A, C, Conv, U, D>>,
+        coordinator: Arc<StorageCoordinator<B, A, T, C, U, D>>,
         conversation_id: ConversationId,
     ) -> Result<Self> {
         let (view_id, resolved_cache) = coordinator.open_session(&conversation_id).await?;
@@ -92,7 +101,7 @@ where
 
     /// Create a new session for a new conversation (not yet persisted)
     pub fn new(
-        coordinator: Arc<StorageCoordinator<B, A, C, Conv, U, D>>,
+        coordinator: Arc<StorageCoordinator<B, A, T, C, U, D>>,
         conversation_id: ConversationId,
         view_id: ViewId,
     ) -> Self {
@@ -116,17 +125,17 @@ where
     }
 
     /// Get access to the storage coordinator
-    pub fn coordinator(&self) -> &Arc<StorageCoordinator<B, A, C, Conv, U, D>> {
+    pub fn coordinator(&self) -> &Arc<StorageCoordinator<B, A, T, C, U, D>> {
         &self.coordinator
     }
 
     /// Get access to the conversation store (via coordinator)
-    pub fn conversation_store(&self) -> &Arc<Conv> {
+    pub fn conversation_store(&self) -> &Arc<C> {
         self.coordinator.conversation_store()
     }
 
-    /// Get access to the content store (via coordinator)
-    pub fn content_store(&self) -> &Arc<C> {
+    /// Get access to the text store (via coordinator)
+    pub fn text_store(&self) -> &Arc<T> {
         self.coordinator.content_block_store()
     }
 
@@ -207,12 +216,12 @@ where
 // ============================================================================
 
 #[async_trait]
-impl<B, A, C, Conv, U, D> ConversationContext for Session<B, A, C, Conv, U, D>
+impl<B, A, T, C, U, D> ConversationContext for Session<B, A, T, C, U, D>
 where
     B: BlobStore + Send + Sync,
     A: AssetStore + Send + Sync,
-    C: TextStore + Send + Sync,
-    Conv: ConversationStore + Send + Sync,
+    T: TextStore + Send + Sync,
+    C: ConversationStore + Send + Sync,
     U: UserStore + Send + Sync,
     D: DocumentStore + Send + Sync,
 {

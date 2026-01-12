@@ -88,21 +88,21 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     // Start embedded Google Docs MCP server
     start_gdocs_server(&app).await;
 
-    let mcp_registry = init_mcp()?;
+    let mcp_registry = init_mcp();
     log_message("MCP registry loaded");
 
-    let result = init_engine(state, session, coordinator, mcp_registry).await?;
-    log_message(&format!("Engine initialized with model: {}", result));
+    let (model_name, mcp_registry_arc) = init_engine(state, session, coordinator, mcp_registry).await?;
+    log_message(&format!("Engine initialized with model: {}", model_name));
 
     // Start the engine event loop (runs continuously)
     start_engine_event_loop(app.clone());
     log_message("Event loop started");
 
     // Start auto-connect for MCP servers (runs in background)
-    start_mcp_auto_connect(app, state, conversation_id).await;
+    start_mcp_auto_connect(app, mcp_registry_arc).await;
     log_message("MCP auto-connect started");
 
-    Ok(result)
+    Ok(model_name)
 }
 
 /// Start the embedded Google Docs MCP server
@@ -119,18 +119,7 @@ async fn start_gdocs_server(app: &AppHandle) {
 }
 
 /// Start auto-connect for all configured MCP servers
-async fn start_mcp_auto_connect(app: AppHandle, state: &AppState, conversation_id: &ConversationId) {
-    // Get the MCP registry from the engine
-    let mcp_registry = {
-        let engines = state.engines.lock().await;
-        match engines.get(conversation_id) {
-            Some(engine) => engine.get_mcp_registry(),
-            None => {
-                log_message("Cannot start MCP auto-connect: engine not initialized");
-                return;
-            }
-        }
-    };
+async fn start_mcp_auto_connect(app: AppHandle, mcp_registry: Arc<tokio::sync::Mutex<McpRegistry>>) {
 
     // Create callback that emits events to frontend
     let app_handle = app.clone();
@@ -280,8 +269,8 @@ async fn init_session(state: &AppState) -> Result<(AppSession, Arc<AppCoordinato
     Ok((session, coordinator))
 }
 
-fn init_mcp() -> Result<McpRegistry, String> {
-    Ok(McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default())))
+fn init_mcp() -> McpRegistry {
+    McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()))
 }
 
 async fn init_engine(
@@ -289,7 +278,7 @@ async fn init_engine(
     session: AppSession,
     coordinator: Arc<AppCoordinator>,
     mcp_registry: McpRegistry,
-) -> Result<String, String> {
+) -> Result<(String, Arc<tokio::sync::Mutex<McpRegistry>>), String> {
     const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
 
     // Load default model from settings, fall back to hardcoded default
@@ -317,7 +306,12 @@ async fn init_engine(
     let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
+
+    // Get the MCP registry Arc from the engine to store in AppState
+    let mcp_registry_arc = engine.get_mcp_registry();
+    *state.mcp_registry.lock().await = Some(mcp_registry_arc.clone());
+
     state.engines.lock().await.insert(conversation_id, engine);
 
-    Ok(model_display_name)
+    Ok((model_display_name, mcp_registry_arc))
 }

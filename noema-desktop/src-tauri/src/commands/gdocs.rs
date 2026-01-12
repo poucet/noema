@@ -307,10 +307,8 @@ pub async fn configure_gdocs_oauth(
         auto_retry: true,
     };
 
-    // Update the in-memory MCP registry
-    let engine_guard = state.engine.lock().await;
-    if let Some(engine) = engine_guard.as_ref() {
-        let mcp_registry = engine.get_mcp_registry();
+    // Update the in-memory MCP registry if available, otherwise save to config file
+    if let Ok(mcp_registry) = state.get_mcp_registry().await {
         let mut registry = mcp_registry.lock().await;
         registry.add_server("gdocs".to_string(), server_config.clone());
         registry.save_config().map_err(|e| format!("Failed to save config: {}", e))?;
@@ -353,10 +351,7 @@ pub async fn list_google_docs(
 ) -> Result<Vec<GoogleDocListItem>, String> {
     // Get a cloneable tool caller so we don't hold the lock during the async call
     let tool_caller = {
-        let engine_guard = state.engine.lock().await;
-        let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-
-        let mcp_registry = engine.get_mcp_registry();
+        let mcp_registry = state.get_mcp_registry().await?;
         let registry = mcp_registry.lock().await;
 
         // Find the gdocs server connection and get a cloneable tool caller
@@ -473,10 +468,7 @@ pub async fn import_google_doc(
 
     // Get a cloneable tool caller so we don't hold the lock during the async call
     let tool_caller = {
-        let engine_guard = state.engine.lock().await;
-        let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-
-        let mcp_registry = engine.get_mcp_registry();
+        let mcp_registry = state.get_mcp_registry().await?;
         let registry = mcp_registry.lock().await;
 
         registry
