@@ -1,11 +1,11 @@
 //! Core traits and implementations for the noema agent framework
 //!
 //! This crate provides:
-//! - **Traits**: `ConversationContext`, `Agent`, `StorageTransaction`
+//! - **Traits**: `ConversationContext`, `Agent`
 //! - **Implementations**: `SimpleAgent`, `ToolAgent`, `McpAgent`
 //! - **MCP Support**: `McpRegistry`, `McpToolRegistry` for Model Context Protocol
 //! - **Engine**: `ChatEngine` for managing chat sessions
-//! - **Storage**: `SessionStore` trait with `MemorySession` and `SqliteSession` backends
+//! - **Storage**: `Session<S: TurnStore>` for DB-agnostic session management
 //!
 //! # Example
 //!

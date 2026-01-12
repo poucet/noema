@@ -1,18 +1,21 @@
 //! Storage abstractions for conversation persistence
 //!
 //! This module provides traits and implementations for storing conversations,
-//! documents, users, and assets. Multiple implementations are available:
+//! documents, users, and assets.
 //!
-//! - `MemorySession` - In-memory storage (default, no persistence)
-//! - `SqliteSession` - SQLite-backed storage (requires `sqlite` feature)
+//! ## Session API
+//!
+//! - `Session<S: TurnStore>` - DB-agnostic session with lazy content resolution
+//! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
+//! - `ContentBlockResolver` / `AssetResolver` - Resolution traits
 //!
 //! ## Storage Traits
 //!
-//! - `SessionStore` - Session-level storage with transactions
+//! - `TurnStore` - Turn/Span/Message conversation storage
+//! - `ConversationStore` - Conversation-level CRUD
 //! - `UserStore` - User account management
 //! - `AssetStore` - Asset metadata storage
 //! - `DocumentStore` - Document, tab, and revision storage
-//! - `TurnStore` - Turn/Span/Message conversation storage
 //! - `BlobStore` - Content-addressable binary storage
 mod helper;
 
