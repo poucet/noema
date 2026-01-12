@@ -4,6 +4,7 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
+use noema_core::storage::ids::{AssetId, DocumentId, TabId, UserId};
 use noema_core::storage::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo};
 use noema_core::storage::UserStore;
 use rmcp::model::RawContent;
@@ -21,8 +22,10 @@ use crate::state::AppState;
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct DocumentInfoResponse {
-    pub id: String,
-    pub user_id: String,
+    #[ts(type = "string")]
+    pub id: DocumentId,
+    #[ts(type = "string")]
+    pub user_id: UserId,
     pub title: String,
     pub source: String,
     pub source_id: Option<String>,
@@ -49,16 +52,22 @@ impl From<DocumentInfo> for DocumentInfoResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct DocumentTabResponse {
-    pub id: String,
-    pub document_id: String,
-    pub parent_tab_id: Option<String>,
+    #[ts(type = "string")]
+    pub id: TabId,
+    #[ts(type = "string")]
+    pub document_id: DocumentId,
+    #[ts(type = "string | null")]
+    pub parent_tab_id: Option<TabId>,
     pub tab_index: i32,
     pub title: String,
     pub icon: Option<String>,
     pub content_markdown: Option<String>,
-    pub referenced_assets: Vec<String>,
-    pub source_tab_id: Option<String>,
-    pub current_revision_id: Option<String>,
+    #[ts(type = "string[]")]
+    pub referenced_assets: Vec<AssetId>,
+    #[ts(type = "string | null")]
+    pub source_tab_id: Option<TabId>,
+    #[ts(type = "string | null")]
+    pub current_revision_id: Option<String>, // RevisionId as string for simplicity
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -75,7 +84,7 @@ impl From<DocumentTabInfo> for DocumentTabResponse {
             content_markdown: tab.content_markdown,
             referenced_assets: tab.referenced_assets,
             source_tab_id: tab.source_tab_id,
-            current_revision_id: tab.current_revision_id,
+            current_revision_id: tab.current_revision_id.map(|r| r.as_str().to_string()),
             created_at: tab.created_at,
             updated_at: tab.updated_at,
         }
@@ -114,7 +123,7 @@ pub async fn list_documents(state: State<'_, Arc<AppState>>) -> Result<Vec<Docum
 #[tauri::command]
 pub async fn get_document(
     state: State<'_, Arc<AppState>>,
-    doc_id: String,
+    doc_id: DocumentId,
 ) -> Result<Option<DocumentInfoResponse>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
@@ -148,7 +157,7 @@ pub async fn get_document_by_google_id(
 #[tauri::command]
 pub async fn get_document_content(
     state: State<'_, Arc<AppState>>,
-    doc_id: String,
+    doc_id: DocumentId,
 ) -> Result<DocumentContentResponse, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
@@ -176,7 +185,7 @@ pub async fn get_document_content(
 #[tauri::command]
 pub async fn get_document_tab(
     state: State<'_, Arc<AppState>>,
-    tab_id: String,
+    tab_id: TabId,
 ) -> Result<Option<DocumentTabResponse>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
@@ -190,7 +199,7 @@ pub async fn get_document_tab(
 
 /// Delete a document and all its tabs/revisions
 #[tauri::command]
-pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: String) -> Result<bool, String> {
+pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: DocumentId) -> Result<bool, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
@@ -202,7 +211,7 @@ pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: String) ->
 #[tauri::command]
 pub async fn sync_google_doc(
     _state: State<'_, Arc<AppState>>,
-    _doc_id: String,
+    _doc_id: DocumentId,
 ) -> Result<(), String> {
     // TODO: Call the MCP server to refresh the document
     // The MCP server will:
@@ -562,10 +571,13 @@ pub async fn import_google_doc(
     }
 
     // Build a map of source_tab_id -> internal tab_id for parent references
-    let mut tab_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut tab_id_map: std::collections::HashMap<String, TabId> = std::collections::HashMap::new();
 
     // Collect referenced asset IDs once
-    let referenced_assets: Vec<String> = image_id_map.values().cloned().collect();
+    let referenced_assets: Vec<AssetId> = image_id_map
+        .values()
+        .map(|hash| AssetId::from_string(hash.clone()))
+        .collect();
 
     // First pass: create all tabs without parent references
     // Each tab now has its own markdown content from the Docs API structured content
@@ -604,6 +616,7 @@ pub async fn import_google_doc(
             info!("Tab '{}' still has ![image] but no noema-asset:// URLs - content sample: {}", tab.title, &content.chars().take(300).collect::<String>());
         }
 
+        let source_tab_id = TabId::from_string(tab.source_tab_id.clone());
         let tab_id = store
             .create_document_tab(
                 &doc_id,
@@ -613,7 +626,7 @@ pub async fn import_google_doc(
                 tab.icon.as_deref(),
                 Some(&content),
                 &referenced_assets,
-                Some(&tab.source_tab_id),
+                Some(&source_tab_id),
             )
             .await
             .map_err(|e| format!("Failed to create tab: {}", e))?;
