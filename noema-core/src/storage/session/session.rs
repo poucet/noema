@@ -156,20 +156,18 @@ impl<S: StorageTypes> Session<S> {
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
             };
 
-            // Create new turn when role changes (user→assistant or assistant→user)
+            // Start new turn when role changes (user→assistant or assistant→user)
             if current_role != Some(span_role) {
-                let turn = self.coordinator.add_turn(&self.conversation_id, span_role).await?;
-                let span = self.coordinator.add_span(&turn.id, model_id).await?;
-                self.coordinator.select_span(&self.view_id, &turn.id, &span.id).await?;
-                current_span = Some(span.id);
+                let span_id = self.coordinator
+                    .start_turn(&self.conversation_id, &self.view_id, span_role, model_id)
+                    .await?;
+                current_span = Some(span_id);
                 current_role = Some(span_role);
             }
 
-            let span_id = current_span.as_ref().unwrap();
-
             // Store message content and resolve for caching
             let (_msg_info, resolved) = self.coordinator
-                .store_message(span_id, msg_role, msg.payload.content, origin)
+                .store_message(current_span.as_ref().unwrap(), msg_role, msg.payload.content, origin)
                 .await?;
 
             self.resolved_cache.push(ResolvedMessage::new(msg_role, resolved));

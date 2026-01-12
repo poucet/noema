@@ -202,34 +202,23 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.conversation_store.set_conversation_private(conversation_id, is_private).await
     }
 
-    // ========== Turn/Span Delegation Methods ==========
+    // ========== Turn/Span Methods ==========
 
-    /// Add a new turn to a conversation
-    pub async fn add_turn(
+    /// Start a new turn in a conversation view.
+    ///
+    /// Creates a turn, adds a span to it, and selects that span in the view.
+    /// Returns the span ID for adding messages.
+    pub async fn start_turn(
         &self,
         conversation_id: &ConversationId,
-        role: crate::storage::types::SpanRole,
-    ) -> Result<crate::storage::types::TurnInfo> {
-        self.conversation_store.add_turn(conversation_id, role).await
-    }
-
-    /// Add a new span to a turn
-    pub async fn add_span(
-        &self,
-        turn_id: &crate::storage::ids::TurnId,
-        model_id: Option<&str>,
-    ) -> Result<crate::storage::types::SpanInfo> {
-        self.conversation_store.add_span(turn_id, model_id).await
-    }
-
-    /// Select a span for a turn within a view
-    pub async fn select_span(
-        &self,
         view_id: &ViewId,
-        turn_id: &crate::storage::ids::TurnId,
-        span_id: &SpanId,
-    ) -> Result<()> {
-        self.conversation_store.select_span(view_id, turn_id, span_id).await
+        role: crate::storage::types::SpanRole,
+        model_id: Option<&str>,
+    ) -> Result<SpanId> {
+        let turn = self.conversation_store.add_turn(conversation_id, role).await?;
+        let span = self.conversation_store.add_span(&turn.id, model_id).await?;
+        self.conversation_store.select_span(view_id, &turn.id, &span.id).await?;
+        Ok(span.id)
     }
 
     // ========== User Delegation Methods ==========
