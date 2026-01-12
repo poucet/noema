@@ -305,7 +305,34 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     asset_id,
                     mime_type,
                     filename,
-                } => ResolvedContent::asset(asset_id.clone(), mime_type, filename.clone()),
+                } => {
+                    // Load asset data and create resolved ContentBlock
+                    let resolved_block = match self.get_asset(asset_id).await {
+                        Ok((data, _)) => {
+                            let base64_data = STANDARD.encode(&data);
+                            if mime_type.starts_with("image/") {
+                                Some(ContentBlock::Image {
+                                    data: base64_data,
+                                    mime_type: mime_type.clone(),
+                                })
+                            } else if mime_type.starts_with("audio/") {
+                                Some(ContentBlock::Audio {
+                                    data: base64_data,
+                                    mime_type: mime_type.clone(),
+                                })
+                            } else {
+                                None
+                            }
+                        }
+                        Err(_) => None,
+                    };
+                    ResolvedContent::Asset {
+                        asset_id: asset_id.clone(),
+                        mime_type: mime_type.clone(),
+                        filename: filename.clone(),
+                        resolved: resolved_block,
+                    }
+                }
                 StoredContent::DocumentRef { document_id } => {
                     ResolvedContent::document(document_id)
                 }
