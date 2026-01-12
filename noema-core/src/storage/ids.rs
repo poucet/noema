@@ -65,6 +65,12 @@ macro_rules! define_id {
                 Self(s.to_string())
             }
         }
+
+        impl From<$name> for String {
+            fn from(id: $name) -> String {
+                id.0
+            }
+        }
     };
 }
 
