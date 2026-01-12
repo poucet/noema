@@ -159,8 +159,8 @@ function App() {
         const isPrivate = await tauri.getConversationPrivate(convId);
         setIsConversationPrivate(isPrivate);
 
-        // Load messages with alternates info for span awareness
-        const msgs = await tauri.getMessagesWithAlternates();
+        // Load messages (view path is resolved by backend)
+        const msgs = await tauri.getMessages();
         setMessages(msgs);
 
         // Load models in background
@@ -306,20 +306,11 @@ function App() {
       }
 
       // If we have a pending fork, create the fork first, then send
+      // NOTE: Fork functionality is pending re-implementation in the new UCM model
       if (pendingForkSpanId) {
-        appLog.info(`Creating fork from spanId=${pendingForkSpanId} before sending`);
-        const forkResult = await tauri.forkFromSpan(pendingForkSpanId);
-        appLog.info(`Fork created: conversationId=${forkResult.conversation_id}, threadId=${forkResult.thread_id}`);
-        // Switch to the new conversation (this loads the forked conversation's messages)
-        const msgs = await tauri.switchConversation(forkResult.conversation_id);
-        setCurrentConversationId(forkResult.conversation_id);
-        setCurrentThreadId(forkResult.thread_id);
-        setMessages(msgs);
-        // Clear the pending fork state
+        appLog.warn(`Fork from span not yet implemented in new UCM model, clearing pending fork`);
         setPendingForkSpanId(null);
         setPrefilledInput("");
-        // Refresh conversations (fork creates a new one)
-        tauri.listConversations().then(setConversations).catch(console.error);
       }
 
       // Check if we have multiple models selected for parallel comparison
@@ -447,20 +438,12 @@ function App() {
     appLog.info("Send to multiple models - use the chat input to send");
   };
 
-  const handleSwitchAlternate = async (spanSetId: string, spanId: string) => {
-    appLog.info(`handleSwitchAlternate called: spanSetId=${spanSetId}, spanId=${spanId}`);
-    try {
-      // Update the selected span in the database
-      await tauri.setSelectedSpan(spanSetId, spanId);
-      appLog.info("setSelectedSpan succeeded, reloading messages...");
-      // Reload messages to get the updated content
-      const msgs = await tauri.getMessagesWithAlternates();
-      appLog.info(`Reloaded ${msgs.length} messages`);
-      setMessages(msgs);
-    } catch (err) {
-      appLog.error("Switch alternate error", String(err));
-      setError(String(err));
-    }
+  const handleSwitchAlternate = async (turnId: string, spanId: string) => {
+    appLog.info(`handleSwitchAlternate called: turnId=${turnId}, spanId=${spanId}`);
+    // NOTE: Span selection is pending re-implementation in the new UCM model
+    // For now, just log a warning
+    appLog.warn("Span selection (setSelectedSpan) not yet implemented in new UCM model");
+    setError("Switching alternates is not yet available in this version");
   };
 
   // Fork handler - simple approach: just store the spanId, no UI changes until send
@@ -790,20 +773,16 @@ function App() {
                                     onClick={async () => {
                                       // Find the span_id for this model from parallelAlternates
                                       const alt = parallelAlternates.find(a => a.modelId === modelId);
-                                      appLog.info(`Use this clicked: modelId=${modelId}, spanSetId=${parallelSpanSetId}, alternate=${JSON.stringify(alt)}, all=${JSON.stringify(parallelAlternates)}`);
-                                      if (alt && parallelSpanSetId) {
-                                        // Set this alternate as the selected one in the database
-                                        await tauri.setSelectedSpan(parallelSpanSetId, alt.spanId);
-                                      } else {
-                                        appLog.warn(`Could not find alternate for modelId=${modelId}`);
-                                      }
-                                      // Clear comparison view and reload messages
+                                      appLog.info(`Use this clicked: modelId=${modelId}, parallelSpanSetId=${parallelSpanSetId}, alternate=${JSON.stringify(alt)}, all=${JSON.stringify(parallelAlternates)}`);
+                                      // NOTE: Span selection is pending re-implementation in new UCM model
+                                      appLog.warn("Span selection (setSelectedSpan) not yet implemented in new UCM model");
+                                      // Clear comparison view (selection doesn't persist yet)
                                       setCompletedParallelResponses(new Map());
                                       setSelectedComparisonTab(null);
                                       setParallelSpanSetId("");
                                       setParallelAlternates([]);
-                                      // Reload to get the persisted state with new selection
-                                      const msgs = await tauri.getMessagesWithAlternates();
+                                      // Reload messages
+                                      const msgs = await tauri.getMessages();
                                       setMessages(msgs);
                                     }}
                                     className={`px-2 py-1 text-xs rounded transition-colors ${

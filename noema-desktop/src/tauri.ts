@@ -417,7 +417,7 @@ export async function searchDocuments(
   return invoke<DocumentInfoResponse[]>("search_documents", { query, limit });
 }
 
-// Span management for parallel model responses
+// Turn/Span/View management (Phase 3 UCM model)
 export interface SpanInfo {
   id: string;
   modelId: string | null;
@@ -426,17 +426,10 @@ export interface SpanInfo {
   createdAt: number;
 }
 
-export async function getSpanSetAlternates(
-  spanSetId: string
+export async function getTurnAlternates(
+  turnId: string
 ): Promise<SpanInfo[]> {
-  return invoke<SpanInfo[]>("get_span_set_alternates", { spanSetId });
-}
-
-export async function setSelectedSpan(
-  spanSetId: string,
-  spanId: string
-): Promise<void> {
-  return invoke<void>("set_selected_span", { spanSetId, spanId });
+  return invoke<SpanInfo[]>("get_turn_alternates", { turnId });
 }
 
 export async function getSpanMessages(
@@ -445,64 +438,28 @@ export async function getSpanMessages(
   return invoke<DisplayMessage[]>("get_span_messages", { spanId });
 }
 
-// Get messages with alternates info (for loading conversations with span awareness)
-export async function getMessagesWithAlternates(): Promise<DisplayMessage[]> {
-  return invoke<DisplayMessage[]>("get_messages_with_alternates");
-}
-
-// Thread/Fork management
-export interface ThreadInfo {
+// View management (replaces Thread/Fork management)
+export interface ViewInfo {
   id: string;
   conversationId: string;
-  parentSpanId: string | null;
+  parentViewId: string | null;
   name: string | null;
-  status: string;
-  createdAt: number;
   isMain: boolean;
+  createdAt: number;
 }
 
-export async function listConversationThreads(
+export async function listConversationViews(
   conversationId: string
-): Promise<ThreadInfo[]> {
-  return invoke<ThreadInfo[]>("list_conversation_threads", { conversationId });
+): Promise<ViewInfo[]> {
+  return invoke<ViewInfo[]>("list_conversation_views", { conversationId });
 }
 
-export interface ForkResult {
-  conversation_id: string;
-  thread_id: string;
+export async function getCurrentViewId(): Promise<string | null> {
+  return invoke<string | null>("get_current_view_id");
 }
 
-export async function forkFromSpan(
-  spanId: string,
-  name?: string
-): Promise<ForkResult> {
-  return invoke<ForkResult>("fork_from_span", { spanId, name });
-}
-
-export async function switchThread(
-  threadId: string
-): Promise<DisplayMessage[]> {
-  return invoke<DisplayMessage[]>("switch_thread", { threadId });
-}
-
-export async function renameThread(
-  threadId: string,
-  name: string
-): Promise<void> {
-  return invoke<void>("rename_thread", { threadId, name });
-}
-
-export async function deleteThread(threadId: string): Promise<void> {
-  return invoke<void>("delete_thread", { threadId });
-}
-
-export async function getCurrentThreadId(): Promise<string | null> {
-  return invoke<string | null>("get_current_thread_id");
-}
-
-export async function editUserMessage(
-  spanId: string,
-  newContent: string
-): Promise<string> {
-  return invoke<string>("edit_user_message", { spanId, newContent });
-}
+// Note: The following view-related commands are pending implementation:
+// - selectSpan(viewId, turnId, spanId) - Select a specific span at a turn in a view
+// - forkView(viewId, atTurnId, name) - Fork a view at a specific turn
+// - switchView(viewId) - Switch to a different view
+// - editTurn(viewId, turnId, newContent) - Edit content at a turn (creates new span)

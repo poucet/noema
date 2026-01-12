@@ -1197,3 +1197,41 @@ Full workspace compiles with only warnings (no errors):
 **Task 3.3.13 Complete** - ChatEngine and desktop now use new Session<S> API.
 
 ---
+
+## 2026-01-12: Fix "Command get_messages_with_alternates not found"
+
+### Problem
+
+The TypeScript frontend (`tauri.ts`) was still exporting legacy commands that had been removed from the Rust backend during the UCM migration:
+
+- `get_messages_with_alternates` - removed
+- `get_span_set_alternates` - replaced by `get_turn_alternates`
+- `set_selected_span` - not yet implemented
+- `list_conversation_threads` - replaced by `list_conversation_views`
+- `fork_from_span` - not yet implemented
+- `switch_thread`, `rename_thread`, `delete_thread` - not yet implemented
+- `get_current_thread_id` - replaced by `get_current_view_id`
+- `edit_user_message` - not yet implemented
+
+### Solution
+
+**1. Updated [tauri.ts](noema-desktop/src/tauri.ts)**:
+- Removed `getMessagesWithAlternates` - use `getMessages()` instead
+- Renamed `getSpanSetAlternates` → `getTurnAlternates`
+- Renamed `listConversationThreads` → `listConversationViews`
+- Renamed `getCurrentThreadId` → `getCurrentViewId`
+- Removed `setSelectedSpan`, `forkFromSpan`, `switchThread`, `renameThread`, `deleteThread`, `editUserMessage`
+- Added `ViewInfo` interface to replace `ThreadInfo`
+- Added comments documenting pending commands
+
+**2. Updated [App.tsx](noema-desktop/src/App.tsx)**:
+- Changed `getMessagesWithAlternates()` calls → `getMessages()`
+- Disabled fork functionality with warning (pending re-implementation)
+- Disabled span selection with user-facing error message (pending re-implementation)
+- Parallel response "Use this" button now clears comparison view without persisting selection
+
+### Status
+
+Basic conversations work. Advanced features (forking, span selection, view switching) are disabled with warnings until backend implementation is complete.
+
+---
