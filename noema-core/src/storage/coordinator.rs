@@ -202,6 +202,36 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.conversation_store.set_conversation_private(conversation_id, is_private).await
     }
 
+    // ========== Turn/Span Delegation Methods ==========
+
+    /// Add a new turn to a conversation
+    pub async fn add_turn(
+        &self,
+        conversation_id: &ConversationId,
+        role: crate::storage::types::SpanRole,
+    ) -> Result<crate::storage::types::TurnInfo> {
+        self.conversation_store.add_turn(conversation_id, role).await
+    }
+
+    /// Add a new span to a turn
+    pub async fn add_span(
+        &self,
+        turn_id: &crate::storage::ids::TurnId,
+        model_id: Option<&str>,
+    ) -> Result<crate::storage::types::SpanInfo> {
+        self.conversation_store.add_span(turn_id, model_id).await
+    }
+
+    /// Select a span for a turn within a view
+    pub async fn select_span(
+        &self,
+        view_id: &ViewId,
+        turn_id: &crate::storage::ids::TurnId,
+        span_id: &SpanId,
+    ) -> Result<()> {
+        self.conversation_store.select_span(view_id, turn_id, span_id).await
+    }
+
     // ========== User Delegation Methods ==========
 
     /// Get or create the default user
@@ -318,6 +348,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
 
         Ok((message_info, resolved))
     }
+
 }
 
 /// Implement ContentResolver for the generic coordinator

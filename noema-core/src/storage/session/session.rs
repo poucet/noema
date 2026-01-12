@@ -112,16 +112,6 @@ impl<S: StorageTypes> Session<S> {
         &self.coordinator
     }
 
-    /// Get access to the conversation store (via coordinator)
-    pub fn conversation_store(&self) -> &Arc<S::Conversation> {
-        self.coordinator.conversation_store()
-    }
-
-    /// Get access to the text store (via coordinator)
-    pub fn text_store(&self) -> &Arc<S::Text> {
-        self.coordinator.content_block_store()
-    }
-
     /// Get committed messages for display - returns cached ResolvedContent
     pub fn messages_for_display(&self) -> &[ResolvedMessage] {
         &self.resolved_cache
@@ -146,18 +136,15 @@ impl<S: StorageTypes> Session<S> {
 
     /// Commit pending messages to storage
     ///
-    /// Groups messages by role, creates turns/spans, and delegates storage
-    /// coordination to the StorageCoordinator.
+    /// Groups messages by role, creates turns/spans as needed, and stores content.
     pub async fn commit(&mut self, model_id: Option<&str>) -> Result<()> {
         if self.pending.is_empty() {
-            return Ok(()); // Nothing to commit
+            return Ok(());
         }
 
-        // Take pending messages to avoid borrow conflict
-        let messages: Vec<ChatMessage> = std::mem::take(&mut self.pending);
+        let messages = std::mem::take(&mut self.pending);
 
-        // Group messages by role to create appropriate turns
-        // User messages -> User turn, Assistant messages -> Assistant turn
+        // Track current turn state for grouping
         let mut current_role: Option<SpanRole> = None;
         let mut current_span: Option<crate::storage::ids::SpanId> = None;
 
@@ -169,19 +156,18 @@ impl<S: StorageTypes> Session<S> {
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
             };
 
-            // Create new turn if role changed
+            // Create new turn when role changes (user→assistant or assistant→user)
             if current_role != Some(span_role) {
-                let conv_store = self.conversation_store();
-                let turn = conv_store.add_turn(&self.conversation_id, span_role).await?;
-                let span = conv_store.add_span(&turn.id, model_id).await?;
-                conv_store.select_span(&self.view_id, &turn.id, &span.id).await?;
+                let turn = self.coordinator.add_turn(&self.conversation_id, span_role).await?;
+                let span = self.coordinator.add_span(&turn.id, model_id).await?;
+                self.coordinator.select_span(&self.view_id, &turn.id, &span.id).await?;
                 current_span = Some(span.id);
                 current_role = Some(span_role);
             }
 
             let span_id = current_span.as_ref().unwrap();
 
-            // Delegate storage coordination to the coordinator
+            // Store message content and resolve for caching
             let (_msg_info, resolved) = self.coordinator
                 .store_message(span_id, msg_role, msg.payload.content, origin)
                 .await?;
