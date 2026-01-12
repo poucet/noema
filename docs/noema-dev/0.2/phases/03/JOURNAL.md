@@ -685,3 +685,94 @@ Removed redundant types:
 `MessageContentInfo` simplified to use `StoredContent` directly instead of a separate `MessageContentData` enum.
 
 ---
+
+## 2026-01-12: Legacy Removal Complete (noema-core)
+
+### Session Rewrite Complete
+
+Rewrote `noema-core/src/storage/session/sqlite.rs` to use TurnStore exclusively:
+- Removed all legacy dual-write code
+- Session now uses TurnStore methods directly via SqliteStore
+- `write_turn()` and `write_parallel_turn()` use TurnStore API
+- `store_message_content()` uses coordinator for content externalization
+- `open_conversation()` loads via `get_view_path()`
+
+### ConversationStore Trait Removed
+
+Deleted files and cleaned up:
+- **Deleted**: `conversation/conversation_store.rs` (entire file)
+- **Cleaned**: `conversation/mod.rs` - removed legacy exports
+- **Cleaned**: `conversation/types.rs` - removed all `Legacy*` types
+
+### Legacy Tables Removed
+
+Updated `conversation/sqlite.rs` schema:
+- Removed: `threads`, `span_sets`, `legacy_spans`, `legacy_span_messages`
+- Kept only: `conversations`, `turns`, `spans`, `messages`, `message_content`, `views`, `view_selections`
+
+### Compilation Fixes
+
+Fixed several issues found during cargo check:
+1. **uuid crate**: Made uuid non-optional in Cargo.toml (required by ids.rs everywhere)
+2. **OriginKind Copy**: Added `Copy` derive to `OriginKind` enum
+3. **with_origin API**: Fixed calls to use `ContentOrigin` struct instead of 3 parameters
+4. **Role match exhaustive**: Fixed From<llm::api::Role> impl (Role only has 3 variants, no wildcard needed)
+
+### noema-core Compiles Successfully
+
+After fixes, `cargo check` passes with only minor warnings (unused helper functions).
+
+### Desktop Still Broken
+
+`noema-desktop` code references removed types:
+- `ConversationStore` trait methods
+- `LegacyConversationInfo`, `LegacyThreadInfo`, `LegacySpanType`
+- Legacy table operations (threads, span_sets, etc.)
+
+### Terminology Mapping (Legacy → New)
+
+| Legacy Concept | New Concept | Notes |
+|---------------|-------------|-------|
+| Thread | View | Named path through conversation |
+| SpanSet | Turn | Position in sequence |
+| Span (in SpanSet) | Span (at Turn) | Alternative response |
+| span_set_id | turn_id | ID type change |
+| thread_id | view_id | ID type change |
+| `get_main_thread_id()` | `get_main_view()` | Returns ViewInfo |
+| `get_thread_span_sets()` | `get_turns()` | Returns Vec<TurnInfo> |
+| `get_span_set_alternates()` | `get_spans(turn_id)` | Returns Vec<SpanInfo> |
+| `create_fork_thread()` | `fork_view()` | Creates forked view |
+
+### Desktop Rewrite Scope
+
+The desktop commands need significant rewrite to use TurnStore API:
+- `list_conversations` - Need to add to SqliteStore
+- `delete_conversation` - Need to add to SqliteStore
+- `rename_conversation` - Need to add to SqliteStore
+- `get/set_conversation_private` - Need to add to SqliteStore
+- `get_messages_with_alternates` - Rewrite using `get_view_path()`
+- `switch_thread` → `switch_view` - Use `get_view_path()`
+- `fork_from_span` - Use `fork_view()`
+- `edit_user_message` - Use `edit_turn()`
+
+**Key Question**: Before adding convenience methods to SqliteStore, should we:
+1. Add methods directly to SqliteStore (simple, tight coupling)?
+2. Create a higher-level service/facade that coordinates TurnStore + conversation management?
+3. Have desktop call TurnStore directly with thin adapter?
+
+User requested not to make strong decisions without input.
+
+### Files Changed
+
+- `noema-core/Cargo.toml` - uuid now required (not optional)
+- `noema-core/src/storage/mod.rs` - Updated docs, removed dead exports
+- `noema-core/src/storage/coordinator.rs` - Fixed `ContentOrigin` usage
+- `noema-core/src/storage/content_block/types.rs` - Added `Copy` to `OriginKind`
+- `noema-core/src/storage/conversation/mod.rs` - Simplified exports
+- `noema-core/src/storage/conversation/types.rs` - Removed legacy types, fixed Role impl
+- `noema-core/src/storage/conversation/turn_store.rs` - Updated docs
+- `noema-core/src/storage/conversation/sqlite.rs` - Removed legacy tables/impl (large)
+- `noema-core/src/storage/session/sqlite.rs` - Complete rewrite (large)
+- **Deleted**: `noema-core/src/storage/conversation/conversation_store.rs`
+
+---
