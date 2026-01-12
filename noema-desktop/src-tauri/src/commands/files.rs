@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use std::sync::Arc;
 
-use noema_core::storage::{Asset, AssetStore};
+use noema_core::storage::{Asset, AssetStore, ids::AssetId};
 use crate::logging::log_message;
 use crate::state::AppState;
 
@@ -79,7 +79,7 @@ pub async fn store_asset(
     data: String,      // base64 encoded
     mime_type: String,
     filename: Option<String>,
-) -> Result<String, String> {
+) -> Result<AssetId, String> {
     use base64::Engine;
 
     let bytes = base64::engine::general_purpose::STANDARD
@@ -106,10 +106,8 @@ pub async fn store_asset(
         asset = asset.with_filename(name);
     }
 
-    let asset_id = store
+    store
         .create_asset(asset)
         .await
-        .map_err(|e| format!("Failed to register asset: {}", e))?;
-
-    Ok(asset_id.into())
+        .map_err(|e| format!("Failed to register asset: {}", e))
 }
