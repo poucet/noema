@@ -15,9 +15,12 @@ use crate::types::{ConversationInfo, DisplayMessage, InputContentBlock, ModelInf
 
 /// Get current messages in the conversation (committed + pending)
 #[tauri::command]
-pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<DisplayMessage>, String> {
-    let engine_guard = state.engine.lock().await;
-    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+pub async fn get_messages(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+) -> Result<Vec<DisplayMessage>, String> {
+    let engines = state.engines.lock().await;
+    let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
 
     let session_arc = engine.get_session();
     let session = session_arc.lock().await;
@@ -41,12 +44,14 @@ pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<Display
 /// Content blocks preserve the exact inline position of text, document references, and attachments.
 ///
 /// # Arguments
+/// * `conversation_id` - The conversation to send the message to
 /// * `content` - The message content blocks (text, document refs, images, audio)
 /// * `tool_config` - Optional configuration for which tools to enable. If None, uses default (all tools enabled).
 #[tauri::command]
 pub async fn send_message(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
     content: Vec<InputContentBlock>,
     tool_config: Option<ToolConfig>,
 ) -> Result<(), String> {
@@ -100,13 +105,14 @@ pub async fn send_message(
         None => CoreToolConfig::all_enabled(), // Default: all tools enabled
     };
 
-    send_message_internal(app, state, payload, core_tool_config).await
+    send_message_internal(app, state, conversation_id, payload, core_tool_config).await
 }
 
 /// Internal helper for sending messages
 async fn send_message_internal(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
     payload: ChatPayload,
     tool_config: CoreToolConfig,
 ) -> Result<(), String> {
@@ -117,122 +123,140 @@ async fn send_message_internal(
         .map_err(|e| e.to_string())?;
 
     // Send to engine with tool config - the event loop (started at init) will handle the response
-    let engine_guard = state.engine.lock().await;
-    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+    let engines = state.engines.lock().await;
+    let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
     engine.send_message(message, tool_config);
 
     Ok(())
 }
 
 /// Start the engine event polling loop - runs continuously from app init
+/// Polls all loaded engines for events
 pub fn start_engine_event_loop(app: AppHandle) {
     tokio::spawn(async move {
         let state = app.state::<Arc<AppState>>();
 
         loop {
-            let event = {
-                let mut engine_guard = state.engine.lock().await;
-                match engine_guard.as_mut() {
-                    Some(engine) => engine.try_recv(),
-                    None => {
-                        // Engine not yet initialized, wait and retry
-                        drop(engine_guard);
-                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                        continue;
+            // Collect events from all engines
+            let events: Vec<(ConversationId, EngineEvent)> = {
+                let mut engines = state.engines.lock().await;
+                let mut collected = Vec::new();
+                for (conv_id, engine) in engines.iter_mut() {
+                    if let Some(event) = engine.try_recv() {
+                        collected.push((conv_id.clone(), event));
                     }
                 }
+                collected
             };
 
-            match event {
-                Some(EngineEvent::Message(msg)) => {
-                    // Mark as processing when we start receiving message chunks
-                    *state.is_processing.lock().await = true;
-                    let display_msg = DisplayMessage::from(&msg);
-                    let _ = app.emit("streaming_message", &display_msg);
-                }
-                Some(EngineEvent::MessageComplete) => {
-                    // Get all messages after completion (committed + pending)
-                    let messages = {
-                        let engine_guard = state.engine.lock().await;
-                        if let Some(engine) = engine_guard.as_ref() {
-                            let session_arc = engine.get_session();
-                            let session = session_arc.lock().await;
+            if events.is_empty() {
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                continue;
+            }
 
-                            // Start with committed messages
-                            let mut msgs: Vec<DisplayMessage> = session
-                                .messages_for_display()
-                                .iter()
-                                .map(DisplayMessage::from)
-                                .collect();
+            for (conversation_id, event) in events {
+                match event {
+                    EngineEvent::Message(msg) => {
+                        state.set_processing(&conversation_id, true).await;
+                        let display_msg = DisplayMessage::from(&msg);
+                        let _ = app.emit("streaming_message", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "message": display_msg
+                        }));
+                    }
+                    EngineEvent::MessageComplete => {
+                        // Get all messages after completion (committed + pending)
+                        let messages = {
+                            let engines = state.engines.lock().await;
+                            if let Some(engine) = engines.get(&conversation_id) {
+                                let session_arc = engine.get_session();
+                                let session = session_arc.lock().await;
 
-                            // Add pending messages (not yet committed to storage)
-                            for pending in session.pending_messages() {
-                                msgs.push(DisplayMessage::from(pending));
+                                let mut msgs: Vec<DisplayMessage> = session
+                                    .messages_for_display()
+                                    .iter()
+                                    .map(DisplayMessage::from)
+                                    .collect();
+
+                                for pending in session.pending_messages() {
+                                    msgs.push(DisplayMessage::from(pending));
+                                }
+                                msgs
+                            } else {
+                                vec![]
                             }
-
-                            msgs
-                        } else {
-                            vec![]
-                        }
-                    };
-                    let _ = app.emit("message_complete", &messages);
-                    *state.is_processing.lock().await = false;
-                }
-                Some(EngineEvent::Error(err)) => {
-                    log_message(&format!("ENGINE ERROR: {}", err));
-                    let _ = app.emit("error", &err);
-                    *state.is_processing.lock().await = false;
-                }
-                Some(EngineEvent::ModelChanged(name)) => {
-                    let _ = app.emit("model_changed", &name);
-                }
-                Some(EngineEvent::HistoryCleared) => {
-                    let _ = app.emit("history_cleared", ());
-                }
-                // Parallel execution events
-                Some(EngineEvent::ParallelStreamingMessage { model_id, message }) => {
-                    *state.is_processing.lock().await = true;
-                    let display_msg = DisplayMessage::from(&message);
-                    let _ = app.emit("parallel_streaming_message", serde_json::json!({
-                        "modelId": model_id,
-                        "message": display_msg
-                    }));
-                }
-                Some(EngineEvent::ParallelModelComplete { model_id, messages }) => {
-                    let display_messages: Vec<DisplayMessage> = messages
-                        .iter()
-                        .map(DisplayMessage::from)
-                        .collect();
-                    let _ = app.emit("parallel_model_complete", serde_json::json!({
-                        "modelId": model_id,
-                        "messages": display_messages
-                    }));
-                }
-                Some(EngineEvent::ParallelComplete { turn_id, alternates }) => {
-                    let alternates_json: Vec<serde_json::Value> = alternates
-                        .iter()
-                        .map(|a| serde_json::json!({
-                            "spanId": a.span_id,
-                            "modelId": a.model_id,
-                            "modelDisplayName": a.model_display_name,
-                            "messageCount": a.message_count,
-                            "isSelected": a.is_selected
-                        }))
-                        .collect();
-                    let _ = app.emit("parallel_complete", serde_json::json!({
-                        "turnId": turn_id,
-                        "alternates": alternates_json
-                    }));
-                    *state.is_processing.lock().await = false;
-                }
-                Some(EngineEvent::ParallelModelError { model_id, error }) => {
-                    let _ = app.emit("parallel_model_error", serde_json::json!({
-                        "modelId": model_id,
-                        "error": error
-                    }));
-                }
-                None => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                        };
+                        let _ = app.emit("message_complete", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "messages": messages
+                        }));
+                        state.set_processing(&conversation_id, false).await;
+                    }
+                    EngineEvent::Error(err) => {
+                        log_message(&format!("ENGINE ERROR [{}]: {}", conversation_id.as_str(), err));
+                        let _ = app.emit("error", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "error": err
+                        }));
+                        state.set_processing(&conversation_id, false).await;
+                    }
+                    EngineEvent::ModelChanged(name) => {
+                        let _ = app.emit("model_changed", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "model": name
+                        }));
+                    }
+                    EngineEvent::HistoryCleared => {
+                        let _ = app.emit("history_cleared", serde_json::json!({
+                            "conversationId": conversation_id.as_str()
+                        }));
+                    }
+                    // Parallel execution events
+                    EngineEvent::ParallelStreamingMessage { model_id, message } => {
+                        state.set_processing(&conversation_id, true).await;
+                        let display_msg = DisplayMessage::from(&message);
+                        let _ = app.emit("parallel_streaming_message", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "modelId": model_id,
+                            "message": display_msg
+                        }));
+                    }
+                    EngineEvent::ParallelModelComplete { model_id, messages } => {
+                        let display_messages: Vec<DisplayMessage> = messages
+                            .iter()
+                            .map(DisplayMessage::from)
+                            .collect();
+                        let _ = app.emit("parallel_model_complete", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "modelId": model_id,
+                            "messages": display_messages
+                        }));
+                    }
+                    EngineEvent::ParallelComplete { turn_id, alternates } => {
+                        let alternates_json: Vec<serde_json::Value> = alternates
+                            .iter()
+                            .map(|a| serde_json::json!({
+                                "spanId": a.span_id,
+                                "modelId": a.model_id,
+                                "modelDisplayName": a.model_display_name,
+                                "messageCount": a.message_count,
+                                "isSelected": a.is_selected
+                            }))
+                            .collect();
+                        let _ = app.emit("parallel_complete", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "turnId": turn_id,
+                            "alternates": alternates_json
+                        }));
+                        state.set_processing(&conversation_id, false).await;
+                    }
+                    EngineEvent::ParallelModelError { model_id, error } => {
+                        let _ = app.emit("parallel_model_error", serde_json::json!({
+                            "conversationId": conversation_id.as_str(),
+                            "modelId": model_id,
+                            "error": error
+                        }));
+                    }
                 }
             }
         }
@@ -241,17 +265,21 @@ pub fn start_engine_event_loop(app: AppHandle) {
 
 /// Clear conversation history
 #[tauri::command]
-pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    let engine_guard = state.engine.lock().await;
-    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
+pub async fn clear_history(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+) -> Result<(), String> {
+    let engines = state.engines.lock().await;
+    let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
     engine.clear_history();
     Ok(())
 }
 
-/// Set the current model
+/// Set the model for a conversation
 #[tauri::command]
 pub async fn set_model(
     state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
     model_id: String,
     provider: String,
 ) -> Result<String, String> {
@@ -268,8 +296,8 @@ pub async fn set_model(
         .to_string();
 
     {
-        let mut engine_guard = state.engine.lock().await;
-        let engine = engine_guard.as_mut().ok_or("App not initialized")?;
+        let mut engines = state.engines.lock().await;
+        let engine = engines.get_mut(&conversation_id).ok_or("Conversation not loaded")?;
         engine.set_model(new_model);
     }
 
@@ -335,12 +363,29 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
         .map_err(|e| format!("Failed to list conversations: {}", e))
 }
 
-/// Switch to a different conversation
+/// Load a conversation (creating an engine for it if not already loaded)
+/// Returns the messages in the conversation
 #[tauri::command]
-pub async fn switch_conversation(
+pub async fn load_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
+    // Check if already loaded
+    {
+        let engines = state.engines.lock().await;
+        if let Some(engine) = engines.get(&conversation_id) {
+            let session_arc = engine.get_session();
+            let session = session_arc.lock().await;
+            let messages: Vec<DisplayMessage> = session
+                .messages_for_display()
+                .iter()
+                .map(DisplayMessage::from)
+                .collect();
+            return Ok(messages);
+        }
+    }
+
+    // Not loaded, create engine
     let coordinator = {
         let coord_guard = state.coordinator.lock().await;
         coord_guard
@@ -373,14 +418,13 @@ pub async fn switch_conversation(
     let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
-
-    *state.engine.lock().await = Some(engine);
-    *state.current_conversation_id.lock().await = conversation_id.into();
+    state.engines.lock().await.insert(conversation_id, engine);
 
     Ok(messages)
 }
 
-/// Create a new conversation
+/// Create a new conversation and load its engine
+/// Returns the conversation ID
 #[tauri::command]
 pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let coordinator = {
@@ -403,7 +447,6 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
         .await
         .map_err(|e| format!("Failed to open new conversation: {}", e))?;
 
-    let conversation_id = conv_id.as_str().to_string();
     let model_id_str = state.model_id.lock().await.clone();
     let mcp_registry =
         McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
@@ -415,28 +458,25 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
+    state.engines.lock().await.insert(conv_id.clone(), engine);
 
-    *state.engine.lock().await = Some(engine);
-    *state.current_conversation_id.lock().await = conversation_id.clone();
-
-    Ok(conversation_id)
+    Ok(conv_id.as_str().to_string())
 }
 
 /// Delete a conversation
+/// Also removes the engine if loaded
 #[tauri::command]
 pub async fn delete_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<(), String> {
-    let current_id = state.current_conversation_id.lock().await.clone();
-    if conversation_id.as_str() == current_id {
-        return Err("Cannot delete current conversation".to_string());
-    }
+    // Remove engine if loaded
+    state.engines.lock().await.remove(&conversation_id);
 
     let coord_guard = state.coordinator.lock().await;
-    let store = coord_guard.as_ref().ok_or("App not initialized")?;
+    let coordinator = coord_guard.as_ref().ok_or("App not initialized")?;
 
-    store
+    coordinator
         .delete_conversation(&conversation_id)
         .await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
@@ -499,12 +539,6 @@ pub async fn set_conversation_private(
 #[tauri::command]
 pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state.model_name.lock().await.clone())
-}
-
-/// Get current conversation ID
-#[tauri::command]
-pub async fn get_current_conversation_id(state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    Ok(state.current_conversation_id.lock().await.clone())
 }
 
 /// Get favorite models

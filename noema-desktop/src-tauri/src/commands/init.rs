@@ -82,7 +82,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
         log_message(&format!("ERROR in init_session: {}", e));
         e
     })?;
-    let conversation_id = session.conversation_id().clone();
+    let conversation_id = session.conversation_id();
     log_message("Session initialized");
 
     // Start embedded Google Docs MCP server
@@ -99,7 +99,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     log_message("Event loop started");
 
     // Start auto-connect for MCP servers (runs in background)
-    start_mcp_auto_connect(app, state, &conversation_id).await;
+    start_mcp_auto_connect(app, state, conversation_id).await;
     log_message("MCP auto-connect started");
 
     Ok(result)
