@@ -7,7 +7,8 @@
 //! All trait implementations are in submodules:
 //! - `asset` - AssetStore impl
 //! - `content_block` - ContentBlockStore impl
-//! - `conversation` - TurnStore + ConversationStore impl
+//! - `conversation` - ConversationStore impl
+//! - `turn` - TurnStore impl
 //! - `document` - DocumentStore impl
 //! - `user` - UserStore impl
 
@@ -23,6 +24,7 @@ mod asset;
 mod content_block;
 mod conversation;
 mod document;
+mod turn;
 mod user;
 
 // Re-export init_schema functions for use in SqliteStore::init_schema
@@ -30,10 +32,11 @@ pub(crate) use asset::init_schema as init_asset_schema;
 pub(crate) use content_block::init_schema as init_content_block_schema;
 pub(crate) use conversation::init_schema as init_conversation_schema;
 pub(crate) use document::init_schema as init_document_schema;
+pub(crate) use turn::init_schema as init_turn_schema;
 pub(crate) use user::init_schema as init_user_schema;
 
-// Re-export sync helpers from conversation module
-pub use conversation::sync_helpers;
+// Re-export sync helpers from turn module
+pub use turn::sync_helpers;
 pub(crate) use content_block::store_content_sync;
 
 /// Shared SQLite connection pool
@@ -98,6 +101,7 @@ impl SqliteStore {
         let conn = self.conn.lock().unwrap();
         init_user_schema(&conn)?;
         init_conversation_schema(&conn)?;
+        init_turn_schema(&conn)?;
         init_asset_schema(&conn)?;
         init_document_schema(&conn)?;
         init_content_block_schema(&conn)?;

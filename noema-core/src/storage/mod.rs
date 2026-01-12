@@ -87,5 +87,11 @@ pub use implementations::sqlite::SqliteStore;
 
 pub use implementations::fs::FsBlobStore;
 
+// Memory implementations (for testing)
+pub use implementations::memory::{
+    MemoryAssetStore, MemoryBlobStore, MemoryContentBlockStore, MemoryConversationStore,
+    MemoryDocumentStore, MemoryTurnStore,
+};
+
 // Document resolution
 pub use document_resolver::{DocumentFormatter, DocumentResolver};
