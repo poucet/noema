@@ -675,4 +675,13 @@ Key changes:
 
 Desktop code (chat.rs, types.rs) still uses legacy API - will be updated when removing dual-write.
 
+### Type Consolidation
+
+Removed redundant types:
+- **ContentType enum** - Removed. Content type strings ("text", "asset_ref", etc.) used directly in SQL.
+- **MessageContentData** - Removed. `MessageContentInfo` now uses `StoredContent` directly.
+- **MessageRole vs llm::Role** - `MessageRole` kept for now with Tool variant for explicit tool messages.
+
+`MessageContentInfo` simplified to use `StoredContent` directly instead of a separate `MessageContentData` enum.
+
 ---
