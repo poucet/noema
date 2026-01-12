@@ -58,7 +58,8 @@ pub mod document_resolver;
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, TextStore, ConversationStore, DocumentStore, TurnStore, UserStore,
+    AssetStore, BlobStore, ConversationStore, DocumentStore, StorageTypes, TextStore, TurnStore,
+    UserStore,
 };
 
 // Types

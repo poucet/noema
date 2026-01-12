@@ -14,9 +14,7 @@ use std::sync::Arc;
 use crate::context::{ConversationContext, MessagesGuard};
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, ViewId};
-use crate::storage::traits::{
-    AssetStore, BlobStore, TextStore, ConversationStore, DocumentStore, UserStore,
-};
+use crate::storage::traits::StorageTypes;
 use crate::storage::types::{MessageRole, OriginKind, SpanRole};
 
 use super::types::{ResolvedContent, ResolvedMessage};
@@ -27,36 +25,29 @@ use super::types::{ResolvedContent, ResolvedMessage};
 
 /// Runtime session state - DB-agnostic
 ///
-/// Generic over storage types (B, A, T, C, U, D):
-/// - B: BlobStore implementation (for binary asset storage)
-/// - A: AssetStore implementation (for asset metadata)
-/// - T: TextStore implementation
-/// - C: ConversationStore implementation (includes TurnStore)
-/// - U: UserStore implementation
-/// - D: DocumentStore implementation
+/// Generic over `S: StorageTypes` which bundles all storage type associations.
 ///
 /// Session is runtime state: conversation context, current view, cached resolved messages.
 /// Implements ConversationContext for direct use with agents.
 ///
 /// # Type Derivation
 ///
-/// Define your storage types once in a Session type alias:
+/// Define your storage types once via `StorageTypes`:
 ///
 /// ```ignore
-/// type AppSession = Session<FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore>;
-/// type AppEngine = ChatEngine<AppSession>;
+/// struct AppStorage;
+/// impl StorageTypes for AppStorage {
+///     type Blob = FsBlobStore;
+///     type Asset = SqliteStore;
+///     // ...
+/// }
+///
+/// type AppSession = Session<AppStorage>;
+/// type AppEngine = ChatEngine<AppStorage>;
 /// ```
-pub struct Session<B, A, T, C, U, D>
-where
-    B: BlobStore,
-    A: AssetStore,
-    T: TextStore,
-    C: ConversationStore,
-    U: UserStore,
-    D: DocumentStore,
-{
+pub struct Session<S: StorageTypes> {
     /// Storage coordinator - provides access to all stores
-    coordinator: Arc<StorageCoordinator<B, A, T, C, U, D>>,
+    coordinator: Arc<StorageCoordinator<S>>,
     conversation_id: ConversationId,
     view_id: ViewId,
     /// Cached resolved messages (text resolved, assets/docs cached lazily)
@@ -69,21 +60,13 @@ where
     pending: Vec<ChatMessage>,
 }
 
-impl<B, A, T, C, U, D> Session<B, A, T, C, U, D>
-where
-    B: BlobStore + Send + Sync,
-    A: AssetStore + Send + Sync,
-    T: TextStore + Send + Sync,
-    C: ConversationStore + Send + Sync,
-    U: UserStore + Send + Sync,
-    D: DocumentStore + Send + Sync,
-{
+impl<S: StorageTypes> Session<S> {
     /// Open a session for an existing conversation
     ///
     /// Delegates view resolution to the StorageCoordinator which handles
     /// the multi-store coordination of getting/creating views and resolving content.
     pub async fn open(
-        coordinator: Arc<StorageCoordinator<B, A, T, C, U, D>>,
+        coordinator: Arc<StorageCoordinator<S>>,
         conversation_id: ConversationId,
     ) -> Result<Self> {
         let (view_id, resolved_cache) = coordinator.open_session(&conversation_id).await?;
@@ -101,7 +84,7 @@ where
 
     /// Create a new session for a new conversation (not yet persisted)
     pub fn new(
-        coordinator: Arc<StorageCoordinator<B, A, T, C, U, D>>,
+        coordinator: Arc<StorageCoordinator<S>>,
         conversation_id: ConversationId,
         view_id: ViewId,
     ) -> Self {
@@ -125,17 +108,17 @@ where
     }
 
     /// Get access to the storage coordinator
-    pub fn coordinator(&self) -> &Arc<StorageCoordinator<B, A, T, C, U, D>> {
+    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> {
         &self.coordinator
     }
 
     /// Get access to the conversation store (via coordinator)
-    pub fn conversation_store(&self) -> &Arc<C> {
+    pub fn conversation_store(&self) -> &Arc<S::Conversation> {
         self.coordinator.conversation_store()
     }
 
     /// Get access to the text store (via coordinator)
-    pub fn text_store(&self) -> &Arc<T> {
+    pub fn text_store(&self) -> &Arc<S::Text> {
         self.coordinator.content_block_store()
     }
 
@@ -216,15 +199,7 @@ where
 // ============================================================================
 
 #[async_trait]
-impl<B, A, T, C, U, D> ConversationContext for Session<B, A, T, C, U, D>
-where
-    B: BlobStore + Send + Sync,
-    A: AssetStore + Send + Sync,
-    T: TextStore + Send + Sync,
-    C: ConversationStore + Send + Sync,
-    U: UserStore + Send + Sync,
-    D: DocumentStore + Send + Sync,
-{
+impl<S: StorageTypes> ConversationContext for Session<S> {
     async fn messages(&mut self) -> Result<MessagesGuard<'_>> {
         // Rebuild llm_cache if invalid or pending messages changed
         let needs_rebuild = !self.llm_cache_valid ||

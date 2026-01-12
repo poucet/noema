@@ -12,14 +12,13 @@ use anyhow::Result;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use llm::ContentBlock;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::storage::content::{ContentResolver, StoredContent};
 use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
-use crate::storage::traits::{
-    AssetStore, BlobStore, TextStore, ConversationStore, DocumentStore, UserStore,
-};
+use crate::storage::traits::StorageTypes;
 use crate::storage::types::{
     Asset, ContentBlock as ContentBlockData, ContentOrigin, ConversationInfo, MessageInfo,
     MessageRole, OriginKind, TurnWithContent, UserInfo,
@@ -27,47 +26,27 @@ use crate::storage::types::{
 
 /// Coordinates storage across all store types.
 ///
-/// Type parameters:
-/// - `B`: Blob storage (filesystem)
-/// - `A`: Asset metadata storage
-/// - `T`: Text content storage
-/// - `C`: Conversation storage (includes TurnStore via supertrait)
-/// - `U`: User storage
-/// - `D`: Document storage
-pub struct StorageCoordinator<B, A, T, C, U, D>
-where
-    B: BlobStore,
-    A: AssetStore,
-    T: TextStore,
-    C: ConversationStore,
-    U: UserStore,
-    D: DocumentStore,
-{
-    blob_store: Arc<B>,
-    asset_store: Arc<A>,
-    content_block_store: Arc<T>,
-    conversation_store: Arc<C>,
-    user_store: Arc<U>,
-    document_store: Arc<D>,
+/// Generic over `S: StorageTypes` which bundles all storage type associations.
+/// Access individual stores via associated types: `S::Blob`, `S::Asset`, etc.
+pub struct StorageCoordinator<S: StorageTypes> {
+    blob_store: Arc<S::Blob>,
+    asset_store: Arc<S::Asset>,
+    content_block_store: Arc<S::Text>,
+    conversation_store: Arc<S::Conversation>,
+    user_store: Arc<S::User>,
+    document_store: Arc<S::Document>,
+    _marker: PhantomData<S>,
 }
 
-impl<B, A, T, C, U, D> StorageCoordinator<B, A, T, C, U, D>
-where
-    B: BlobStore,
-    A: AssetStore,
-    T: TextStore,
-    C: ConversationStore,
-    U: UserStore,
-    D: DocumentStore,
-{
+impl<S: StorageTypes> StorageCoordinator<S> {
     /// Create a new storage coordinator
     pub fn new(
-        blob_store: Arc<B>,
-        asset_store: Arc<A>,
-        content_block_store: Arc<T>,
-        conversation_store: Arc<C>,
-        user_store: Arc<U>,
-        document_store: Arc<D>,
+        blob_store: Arc<S::Blob>,
+        asset_store: Arc<S::Asset>,
+        content_block_store: Arc<S::Text>,
+        conversation_store: Arc<S::Conversation>,
+        user_store: Arc<S::User>,
+        document_store: Arc<S::Document>,
     ) -> Self {
         Self {
             blob_store,
@@ -76,6 +55,7 @@ where
             conversation_store,
             user_store,
             document_store,
+            _marker: PhantomData,
         }
     }
 
@@ -159,22 +139,22 @@ where
     }
 
     /// Get access to the content block store
-    pub fn content_block_store(&self) -> &Arc<T> {
+    pub fn content_block_store(&self) -> &Arc<S::Text> {
         &self.content_block_store
     }
 
     /// Get access to the conversation store (includes TurnStore methods)
-    pub fn conversation_store(&self) -> &Arc<C> {
+    pub fn conversation_store(&self) -> &Arc<S::Conversation> {
         &self.conversation_store
     }
 
     /// Get access to the user store
-    pub fn user_store(&self) -> &Arc<U> {
+    pub fn user_store(&self) -> &Arc<S::User> {
         &self.user_store
     }
 
     /// Get access to the document store
-    pub fn document_store(&self) -> &Arc<D> {
+    pub fn document_store(&self) -> &Arc<S::Document> {
         &self.document_store
     }
 
@@ -342,15 +322,7 @@ where
 
 /// Implement ContentResolver for the generic coordinator
 #[async_trait]
-impl<B, A, T, C, U, D> ContentResolver for StorageCoordinator<B, A, T, C, U, D>
-where
-    B: BlobStore,
-    A: AssetStore,
-    T: TextStore,
-    C: ConversationStore,
-    U: UserStore,
-    D: DocumentStore,
-{
+impl<S: StorageTypes> ContentResolver for StorageCoordinator<S> {
     async fn get_text(&self, id: &ContentBlockId) -> Result<String> {
         self.content_block_store
             .get_text(id)
@@ -374,15 +346,7 @@ where
 
 /// Implement DocumentResolver by delegating to the document store
 #[async_trait]
-impl<B, A, T, C, U, D> crate::storage::DocumentResolver for StorageCoordinator<B, A, T, C, U, D>
-where
-    B: BlobStore,
-    A: AssetStore,
-    T: TextStore,
-    C: ConversationStore,
-    U: UserStore,
-    D: DocumentStore,
-{
+impl<S: StorageTypes> crate::storage::DocumentResolver for StorageCoordinator<S> {
     async fn resolve_documents(
         &self,
         doc_ids: &[crate::storage::ids::DocumentId],
@@ -396,7 +360,7 @@ mod tests {
     use super::*;
     use crate::storage::content::StoredContent;
     use crate::storage::ids::{ConversationId, DocumentId, MessageId, RevisionId, SpanId, TabId, TurnId, ViewId};
-    use crate::storage::traits::TurnStore;
+    use crate::storage::traits::{AssetStore, BlobStore, ConversationStore, DocumentStore, TextStore, TurnStore, UserStore};
     use crate::storage::types::{
         DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
         MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, StoredAsset,
@@ -405,6 +369,18 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
     use uuid::Uuid;
+
+    /// Mock storage types bundled together
+    struct MockStorage;
+
+    impl StorageTypes for MockStorage {
+        type Blob = MockBlobStore;
+        type Asset = MockAssetStore;
+        type Text = MockTextStore;
+        type Conversation = MockConversationStore;
+        type User = MockUserStore;
+        type Document = MockDocumentStore;
+    }
 
     // Mock conversation store (implements TurnStore + ConversationStore)
     struct MockConversationStore;
@@ -631,7 +607,7 @@ mod tests {
         }
     }
 
-    fn make_coordinator(content_block_store: Arc<MockTextStore>) -> StorageCoordinator<MockBlobStore, MockAssetStore, MockTextStore, MockConversationStore, MockUserStore, MockDocumentStore> {
+    fn make_coordinator(content_block_store: Arc<MockTextStore>) -> StorageCoordinator<MockStorage> {
         StorageCoordinator::new(
             Arc::new(MockBlobStore::new()),
             Arc::new(MockAssetStore::new()),
@@ -646,7 +622,7 @@ mod tests {
         blob_store: Arc<MockBlobStore>,
         asset_store: Arc<MockAssetStore>,
         content_block_store: Arc<MockTextStore>,
-    ) -> StorageCoordinator<MockBlobStore, MockAssetStore, MockTextStore, MockConversationStore, MockUserStore, MockDocumentStore> {
+    ) -> StorageCoordinator<MockStorage> {
         StorageCoordinator::new(
             blob_store,
             asset_store,

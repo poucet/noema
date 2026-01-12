@@ -5,6 +5,7 @@ use noema_audio::VoiceCoordinator;
 use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::storage::ids::{ConversationId, UserId};
 use noema_core::storage::session::Session;
+use noema_core::storage::traits::StorageTypes;
 use noema_core::storage::{FsBlobStore, SqliteStore};
 use noema_core::{ChatEngine, McpRegistry};
 use std::collections::HashMap;
@@ -12,23 +13,26 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 // ============================================================================
-// App Storage Types - Define once via macro
+// App Storage Types - Define once via StorageTypes
 // ============================================================================
 
-/// Define all storage-parameterized types from a single set of type parameters.
-/// Usage: define_storage_types!(B, A, T, C, U, D)
-macro_rules! define_storage_types {
-    ($B:ty, $A:ty, $T:ty, $C:ty, $U:ty, $D:ty) => {
-        pub type AppSession = Session<$B, $A, $T, $C, $U, $D>;
-        pub type AppCoordinator = StorageCoordinator<$B, $A, $T, $C, $U, $D>;
-        pub type AppEngine = ChatEngine<$B, $A, $T, $C, $U, $D>;
-    };
+/// Application storage configuration.
+///
+/// Defines all storage type associations in one place.
+pub struct AppStorage;
+
+impl StorageTypes for AppStorage {
+    type Blob = FsBlobStore;
+    type Asset = SqliteStore;
+    type Text = SqliteStore;
+    type Conversation = SqliteStore;
+    type User = SqliteStore;
+    type Document = SqliteStore;
 }
 
-// Storage types defined once:
-// B = FsBlobStore, A = SqliteStore (asset), T = SqliteStore (text)
-// C = SqliteStore (conversation), U = SqliteStore (user), D = SqliteStore (document)
-define_storage_types!(FsBlobStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore, SqliteStore);
+pub type AppSession = Session<AppStorage>;
+pub type AppCoordinator = StorageCoordinator<AppStorage>;
+pub type AppEngine = ChatEngine<AppStorage>;
 
 pub struct AppState {
     pub coordinator: Mutex<Option<Arc<AppCoordinator>>>,
