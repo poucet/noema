@@ -428,7 +428,7 @@ mod tests {
             Ok(self.blocks.lock().unwrap().contains_key(id.as_str()))
         }
 
-        async fn find_by_hash(&self, _hash: &str) -> Result<Option<StoredContentBlock>> {
+        async fn find_by_hash(&self, _hash: &str) -> Result<Option<ContentBlockId>> {
             Ok(None)
         }
     }
