@@ -8,6 +8,7 @@ mod state;
 mod types;
 
 use config::PathManager;
+use noema_core::storage::ids::AssetId;
 use tauri::http::Response;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -56,9 +57,10 @@ async fn handle_asset_request(
     };
     drop(coordinator_guard);
 
-    // Read the asset from blob store (asset_id here is actually the blob hash)
-    let data = match coordinator.get_blob(asset_id).await {
-        Ok(data) => data,
+    // Look up asset by ID and get blob data
+    let asset_id_typed = AssetId::from_string(asset_id.to_string());
+    let (data, mime_type) = match coordinator.get_asset_data(&asset_id_typed).await {
+        Ok(result) => result,
         Err(_) => {
             return Response::builder()
                 .status(404)
@@ -67,18 +69,6 @@ async fn handle_asset_request(
                 .unwrap();
         }
     };
-
-    // Determine content type from asset_id query param or default
-    // Frontend should pass ?mime_type=image/png in the URL
-    let mime_type = request
-        .uri()
-        .query()
-        .and_then(|q| {
-            q.split('&')
-                .find(|p| p.starts_with("mime_type="))
-                .map(|p| p.trim_start_matches("mime_type="))
-        })
-        .unwrap_or("application/octet-stream");
 
     // Build response with caching headers
     // Assets are immutable (content-addressed), so we can cache forever

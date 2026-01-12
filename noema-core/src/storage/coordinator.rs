@@ -136,9 +136,23 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.asset_store.create_asset(asset).await
     }
 
-    /// Get blob data by hash (for asset protocol handler)
+    /// Get blob data by hash
     pub async fn get_blob(&self, hash: &str) -> Result<Vec<u8>> {
         self.blob_store.get(hash).await
+    }
+
+    /// Get asset data by asset ID (for asset protocol handler)
+    ///
+    /// Returns (data, mime_type) for the asset.
+    pub async fn get_asset_data(&self, asset_id: &AssetId) -> Result<(Vec<u8>, String)> {
+        let stored_asset = self
+            .asset_store
+            .get(asset_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", asset_id))?;
+
+        let data = self.blob_store.get(&stored_asset.asset.blob_hash).await?;
+        Ok((data, stored_asset.asset.mime_type))
     }
 
     /// Get access to the content block store
