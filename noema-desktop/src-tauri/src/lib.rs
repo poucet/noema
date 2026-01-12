@@ -24,21 +24,21 @@ pub use commands::*;
 // Asset Protocol Handler
 // ============================================================================
 
-/// Handle requests to noema-asset://localhost/{asset_id}
-/// Returns the asset with proper caching headers
+/// Handle requests to noema-asset://localhost/{blob_hash}
+/// Returns the blob with proper caching headers
 async fn handle_asset_request(
     request: &tauri::http::Request<Vec<u8>>,
     app_state: Arc<AppState>,
 ) -> Response<Vec<u8>> {
-    // Parse asset_id from path: /asset_id or /{asset_id}
+    // Parse blob_hash from path: /{blob_hash}
     let path = request.uri().path();
-    let asset_id = path.trim_start_matches('/');
+    let blob_hash = path.trim_start_matches('/');
 
-    if asset_id.is_empty() {
+    if blob_hash.is_empty() {
         return Response::builder()
             .status(400)
             .header("Content-Type", "text/plain")
-            .body("Missing asset_id".as_bytes().to_vec())
+            .body("Missing blob_hash".as_bytes().to_vec())
             .unwrap();
     }
 
@@ -56,8 +56,7 @@ async fn handle_asset_request(
     };
     drop(coordinator_guard);
 
-    // Path is the blob hash - fetch directly from blob store
-    let blob_hash = asset_id; // URL path is the blob hash
+    // Fetch blob directly by hash
     let data = match coordinator.get_blob(blob_hash).await {
         Ok(data) => data,
         Err(_) => {
@@ -81,13 +80,13 @@ async fn handle_asset_request(
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
     // Build response with caching headers
-    // Assets are immutable (content-addressed), so we can cache forever
+    // Blobs are immutable (content-addressed), so we can cache forever
     Response::builder()
         .status(200)
         .header("Content-Type", mime_type)
         .header("Content-Length", data.len().to_string())
         .header("Cache-Control", "public, max-age=31536000, immutable")
-        .header("ETag", format!("\"{}\"", asset_id))
+        .header("ETag", format!("\"{}\"", blob_hash))
         .body(data)
         .unwrap()
 }
