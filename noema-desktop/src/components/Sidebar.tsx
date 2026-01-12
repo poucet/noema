@@ -11,9 +11,9 @@ interface SidebarProps {
   onOpenSettings: () => void;
 }
 
-function formatDate(timestamp: number): string {
+function formatDate(timestamp: number | bigint): string {
   // Timestamp is already in milliseconds (epoch ms from Rust i64)
-  const date = new Date(timestamp);
+  const date = new Date(Number(timestamp));
   const now = new Date();
   const diffDays = Math.floor(
     (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)

@@ -1235,3 +1235,29 @@ The TypeScript frontend (`tauri.ts`) was still exporting legacy commands that ha
 Basic conversations work. Advanced features (forking, span selection, view switching) are disabled with warnings until backend implementation is complete.
 
 ---
+
+## 2026-01-12: Fix basic conversation functionality
+
+### Issues Found
+
+1. **Empty LLM content**: `Session.messages()` wasn't including pending messages in the returned list, so the LLM received an empty conversation.
+
+2. **Timestamp display**: Frontend was multiplying timestamps by 1000 (expecting seconds), but backend sends milliseconds.
+
+3. **Missing types.ts**: Components importing from `../../types` had no file to resolve to.
+
+4. **Build errors**: `AddMcpServerRequest` required all fields but callers only provided required ones.
+
+### Fixes
+
+1. **[session.rs](noema-core/src/storage/session/session.rs)**: Fixed `messages()` to include pending messages in `llm_cache`.
+
+2. **[ConversationsPanel.tsx](noema-desktop/src/components/panels/ConversationsPanel.tsx)**: Removed `* 1000` from timestamp conversion.
+
+3. **[types.ts](noema-desktop/src/types.ts)**: Created re-export file for generated types.
+
+4. **[tauri.ts](noema-desktop/src/tauri.ts)**: Added `AddMcpServerOptions` helper type with optional fields, shim function fills defaults.
+
+5. **[App.tsx](noema-desktop/src/App.tsx)**: Commented out unused `setCurrentThreadId` state.
+
+---

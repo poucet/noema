@@ -177,16 +177,28 @@ impl<S: TurnStore + Send + Sync> Session<S> {
 #[async_trait]
 impl<S: TurnStore + Send + Sync> ConversationContext for Session<S> {
     async fn messages(&mut self) -> Result<MessagesGuard<'_>> {
-        // For now, return resolved messages converted to ChatMessage
-        // TODO: Use proper AssetResolver here
-        if !self.llm_cache_valid {
+        // Rebuild llm_cache if invalid or pending messages changed
+        // Note: We always need to include pending messages, so rebuild if pending is non-empty
+        let needs_rebuild = !self.llm_cache_valid ||
+            self.llm_cache.len() != self.resolved_cache.len() + self.pending.len();
+
+        if needs_rebuild {
             self.llm_cache.clear();
+            self.llm_cache.reserve(self.resolved_cache.len() + self.pending.len());
+
+            // Add resolved (committed) messages
             for msg in &self.resolved_cache {
                 let blocks = resolved_message_to_blocks(msg);
                 let role = msg.role.into();
                 self.llm_cache.push(ChatMessage::new(role, ChatPayload::new(blocks)));
             }
-            self.llm_cache_valid = true;
+
+            // Add pending (uncommitted) messages
+            for msg in &self.pending {
+                self.llm_cache.push(msg.clone());
+            }
+
+            self.llm_cache_valid = self.pending.is_empty(); // Only cache-valid if no pending
         }
 
         Ok(MessagesGuard::new(&self.llm_cache))

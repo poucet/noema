@@ -342,16 +342,21 @@ pub struct AddMcpServerRequest {
     pub name: String,
     pub url: String,
     pub auth_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[ts(optional)]
     pub token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[ts(optional)]
     pub client_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[ts(optional)]
     pub client_secret: Option<String>,
     #[serde(default)]
-    pub scopes: Vec<String>,
+    #[ts(optional)]
+    pub scopes: Option<Vec<String>>,
     #[serde(default)]
-    pub use_well_known: bool,
+    #[ts(optional)]
+    pub use_well_known: Option<bool>,
 }
 
 /// Attachment from frontend for message sending

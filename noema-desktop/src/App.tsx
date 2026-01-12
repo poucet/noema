@@ -42,8 +42,9 @@ function App() {
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   // Document selected in the documents activity (shown in main panel)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  // Current thread ID (null = main thread) - value may be needed later for thread switching
-  const [_currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  // Current view ID (null = main view) - value may be needed later for view switching
+  // Disabled until view switching is implemented in the backend
+  // const [_currentViewId, setCurrentViewId] = useState<string | null>(null);
   // Pending fork: when set, the next message will create a fork from this span
   // Unlike episteme's complex approach, we keep it simple: just store the spanId,
   // and when user sends a message, backend creates a new conversation

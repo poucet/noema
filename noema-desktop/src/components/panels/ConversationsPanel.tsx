@@ -11,9 +11,9 @@ interface ConversationsPanelProps {
   pendingFork?: boolean;
 }
 
-function formatDate(timestamp: number): string {
-  // Backend sends unix seconds, JavaScript expects milliseconds
-  const date = new Date(timestamp * 1000);
+function formatDate(timestamp: number | bigint): string {
+  // Backend sends unix milliseconds, JavaScript Date expects milliseconds
+  const date = new Date(Number(timestamp));
   const now = new Date();
   const diffDays = Math.floor(
     (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
