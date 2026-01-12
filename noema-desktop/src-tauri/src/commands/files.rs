@@ -5,7 +5,6 @@ use tauri_plugin_dialog::DialogExt;
 use std::sync::Arc;
 
 use noema_core::storage::{Asset, AssetStore};
-use noema_core::storage::ids::AssetId;
 use crate::logging::log_message;
 use crate::state::AppState;
 
@@ -73,7 +72,7 @@ pub async fn save_file(
 
 /// Store an asset in blob storage
 ///
-/// Returns the asset ID (SHA-256 hash) for referencing in messages.
+/// Returns the asset ID (UUID) for referencing in messages.
 #[tauri::command]
 pub async fn store_asset(
     state: State<'_, Arc<AppState>>,
@@ -92,26 +91,25 @@ pub async fn store_asset(
         .as_ref()
         .ok_or("Blob store not initialized")?;
 
-    // Store in blob storage
+    // Store in blob storage (returns hash for deduplication)
     let stored = blob_store
         .store(&bytes)
         .await
         .map_err(|e| format!("Failed to store blob: {}", e))?;
 
-    // Register metadata in SQLite
+    // Register metadata in SQLite with blob_hash reference
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Store not initialized")?;
 
-    let asset_id = AssetId::from_string(&stored.hash);
-    let mut asset = Asset::new(&mime_type, bytes.len() as i64);
+    let mut asset = Asset::new(&stored.hash, &mime_type, bytes.len() as i64);
     if let Some(name) = filename {
         asset = asset.with_filename(name);
     }
 
-    store
-        .store(asset_id, asset)
+    let asset_id = store
+        .create_asset(asset)
         .await
         .map_err(|e| format!("Failed to register asset: {}", e))?;
 
-    Ok(stored.hash)
+    Ok(asset_id.into())
 }
