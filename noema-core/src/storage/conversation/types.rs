@@ -1,18 +1,119 @@
-//! Conversation structure types for the Unified Content Model
+//! Conversation structure types
 //!
-//! This module defines the Turn/Span/Message hierarchy:
-//! - Turn: A position in the conversation sequence
-//! - Span: An alternative response at a turn (owned by user or assistant)
-//! - Message: Individual content within a span
+//! This module defines types for both the legacy conversation model
+//! and the new Turn/Span/Message hierarchy (Unified Content Model).
+//!
+//! ## Legacy Types (used during migration)
+//! - `SpanType` - User or assistant span type
+//! - `ConversationInfo` - Conversation metadata for listing
+//! - `ThreadInfo` - Thread metadata
+//! - `SpanInfo` (legacy) - Span metadata with selection state
+//! - `SpanSetInfo` - SpanSet metadata
+//! - `SpanSetWithContent` - SpanSet with messages
+//!
+//! ## New Types (Turn/Span/Message hierarchy)
+//! - `TurnInfo` - A position in the conversation sequence
+//! - `NewSpanInfo` - A span of messages at a turn
+//! - `MessageInfo` - Individual content within a span
+//! - `ViewInfo` - A path through spans
 
-use anyhow::Result;
-use async_trait::async_trait;
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
+use crate::storage::content::StoredMessage;
 use crate::storage::ids::{ContentBlockId, ConversationId, MessageId, SpanId, TurnId, ViewId};
 
 // ============================================================================
-// Span Role
+// Legacy Types (for migration compatibility)
+// ============================================================================
+
+/// Span type (user input or assistant response)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacySpanType {
+    User,
+    Assistant,
+}
+
+impl ToString for LegacySpanType {
+    fn to_string(&self) -> String {
+        match self {
+            LegacySpanType::User => "user".to_string(),
+            LegacySpanType::Assistant => "assistant".to_string(),
+        }
+    }
+}
+
+impl FromStr for LegacySpanType {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "user" => Ok(LegacySpanType::User),
+            "assistant" => Ok(LegacySpanType::Assistant),
+            _ => Err(format!("{s} is not a valid LegacySpanType")),
+        }
+    }
+}
+
+/// Information about a conversation for listing/display
+#[derive(Debug, Clone)]
+pub struct LegacyConversationInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub message_count: usize,
+    /// Whether this conversation contains private/sensitive content
+    /// When true, warns before using cloud models
+    pub is_private: bool,
+    /// Unix timestamp when created
+    pub created_at: i64,
+    /// Unix timestamp when last updated
+    pub updated_at: i64,
+}
+
+/// Information about a thread (for listing threads/branches)
+#[derive(Debug, Clone)]
+pub struct LegacyThreadInfo {
+    pub id: String,
+    pub conversation_id: String,
+    pub parent_span_id: Option<String>,
+    pub name: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+}
+
+/// Information about a span (one model's response within a SpanSet)
+#[derive(Debug, Clone)]
+pub struct LegacySpanInfo {
+    pub id: String,
+    pub model_id: Option<String>,
+    pub message_count: usize,
+    pub is_selected: bool,
+    pub created_at: i64,
+}
+
+/// Information about a SpanSet (position in conversation)
+#[derive(Debug, Clone)]
+pub struct LegacySpanSetInfo {
+    pub id: String,
+    pub thread_id: String,
+    pub sequence_number: i64,
+    pub span_type: LegacySpanType,
+    pub selected_span_id: Option<String>,
+    pub created_at: i64,
+}
+
+/// A SpanSet with its selected span's messages
+#[derive(Debug, Clone)]
+pub struct LegacySpanSetWithContent {
+    pub id: String,
+    pub span_type: LegacySpanType,
+    pub messages: Vec<StoredMessage>,
+    pub alternates: Vec<LegacySpanInfo>,
+}
+
+// ============================================================================
+// New Types: Span Role
 // ============================================================================
 
 /// Role identifying who owns a span (user or assistant)
@@ -329,142 +430,6 @@ pub struct SpanWithMessages {
     pub span: SpanInfo,
     /// Messages in the span
     pub messages: Vec<MessageInfo>,
-}
-
-// ============================================================================
-// Turn Store Trait
-// ============================================================================
-
-/// Trait for Turn/Span/Message storage operations
-///
-/// This trait defines the operations for the new conversation structure.
-/// It coexists with the legacy `ConversationStore` trait during migration.
-#[async_trait]
-pub trait TurnStore: Send + Sync {
-    // ========== Turn Management ==========
-
-    /// Add a new turn to a conversation
-    ///
-    /// Creates a turn at the next sequence number. Also creates a default span
-    /// for the turn and selects it in the main view.
-    async fn add_turn(
-        &self,
-        conversation_id: &ConversationId,
-        role: SpanRole,
-    ) -> Result<TurnInfo>;
-
-    /// Get all turns for a conversation in sequence order
-    async fn get_turns(&self, conversation_id: &ConversationId) -> Result<Vec<TurnInfo>>;
-
-    /// Get a specific turn by ID
-    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<TurnInfo>>;
-
-    // ========== Span Management ==========
-
-    /// Add a new span to a turn
-    ///
-    /// Creates an additional span at the given turn (for parallel responses
-    /// or regenerations).
-    async fn add_span(
-        &self,
-        turn_id: &TurnId,
-        model_id: Option<&str>,
-    ) -> Result<SpanInfo>;
-
-    /// Get all spans for a turn
-    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<SpanInfo>>;
-
-    /// Get a specific span by ID
-    async fn get_span(&self, span_id: &SpanId) -> Result<Option<SpanInfo>>;
-
-    // ========== Message Management ==========
-
-    /// Add a message to a span
-    ///
-    /// The message text is stored in the content_blocks table and referenced
-    /// by content_id.
-    async fn add_message(
-        &self,
-        span_id: &SpanId,
-        message: NewMessage,
-    ) -> Result<MessageInfo>;
-
-    /// Get all messages for a span in sequence order
-    async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageInfo>>;
-
-    /// Get a specific message by ID
-    async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>>;
-
-    // ========== View Management ==========
-
-    /// Create a new view for a conversation
-    ///
-    /// If `is_main` is true, this becomes the main view. A conversation can
-    /// only have one main view.
-    async fn create_view(
-        &self,
-        conversation_id: &ConversationId,
-        name: Option<&str>,
-        is_main: bool,
-    ) -> Result<ViewInfo>;
-
-    /// Get all views for a conversation
-    async fn get_views(&self, conversation_id: &ConversationId) -> Result<Vec<ViewInfo>>;
-
-    /// Get the main view for a conversation
-    async fn get_main_view(&self, conversation_id: &ConversationId) -> Result<Option<ViewInfo>>;
-
-    /// Select a span for a turn within a view
-    ///
-    /// Updates which span is selected at the given turn for the given view.
-    async fn select_span(
-        &self,
-        view_id: &ViewId,
-        turn_id: &TurnId,
-        span_id: &SpanId,
-    ) -> Result<()>;
-
-    /// Get the selected span for a turn within a view
-    async fn get_selected_span(
-        &self,
-        view_id: &ViewId,
-        turn_id: &TurnId,
-    ) -> Result<Option<SpanId>>;
-
-    /// Get the full view path (all turns with their selected spans and messages)
-    async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>>;
-
-    /// Fork a view at a specific turn
-    ///
-    /// Creates a new view that shares selections with the original up to (but
-    /// not including) the fork turn.
-    async fn fork_view(
-        &self,
-        view_id: &ViewId,
-        at_turn_id: &TurnId,
-        name: Option<&str>,
-    ) -> Result<ViewInfo>;
-
-    // ========== Convenience Methods ==========
-
-    /// Add a complete user turn (turn + span + message)
-    ///
-    /// Creates a user turn with a single span containing the given message.
-    async fn add_user_turn(
-        &self,
-        conversation_id: &ConversationId,
-        text: &str,
-    ) -> Result<(TurnInfo, SpanInfo, MessageInfo)>;
-
-    /// Add a complete assistant turn (turn + span + message)
-    ///
-    /// Creates an assistant turn with a single span containing the given message.
-    async fn add_assistant_turn(
-        &self,
-        conversation_id: &ConversationId,
-        model_id: &str,
-        text: &str,
-    ) -> Result<(TurnInfo, SpanInfo, MessageInfo)>;
 }
 
 #[cfg(test)]

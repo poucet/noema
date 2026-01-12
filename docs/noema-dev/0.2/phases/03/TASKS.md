@@ -13,13 +13,11 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ✅ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
-| 🔄 | P0 | 3.3 | Views and forking | Named paths through conversations, fork support |
+| 🔄 | P0 | 3.3 | Views, forking, and migration | Complete conversation model with legacy removal |
 | ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
 | ⬜ | P2 | 3.7 | Temporal queries | Time-based activity summaries for LLM context |
-| ⬜ | P2 | 3.8 | Session integration | Connect engine to new conversation model |
-| ⬜ | P2 | 3.9 | Migration and cleanup | Remove legacy tables |
 
 Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
 
@@ -79,7 +77,11 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.2.12 | 🔧 User: E2E verification in noema app |
 | ✅ | 3.2.13 | 🔧 User: SQL verify data in new tables |
 
-### 3.3 Views and Forking (11 tasks)
+### 3.3 Views, Forking, and Migration (21 tasks)
+
+**Goal**: Complete the conversation model and remove legacy system. After 3.3, the app runs entirely on Turn/Span/Message/View model.
+
+#### Part A: Views and Forking (8 tasks)
 
 | Status | # | Task |
 |--------|---|------|
@@ -89,11 +91,36 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.4 | ⚡ Implement select_span, get_selected_span |
 | ✅ | 3.3.5 | ⚡ Implement get_view_path |
 | ✅ | 3.3.6 | ⚡ Implement fork_view |
-| ⬜ | 3.3.7 | ⚡ Implement edit_turn (splice) |
+| ✅ | 3.3.7 | ⚡ Implement edit_turn, fork_view_with_selections, get_view_context_at |
 | ✅ | 3.3.8 | ✅ Unit tests for views and forking |
-| ⬜ | 3.3.9 | 🔧 User: E2E verification - fork conversation in noema app |
-| ⬜ | 3.3.10 | 🔧 User: SQL verify `SELECT * FROM views` shows data |
-| ⬜ | 3.3.11 | 🔧 User: SQL verify `SELECT * FROM view_selections` shows data |
+
+#### Part B: Session Integration (6 tasks)
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.9 | 🏗️ Create adapter types for session (replaces dual-write) |
+| ⬜ | 3.3.10 | ⚡ Implement commit() using only TurnStore |
+| ⬜ | 3.3.11 | ⚡ Implement open_conversation() loading from main view |
+| ⬜ | 3.3.12 | ⚡ Implement commit_parallel_responses() creating multiple spans |
+| ⬜ | 3.3.13 | 🔧 Update engine to use new session adapter |
+| ⬜ | 3.3.14 | ✅ Integration tests with engine |
+
+#### Part C: Legacy Cleanup (5 tasks)
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.15 | ✅ Verify all features work with new model only |
+| ⬜ | 3.3.16 | 🧹 Drop legacy conversation tables (threads, span_sets, legacy_spans, legacy_span_messages) |
+| ⬜ | 3.3.17 | 🧹 Remove ConversationStore trait and legacy types |
+| ⬜ | 3.3.18 | 🧹 Remove dual-write code paths in session |
+
+#### Part D: Final Verification (3 tasks)
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.19 | 🔧 User: E2E verification - fork conversation in noema app |
+| ⬜ | 3.3.20 | 🔧 User: SQL verify views and view_selections have data |
+| ⬜ | 3.3.21 | ✅ Final E2E: fresh install, all conversation features work
 
 ### 3.4 Document Structure (10 tasks)
 
@@ -149,27 +176,6 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ⬜ | 3.7.4 | ⚡ Implement get_activity_summary |
 | ⬜ | 3.7.5 | ⚡ Implement LLM context rendering |
 | ⬜ | 3.7.6 | ✅ Unit tests for temporal queries |
-
-### 3.8 Session Integration (6 tasks)
-
-| Status | # | Task |
-|--------|---|------|
-| ⬜ | 3.8.1 | 🏗️ Create adapter types for session |
-| ⬜ | 3.8.2 | ⚡ Implement commit() with new model |
-| ⬜ | 3.8.3 | ⚡ Implement open_conversation() |
-| ⬜ | 3.8.4 | ⚡ Implement commit_parallel_responses() |
-| ⬜ | 3.8.5 | 🔧 Update engine to use adapter |
-| ⬜ | 3.8.6 | ✅ Integration tests with engine |
-
-### 3.9 Migration and Cleanup (5 tasks)
-
-| Status | # | Task |
-|--------|---|------|
-| ⬜ | 3.9.1 | ✅ Verify all features work with new model |
-| ⬜ | 3.9.2 | 🧹 Drop legacy conversation tables |
-| ⬜ | 3.9.3 | 🧹 Drop legacy document tables |
-| ⬜ | 3.9.4 | 🧹 Remove old code paths |
-| ⬜ | 3.9.5 | ✅ Final verification |
 
 ---
 
@@ -289,11 +295,11 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 
 ---
 
-### Feature 3.3: Views and Forking
+### Feature 3.3: Views, Forking, and Migration
 
-**Problem**: No way to branch conversations, compare different paths, or edit mid-conversation.
+**Problem**: No way to branch conversations, compare different paths, or edit mid-conversation. Additionally, legacy dual-write adds complexity and technical debt.
 
-**Solution**: Views select one span per turn, creating named paths through the conversation.
+**Solution**: Views select one span per turn, creating named paths through the conversation. Complete the migration to the new model by replacing dual-write with TurnStore-only writes and removing legacy tables.
 
 **Functional Requirements**:
 - Views select which span to use at each turn
@@ -301,11 +307,14 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 - Fork creates new view sharing selections up to fork point
 - Span selection affects subsequent context
 - Views are cheap (just selection pointers, content not duplicated)
+- Session integration: `commit()` and `open_conversation()` use TurnStore exclusively
+- Legacy cleanup: Remove old tables and ConversationStore trait
 
 **Use Cases Enabled**:
 - Fork conversation: Branch from turn 3, explore different direction
 - Edit and splice: New span at turn 3, reuse turns 4-5 from original
 - A/B comparison: Two views selecting different spans
+- Clean codebase: No legacy code paths, single conversation model
 
 **Acceptance Criteria**:
 - [ ] Create view for conversation
@@ -313,19 +322,10 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 - [ ] Fork view at turn N shares turns 1..(N-1)
 - [ ] Forked view can select different spans after fork point
 - [ ] Get view path returns selected span messages in order
-
-**Microtask Details**:
-
-| # | Create | Update | Implement | SQL | Test |
-|---|--------|--------|-----------|-----|------|
-| 3.3.1 | — | schema/migrations | — | `views` table | fresh DB |
-| 3.3.2 | — | schema/migrations | — | `view_selections` table, PK | fresh DB |
-| 3.3.3 | — | sqlite.rs | `create_view()`, auto-create main view | — | compile |
-| 3.3.4 | — | sqlite.rs | `select_span()` upsert, auto-select first | — | compile |
-| 3.3.5 | — | sqlite.rs | `get_view_path()` → `Vec<(Turn, Span, Messages)>` | — | compile |
-| 3.3.6 | — | sqlite.rs | `fork_view()`, copy selections, set forked_from | — | compile |
-| 3.3.7 | — | sqlite.rs | `edit_turn()`, `fork_view_with_selections()`, `get_view_context_at()` | — | compile |
-| 3.3.8 | `storage/conversation/tests.rs` | — | — | — | path, fork, splice, multi-view |
+- [ ] Session commit() writes only to TurnStore tables
+- [ ] Session open_conversation() reads from main view path
+- [ ] Legacy tables dropped, no dual-write code remains
+- [ ] Fresh install works with new model only
 
 ---
 
@@ -492,66 +492,6 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | 3.7.4 | — | sqlite.rs | `get_activity_summary()` counts, active conversations | — | compile |
 | 3.7.5 | — | sqlite.rs | `render_activity_context()` markdown, headers, timestamps, token budget | — | compile |
 | 3.7.6 | `storage/temporal/tests.rs` | — | — | — | range query, summary, render |
-
----
-
-### Feature 3.8: Session Integration
-
-**Problem**: Engine session uses old conversation model. Need to connect to new structure.
-
-**Solution**: Adapter connecting SqliteSession to Turn/Span/Message model.
-
-**Functional Requirements**:
-- `commit()` creates turn + span + messages
-- Message text stored via content block store
-- `commit_parallel_responses()` creates one turn with multiple spans
-- `open_conversation()` loads main view's selected spans
-- Existing session API preserved (engine unchanged)
-
-**Acceptance Criteria**:
-- [ ] Send message → creates turn, span, message, content block
-- [ ] Load conversation → returns messages from main view path
-- [ ] Parallel responses → multiple spans at same turn
-- [ ] Engine works without modification
-
-**Microtask Details**:
-
-| # | Create | Update | Implement | SQL | Test |
-|---|--------|--------|-----------|-----|------|
-| 3.8.1 | `storage/session/adapter.rs` | — | `SessionAdapter` with store refs, map old methods | — | compile |
-| 3.8.2 | — | adapter.rs | `commit()` → turn + span + messages via ContentBlockStore | — | compile |
-| 3.8.3 | — | adapter.rs | `open_conversation()` → main view path | — | compile |
-| 3.8.4 | — | adapter.rs | `commit_parallel_responses()` → multiple spans | — | compile |
-| 3.8.5 | — | engine init | Wire engine to SessionAdapter | — | compile, app starts |
-| 3.8.6 | `storage/session/tests.rs` | — | — | — | commit, load, parallel |
-
----
-
-### Feature 3.9: Migration and Cleanup
-
-**Problem**: Legacy tables (threads, span_sets, spans, span_messages) need removal.
-
-**Solution**: Remove old schema after session integration verified.
-
-**Functional Requirements**:
-- Verify all functionality works with new model
-- Drop legacy tables
-- Clean up old code paths
-
-**Acceptance Criteria**:
-- [ ] All tests pass with new model
-- [ ] Legacy tables dropped
-- [ ] No references to old table names in code
-
-**Microtask Details**:
-
-| # | Action | Verify |
-|---|--------|--------|
-| 3.9.1 | Run `cargo test --all`, manual app testing | all tests pass, no regressions |
-| 3.9.2 | DROP span_messages, spans (old), span_sets, threads | fresh DB doesn't create old tables |
-| 3.9.3 | DROP legacy document tables not matching new schema | fresh DB only has new schema |
-| 3.9.4 | Remove old session/conversation store files and references | `cargo build --all`, no dead code |
-| 3.9.5 | Final verification: fresh install, all features E2E | Phase 3 complete |
 
 ---
 

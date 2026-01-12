@@ -6,13 +6,14 @@ use llm::api::Role;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
-use super::{
-    ConversationInfo, ConversationStore, SpanInfo as LegacySpanInfo, SpanSetInfo, SpanSetWithContent, SpanType,
-    ThreadInfo,
-};
+use super::conversation_store::ConversationStore;
+use super::turn_store::TurnStore;
 use super::types::{
-    MessageInfo, MessageRole, NewMessage, SpanInfo, SpanRole, TurnInfo,
-    TurnStore, TurnWithContent, ViewInfo,
+    // Legacy types
+    LegacyConversationInfo, LegacySpanInfo, LegacySpanSetInfo, LegacySpanSetWithContent,
+    LegacySpanType, LegacyThreadInfo,
+    // New types
+    MessageInfo, MessageRole, NewMessage, SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo,
 };
 use crate::storage::content::{StoredMessage, StoredPayload};
 use crate::storage::content_block::sqlite::store_content_sync;
@@ -160,7 +161,7 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
 impl ConversationStore for SqliteStore {
     // ========== Conversation Methods ==========
 
-    async fn list_conversations(&self, user_id: &str) -> Result<Vec<ConversationInfo>> {
+    async fn list_conversations(&self, user_id: &str) -> Result<Vec<LegacyConversationInfo>> {
         let conn = self.conn().lock().unwrap();
 
         // Count span_sets as the "message count" (each span_set is a turn in conversation)
@@ -173,10 +174,10 @@ impl ConversationStore for SqliteStore {
              ORDER BY c.updated_at DESC";
 
         let mut stmt = conn.prepare(query)?;
-        let infos: Vec<ConversationInfo> = stmt
+        let infos: Vec<LegacyConversationInfo> = stmt
             .query_map(params![user_id], |row| {
                 let is_private_int: i32 = row.get(3)?;
-                Ok(ConversationInfo {
+                Ok(LegacyConversationInfo {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     message_count: row.get(2)?,
@@ -333,7 +334,7 @@ impl ConversationStore for SqliteStore {
         Ok((conversation_id, thread_id))
     }
 
-    async fn list_conversation_threads(&self, conversation_id: &str) -> Result<Vec<ThreadInfo>> {
+    async fn list_conversation_threads(&self, conversation_id: &str) -> Result<Vec<LegacyThreadInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, parent_span_id, status, created_at
@@ -350,7 +351,7 @@ impl ConversationStore for SqliteStore {
                 } else {
                     (status.clone(), None)
                 };
-                Ok(ThreadInfo {
+                Ok(LegacyThreadInfo {
                     id: row.get(0)?,
                     conversation_id: row.get(1)?,
                     parent_span_id: row.get(2)?,
@@ -365,7 +366,7 @@ impl ConversationStore for SqliteStore {
         Ok(threads)
     }
 
-    async fn get_thread(&self, thread_id: &str) -> Result<Option<ThreadInfo>> {
+    async fn get_thread(&self, thread_id: &str) -> Result<Option<LegacyThreadInfo>> {
         let conn = self.conn().lock().unwrap();
         let thread = conn
             .query_row(
@@ -380,7 +381,7 @@ impl ConversationStore for SqliteStore {
                     } else {
                         (status.clone(), None)
                     };
-                    Ok(ThreadInfo {
+                    Ok(LegacyThreadInfo {
                         id: row.get(0)?,
                         conversation_id: row.get(1)?,
                         parent_span_id: row.get(2)?,
@@ -490,7 +491,7 @@ impl ConversationStore for SqliteStore {
         Ok(id)
     }
 
-    async fn get_thread_span_sets(&self, thread_id: &str) -> Result<Vec<SpanSetInfo>> {
+    async fn get_thread_span_sets(&self, thread_id: &str) -> Result<Vec<LegacySpanSetInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, thread_id, sequence_number, span_type, selected_span_id, created_at
@@ -500,11 +501,11 @@ impl ConversationStore for SqliteStore {
         let span_sets = stmt
             .query_map(params![thread_id], |row| {
                 let span_type_str: String = row.get(3)?;
-                Ok(SpanSetInfo {
+                Ok(LegacySpanSetInfo {
                     id: row.get(0)?,
                     thread_id: row.get(1)?,
                     sequence_number: row.get(2)?,
-                    span_type: span_type_str.parse::<SpanType>().unwrap_or(SpanType::User),
+                    span_type: span_type_str.parse::<LegacySpanType>().unwrap_or(LegacySpanType::User),
                     selected_span_id: row.get(4)?,
                     created_at: row.get(5)?,
                 })
@@ -518,7 +519,7 @@ impl ConversationStore for SqliteStore {
     async fn get_span_set_with_content(
         &self,
         span_set_id: &str,
-    ) -> Result<Option<SpanSetWithContent>> {
+    ) -> Result<Option<LegacySpanSetWithContent>> {
         let (span_type, selected_span_id) = {
             let conn = self.conn().lock().unwrap();
 
@@ -536,7 +537,7 @@ impl ConversationStore for SqliteStore {
                 None => return Ok(None),
             };
 
-            let span_type = span_type_str.parse::<SpanType>().unwrap_or(SpanType::User);
+            let span_type = span_type_str.parse::<LegacySpanType>().unwrap_or(LegacySpanType::User);
             (span_type, selected_span_id)
         };
 
@@ -550,7 +551,7 @@ impl ConversationStore for SqliteStore {
             Vec::new()
         };
 
-        Ok(Some(SpanSetWithContent {
+        Ok(Some(LegacySpanSetWithContent {
             id: span_set_id.to_string(),
             span_type,
             messages,
@@ -755,14 +756,14 @@ impl ConversationStore for SqliteStore {
     // ========== Helper Methods ==========
 
     async fn add_user_span_set(&self, thread_id: &str, content: &StoredPayload) -> Result<String> {
-        let span_set_id = self.create_span_set(thread_id, SpanType::User).await?;
+        let span_set_id = self.create_span_set(thread_id, LegacySpanType::User).await?;
         let span_id = self.create_span(&span_set_id, None).await?;
         self.add_span_message(&span_id, Role::User, content).await?;
         Ok(span_set_id)
     }
 
     async fn add_assistant_span_set(&self, thread_id: &str) -> Result<String> {
-        self.create_span_set(thread_id, SpanType::Assistant).await
+        self.create_span_set(thread_id, LegacySpanType::Assistant).await
     }
 
     async fn add_assistant_span(
@@ -1342,6 +1343,187 @@ impl TurnStore for SqliteStore {
         })
     }
 
+    async fn fork_view_with_selections(
+        &self,
+        view_id: &ViewId,
+        at_turn_id: &TurnId,
+        name: Option<&str>,
+        selections: &[(TurnId, SpanId)],
+    ) -> Result<ViewInfo> {
+        // Get the original view info
+        let conn = self.conn().lock().unwrap();
+        let conversation_id: String = conn.query_row(
+            "SELECT conversation_id FROM views WHERE id = ?1",
+            params![view_id.as_str()],
+            |row| row.get(0),
+        )?;
+        drop(conn);
+
+        // Create new view
+        let new_id = ViewId::new();
+        let now = unix_timestamp();
+
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT INTO views (id, conversation_id, name, is_main, forked_from_view_id, forked_at_turn_id, created_at)
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6)",
+            params![
+                new_id.as_str(),
+                &conversation_id,
+                name,
+                view_id.as_str(),
+                at_turn_id.as_str(),
+                now
+            ],
+        )?;
+
+        // Copy selections from original view up to (but not including) the fork turn
+        conn.execute(
+            "INSERT INTO view_selections (view_id, turn_id, span_id)
+             SELECT ?1, vs.turn_id, vs.span_id
+             FROM view_selections vs
+             JOIN turns t ON t.id = vs.turn_id
+             JOIN turns fork_turn ON fork_turn.id = ?3
+             WHERE vs.view_id = ?2
+               AND t.sequence_number < fork_turn.sequence_number",
+            params![new_id.as_str(), view_id.as_str(), at_turn_id.as_str()],
+        )?;
+
+        // Apply the custom selections (for splicing)
+        for (turn_id, span_id) in selections {
+            conn.execute(
+                "INSERT INTO view_selections (view_id, turn_id, span_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(view_id, turn_id) DO UPDATE SET span_id = ?3",
+                params![new_id.as_str(), turn_id.as_str(), span_id.as_str()],
+            )?;
+        }
+
+        Ok(ViewInfo {
+            id: new_id,
+            conversation_id: ConversationId::from_string(conversation_id),
+            name: name.map(|s| s.to_string()),
+            is_main: false,
+            forked_from_view_id: Some(view_id.clone()),
+            forked_at_turn_id: Some(at_turn_id.clone()),
+            created_at: now,
+        })
+    }
+
+    async fn get_view_context_at(
+        &self,
+        view_id: &ViewId,
+        up_to_turn_id: &TurnId,
+    ) -> Result<Vec<TurnWithContent>> {
+        // Get the conversation_id and fork turn's sequence number
+        let (conversation_id, up_to_seq) = {
+            let conn = self.conn().lock().unwrap();
+            let conv_id: String = conn.query_row(
+                "SELECT conversation_id FROM views WHERE id = ?1",
+                params![view_id.as_str()],
+                |row| row.get(0),
+            )?;
+            let seq: i32 = conn.query_row(
+                "SELECT sequence_number FROM turns WHERE id = ?1",
+                params![up_to_turn_id.as_str()],
+                |row| row.get(0),
+            )?;
+            (conv_id, seq)
+        };
+
+        // Get turns up to (but not including) the specified turn
+        let turns = {
+            let conn = self.conn().lock().unwrap();
+            let mut stmt = conn.prepare(
+                "SELECT id, conversation_id, role, sequence_number, created_at
+                 FROM turns
+                 WHERE conversation_id = ?1 AND sequence_number < ?2
+                 ORDER BY sequence_number",
+            )?;
+
+            stmt.query_map(params![&conversation_id, up_to_seq], |row| {
+                let id: String = row.get(0)?;
+                let conv_id: String = row.get(1)?;
+                let role_str: String = row.get(2)?;
+                let seq: i32 = row.get(3)?;
+                let created: i64 = row.get(4)?;
+                Ok((id, conv_id, role_str, seq, created))
+            })?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, conv_id, role_str, seq, created)| {
+                let role = role_str.parse::<SpanRole>().ok()?;
+                Some(TurnInfo {
+                    id: TurnId::from_string(id),
+                    conversation_id: ConversationId::from_string(conv_id),
+                    role,
+                    sequence_number: seq,
+                    created_at: created,
+                })
+            })
+            .collect::<Vec<_>>()
+        };
+
+        // Build the result with selected spans
+        let mut result = Vec::new();
+        for turn in turns {
+            let selected_span_id = self.get_selected_span(view_id, &turn.id).await?;
+
+            let span = if let Some(span_id) = selected_span_id {
+                self.get_span(&span_id).await?
+            } else {
+                // Get first span for this turn as fallback
+                let spans = self.get_spans(&turn.id).await?;
+                spans.into_iter().next()
+            };
+
+            if let Some(span) = span {
+                let messages = self.get_messages(&span.id).await?;
+                result.push(TurnWithContent {
+                    turn,
+                    span,
+                    messages,
+                });
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn edit_turn(
+        &self,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+        messages: Vec<NewMessage>,
+        model_id: Option<&str>,
+        create_fork: bool,
+        fork_name: Option<&str>,
+    ) -> Result<(SpanInfo, Option<ViewInfo>)> {
+        // Create a new span at the specified turn
+        let span = self.add_span(turn_id, model_id).await?;
+
+        // Add messages to the new span
+        for msg in messages {
+            self.add_message(&span.id, msg).await?;
+        }
+
+        // Optionally create a forked view that selects this new span
+        let forked_view = if create_fork {
+            let new_view = self.fork_view(view_id, turn_id, fork_name).await?;
+            // Select the new span at the edit turn in the forked view
+            self.select_span(&new_view.id, turn_id, &span.id).await?;
+            Some(new_view)
+        } else {
+            // Just update the current view's selection
+            self.select_span(view_id, turn_id, &span.id).await?;
+            None
+        };
+
+        // Refresh span to get accurate message count
+        let span = self.get_span(&span.id).await?.unwrap_or(span);
+
+        Ok((span, forked_view))
+    }
+
     // ========== Convenience Methods ==========
 
     async fn add_user_turn(
@@ -1790,5 +1972,146 @@ mod tests {
         let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
         let selected = store.get_selected_span(&main_view.id, &turn2.id).await.unwrap();
         assert_eq!(selected, Some(span2.id));
+    }
+
+    #[tokio::test]
+    async fn test_edit_turn() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Create a conversation with 3 turns
+        let (turn1, span1, _) = store.add_user_turn(&conv_id, "Hello").await.unwrap();
+        let (turn2, span2, _) = store.add_assistant_turn(&conv_id, "claude", "Hi there!").await.unwrap();
+        let (turn3, span3, _) = store.add_user_turn(&conv_id, "How are you?").await.unwrap();
+
+        let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
+
+        // Edit turn 2 (assistant) without creating a fork
+        let (new_span, forked_view) = store
+            .edit_turn(
+                &main_view.id,
+                &turn2.id,
+                vec![NewMessage::assistant("Hello! How can I help?")],
+                Some("gpt-4"),
+                false, // don't create fork
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(forked_view.is_none());
+        assert_eq!(new_span.model_id.as_deref(), Some("gpt-4"));
+
+        // The new span should be selected in the main view
+        let selected = store.get_selected_span(&main_view.id, &turn2.id).await.unwrap();
+        assert_eq!(selected, Some(new_span.id.clone()));
+
+        // Turn 2 should now have 2 spans (original + edit)
+        let spans = store.get_spans(&turn2.id).await.unwrap();
+        assert_eq!(spans.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_edit_turn_with_fork() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Create a conversation
+        let (turn1, _, _) = store.add_user_turn(&conv_id, "Hello").await.unwrap();
+        let (turn2, original_span, _) = store.add_assistant_turn(&conv_id, "claude", "Hi!").await.unwrap();
+        let (turn3, _, _) = store.add_user_turn(&conv_id, "More").await.unwrap();
+
+        let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
+
+        // Edit turn 2 with fork
+        let (new_span, forked_view) = store
+            .edit_turn(
+                &main_view.id,
+                &turn2.id,
+                vec![NewMessage::assistant("New response")],
+                Some("gpt-4"),
+                true, // create fork
+                Some("edited-branch"),
+            )
+            .await
+            .unwrap();
+
+        let forked_view = forked_view.unwrap();
+        assert_eq!(forked_view.name.as_deref(), Some("edited-branch"));
+        assert!(!forked_view.is_main);
+
+        // Forked view should select new span at turn 2
+        let selected = store.get_selected_span(&forked_view.id, &turn2.id).await.unwrap();
+        assert_eq!(selected, Some(new_span.id.clone()));
+
+        // Main view should still have original span
+        let main_selected = store.get_selected_span(&main_view.id, &turn2.id).await.unwrap();
+        assert_eq!(main_selected, Some(original_span.id));
+    }
+
+    #[tokio::test]
+    async fn test_get_view_context_at() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Create 4 turns
+        let (turn1, _, _) = store.add_user_turn(&conv_id, "Turn 1").await.unwrap();
+        let (turn2, _, _) = store.add_assistant_turn(&conv_id, "claude", "Turn 2").await.unwrap();
+        let (turn3, _, _) = store.add_user_turn(&conv_id, "Turn 3").await.unwrap();
+        let (turn4, _, _) = store.add_assistant_turn(&conv_id, "claude", "Turn 4").await.unwrap();
+
+        let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
+
+        // Get context up to turn 3 (should include turns 1 and 2)
+        let context = store.get_view_context_at(&main_view.id, &turn3.id).await.unwrap();
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[0].turn.id, turn1.id);
+        assert_eq!(context[1].turn.id, turn2.id);
+
+        // Get context up to turn 1 (should be empty)
+        let context = store.get_view_context_at(&main_view.id, &turn1.id).await.unwrap();
+        assert_eq!(context.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_fork_view_with_selections() {
+        let store = create_test_store();
+        let conv_id = create_test_conversation(&store);
+
+        // Create a conversation with 3 turns
+        let (turn1, span1, _) = store.add_user_turn(&conv_id, "Hello").await.unwrap();
+        let (turn2, span2, _) = store.add_assistant_turn(&conv_id, "claude", "Hi!").await.unwrap();
+        let (turn3, span3, _) = store.add_user_turn(&conv_id, "Question").await.unwrap();
+
+        // Create an alternate span at turn 2
+        let alt_span = store.add_span(&turn2.id, Some("gpt-4")).await.unwrap();
+        store.add_message(&alt_span.id, NewMessage::assistant("Greetings!")).await.unwrap();
+
+        let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
+
+        // Fork with custom selection: use alt_span at turn 2, reuse span3 at turn 3
+        let forked = store
+            .fork_view_with_selections(
+                &main_view.id,
+                &turn2.id,
+                Some("custom-fork"),
+                &[(turn2.id.clone(), alt_span.id.clone()), (turn3.id.clone(), span3.id.clone())],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(forked.name.as_deref(), Some("custom-fork"));
+
+        // Turn 1 should have same selection as main (copied before fork point)
+        let t1_selected = store.get_selected_span(&forked.id, &turn1.id).await.unwrap();
+        assert_eq!(t1_selected, Some(span1.id.clone()));
+
+        // Turn 2 should have alt_span (from custom selection)
+        let t2_selected = store.get_selected_span(&forked.id, &turn2.id).await.unwrap();
+        assert_eq!(t2_selected, Some(alt_span.id.clone()));
+
+        // Turn 3 should have span3 (from custom selection - "spliced" from original)
+        let t3_selected = store.get_selected_span(&forked.id, &turn3.id).await.unwrap();
+        assert_eq!(t3_selected, Some(span3.id.clone()));
     }
 }

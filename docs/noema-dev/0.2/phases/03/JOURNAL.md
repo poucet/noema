@@ -412,3 +412,71 @@ Added `Role::as_str() -> &'static str` method to `llm::Role` enum. `ToString` no
 **Next**: Feature 3.3 Views and Forking (3.3.7 `edit_turn` remaining)
 
 ---
+
+## 2026-01-12: Feature 3.3.7 Edit Turn Implementation
+
+### Module Refactoring
+
+Refactored `storage/conversation/` module for clearer organization:
+
+**Before:**
+- `mod.rs` - Trait + legacy types + re-exports
+- `types.rs` - New TurnStore types + trait
+
+**After:**
+- `mod.rs` - Just re-exports
+- `types.rs` - All types (legacy and new)
+- `conversation_store.rs` - ConversationStore trait (legacy)
+- `turn_store.rs` - TurnStore trait (new)
+- `sqlite.rs` - Both implementations
+
+### Legacy Type Renaming
+
+Renamed legacy types with `Legacy` prefix to make the distinction clear:
+- `SpanType` → `LegacySpanType`
+- `ConversationInfo` → `LegacyConversationInfo`
+- `ThreadInfo` → `LegacyThreadInfo`
+- `SpanInfo` → `LegacySpanInfo` (for legacy, new SpanInfo is in types.rs)
+- `SpanSetInfo` → `LegacySpanSetInfo`
+- `SpanSetWithContent` → `LegacySpanSetWithContent`
+
+Updated all usages in:
+- `noema-core/src/storage/conversation/sqlite.rs`
+- `noema-core/src/storage/session/sqlite.rs`
+- `noema-desktop/src-tauri/src/commands/chat.rs`
+- `noema-desktop/src-tauri/src/types.rs`
+
+### New TurnStore Methods (3.3.7)
+
+Added three new methods to `TurnStore` trait:
+
+1. **`edit_turn()`** - Creates a new span at an existing turn with new content
+   - Optionally creates a forked view that selects the new span
+   - Useful for regeneration (same turn, new span) and user edit (fork + new span)
+
+2. **`fork_view_with_selections()`** - Forks a view with custom span selections
+   - Enables "splicing" - reusing spans from original path after an edit
+   - Use case: Edit turn 3, but reuse turns 4-5 from original conversation
+
+3. **`get_view_context_at()`** - Gets view path up to (but not including) a specific turn
+   - Returns all turns with selected spans before the specified turn
+   - Useful for building context when editing mid-conversation
+
+### Tests Added
+
+Comprehensive tests for new methods:
+- `test_edit_turn()` - Edit without fork, verify span selection
+- `test_edit_turn_with_fork()` - Edit with fork, verify original unchanged
+- `test_get_view_context_at()` - Context retrieval at various points
+- `test_fork_view_with_selections()` - Custom splicing behavior
+
+### Technical Debt Discussion
+
+User raised concern about legacy system coexisting too long (3.4-3.7 before migration in 3.8-3.9). Consider:
+- Complete 3.3 (core Turn/Span/Message model)
+- Do 3.8 (Session Integration) and 3.9 (Migration) immediately
+- Build 3.4-3.7 (Documents, Collections, etc.) cleanly on new foundation
+
+**Feature 3.3.7 Complete**
+
+---

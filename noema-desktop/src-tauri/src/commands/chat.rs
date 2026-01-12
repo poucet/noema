@@ -2,7 +2,7 @@
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
-use noema_core::storage::conversation::{ConversationStore, SpanType};
+use noema_core::storage::conversation::{ConversationStore, LegacySpanType};
 use noema_core::storage::document::resolver::DocumentResolver;
 use noema_core::storage::content::{StoredContent, StoredPayload};
 use noema_core::storage::session::SessionStore;
@@ -989,7 +989,7 @@ pub async fn edit_user_message(
 
     // Create a span_set for the user message in the new thread
     let span_set_id = store
-        .create_span_set(&new_thread_id, SpanType::User)
+        .create_span_set(&new_thread_id, LegacySpanType::User)
         .await
         .map_err(|e| format!("Failed to create span_set: {}", e))?;
 

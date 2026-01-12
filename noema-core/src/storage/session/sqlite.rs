@@ -13,7 +13,7 @@ use crate::storage::content::StoredPayload;
 use crate::storage::content_block::sqlite::store_content_sync;
 use crate::storage::conversation::sqlite::sync_helpers as turn_sync;
 use crate::storage::conversation::types::SpanRole;
-use crate::storage::conversation::SpanType;
+use crate::storage::conversation::LegacySpanType;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::ConversationId;
 use crate::ConversationContext;
@@ -679,8 +679,8 @@ impl SessionStore for SqliteSession {
 
         // Determine span type based on first message role
         let span_type = match messages.first().map(|m| &m.role) {
-            Some(Role::User) => SpanType::User,
-            Some(Role::Assistant) | Some(Role::System) => SpanType::Assistant,
+            Some(Role::User) => LegacySpanType::User,
+            Some(Role::Assistant) | Some(Role::System) => LegacySpanType::Assistant,
             None => return Ok(()),
         };
 
