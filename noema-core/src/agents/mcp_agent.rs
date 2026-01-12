@@ -1,6 +1,7 @@
 //! Agent with dynamic MCP tool support
 
 use crate::storage::document_resolver::{DocumentFormatter, DocumentResolver};
+use crate::storage::ids::DocumentId;
 use crate::mcp::McpToolRegistry;
 use crate::traffic_log;
 use crate::Agent;
@@ -89,10 +90,10 @@ impl McpAgent {
     }
 
     async fn resolve_documents(&self, request: &mut ChatRequest) {
-        let doc_ids: Vec<String> = request
+        let doc_ids: Vec<DocumentId> = request
             .get_document_refs()
             .into_iter()
-            .map(|(id, _)| id.to_string())
+            .map(|(id, _)| DocumentId::from_string(id.to_string()))
             .collect();
 
         if doc_ids.is_empty() {

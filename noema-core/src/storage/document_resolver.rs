@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use futures::future::join_all;
 use llm::{ChatRequest, ContentBlock};
 
+use crate::storage::ids::DocumentId;
 use crate::storage::traits::DocumentStore;
 use crate::storage::types::FullDocumentInfo;
 
@@ -17,12 +18,12 @@ use crate::storage::types::FullDocumentInfo;
 #[async_trait]
 pub trait DocumentResolver: Send + Sync {
     /// Resolve all document IDs to their full content
-    async fn resolve_documents(&self, doc_ids: &[String]) -> HashMap<String, FullDocumentInfo>;
+    async fn resolve_documents(&self, doc_ids: &[DocumentId]) -> HashMap<DocumentId, FullDocumentInfo>;
 }
 
 #[async_trait]
 impl<S: DocumentStore> DocumentResolver for S {
-    async fn resolve_documents(&self, doc_ids: &[String]) -> HashMap<String, FullDocumentInfo> {
+    async fn resolve_documents(&self, doc_ids: &[DocumentId]) -> HashMap<DocumentId, FullDocumentInfo> {
         join_all(doc_ids.iter().map(|id| async move {
             (
                 id.clone(),
@@ -69,7 +70,7 @@ impl DocumentFormatter {
     pub fn inject_documents(
         &self,
         request: &mut ChatRequest,
-        resolved_docs: &HashMap<String, FullDocumentInfo>,
+        resolved_docs: &HashMap<DocumentId, FullDocumentInfo>,
     ) {
         // Track which documents have already been expanded (first reference gets full content)
         let mut expanded_docs: HashSet<String> = HashSet::new();
@@ -77,7 +78,8 @@ impl DocumentFormatter {
         for msg in request.messages_mut() {
             for block in &mut msg.payload.content {
                 if let ContentBlock::DocumentRef { id, title } = block {
-                    if let Some(doc) = resolved_docs.get(id.as_str()) {
+                    let doc_id = DocumentId::from_string(id.clone());
+                    if let Some(doc) = resolved_docs.get(&doc_id) {
                         let formatted = if expanded_docs.insert(id.clone()) {
                             // First reference: include full content
                             self.format_document(doc)
@@ -105,7 +107,7 @@ impl DocumentFormatter {
             .collect();
 
         let template = DocumentTemplate {
-            id: &doc.document.id,
+            id: doc.document.id.as_str(),
             title: &doc.document.title,
             tabs,
         };
@@ -116,7 +118,7 @@ impl DocumentFormatter {
     /// Format a shorthand reference (for subsequent mentions of the same document)
     pub fn format_document_shorthand(&self, doc: &FullDocumentInfo, _title: &str) -> String {
         let template = DocumentShorthandTemplate {
-            id: &doc.document.id,
+            id: doc.document.id.as_str(),
             title: &doc.document.title,
         };
 
