@@ -543,8 +543,136 @@ Updated TurnStore implementation:
 - All tests updated for new API
 
 **Next Steps:**
+- Refactor StoredContent to be refs-only
 - Update SqliteSession to use TurnStore directly (remove dual-write)
 - Remove legacy tables and ConversationStore trait
 - Update engine and commands
+
+---
+
+## 2026-01-12: StoredContent Refs-Only Redesign
+
+### Problem Identified
+
+Looking at `storage/content.rs`, `StoredContent` has both inline variants (`Text`, `Image`, `Audio`) and ref variants (`AssetRef`, `DocumentRef`). This creates issues:
+
+1. **Tight coupling**: TurnStore implementation is entangled with content_block storage
+2. **Inconsistent representation**: Some content inline, some as refs
+3. **No single source of truth**: Text stored inline but should reference `content_blocks` for deduplication/search
+
+User feedback:
+> "I wonder if StoredContent being what's actually stored should represent text as refs to content_blocks"
+> "StoredContent should have easy ways of resolving refs before sending back to UI or to the LLM"
+
+### Solution: Refs-Only StoredContent
+
+`StoredContent` becomes **what is actually stored in the database** - all refs, no inline data:
+
+**Before:**
+```rust
+pub enum StoredContent {
+    Text { text: String },           // Inline
+    Image { data: String, ... },     // Inline base64
+    Audio { data: String, ... },     // Inline base64
+    AssetRef { asset_id, ... },      // Ref
+    DocumentRef { id, title },       // Ref
+    ToolCall(ToolCall),
+    ToolResult(ToolResult),
+}
+```
+
+**After:**
+```rust
+pub enum StoredContent {
+    TextRef { content_block_id: ContentBlockId },  // Ref to content_blocks
+    AssetRef { asset_id, mime_type, filename },    // Ref to blob storage
+    DocumentRef { id, title },                     // Ref to documents
+    ToolCall(ToolCall),                            // Inline (structured JSON)
+    ToolResult(ToolResult),                        // Inline (structured JSON)
+}
+```
+
+### Resolution Layer
+
+Add a `ContentResolver` trait for converting refs back to full content:
+
+```rust
+#[async_trait]
+pub trait ContentResolver: Send + Sync {
+    async fn get_text(&self, id: &ContentBlockId) -> Result<String>;
+    async fn get_asset(&self, id: &str) -> Result<(Vec<u8>, String)>; // (data, mime_type)
+}
+
+impl StoredContent {
+    /// Resolve this ref to a ContentBlock for LLM/UI
+    pub async fn resolve<R: ContentResolver>(&self, resolver: &R) -> Result<ContentBlock> {
+        match self {
+            StoredContent::TextRef { content_block_id } => {
+                let text = resolver.get_text(content_block_id).await?;
+                Ok(ContentBlock::Text { text })
+            }
+            StoredContent::AssetRef { asset_id, mime_type, .. } => {
+                let (data, _) = resolver.get_asset(asset_id).await?;
+                let encoded = STANDARD.encode(&data);
+                if mime_type.starts_with("image/") {
+                    Ok(ContentBlock::Image { data: encoded, mime_type: mime_type.clone() })
+                } else if mime_type.starts_with("audio/") {
+                    Ok(ContentBlock::Audio { data: encoded, mime_type: mime_type.clone() })
+                } else {
+                    // Other types handled as needed
+                }
+            }
+            StoredContent::DocumentRef { id, title } => {
+                Ok(ContentBlock::DocumentRef { id: id.clone(), title: title.clone() })
+            }
+            StoredContent::ToolCall(call) => Ok(ContentBlock::ToolCall(call.clone())),
+            StoredContent::ToolResult(result) => Ok(ContentBlock::ToolResult(result.clone())),
+        }
+    }
+}
+```
+
+### Storage Coordination
+
+The `StorageCoordinator` handles the inverse - converting input content to stored refs:
+
+1. **Text input** → Store in `content_blocks` → Create `StoredContent::TextRef`
+2. **Inline image/audio** → Store in blob/assets → Create `StoredContent::AssetRef`
+3. **DocumentRef, ToolCall, ToolResult** → Pass through
+
+This keeps the DB layer simple (just storing/loading refs) while the coordination layer above handles conversion.
+
+### Benefits
+
+- **Clean separation**: DB layer stores refs, resolution layer converts
+- **DB-agnostic**: Same `StoredContent` works for any backend
+- **Deduplication**: All text goes through `content_blocks`
+- **Search**: Text refs can be joined with searchable content
+- **Single source of truth**: `StoredContent` = what's in DB
+
+### Impact on Existing Code
+
+- `StoredPayload::resolve()` → Replaced by `StoredContent::resolve()` with trait
+- `From<ContentBlock> for StoredContent` → Removed (coordinator handles this)
+- `TryFrom<StoredContent> for ContentBlock` → Replaced by async resolve
+- `MessageContentData` in types.rs → Already uses refs, will align with StoredContent
+
+### Implementation Complete
+
+Updated files:
+- [content.rs](noema-core/src/storage/content.rs) - Refs-only `StoredContent`, `ContentResolver` trait
+- [coordinator.rs](noema-core/src/storage/coordinator.rs) - Updated to use `store_content()` API
+- [conversation/types.rs](noema-core/src/storage/conversation/types.rs) - `MessageContentData::DocumentRef` now ID-only
+- [conversation/sqlite.rs](noema-core/src/storage/conversation/sqlite.rs) - Updated for `TextRef`, removed `document_title`
+
+Key changes:
+1. `StoredContent::Text { text }` → `StoredContent::TextRef { content_block_id }`
+2. `StoredContent::Image/Audio` → Removed (always use `AssetRef`)
+3. `StoredContent::DocumentRef { id, title }` → `StoredContent::DocumentRef { document_id }` (title looked up separately)
+4. `StorageCoordinator.store_content()` takes `Vec<ContentBlock>` and returns `Vec<StoredContent>`
+5. `ContentResolver` trait enables resolution of refs back to `ContentBlock`
+6. `TurnStore` convenience methods (`add_user_turn`, `add_assistant_turn`) store text in content_blocks first
+
+Desktop code (chat.rs, types.rs) still uses legacy API - will be updated when removing dual-write.
 
 ---

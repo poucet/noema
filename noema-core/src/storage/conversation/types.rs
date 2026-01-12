@@ -377,10 +377,9 @@ pub enum MessageContentData {
         mime_type: String,
         filename: Option<String>,
     },
-    /// Document reference - for RAG
+    /// Document reference - for RAG (title looked up from documents table)
     DocumentRef {
         document_id: String,
-        title: String,
     },
     /// Tool call - structured JSON
     ToolCall {

@@ -141,9 +141,8 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             asset_id TEXT,
             mime_type TEXT,
             filename TEXT,
-            -- For document_ref: reference to document
+            -- For document_ref: reference to document (title looked up from documents table)
             document_id TEXT,
-            document_title TEXT,
             -- For tool_call/tool_result: structured JSON
             tool_data TEXT
         );
@@ -807,7 +806,7 @@ fn load_message_content(conn: &Connection, message_id: &MessageId) -> Result<Vec
     let mut stmt = conn.prepare(
         "SELECT id, message_id, sequence_number, content_type,
                 content_block_id, asset_id, mime_type, filename,
-                document_id, document_title, tool_data
+                document_id, tool_data
          FROM message_content WHERE message_id = ?1
          ORDER BY sequence_number",
     )?;
@@ -823,12 +822,11 @@ fn load_message_content(conn: &Connection, message_id: &MessageId) -> Result<Vec
             let mime_type: Option<String> = row.get(6)?;
             let filename: Option<String> = row.get(7)?;
             let document_id: Option<String> = row.get(8)?;
-            let document_title: Option<String> = row.get(9)?;
-            let tool_data: Option<String> = row.get(10)?;
-            Ok((id, mid, seq, content_type_str, content_block_id, asset_id, mime_type, filename, document_id, document_title, tool_data))
+            let tool_data: Option<String> = row.get(9)?;
+            Ok((id, mid, seq, content_type_str, content_block_id, asset_id, mime_type, filename, document_id, tool_data))
         })?
         .filter_map(|r| r.ok())
-        .filter_map(|(id, mid, seq, content_type_str, content_block_id, asset_id, mime_type, filename, document_id, document_title, tool_data)| {
+        .filter_map(|(id, mid, seq, content_type_str, content_block_id, asset_id, mime_type, filename, document_id, tool_data)| {
             let content_type = content_type_str.parse::<ContentType>().ok()?;
 
             let content = match content_type {
@@ -847,7 +845,6 @@ fn load_message_content(conn: &Connection, message_id: &MessageId) -> Result<Vec
                 ContentType::DocumentRef => {
                     MessageContentData::DocumentRef {
                         document_id: document_id?,
-                        title: document_title?,
                     }
                 }
                 ContentType::ToolCall => {
@@ -1107,16 +1104,8 @@ impl TurnStore for SqliteStore {
             let content_id = MessageContentId::new();
 
             match stored_content {
-                StoredContent::Text { text } => {
-                    // Store text in content_blocks
-                    let origin_kind = match role {
-                        MessageRole::User => Some("user"),
-                        MessageRole::Assistant => Some("assistant"),
-                        MessageRole::System => Some("system"),
-                        MessageRole::Tool => Some("system"),
-                    };
-                    let content_block_id = store_content_sync(&conn, text, origin_kind, None, None)?;
-
+                StoredContent::TextRef { content_block_id } => {
+                    // Text already stored in content_blocks by coordinator
                     conn.execute(
                         "INSERT INTO message_content (id, message_id, sequence_number, content_type, content_block_id)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -1125,7 +1114,7 @@ impl TurnStore for SqliteStore {
                             message_id.as_str(),
                             content_seq as i32,
                             ContentType::Text.as_str(),
-                            content_block_id
+                            content_block_id.as_str()
                         ],
                     )?;
                 }
@@ -1144,17 +1133,16 @@ impl TurnStore for SqliteStore {
                         ],
                     )?;
                 }
-                StoredContent::DocumentRef { id, title } => {
+                StoredContent::DocumentRef { document_id } => {
                     conn.execute(
-                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, document_id, document_title)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, document_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
                         params![
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
                             ContentType::DocumentRef.as_str(),
-                            id,
-                            title
+                            document_id
                         ],
                     )?;
                 }
@@ -1185,12 +1173,6 @@ impl TurnStore for SqliteStore {
                             tool_data
                         ],
                     )?;
-                }
-                // Image and Audio should have been externalized to AssetRef by now
-                StoredContent::Image { .. } | StoredContent::Audio { .. } => {
-                    return Err(anyhow::anyhow!(
-                        "Inline image/audio should be externalized to AssetRef before storage"
-                    ));
                 }
             }
         }
@@ -1706,9 +1688,16 @@ impl TurnStore for SqliteStore {
         conversation_id: &ConversationId,
         text: &str,
     ) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
+        // Store text in content_blocks first
+        let content_block_id = {
+            let conn = self.conn().lock().unwrap();
+            let id = store_content_sync(&conn, text, Some("user"), None, None)?;
+            ContentBlockId::from_string(id)
+        };
+
         let turn = self.add_turn(conversation_id, SpanRole::User).await?;
         let span = self.add_span(&turn.id, None).await?;
-        let content = vec![StoredContent::Text { text: text.to_string() }];
+        let content = vec![StoredContent::text_ref(content_block_id)];
         let message = self.add_message(&span.id, MessageRole::User, &content).await?;
 
         // Auto-select this span in the main view
@@ -1725,9 +1714,16 @@ impl TurnStore for SqliteStore {
         model_id: &str,
         text: &str,
     ) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
+        // Store text in content_blocks first
+        let content_block_id = {
+            let conn = self.conn().lock().unwrap();
+            let id = store_content_sync(&conn, text, Some("assistant"), Some(model_id), None)?;
+            ContentBlockId::from_string(id)
+        };
+
         let turn = self.add_turn(conversation_id, SpanRole::Assistant).await?;
         let span = self.add_span(&turn.id, Some(model_id)).await?;
-        let content = vec![StoredContent::Text { text: text.to_string() }];
+        let content = vec![StoredContent::text_ref(content_block_id)];
         let message = self.add_message(&span.id, MessageRole::Assistant, &content).await?;
 
         // Auto-select this span in the main view
@@ -1908,17 +1904,16 @@ pub mod sync_helpers {
                         ],
                     )?;
                 }
-                StoredContent::DocumentRef { id, title } => {
+                StoredContent::DocumentRef { document_id } => {
                     conn.execute(
-                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, document_id, document_title)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, document_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
                         params![
                             content_id.as_str(),
                             message_id.as_str(),
                             content_seq as i32,
                             ContentType::DocumentRef.as_str(),
-                            id,
-                            title
+                            document_id
                         ],
                     )?;
                 }
@@ -1950,12 +1945,6 @@ pub mod sync_helpers {
                         ],
                     )?;
                 }
-                // Image and Audio should have been externalized to AssetRef by now
-                StoredContent::Image { .. } | StoredContent::Audio { .. } => {
-                    return Err(anyhow::anyhow!(
-                        "Inline image/audio should be externalized to AssetRef before storage"
-                    ));
-                }
             }
         }
 
@@ -1986,6 +1975,7 @@ pub mod sync_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::content_block::sqlite::store_content_sync;
 
     fn create_test_store() -> SqliteStore {
         // SqliteStore::in_memory() initializes all schemas
@@ -2003,14 +1993,22 @@ mod tests {
         id
     }
 
-    // Helper to create user message content
-    fn new_user_msg(text: &str) -> (MessageRole, Vec<StoredContent>) {
-        (MessageRole::User, vec![StoredContent::Text { text: text.to_string() }])
+    // Helper to create user message content with text ref
+    // In real code, text is stored via coordinator; for tests we create refs directly
+    fn new_user_msg(content_block_id: &str) -> (MessageRole, Vec<StoredContent>) {
+        (MessageRole::User, vec![StoredContent::text_ref(ContentBlockId::from_string(content_block_id))])
     }
 
-    // Helper to create assistant message content
-    fn new_assistant_msg(text: &str) -> (MessageRole, Vec<StoredContent>) {
-        (MessageRole::Assistant, vec![StoredContent::Text { text: text.to_string() }])
+    // Helper to create assistant message content with text ref
+    fn new_assistant_msg(content_block_id: &str) -> (MessageRole, Vec<StoredContent>) {
+        (MessageRole::Assistant, vec![StoredContent::text_ref(ContentBlockId::from_string(content_block_id))])
+    }
+
+    // Store text in content_blocks and return the ID (for test setup)
+    fn store_test_text(store: &SqliteStore, text: &str) -> ContentBlockId {
+        let conn = store.conn().lock().unwrap();
+        let id = store_content_sync(&conn, text, Some("user"), None, None).unwrap();
+        ContentBlockId::from_string(id)
     }
 
     // Helper to create tool message content
