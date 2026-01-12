@@ -10,7 +10,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ToolConfig};
+use crate::types::{
+    ConversationInfo, DisplayMessage, ErrorEvent, HistoryClearedEvent, InputContentBlock,
+    MessageCompleteEvent, ModelChangedEvent, ModelInfo, ParallelCompleteEvent,
+    ParallelModelCompleteEvent, ParallelModelErrorEvent, ParallelStreamingMessageEvent,
+    StreamingMessageEvent, ToolConfig,
+};
 
 
 /// Get current messages in the conversation (committed + pending)
@@ -158,11 +163,10 @@ pub fn start_engine_event_loop(app: AppHandle) {
                 match event {
                     EngineEvent::Message(msg) => {
                         state.set_processing(&conversation_id, true).await;
-                        let display_msg = DisplayMessage::from(&msg);
-                        let _ = app.emit("streaming_message", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "message": display_msg
-                        }));
+                        let _ = app.emit("streaming_message", StreamingMessageEvent {
+                            conversation_id: conversation_id.clone(),
+                            message: DisplayMessage::from(&msg),
+                        });
                     }
                     EngineEvent::MessageComplete => {
                         // Get all messages after completion (committed + pending)
@@ -186,76 +190,61 @@ pub fn start_engine_event_loop(app: AppHandle) {
                                 vec![]
                             }
                         };
-                        let _ = app.emit("message_complete", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "messages": messages
-                        }));
+                        let _ = app.emit("message_complete", MessageCompleteEvent {
+                            conversation_id: conversation_id.clone(),
+                            messages,
+                        });
                         state.set_processing(&conversation_id, false).await;
                     }
                     EngineEvent::Error(err) => {
                         log_message(&format!("ENGINE ERROR [{}]: {}", conversation_id.as_str(), err));
-                        let _ = app.emit("error", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "error": err
-                        }));
+                        let _ = app.emit("error", ErrorEvent {
+                            conversation_id: conversation_id.clone(),
+                            error: err,
+                        });
                         state.set_processing(&conversation_id, false).await;
                     }
                     EngineEvent::ModelChanged(name) => {
-                        let _ = app.emit("model_changed", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "model": name
-                        }));
+                        let _ = app.emit("model_changed", ModelChangedEvent {
+                            conversation_id: conversation_id.clone(),
+                            model: name,
+                        });
                     }
                     EngineEvent::HistoryCleared => {
-                        let _ = app.emit("history_cleared", serde_json::json!({
-                            "conversationId": conversation_id.as_str()
-                        }));
+                        let _ = app.emit("history_cleared", HistoryClearedEvent {
+                            conversation_id: conversation_id.clone(),
+                        });
                     }
                     // Parallel execution events
                     EngineEvent::ParallelStreamingMessage { model_id, message } => {
                         state.set_processing(&conversation_id, true).await;
-                        let display_msg = DisplayMessage::from(&message);
-                        let _ = app.emit("parallel_streaming_message", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "modelId": model_id,
-                            "message": display_msg
-                        }));
+                        let _ = app.emit("parallel_streaming_message", ParallelStreamingMessageEvent {
+                            conversation_id: conversation_id.clone(),
+                            model_id,
+                            message: DisplayMessage::from(&message),
+                        });
                     }
                     EngineEvent::ParallelModelComplete { model_id, messages } => {
-                        let display_messages: Vec<DisplayMessage> = messages
-                            .iter()
-                            .map(DisplayMessage::from)
-                            .collect();
-                        let _ = app.emit("parallel_model_complete", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "modelId": model_id,
-                            "messages": display_messages
-                        }));
+                        let _ = app.emit("parallel_model_complete", ParallelModelCompleteEvent {
+                            conversation_id: conversation_id.clone(),
+                            model_id,
+                            messages: messages.iter().map(DisplayMessage::from).collect(),
+                        });
                     }
                     EngineEvent::ParallelComplete { turn_id, alternates } => {
-                        let alternates_json: Vec<serde_json::Value> = alternates
-                            .iter()
-                            .map(|a| serde_json::json!({
-                                "spanId": a.span_id,
-                                "modelId": a.model_id,
-                                "modelDisplayName": a.model_display_name,
-                                "messageCount": a.message_count,
-                                "isSelected": a.is_selected
-                            }))
-                            .collect();
-                        let _ = app.emit("parallel_complete", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "turnId": turn_id,
-                            "alternates": alternates_json
-                        }));
+                        let _ = app.emit("parallel_complete", ParallelCompleteEvent {
+                            conversation_id: conversation_id.clone(),
+                            turn_id: TurnId::from_string(turn_id),
+                            alternates: alternates.into_iter().map(Into::into).collect(),
+                        });
                         state.set_processing(&conversation_id, false).await;
                     }
                     EngineEvent::ParallelModelError { model_id, error } => {
-                        let _ = app.emit("parallel_model_error", serde_json::json!({
-                            "conversationId": conversation_id.as_str(),
-                            "modelId": model_id,
-                            "error": error
-                        }));
+                        let _ = app.emit("parallel_model_error", ParallelModelErrorEvent {
+                            conversation_id: conversation_id.clone(),
+                            model_id,
+                            error,
+                        });
                     }
                 }
             }

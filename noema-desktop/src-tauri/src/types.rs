@@ -1,7 +1,7 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
-use noema_core::storage::ids::{AssetId, SpanId, TurnId};
+use noema_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId, ViewId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -20,7 +20,8 @@ pub struct ModelInfo {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ConversationInfo {
-    pub id: String,
+    #[ts(type = "string")]
+    pub id: ConversationId,
     pub name: Option<String>,
     pub message_count: usize,
     /// Whether this conversation is marked as private (warns before using cloud models)
@@ -32,7 +33,7 @@ pub struct ConversationInfo {
 impl From<noema_core::storage::ConversationInfo> for ConversationInfo {
     fn from(info: noema_core::storage::ConversationInfo) -> Self {
         Self {
-            id: info.id.as_str().to_string(),
+            id: info.id,
             name: info.name,
             message_count: info.turn_count,
             is_private: info.is_private,
@@ -70,7 +71,8 @@ pub enum DisplayContent {
     },
     /// Reference to a document (shown as chip in UI, content injected to LLM separately)
     DocumentRef {
-        id: String,
+        #[ts(type = "string")]
+        id: DocumentId,
     },
     ToolCall { 
         name: String, 
@@ -198,7 +200,7 @@ impl From<&ContentBlock> for DisplayContent {
                     .collect(),
             },
             ContentBlock::DocumentRef { id } => DisplayContent::DocumentRef {
-                id: id.clone(),
+                id: DocumentId::from(id.clone()),
             },
         }
     }
@@ -237,7 +239,7 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
                 filename: filename.clone(),
             },
             ResolvedContent::Document { document_id, .. } => DisplayContent::DocumentRef {
-                id: document_id.clone(),
+                id: DocumentId::from(document_id.clone()),
             },
             ResolvedContent::ToolCall(call) => DisplayContent::ToolCall {
                 name: call.name.clone(),
@@ -399,7 +401,8 @@ pub enum InputContentBlock {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ParallelAlternateInfo {
-    pub span_id: String,
+    #[ts(type = "string")]
+    pub span_id: SpanId,
     pub model_id: String,
     pub model_display_name: String,
     pub message_count: usize,
@@ -409,7 +412,7 @@ pub struct ParallelAlternateInfo {
 impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
     fn from(info: noema_core::ParallelAlternateInfo) -> Self {
         Self {
-            span_id: info.span_id,
+            span_id: SpanId::from_string(info.span_id),
             model_id: info.model_id,
             model_display_name: info.model_display_name,
             message_count: info.message_count,
@@ -423,9 +426,12 @@ impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ThreadInfoResponse {
-    pub id: String,
-    pub conversation_id: String,
-    pub parent_span_id: Option<String>,
+    #[ts(type = "string")]
+    pub id: ViewId,
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    #[ts(type = "string | null")]
+    pub parent_span_id: Option<TurnId>,
     pub name: Option<String>,
     pub status: String,
     pub created_at: i64,
@@ -436,9 +442,9 @@ pub struct ThreadInfoResponse {
 impl From<noema_core::storage::ViewInfo> for ThreadInfoResponse {
     fn from(info: noema_core::storage::ViewInfo) -> Self {
         Self {
-            id: info.id.as_str().to_string(),
-            conversation_id: info.conversation_id.as_str().to_string(),
-            parent_span_id: info.forked_at_turn_id.map(|t| t.as_str().to_string()),
+            id: info.id,
+            conversation_id: info.conversation_id,
+            parent_span_id: info.forked_at_turn_id,
             name: info.name,
             status: "active".to_string(), // Views are always active
             created_at: info.created_at,
@@ -470,7 +476,8 @@ pub struct ParallelModelComplete {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ParallelComplete {
-    pub span_set_id: String,
+    #[ts(type = "string")]
+    pub span_set_id: TurnId,
     pub alternates: Vec<ParallelAlternateInfo>,
 }
 
@@ -479,6 +486,104 @@ pub struct ParallelComplete {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
 pub struct ParallelModelError {
+    pub model_id: String,
+    pub error: String,
+}
+
+// =============================================================================
+// Event Payloads - typed payloads for Tauri events
+// =============================================================================
+
+/// Payload for streaming_message event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct StreamingMessageEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    pub message: DisplayMessage,
+}
+
+/// Payload for message_complete event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct MessageCompleteEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    pub messages: Vec<DisplayMessage>,
+}
+
+/// Payload for error event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ErrorEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    pub error: String,
+}
+
+/// Payload for model_changed event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ModelChangedEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    pub model: String,
+}
+
+/// Payload for history_cleared event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct HistoryClearedEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+}
+
+/// Payload for parallel_streaming_message event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelStreamingMessageEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    pub model_id: String,
+    pub message: DisplayMessage,
+}
+
+/// Payload for parallel_model_complete event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelModelCompleteEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    pub model_id: String,
+    pub messages: Vec<DisplayMessage>,
+}
+
+/// Payload for parallel_complete event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelCompleteEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    #[ts(type = "string")]
+    pub turn_id: TurnId,
+    pub alternates: Vec<ParallelAlternateInfo>,
+}
+
+/// Payload for parallel_model_error event
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct ParallelModelErrorEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
     pub model_id: String,
     pub error: String,
 }
@@ -531,6 +636,15 @@ mod ts_export {
         ParallelModelComplete::export_all().expect("Failed to export ParallelModelComplete");
         ParallelComplete::export_all().expect("Failed to export ParallelComplete");
         ParallelModelError::export_all().expect("Failed to export ParallelModelError");
+        StreamingMessageEvent::export_all().expect("Failed to export StreamingMessageEvent");
+        MessageCompleteEvent::export_all().expect("Failed to export MessageCompleteEvent");
+        ErrorEvent::export_all().expect("Failed to export ErrorEvent");
+        ModelChangedEvent::export_all().expect("Failed to export ModelChangedEvent");
+        HistoryClearedEvent::export_all().expect("Failed to export HistoryClearedEvent");
+        ParallelStreamingMessageEvent::export_all().expect("Failed to export ParallelStreamingMessageEvent");
+        ParallelModelCompleteEvent::export_all().expect("Failed to export ParallelModelCompleteEvent");
+        ParallelCompleteEvent::export_all().expect("Failed to export ParallelCompleteEvent");
+        ParallelModelErrorEvent::export_all().expect("Failed to export ParallelModelErrorEvent");
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
         InputContentBlock::export_all().expect("Failed to export InputContentBlock");
         ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");
