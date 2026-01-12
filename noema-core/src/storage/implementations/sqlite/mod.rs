@@ -15,9 +15,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
-
-use crate::storage::coordinator::DynStorageCoordinator;
+use std::sync::{Arc, Mutex};
 
 // Submodules with trait implementations
 mod asset;
@@ -53,8 +51,6 @@ pub(crate) use content_block::store_content_sync;
 /// - `UserStore` - User account management
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
-    /// Storage coordinator for content externalization (optional)
-    coordinator: RwLock<Option<Arc<DynStorageCoordinator>>>,
 }
 
 impl SqliteStore {
@@ -63,7 +59,6 @@ impl SqliteStore {
         let conn = Connection::open(&path)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
-            coordinator: RwLock::new(None),
         };
         store.init_schema()?;
         Ok(store)
@@ -74,22 +69,9 @@ impl SqliteStore {
         let conn = Connection::open_in_memory()?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
-            coordinator: RwLock::new(None),
         };
         store.init_schema()?;
         Ok(store)
-    }
-
-    /// Set the storage coordinator for content externalization
-    pub fn set_coordinator(&self, coordinator: Arc<DynStorageCoordinator>) {
-        let mut guard = self.coordinator.write().unwrap();
-        *guard = Some(coordinator);
-    }
-
-    /// Get the storage coordinator (if set)
-    pub fn coordinator(&self) -> Option<Arc<DynStorageCoordinator>> {
-        let guard = self.coordinator.read().unwrap();
-        guard.clone()
     }
 
     /// Get access to the connection (for trait implementations)
@@ -115,7 +97,6 @@ mod tests {
 
     #[test]
     fn test_sqlite_store_create() {
-        let store = SqliteStore::in_memory().unwrap();
-        assert!(store.coordinator().is_none());
+        let _store = SqliteStore::in_memory().unwrap();
     }
 }
