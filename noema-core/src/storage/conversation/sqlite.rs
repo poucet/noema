@@ -13,12 +13,13 @@ use super::types::{
     LegacyConversationInfo, LegacySpanInfo, LegacySpanSetInfo, LegacySpanSetWithContent,
     LegacySpanType, LegacyThreadInfo,
     // New types
-    MessageInfo, MessageRole, NewMessage, SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo,
+    ContentType, MessageContentData, MessageContentInfo, MessageInfo, MessageRole,
+    MessageWithContent, SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo,
 };
-use crate::storage::content::{StoredMessage, StoredPayload};
+use crate::storage::content::{StoredContent, StoredMessage, StoredPayload};
 use crate::storage::content_block::sqlite::store_content_sync;
 use crate::storage::ids::{
-    ContentBlockId, ConversationId, MessageId, SpanId, TurnId, ViewId,
+    ContentBlockId, ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId,
 };
 use crate::storage::session::SqliteStore;
 use crate::storage::helper::unix_timestamp;
@@ -798,6 +799,82 @@ impl ConversationStore for SqliteStore {
 }
 
 // ============================================================================
+// Helper Functions for Message Content
+// ============================================================================
+
+/// Load all content items for a message from message_content table
+fn load_message_content(conn: &Connection, message_id: &MessageId) -> Result<Vec<MessageContentInfo>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, message_id, sequence_number, content_type,
+                content_block_id, asset_id, mime_type, filename,
+                document_id, document_title, tool_data
+         FROM message_content WHERE message_id = ?1
+         ORDER BY sequence_number",
+    )?;
+
+    let items = stmt
+        .query_map(params![message_id.as_str()], |row| {
+            let id: String = row.get(0)?;
+            let mid: String = row.get(1)?;
+            let seq: i32 = row.get(2)?;
+            let content_type_str: String = row.get(3)?;
+            let content_block_id: Option<String> = row.get(4)?;
+            let asset_id: Option<String> = row.get(5)?;
+            let mime_type: Option<String> = row.get(6)?;
+            let filename: Option<String> = row.get(7)?;
+            let document_id: Option<String> = row.get(8)?;
+            let document_title: Option<String> = row.get(9)?;
+            let tool_data: Option<String> = row.get(10)?;
+            Ok((id, mid, seq, content_type_str, content_block_id, asset_id, mime_type, filename, document_id, document_title, tool_data))
+        })?
+        .filter_map(|r| r.ok())
+        .filter_map(|(id, mid, seq, content_type_str, content_block_id, asset_id, mime_type, filename, document_id, document_title, tool_data)| {
+            let content_type = content_type_str.parse::<ContentType>().ok()?;
+
+            let content = match content_type {
+                ContentType::Text => {
+                    MessageContentData::Text {
+                        content_block_id: ContentBlockId::from_string(content_block_id?),
+                    }
+                }
+                ContentType::AssetRef => {
+                    MessageContentData::AssetRef {
+                        asset_id: asset_id?,
+                        mime_type: mime_type?,
+                        filename,
+                    }
+                }
+                ContentType::DocumentRef => {
+                    MessageContentData::DocumentRef {
+                        document_id: document_id?,
+                        title: document_title?,
+                    }
+                }
+                ContentType::ToolCall => {
+                    MessageContentData::ToolCall {
+                        data: tool_data?,
+                    }
+                }
+                ContentType::ToolResult => {
+                    MessageContentData::ToolResult {
+                        data: tool_data?,
+                    }
+                }
+            };
+
+            Some(MessageContentInfo {
+                id: MessageContentId::from_string(id),
+                message_id: MessageId::from_string(mid),
+                sequence_number: seq,
+                content,
+            })
+        })
+        .collect();
+
+    Ok(items)
+}
+
+// ============================================================================
 // TurnStore Implementation
 // ============================================================================
 
@@ -996,13 +1073,14 @@ impl TurnStore for SqliteStore {
     async fn add_message(
         &self,
         span_id: &SpanId,
-        message: NewMessage,
+        role: MessageRole,
+        content: &[StoredContent],
     ) -> Result<MessageInfo> {
         let conn = self.conn().lock().unwrap();
-        let id = MessageId::new();
+        let message_id = MessageId::new();
         let now = unix_timestamp();
 
-        // Get next sequence number
+        // Get next sequence number for message
         let sequence_number: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE span_id = ?1",
@@ -1011,43 +1089,117 @@ impl TurnStore for SqliteStore {
             )
             .unwrap_or(0);
 
-        // Store text in content_blocks if present
-        let content_id: Option<ContentBlockId> = if let Some(ref text) = message.text {
-            let origin_kind = match message.role {
-                MessageRole::User => Some("user"),
-                MessageRole::Assistant => Some("assistant"),
-                MessageRole::System => Some("system"),
-                MessageRole::Tool => Some("system"),
-            };
-            let content_block_id = store_content_sync(&conn, text, origin_kind, None, None)?;
-            Some(ContentBlockId::from_string(content_block_id))
-        } else {
-            None
-        };
-
+        // Insert message row
         conn.execute(
-            "INSERT INTO messages (id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO messages (id, span_id, sequence_number, role, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                id.as_str(),
+                message_id.as_str(),
                 span_id.as_str(),
                 sequence_number,
-                message.role.as_str(),
-                content_id.as_ref().map(|c| c.as_str()),
-                message.tool_calls,
-                message.tool_results,
+                role.as_str(),
                 now
             ],
         )?;
 
+        // Insert content items
+        for (content_seq, stored_content) in content.iter().enumerate() {
+            let content_id = MessageContentId::new();
+
+            match stored_content {
+                StoredContent::Text { text } => {
+                    // Store text in content_blocks
+                    let origin_kind = match role {
+                        MessageRole::User => Some("user"),
+                        MessageRole::Assistant => Some("assistant"),
+                        MessageRole::System => Some("system"),
+                        MessageRole::Tool => Some("system"),
+                    };
+                    let content_block_id = store_content_sync(&conn, text, origin_kind, None, None)?;
+
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, content_block_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::Text.as_str(),
+                            content_block_id
+                        ],
+                    )?;
+                }
+                StoredContent::AssetRef { asset_id, mime_type, filename } => {
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, asset_id, mime_type, filename)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::AssetRef.as_str(),
+                            asset_id,
+                            mime_type,
+                            filename.as_deref()
+                        ],
+                    )?;
+                }
+                StoredContent::DocumentRef { id, title } => {
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, document_id, document_title)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::DocumentRef.as_str(),
+                            id,
+                            title
+                        ],
+                    )?;
+                }
+                StoredContent::ToolCall(call) => {
+                    let tool_data = serde_json::to_string(call)?;
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, tool_data)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::ToolCall.as_str(),
+                            tool_data
+                        ],
+                    )?;
+                }
+                StoredContent::ToolResult(result) => {
+                    let tool_data = serde_json::to_string(result)?;
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, tool_data)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::ToolResult.as_str(),
+                            tool_data
+                        ],
+                    )?;
+                }
+                // Image and Audio should have been externalized to AssetRef by now
+                StoredContent::Image { .. } | StoredContent::Audio { .. } => {
+                    return Err(anyhow::anyhow!(
+                        "Inline image/audio should be externalized to AssetRef before storage"
+                    ));
+                }
+            }
+        }
+
         Ok(MessageInfo {
-            id,
+            id: message_id,
             span_id: span_id.clone(),
             sequence_number,
-            role: message.role,
-            content_id,
-            tool_calls: message.tool_calls,
-            tool_results: message.tool_results,
+            role,
             created_at: now,
         })
     }
@@ -1055,7 +1207,7 @@ impl TurnStore for SqliteStore {
     async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at
+            "SELECT id, span_id, sequence_number, role, created_at
              FROM messages WHERE span_id = ?1
              ORDER BY sequence_number",
         )?;
@@ -1066,23 +1218,17 @@ impl TurnStore for SqliteStore {
                 let sid: String = row.get(1)?;
                 let seq: i32 = row.get(2)?;
                 let role_str: String = row.get(3)?;
-                let content_id: Option<String> = row.get(4)?;
-                let tool_calls: Option<String> = row.get(5)?;
-                let tool_results: Option<String> = row.get(6)?;
-                let created: i64 = row.get(7)?;
-                Ok((id, sid, seq, role_str, content_id, tool_calls, tool_results, created))
+                let created: i64 = row.get(4)?;
+                Ok((id, sid, seq, role_str, created))
             })?
             .filter_map(|r| r.ok())
-            .filter_map(|(id, sid, seq, role_str, content_id, tool_calls, tool_results, created)| {
+            .filter_map(|(id, sid, seq, role_str, created)| {
                 let role = role_str.parse::<MessageRole>().ok()?;
                 Some(MessageInfo {
                     id: MessageId::from_string(id),
                     span_id: SpanId::from_string(sid),
                     sequence_number: seq,
                     role,
-                    content_id: content_id.map(ContentBlockId::from_string),
-                    tool_calls,
-                    tool_results,
                     created_at: created,
                 })
             })
@@ -1091,10 +1237,23 @@ impl TurnStore for SqliteStore {
         Ok(messages)
     }
 
+    async fn get_messages_with_content(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>> {
+        let messages = self.get_messages(span_id).await?;
+        let conn = self.conn().lock().unwrap();
+
+        let mut result = Vec::new();
+        for message in messages {
+            let content = load_message_content(&conn, &message.id)?;
+            result.push(MessageWithContent { message, content });
+        }
+
+        Ok(result)
+    }
+
     async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at
+            "SELECT id, span_id, sequence_number, role, created_at
              FROM messages WHERE id = ?1",
             params![message_id.as_str()],
             |row| {
@@ -1102,16 +1261,13 @@ impl TurnStore for SqliteStore {
                 let sid: String = row.get(1)?;
                 let seq: i32 = row.get(2)?;
                 let role_str: String = row.get(3)?;
-                let content_id: Option<String> = row.get(4)?;
-                let tool_calls: Option<String> = row.get(5)?;
-                let tool_results: Option<String> = row.get(6)?;
-                let created: i64 = row.get(7)?;
-                Ok((id, sid, seq, role_str, content_id, tool_calls, tool_results, created))
+                let created: i64 = row.get(4)?;
+                Ok((id, sid, seq, role_str, created))
             },
         );
 
         match result {
-            Ok((id, sid, seq, role_str, content_id, tool_calls, tool_results, created)) => {
+            Ok((id, sid, seq, role_str, created)) => {
                 let role = role_str.parse::<MessageRole>()
                     .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
                 Ok(Some(MessageInfo {
@@ -1119,9 +1275,6 @@ impl TurnStore for SqliteStore {
                     span_id: SpanId::from_string(sid),
                     sequence_number: seq,
                     role,
-                    content_id: content_id.map(ContentBlockId::from_string),
-                    tool_calls,
-                    tool_results,
                     created_at: created,
                 }))
             }
@@ -1293,7 +1446,7 @@ impl TurnStore for SqliteStore {
             };
 
             if let Some(span) = span {
-                let messages = self.get_messages(&span.id).await?;
+                let messages = self.get_messages_with_content(&span.id).await?;
                 result.push(TurnWithContent {
                     turn,
                     span,
@@ -1499,7 +1652,7 @@ impl TurnStore for SqliteStore {
             };
 
             if let Some(span) = span {
-                let messages = self.get_messages(&span.id).await?;
+                let messages = self.get_messages_with_content(&span.id).await?;
                 result.push(TurnWithContent {
                     turn,
                     span,
@@ -1515,7 +1668,7 @@ impl TurnStore for SqliteStore {
         &self,
         view_id: &ViewId,
         turn_id: &TurnId,
-        messages: Vec<NewMessage>,
+        messages: Vec<(MessageRole, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
         fork_name: Option<&str>,
@@ -1524,8 +1677,8 @@ impl TurnStore for SqliteStore {
         let span = self.add_span(turn_id, model_id).await?;
 
         // Add messages to the new span
-        for msg in messages {
-            self.add_message(&span.id, msg).await?;
+        for (role, content) in messages {
+            self.add_message(&span.id, role, &content).await?;
         }
 
         // Optionally create a forked view that selects this new span
@@ -1555,7 +1708,8 @@ impl TurnStore for SqliteStore {
     ) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
         let turn = self.add_turn(conversation_id, SpanRole::User).await?;
         let span = self.add_span(&turn.id, None).await?;
-        let message = self.add_message(&span.id, NewMessage::user(text)).await?;
+        let content = vec![StoredContent::Text { text: text.to_string() }];
+        let message = self.add_message(&span.id, MessageRole::User, &content).await?;
 
         // Auto-select this span in the main view
         if let Some(main_view) = self.get_main_view(conversation_id).await? {
@@ -1573,7 +1727,8 @@ impl TurnStore for SqliteStore {
     ) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
         let turn = self.add_turn(conversation_id, SpanRole::Assistant).await?;
         let span = self.add_span(&turn.id, Some(model_id)).await?;
-        let message = self.add_message(&span.id, NewMessage::assistant(text)).await?;
+        let content = vec![StoredContent::Text { text: text.to_string() }];
+        let message = self.add_message(&span.id, MessageRole::Assistant, &content).await?;
 
         // Auto-select this span in the main view
         if let Some(main_view) = self.get_main_view(conversation_id).await? {
@@ -1673,22 +1828,24 @@ pub mod sync_helpers {
         Ok(id)
     }
 
-    /// Add a message to the new messages table.
-    /// Text content is stored in content_blocks.
+    /// Add a message to the messages table with content stored in message_content.
+    /// Each StoredContent item is stored as a separate row.
     pub fn add_message_sync(
         conn: &Connection,
         span_id: &SpanId,
         role: MessageRole,
-        text: Option<&str>,
-        tool_calls: Option<&str>,
-        tool_results: Option<&str>,
+        content: &[crate::storage::content::StoredContent],
         user_id: Option<&str>,
         model_id: Option<&str>,
     ) -> Result<MessageId> {
-        let id = MessageId::new();
+        use crate::storage::content::StoredContent;
+        use crate::storage::conversation::types::ContentType;
+        use crate::storage::ids::MessageContentId;
+
+        let message_id = MessageId::new();
         let now = unix_timestamp();
 
-        // Get next sequence number
+        // Get next sequence number for message
         let sequence_number: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM messages WHERE span_id = ?1",
@@ -1697,39 +1854,112 @@ pub mod sync_helpers {
             )
             .unwrap_or(0);
 
-        // Store text in content_blocks if present
-        let content_id: Option<String> = if let Some(text) = text {
-            if !text.is_empty() {
-                let origin_kind = match role {
-                    MessageRole::User => Some("user"),
-                    MessageRole::Assistant => Some("assistant"),
-                    MessageRole::System => Some("system"),
-                    MessageRole::Tool => Some("system"),
-                };
-                Some(store_content_sync(conn, text, origin_kind, user_id, model_id)?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
+        // Insert message row
         conn.execute(
-            "INSERT INTO messages (id, span_id, sequence_number, role, content_id, tool_calls, tool_results, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO messages (id, span_id, sequence_number, role, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                id.as_str(),
+                message_id.as_str(),
                 span_id.as_str(),
                 sequence_number,
                 role.as_str(),
-                content_id,
-                tool_calls,
-                tool_results,
                 now
             ],
         )?;
 
-        Ok(id)
+        // Insert content items
+        for (content_seq, stored_content) in content.iter().enumerate() {
+            let content_id = MessageContentId::new();
+
+            match stored_content {
+                StoredContent::Text { text } => {
+                    let origin_kind = match role {
+                        MessageRole::User => Some("user"),
+                        MessageRole::Assistant => Some("assistant"),
+                        MessageRole::System => Some("system"),
+                        MessageRole::Tool => Some("system"),
+                    };
+                    let content_block_id = store_content_sync(conn, text, origin_kind, user_id, model_id)?;
+
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, content_block_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::Text.as_str(),
+                            content_block_id
+                        ],
+                    )?;
+                }
+                StoredContent::AssetRef { asset_id, mime_type, filename } => {
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, asset_id, mime_type, filename)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::AssetRef.as_str(),
+                            asset_id,
+                            mime_type,
+                            filename.as_deref()
+                        ],
+                    )?;
+                }
+                StoredContent::DocumentRef { id, title } => {
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, document_id, document_title)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::DocumentRef.as_str(),
+                            id,
+                            title
+                        ],
+                    )?;
+                }
+                StoredContent::ToolCall(call) => {
+                    let tool_data = serde_json::to_string(call)?;
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, tool_data)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::ToolCall.as_str(),
+                            tool_data
+                        ],
+                    )?;
+                }
+                StoredContent::ToolResult(result) => {
+                    let tool_data = serde_json::to_string(result)?;
+                    conn.execute(
+                        "INSERT INTO message_content (id, message_id, sequence_number, content_type, tool_data)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            content_id.as_str(),
+                            message_id.as_str(),
+                            content_seq as i32,
+                            ContentType::ToolResult.as_str(),
+                            tool_data
+                        ],
+                    )?;
+                }
+                // Image and Audio should have been externalized to AssetRef by now
+                StoredContent::Image { .. } | StoredContent::Audio { .. } => {
+                    return Err(anyhow::anyhow!(
+                        "Inline image/audio should be externalized to AssetRef before storage"
+                    ));
+                }
+            }
+        }
+
+        Ok(message_id)
     }
 
     /// Select a span for a turn in a view.
@@ -1771,6 +2001,26 @@ mod tests {
             params![id.as_str(), now],
         ).unwrap();
         id
+    }
+
+    // Helper to create user message content
+    fn new_user_msg(text: &str) -> (MessageRole, Vec<StoredContent>) {
+        (MessageRole::User, vec![StoredContent::Text { text: text.to_string() }])
+    }
+
+    // Helper to create assistant message content
+    fn new_assistant_msg(text: &str) -> (MessageRole, Vec<StoredContent>) {
+        (MessageRole::Assistant, vec![StoredContent::Text { text: text.to_string() }])
+    }
+
+    // Helper to create tool message content
+    fn new_tool_msg(tool_result: llm::ToolResult) -> (MessageRole, Vec<StoredContent>) {
+        (MessageRole::Tool, vec![StoredContent::ToolResult(tool_result)])
+    }
+
+    // Helper to create assistant message with tool calls
+    fn new_assistant_with_tools(tool_call: llm::ToolCall) -> (MessageRole, Vec<StoredContent>) {
+        (MessageRole::Assistant, vec![StoredContent::ToolCall(tool_call)])
     }
 
     #[test]
@@ -1868,13 +2118,14 @@ mod tests {
         let span = store.add_span(&turn.id, None).await.unwrap();
 
         // Add a message
-        let msg = store.add_message(&span.id, NewMessage::user("Hello!")).await.unwrap();
+        let (role, content) = new_user_msg("Hello!");
+        let msg = store.add_message(&span.id, role, &content).await.unwrap();
         assert_eq!(msg.sequence_number, 0);
         assert_eq!(msg.role, MessageRole::User);
-        assert!(msg.content_id.is_some());
 
         // Add another message
-        let msg2 = store.add_message(&span.id, NewMessage::user("Follow up")).await.unwrap();
+        let (role2, content2) = new_user_msg("Follow up");
+        let msg2 = store.add_message(&span.id, role2, &content2).await.unwrap();
         assert_eq!(msg2.sequence_number, 1);
     }
 
@@ -1887,19 +2138,34 @@ mod tests {
         let span = store.add_span(&turn.id, Some("claude-3")).await.unwrap();
 
         // Add messages
-        store.add_message(&span.id, NewMessage::assistant("Thinking...")).await.unwrap();
-        store.add_message(&span.id, NewMessage::assistant_with_tools(None, r#"{"tool": "search"}"#)).await.unwrap();
-        store.add_message(&span.id, NewMessage::tool_result(r#"{"result": "found"}"#)).await.unwrap();
-        store.add_message(&span.id, NewMessage::assistant("Here's what I found.")).await.unwrap();
+        let (r1, c1) = new_assistant_msg("Thinking...");
+        store.add_message(&span.id, r1, &c1).await.unwrap();
+
+        let tool_call = llm::ToolCall {
+            id: "call_1".to_string(),
+            name: "search".to_string(),
+            arguments: r#"{"query": "test"}"#.to_string(),
+        };
+        let (r2, c2) = new_assistant_with_tools(tool_call);
+        store.add_message(&span.id, r2, &c2).await.unwrap();
+
+        let tool_result = llm::ToolResult {
+            tool_call_id: "call_1".to_string(),
+            content: r#"{"result": "found"}"#.to_string(),
+            is_error: false,
+        };
+        let (r3, c3) = new_tool_msg(tool_result);
+        store.add_message(&span.id, r3, &c3).await.unwrap();
+
+        let (r4, c4) = new_assistant_msg("Here's what I found.");
+        store.add_message(&span.id, r4, &c4).await.unwrap();
 
         // Get all messages
         let messages = store.get_messages(&span.id).await.unwrap();
         assert_eq!(messages.len(), 4);
         assert_eq!(messages[0].role, MessageRole::Assistant);
         assert_eq!(messages[1].role, MessageRole::Assistant);
-        assert!(messages[1].tool_calls.is_some());
         assert_eq!(messages[2].role, MessageRole::Tool);
-        assert!(messages[2].tool_results.is_some());
     }
 
     #[tokio::test]
@@ -1915,14 +2181,20 @@ mod tests {
         let span3 = store.add_span(&turn.id, Some("gemini")).await.unwrap();
 
         // Add different message counts to each
-        store.add_message(&span1.id, NewMessage::assistant("Claude says hi")).await.unwrap();
-        store.add_message(&span1.id, NewMessage::assistant("And more")).await.unwrap();
+        let (r, c) = new_assistant_msg("Claude says hi");
+        store.add_message(&span1.id, r, &c).await.unwrap();
+        let (r, c) = new_assistant_msg("And more");
+        store.add_message(&span1.id, r, &c).await.unwrap();
 
-        store.add_message(&span2.id, NewMessage::assistant("GPT says hello")).await.unwrap();
+        let (r, c) = new_assistant_msg("GPT says hello");
+        store.add_message(&span2.id, r, &c).await.unwrap();
 
-        store.add_message(&span3.id, NewMessage::assistant("Gemini here")).await.unwrap();
-        store.add_message(&span3.id, NewMessage::assistant("With tools")).await.unwrap();
-        store.add_message(&span3.id, NewMessage::assistant("Done")).await.unwrap();
+        let (r, c) = new_assistant_msg("Gemini here");
+        store.add_message(&span3.id, r, &c).await.unwrap();
+        let (r, c) = new_assistant_msg("With tools");
+        store.add_message(&span3.id, r, &c).await.unwrap();
+        let (r, c) = new_assistant_msg("Done");
+        store.add_message(&span3.id, r, &c).await.unwrap();
 
         // Get spans and verify message counts
         let spans = store.get_spans(&turn.id).await.unwrap();
@@ -1950,13 +2222,16 @@ mod tests {
         // Add turns and spans
         let turn1 = store.add_turn(&conv_id, SpanRole::User).await.unwrap();
         let span1 = store.add_span(&turn1.id, None).await.unwrap();
-        store.add_message(&span1.id, NewMessage::user("Hello")).await.unwrap();
+        let (r, c) = new_user_msg("Hello");
+        store.add_message(&span1.id, r, &c).await.unwrap();
 
         let turn2 = store.add_turn(&conv_id, SpanRole::Assistant).await.unwrap();
         let span2a = store.add_span(&turn2.id, Some("claude-3")).await.unwrap();
         let span2b = store.add_span(&turn2.id, Some("gpt-4")).await.unwrap();
-        store.add_message(&span2a.id, NewMessage::assistant("Claude response")).await.unwrap();
-        store.add_message(&span2b.id, NewMessage::assistant("GPT response")).await.unwrap();
+        let (r, c) = new_assistant_msg("Claude response");
+        store.add_message(&span2a.id, r, &c).await.unwrap();
+        let (r, c) = new_assistant_msg("GPT response");
+        store.add_message(&span2b.id, r, &c).await.unwrap();
 
         // Select spans for view
         store.select_span(&view.id, &turn1.id, &span1.id).await.unwrap();
@@ -2002,9 +2277,9 @@ mod tests {
         let conv_id = create_test_conversation(&store);
 
         // Create a conversation with 3 turns
-        let (turn1, span1, _) = store.add_user_turn(&conv_id, "Hello").await.unwrap();
-        let (turn2, span2, _) = store.add_assistant_turn(&conv_id, "claude", "Hi there!").await.unwrap();
-        let (turn3, span3, _) = store.add_user_turn(&conv_id, "How are you?").await.unwrap();
+        let (turn1, _span1, _) = store.add_user_turn(&conv_id, "Hello").await.unwrap();
+        let (turn2, _span2, _) = store.add_assistant_turn(&conv_id, "claude", "Hi there!").await.unwrap();
+        let (turn3, _span3, _) = store.add_user_turn(&conv_id, "How are you?").await.unwrap();
 
         let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
 
@@ -2013,7 +2288,7 @@ mod tests {
             .edit_turn(
                 &main_view.id,
                 &turn2.id,
-                vec![NewMessage::assistant("Hello! How can I help?")],
+                vec![new_assistant_msg("Hello! How can I help?")],
                 Some("gpt-4"),
                 false, // don't create fork
                 None,
@@ -2039,9 +2314,9 @@ mod tests {
         let conv_id = create_test_conversation(&store);
 
         // Create a conversation
-        let (turn1, _, _) = store.add_user_turn(&conv_id, "Hello").await.unwrap();
+        let (_turn1, _, _) = store.add_user_turn(&conv_id, "Hello").await.unwrap();
         let (turn2, original_span, _) = store.add_assistant_turn(&conv_id, "claude", "Hi!").await.unwrap();
-        let (turn3, _, _) = store.add_user_turn(&conv_id, "More").await.unwrap();
+        let (_turn3, _, _) = store.add_user_turn(&conv_id, "More").await.unwrap();
 
         let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
 
@@ -2050,7 +2325,7 @@ mod tests {
             .edit_turn(
                 &main_view.id,
                 &turn2.id,
-                vec![NewMessage::assistant("New response")],
+                vec![new_assistant_msg("New response")],
                 Some("gpt-4"),
                 true, // create fork
                 Some("edited-branch"),
@@ -2107,7 +2382,8 @@ mod tests {
 
         // Create an alternate span at turn 2
         let alt_span = store.add_span(&turn2.id, Some("gpt-4")).await.unwrap();
-        store.add_message(&alt_span.id, NewMessage::assistant("Greetings!")).await.unwrap();
+        let (r, c) = new_assistant_msg("Greetings!");
+        store.add_message(&alt_span.id, r, &c).await.unwrap();
 
         let main_view = store.get_main_view(&conv_id).await.unwrap().unwrap();
 
