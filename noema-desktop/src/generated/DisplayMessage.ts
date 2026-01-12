@@ -4,14 +4,14 @@ import type { DisplayContent } from "./DisplayContent";
 
 export type DisplayMessage = { role: string, content: Array<DisplayContent>, 
 /**
- * Span set ID this message belongs to (for switching alternates)
+ * Turn ID this message belongs to (for switching alternates)
  */
-spanSetId: string | null, 
+turnId: string | undefined, 
 /**
  * Span ID for this specific message (for fork/edit actions)
  */
-spanId: string | null, 
+spanId: string | undefined, 
 /**
- * Available alternates for this message's span set (only populated for assistant messages with alternatives)
+ * Available alternates for this message's turn (only populated for assistant messages with alternatives)
  */
 alternates: Array<AlternateInfo> | null, };
