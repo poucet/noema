@@ -1045,3 +1045,97 @@ The new DB-agnostic session API is now the only session API:
 `cargo check --package noema-core --package noema-ext` passes. Desktop needs separate update.
 
 ---
+
+## 2026-01-12: Storage Module Restructure
+
+### Problem
+
+Storage implementation was tightly coupled to trait definitions. All stores were in domain-specific directories (asset/, blob/, content_block/, conversation/, document/, user/) mixing traits, types, and implementations.
+
+User feedback highlighted several issues:
+1. SQLite store shouldn't be under session/ - too much tight coupling
+2. Need ability to use different backends for different stores (e.g., SQLite for assets, something else for conversations)
+3. Need in-memory implementations for testing without SQLite
+4. ContentBlockResolver should be derivable from ContentBlockStore, not a separate trait
+
+### Solution: Clean Module Structure
+
+Restructured storage module into three directories:
+
+**`storage/traits/`** - All trait definitions:
+- `AssetStore` - Asset metadata storage
+- `BlobStore` - Content-addressable binary storage
+- `ContentBlockStore` - Content-addressed text storage (added `require_text()` method)
+- `ConversationStore` - Conversation-level CRUD
+- `DocumentStore` - Document, tab, revision storage
+- `TurnStore` - Turn/Span/Message conversation storage
+- `UserStore` - User account management
+
+**`storage/types/`** - All type definitions:
+- Asset types (Asset, StoredAsset, AssetStoreResult)
+- Blob types (StoredBlob)
+- ContentBlock types (ContentBlock, StoredContentBlock, StoreResult, ContentOrigin, OriginKind)
+- Conversation types (TurnInfo, SpanInfo, MessageInfo, ViewInfo, etc.)
+- Document types (DocumentInfo, DocumentTabInfo, DocumentRevisionInfo, FullDocumentInfo)
+- User types (UserInfo)
+
+**`storage/implementations/`** - Backend implementations:
+- `sqlite/` - SqliteStore implementing all traits (moved from scattered locations)
+- `fs/` - FsBlobStore for filesystem blob storage
+- `memory/` - In-memory implementations for testing:
+  - `MemoryBlobStore` - Content-addressable blob storage with SHA-256
+  - `MemoryContentBlockStore` - Content block storage with deduplication
+  - `MemoryAssetStore` - Asset metadata storage
+
+**`storage/document_resolver.rs`** - DocumentFormatter and DocumentResolver for RAG (restored from deleted module)
+
+### Key Changes
+
+1. **ContentBlockStore::require_text()** - New method that returns `Result<String>`, errors if not found. Replaces separate `ContentBlockResolver` trait.
+
+2. **Clean re-exports from storage/mod.rs** - All commonly used items re-exported for convenience:
+   ```rust
+   pub use traits::{AssetStore, BlobStore, ContentBlockStore, ...};
+   pub use types::{Asset, StoredAsset, ContentBlock, ...};
+   pub use session::{Session, ResolvedContent, ResolvedMessage, ...};
+   pub use implementations::sqlite::SqliteStore;
+   pub use implementations::fs::FsBlobStore;
+   ```
+
+3. **In-memory stores** - Thread-safe using `Mutex`, comprehensive test coverage. Enable unit testing without SQLite dependencies.
+
+### Files Changed
+
+**New files:**
+- `storage/traits/mod.rs` + individual trait files
+- `storage/types/mod.rs` + individual type files
+- `storage/implementations/mod.rs`
+- `storage/implementations/sqlite/mod.rs` (moved from storage/sqlite/)
+- `storage/implementations/fs/mod.rs` + blob.rs (moved from storage/blob/)
+- `storage/implementations/memory/mod.rs` + blob.rs, content_block.rs, asset.rs
+- `storage/document_resolver.rs` (restored)
+
+**Updated files:**
+- `storage/mod.rs` - New structure with re-exports
+- All sqlite implementation files - Updated imports
+- `engine.rs` - Added DocumentResolver import
+- Desktop commands - Updated import paths
+
+**Deleted files:**
+- Old domain directories (asset/, blob/, content_block/, conversation/, document/, user/)
+- Their individual mod.rs, types.rs, sqlite.rs files (content moved to new structure)
+
+### Commits
+
+1. "Restructure storage module with traits/, types/, implementations/"
+2. "Fix missing DocumentResolver import and visibility of store_content_sync"
+3. "Fix find_by_hash return type in coordinator test mock"
+4. "Add in-memory storage implementations for testing"
+
+### Test Results
+
+All 45 tests pass:
+- 32 existing tests (coordinator, session, types, fs blob)
+- 13 new tests for memory implementations
+
+---
