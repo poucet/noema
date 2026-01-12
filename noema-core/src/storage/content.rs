@@ -169,10 +169,8 @@ impl StoredContent {
                 }
             }
             StoredContent::DocumentRef { document_id } => {
-                // Document title is looked up separately by UI/formatter
                 Ok(ContentBlock::DocumentRef {
                     id: document_id.clone(),
-                    title: String::new(), // UI will fetch title from document store
                 })
             }
             StoredContent::ToolCall(call) => Ok(ContentBlock::ToolCall(call.clone())),

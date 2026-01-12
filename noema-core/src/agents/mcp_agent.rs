@@ -93,7 +93,7 @@ impl McpAgent {
         let doc_ids: Vec<DocumentId> = request
             .get_document_refs()
             .into_iter()
-            .map(|(id, _)| DocumentId::from_string(id.to_string()))
+            .map(DocumentId::from)
             .collect();
 
         if doc_ids.is_empty() {

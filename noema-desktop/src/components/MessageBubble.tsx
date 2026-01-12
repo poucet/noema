@@ -9,7 +9,7 @@ function extractRawMarkdown(content: DisplayContent[]): string {
   return content
     .map((block) => {
       if ("text" in block) return block.text;
-      if ("documentRef" in block) return `[@${block.documentRef.title}]`;
+      if ("documentRef" in block) return `[@doc:${block.documentRef.id}]`;
       if ("toolCall" in block) return `[Tool: ${block.toolCall.name}]`;
       if ("toolResult" in block) {
         const textParts = block.toolResult.content

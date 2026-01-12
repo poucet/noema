@@ -110,7 +110,7 @@ pub enum ContentBlock {
     Image { data: String, mime_type: String },
     Audio { data: String, mime_type: String },
     /// Reference to a document - stored as-is, resolved to full content before sending to LLM
-    DocumentRef { id: String, title: String },
+    DocumentRef { id: String },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
 }
@@ -125,10 +125,10 @@ impl ContentBlock {
         }
     }
 
-    /// Extract the DocumentRef, if any
-    pub fn document_ref(&self) -> Option<(&str, &str)> {
+    /// Extract the DocumentRef id, if any
+    pub fn document_ref(&self) -> Option<&str> {
         match self {
-            ContentBlock::DocumentRef { id, title } => Some((id.as_str(), title.as_str())),
+            ContentBlock::DocumentRef { id } => Some(id.as_str()),
             _ => None,
         }
     }
@@ -169,7 +169,7 @@ impl ChatPayload {
     }
 
     /// Get all document IDs referenced in this payload
-    pub fn get_document_refs(&self) -> Vec<(&str, &str)> {
+    pub fn get_document_refs(&self) -> Vec<&str> {
         self.content
             .iter()
             .filter_map(|block| block.document_ref())
@@ -311,7 +311,7 @@ impl ChatMessage {
         self.payload.get_text()
     }
     
-    pub fn get_document_refs(&self) -> Vec<(&str, &str)> {
+    pub fn get_document_refs(&self) -> Vec<&str> {
         self.payload.get_document_refs()
     }
 
@@ -406,8 +406,8 @@ impl ChatRequest {
     }
 
 
-    /// Get all document IDs referenced in this payload
-    pub fn get_document_refs(&self) -> Vec<(&str, &str)> {
+    /// Get all document IDs referenced in this request
+    pub fn get_document_refs(&self) -> Vec<&str> {
         self.messages
             .iter()
             .flat_map(|msg| msg.get_document_refs())

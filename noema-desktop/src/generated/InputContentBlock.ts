@@ -4,4 +4,4 @@
  * Input content block from frontend - structured content for user messages.
  * This preserves the exact position of document references and attachments inline with text.
  */
-export type InputContentBlock = { "type": "text", text: string, } | { "type": "documentRef", id: string, title: string, } | { "type": "image", data: string, mimeType: string, } | { "type": "audio", data: string, mimeType: string, } | { "type": "assetRef", assetId: string, mimeType: string, };
+export type InputContentBlock = { "type": "text", text: string, } | { "type": "documentRef", id: string, } | { "type": "image", data: string, mimeType: string, } | { "type": "audio", data: string, mimeType: string, } | { "type": "assetRef", assetId: string, mimeType: string, };

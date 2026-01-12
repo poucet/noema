@@ -15,8 +15,10 @@ interface MentionState {
   selectedIndex: number;
 }
 
-// Subset of InputContentBlock that can appear in the editor (text and documentRef)
-type EditorBlock = Extract<InputContentBlock, { type: "text" } | { type: "documentRef" }>;
+// Editor blocks include title for display - stripped when sending to backend
+type EditorBlock =
+  | { type: "text"; text: string }
+  | { type: "documentRef"; id: string; title: string };
 
 interface ChatInputProps {
   onSend: (content: InputContentBlock[], toolConfig?: ToolConfig) => void;
@@ -508,11 +510,15 @@ export function ChatInput({
     if (!hasContent(blocks) && attachments.length === 0) return;
     if (disabled) return;
 
-    // Build content blocks: filter empty text blocks, trim text, and add attachments
+    // Build content blocks: filter empty text blocks, trim text, strip title from documentRefs
     const contentBlocks: InputContentBlock[] = blocks
-      .map((block) =>
-        block.type === "text" ? { ...block, text: block.text.trim() } : block
-      )
+      .map((block): InputContentBlock => {
+        if (block.type === "text") {
+          return { type: "text", text: block.text.trim() };
+        }
+        // Strip title - backend only needs id
+        return { type: "documentRef", id: block.id };
+      })
       .filter((block) => block.type !== "text" || block.text.length > 0);
 
     // Add attachments as image/audio blocks

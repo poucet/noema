@@ -77,7 +77,7 @@ impl DocumentFormatter {
 
         for msg in request.messages_mut() {
             for block in &mut msg.payload.content {
-                if let ContentBlock::DocumentRef { id, title } = block {
+                if let ContentBlock::DocumentRef { id } = block {
                     let doc_id = DocumentId::from_string(id.clone());
                     if let Some(doc) = resolved_docs.get(&doc_id) {
                         let formatted = if expanded_docs.insert(id.clone()) {
@@ -85,7 +85,7 @@ impl DocumentFormatter {
                             self.format_document(doc)
                         } else {
                             // Subsequent references: use shorthand
-                            self.format_document_shorthand(doc, title)
+                            self.format_document_shorthand(doc)
                         };
                         *block = ContentBlock::Text { text: formatted };
                     }
@@ -116,7 +116,7 @@ impl DocumentFormatter {
     }
 
     /// Format a shorthand reference (for subsequent mentions of the same document)
-    pub fn format_document_shorthand(&self, doc: &FullDocumentInfo, _title: &str) -> String {
+    pub fn format_document_shorthand(&self, doc: &FullDocumentInfo) -> String {
         let template = DocumentShorthandTemplate {
             id: doc.document.id.as_str(),
             title: &doc.document.title,

@@ -49,7 +49,6 @@ export function ContentBlock({ block, onDocumentClick }: ContentBlockProps) {
     return (
       <DocumentRefChip
         id={block.documentRef.id}
-        title={block.documentRef.title}
         onClick={onDocumentClick}
       />
     );

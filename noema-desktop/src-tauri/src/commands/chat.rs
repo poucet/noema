@@ -63,8 +63,8 @@ pub async fn send_message(
                     llm_content.push(ContentBlock::Text { text });
                 }
             }
-            InputContentBlock::DocumentRef { id, title } => {
-                llm_content.push(ContentBlock::DocumentRef { id, title });
+            InputContentBlock::DocumentRef { id } => {
+                llm_content.push(ContentBlock::DocumentRef { id });
             }
             InputContentBlock::Image { data, mime_type } => {
                 llm_content.push(ContentBlock::Image { data, mime_type });
@@ -339,7 +339,7 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
 #[tauri::command]
 pub async fn switch_conversation(
     state: State<'_, Arc<AppState>>,
-    conversation_id: String,
+    conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
     let store = {
         let store_guard = state.store.lock().await;
@@ -349,10 +349,8 @@ pub async fn switch_conversation(
             .clone()
     };
 
-    let conv_id = ConversationId::from_string(conversation_id.clone());
-
     // Open session for the conversation
-    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conv_id)
+    let session = Session::open(Arc::clone(&store), Arc::clone(&store), conversation_id.clone())
         .await
         .map_err(|e| format!("Failed to open conversation: {}", e))?;
 
@@ -377,7 +375,7 @@ pub async fn switch_conversation(
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
     *state.engine.lock().await = Some(engine);
-    *state.current_conversation_id.lock().await = conversation_id;
+    *state.current_conversation_id.lock().await = conversation_id.into();
 
     Ok(messages)
 }
@@ -428,19 +426,18 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
 #[tauri::command]
 pub async fn delete_conversation(
     state: State<'_, Arc<AppState>>,
-    conversation_id: String,
+    conversation_id: ConversationId,
 ) -> Result<(), String> {
     let current_id = state.current_conversation_id.lock().await.clone();
-    if conversation_id == current_id {
+    if conversation_id.as_str() == current_id {
         return Err("Cannot delete current conversation".to_string());
     }
 
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
-    let conv_id = ConversationId::from_string(conversation_id);
     store
-        .delete_conversation(&conv_id)
+        .delete_conversation(&conversation_id)
         .await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
@@ -449,13 +446,12 @@ pub async fn delete_conversation(
 #[tauri::command]
 pub async fn rename_conversation(
     state: State<'_, Arc<AppState>>,
-    conversation_id: String,
+    conversation_id: ConversationId,
     name: String,
 ) -> Result<(), String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
-    let conv_id = ConversationId::from_string(conversation_id);
     let name_opt = if name.trim().is_empty() {
         None
     } else {
@@ -463,7 +459,7 @@ pub async fn rename_conversation(
     };
 
     store
-        .rename_conversation(&conv_id, name_opt)
+        .rename_conversation(&conversation_id, name_opt)
         .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
@@ -472,14 +468,13 @@ pub async fn rename_conversation(
 #[tauri::command]
 pub async fn get_conversation_private(
     state: State<'_, Arc<AppState>>,
-    conversation_id: String,
+    conversation_id: ConversationId,
 ) -> Result<bool, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
-    let conv_id = ConversationId::from_string(conversation_id);
     store
-        .is_conversation_private(&conv_id)
+        .is_conversation_private(&conversation_id)
         .await
         .map_err(|e| format!("Failed to get conversation privacy: {}", e))
 }
@@ -488,15 +483,14 @@ pub async fn get_conversation_private(
 #[tauri::command]
 pub async fn set_conversation_private(
     state: State<'_, Arc<AppState>>,
-    conversation_id: String,
+    conversation_id: ConversationId,
     is_private: bool,
 ) -> Result<(), String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
-    let conv_id = ConversationId::from_string(conversation_id);
     store
-        .set_conversation_private(&conv_id, is_private)
+        .set_conversation_private(&conversation_id, is_private)
         .await
         .map_err(|e| format!("Failed to set conversation privacy: {}", e))
 }
@@ -579,12 +573,11 @@ pub struct SpanInfoResponse {
 #[tauri::command]
 pub async fn get_turn_alternates(
     state: State<'_, Arc<AppState>>,
-    turn_id: String,
+    turn_id: TurnId,
 ) -> Result<Vec<SpanInfoResponse>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
-    let turn_id = TurnId::from_string(turn_id);
     let spans = store
         .get_spans(&turn_id)
         .await
@@ -606,17 +599,17 @@ pub async fn get_turn_alternates(
 #[tauri::command]
 pub async fn get_span_messages(
     state: State<'_, Arc<AppState>>,
-    span_id: String,
+    span_id: SpanId,
 ) -> Result<Vec<DisplayMessage>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
-    let span_id = SpanId::from_string(span_id);
     let messages = store
         .get_messages_with_content(&span_id)
         .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
 
+    let span_id_str = span_id.into();
     // TODO: Need to resolve content through coordinator
     // For now, return basic messages without resolved content
     Ok(messages
@@ -630,7 +623,7 @@ pub async fn get_span_messages(
             },
             content: vec![], // Content needs resolution via coordinator
             span_set_id: None,
-            span_id: Some(span_id.as_str().to_string()),
+            span_id: Some(span_id_str.clone()),
             alternates: None,
         })
         .collect())
@@ -640,14 +633,13 @@ pub async fn get_span_messages(
 #[tauri::command]
 pub async fn list_conversation_views(
     state: State<'_, Arc<AppState>>,
-    conversation_id: String,
+    conversation_id: ConversationId,
 ) -> Result<Vec<ThreadInfoResponse>, String> {
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("Storage not initialized")?;
 
-    let conv_id = ConversationId::from_string(conversation_id);
     let views = store
-        .get_views(&conv_id)
+        .get_views(&conversation_id)
         .await
         .map_err(|e| format!("Failed to list views: {}", e))?;
 

@@ -69,7 +69,6 @@ pub enum DisplayContent {
     /// Reference to a document (shown as chip in UI, content injected to LLM separately)
     DocumentRef {
         id: String,
-        title: String,
     },
     ToolCall { 
         name: String, 
@@ -193,9 +192,8 @@ impl From<&ContentBlock> for DisplayContent {
                     .map(DisplayToolResultContent::from)
                     .collect(),
             },
-            ContentBlock::DocumentRef { id, title } => DisplayContent::DocumentRef {
+            ContentBlock::DocumentRef { id } => DisplayContent::DocumentRef {
                 id: id.clone(),
-                title: title.clone(),
             },
         }
     }
@@ -229,7 +227,6 @@ impl From<noema_core::storage::content::ResolvedContent> for DisplayContent {
             },
             ResolvedContent::DocumentRef { document_id } => DisplayContent::DocumentRef {
                 id: document_id,
-                title: String::new(), // Title fetched separately by UI
             },
             ResolvedContent::ToolCall(call) => DisplayContent::ToolCall {
                 name: call.name.clone(),
@@ -266,7 +263,6 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
             },
             ResolvedContent::Document { document_id, .. } => DisplayContent::DocumentRef {
                 id: document_id.clone(),
-                title: String::new(), // Title not stored in resolved content
             },
             ResolvedContent::ToolCall(call) => DisplayContent::ToolCall {
                 name: call.name.clone(),
@@ -399,9 +395,8 @@ pub enum InputContentBlock {
         text: String 
     },
     /// Reference to a document (inline position preserved)
-    DocumentRef { 
-        id: String, title: 
-        String 
+    DocumentRef {
+        id: String,
     },
     /// Inline base64 image (for new uploads)
     Image { 
