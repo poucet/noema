@@ -9,6 +9,7 @@
 use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry};
 use crate::storage::session::Session;
 use crate::storage::traits::TurnStore;
+use crate::storage::DocumentResolver;
 use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};

@@ -34,7 +34,7 @@ pub(crate) use user::init_schema as init_user_schema;
 
 // Re-export sync helpers from conversation module
 pub use conversation::sync_helpers;
-pub use content_block::store_content_sync;
+pub(crate) use content_block::store_content_sync;
 
 /// Shared SQLite connection pool
 ///
