@@ -4,13 +4,12 @@ use config::PathManager;
 use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::{
-    AssetStore, BlobStore, FsBlobStore, ConversationStore, UserStore,
-    DocumentResolver, SqliteStore,
+    AssetStore, BlobStore, ContentBlockStore, ConversationStore, DocumentResolver, FsBlobStore,
+    Session, SqliteStore, UserStore,
 };
 use noema_core::storage::coordinator::DynStorageCoordinator;
-use noema_core::storage::session::Session;
+use noema_core::storage::ids::ConversationId;
 use noema_core::{ChatEngine, McpRegistry};
-use noema_core::storage::ids::{ConversationId, UserId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -77,7 +76,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     })?;
     log_message("User initialized");
 
-    let session = init_session(state).await.map_err(|e| {
+    let (session, store) = init_session(state).await.map_err(|e| {
         log_message(&format!("ERROR in init_session: {}", e));
         e
     })?;
@@ -89,7 +88,7 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     let mcp_registry = init_mcp()?;
     log_message("MCP registry loaded");
 
-    let result = init_engine(state, session, mcp_registry).await?;
+    let result = init_engine(state, session, store, mcp_registry).await?;
     log_message(&format!("Engine initialized with model: {}", result));
 
     // Start the engine event loop (runs continuously)
@@ -184,11 +183,13 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
 
     // Create storage coordinator for automatic asset externalization
     // The coordinator uses the blob store for binary data and the SQL store for asset metadata
-    // Note: SqliteStore implements AssetStore
+    // Note: SqliteStore implements AssetStore and ContentBlockStore
     let asset_store = Arc::clone(&store) as Arc<dyn AssetStore>;
+    let content_block_store = Arc::clone(&store) as Arc<dyn ContentBlockStore>;
     let coordinator = Arc::new(DynStorageCoordinator::new(
         blob_store.clone(),
         asset_store,
+        content_block_store,
     ));
 
     // Set the coordinator on the store (uses interior mutability)
@@ -244,13 +245,18 @@ async fn init_user(state: &AppState) -> Result<(), String> {
     };
 
     drop(store_guard);
-    *state.user_id.lock().await = user.id;
+    *state.user_id.lock().await = noema_core::storage::ids::UserId::from_string(user.id);
     Ok(())
 }
 
-async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
-    let store_guard = state.store.lock().await;
-    let store = store_guard.as_ref().ok_or("Storage not initialized")?;
+async fn init_session(state: &AppState) -> Result<(Session<SqliteStore>, Arc<SqliteStore>), String> {
+    let store = {
+        let store_guard = state.store.lock().await;
+        store_guard
+            .as_ref()
+            .ok_or("Storage not initialized")?
+            .clone()
+    };
     let user_id = state.user_id.lock().await.clone();
 
     // Try to open the most recent conversation, or create a new one if none exist
@@ -259,24 +265,25 @@ async fn init_session(state: &AppState) -> Result<SqliteSession, String> {
         .await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
-    let session = if let Some(most_recent) = conversations.first() {
-        // Open the most recent conversation
-        store
-            .open_conversation(most_recent.id.as_str())
-            .await
-            .map_err(|e| format!("Failed to open conversation: {}", e))?
+    let conversation_id = if let Some(most_recent) = conversations.first() {
+        most_recent.id.clone()
     } else {
         // No conversations exist, create a new one
         store
-            .create_conversation(&user_id)
+            .create_conversation(&user_id, None)
+            .await
             .map_err(|e| format!("Failed to create conversation: {}", e))?
     };
 
-    let conversation_id = session.conversation_id().to_string();
-    drop(store_guard); // Release lock before acquiring another
-    *state.current_conversation_id.lock().await = conversation_id;
+    // Open session for the conversation
+    // Session::open needs a ContentBlockStore for resolving text - SqliteStore implements it
+    let session = Session::open(Arc::clone(&store), conversation_id.clone(), store.as_ref())
+        .await
+        .map_err(|e| format!("Failed to open session: {}", e))?;
 
-    Ok(session)
+    *state.current_conversation_id.lock().await = conversation_id.as_str().to_string();
+
+    Ok((session, store))
 }
 
 fn init_mcp() -> Result<McpRegistry, String> {
@@ -285,7 +292,8 @@ fn init_mcp() -> Result<McpRegistry, String> {
 
 async fn init_engine(
     state: &AppState,
-    session: SqliteSession,
+    session: Session<SqliteStore>,
+    store: Arc<SqliteStore>,
     mcp_registry: McpRegistry,
 ) -> Result<String, String> {
     const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
@@ -308,12 +316,8 @@ async fn init_engine(
     *state.model_id.lock().await = model_id;
     *state.model_name.lock().await = model_display_name.clone();
 
-    // Get document resolver (store implements DocumentResolver directly)
-    let document_resolver: Arc<dyn DocumentResolver> = {
-        let store_guard = state.store.lock().await;
-        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-        Arc::clone(store) as Arc<dyn DocumentResolver>
-    };
+    // Store implements DocumentResolver directly
+    let document_resolver: Arc<dyn DocumentResolver> = store;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
     *state.engine.lock().await = Some(engine);

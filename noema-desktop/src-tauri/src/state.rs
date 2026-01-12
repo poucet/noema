@@ -2,6 +2,7 @@
 
 use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
+use noema_core::storage::ids::UserId;
 use noema_core::storage::{BlobStore, SqliteStore};
 use noema_core::ChatEngine;
 use std::collections::HashMap;
@@ -15,7 +16,7 @@ pub struct AppState {
     /// Current thread ID within the conversation (None = main thread)
     pub current_thread_id: Mutex<Option<String>>,
     /// Current user ID (from database)
-    pub user_id: Mutex<String>,
+    pub user_id: Mutex<UserId>,
     /// Full model ID in "provider/model" format
     pub model_id: Mutex<String>,
     /// Display name for the model
@@ -42,7 +43,7 @@ impl AppState {
             engine: Mutex::new(None),
             current_conversation_id: Mutex::new(String::new()),
             current_thread_id: Mutex::new(None),
-            user_id: Mutex::new(String::new()),
+            user_id: Mutex::new(UserId::from_string(String::new())),
             model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
             voice_coordinator: Mutex::new(None),

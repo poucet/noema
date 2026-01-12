@@ -6,7 +6,7 @@ use rusqlite::{params, Connection};
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
-use crate::storage::ids::{ConversationId, UserId};
+use crate::storage::ids::{ConversationId, UserId, ViewId};
 use crate::storage::traits::ConversationStore;
 use crate::storage::types::ConversationInfo;
 
@@ -39,6 +39,67 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 
 #[async_trait]
 impl ConversationStore for SqliteStore {
+    async fn create_conversation(
+        &self,
+        user_id: &UserId,
+        name: Option<&str>,
+    ) -> Result<ConversationId> {
+        let conn = self.conn().lock().unwrap();
+        let now = unix_timestamp();
+        let conv_id = ConversationId::new();
+
+        conn.execute(
+            "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![conv_id.as_str(), user_id.as_str(), name, now, now],
+        )?;
+
+        // Create main view for the conversation
+        let view_id = ViewId::new();
+        conn.execute(
+            "INSERT INTO views (id, conversation_id, name, is_main, created_at) VALUES (?1, ?2, 'main', 1, ?3)",
+            params![view_id.as_str(), conv_id.as_str(), now],
+        )?;
+
+        Ok(conv_id)
+    }
+
+    async fn get_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Option<ConversationInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let result = conn.query_row(
+            "SELECT c.id, c.title, c.is_private, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) as turn_count
+             FROM conversations c WHERE c.id = ?1",
+            params![conversation_id.as_str()],
+            |row| {
+                let id: String = row.get(0)?;
+                let name: Option<String> = row.get(1)?;
+                let is_private: i32 = row.get(2)?;
+                let created_at: i64 = row.get(3)?;
+                let updated_at: i64 = row.get(4)?;
+                let turn_count: usize = row.get(5)?;
+                Ok((id, name, is_private, created_at, updated_at, turn_count))
+            },
+        );
+
+        match result {
+            Ok((id, name, is_private, created_at, updated_at, turn_count)) => {
+                Ok(Some(ConversationInfo {
+                    id: ConversationId::from_string(id),
+                    name,
+                    turn_count,
+                    is_private: is_private != 0,
+                    created_at,
+                    updated_at,
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(

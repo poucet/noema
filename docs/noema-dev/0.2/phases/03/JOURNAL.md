@@ -1139,3 +1139,61 @@ All 45 tests pass:
 - 13 new tests for memory implementations
 
 ---
+
+## 2026-01-12: Desktop Commands Updated for New Session API (3.3.13)
+
+### Changes Made
+
+Updated noema-desktop to use the new `Session<S: TurnStore>` API:
+
+**1. ConversationStore trait updated** (noema-core):
+- Added `create_conversation(user_id, name)` method
+- Added `get_conversation(conversation_id)` method
+- Implemented for `SqliteStore` and `MemoryConversationStore`
+
+**2. init.rs rewritten**:
+- `init_session()` now returns `(Session<SqliteStore>, Arc<SqliteStore>)`
+- Uses `ConversationStore::create_conversation()` for new conversations
+- Uses `Session::open()` to open existing conversations
+- Passes store to `init_engine()` for DocumentResolver
+
+**3. chat.rs updated**:
+- `get_messages()` - Uses `session.messages_for_display()` instead of `session.messages()`
+- `switch_conversation()` - Uses `Session::open()` instead of `store.open_conversation()`
+- `new_conversation()` - Uses `ConversationStore::create_conversation()` + `Session::open()`
+- `delete_conversation()` / `rename_conversation()` - Uses `ConversationId` newtype
+- `get_conversation_private()` / `set_conversation_private()` - Uses `is_conversation_private()` method name
+- `send_parallel_message()` - Stubbed (parallel support pending re-implementation)
+
+**4. types.rs updated**:
+- Added `From<&noema_core::storage::ResolvedContent> for DisplayContent`
+- Added `From<&noema_core::storage::ResolvedMessage> for DisplayMessage`
+- Maps `MessageRole::Tool` to `Role::Assistant` (llm::Role has no Tool variant)
+
+**5. state.rs updated**:
+- `user_id` field changed from `String` to `UserId` newtype
+
+**6. lib.rs updated**:
+- Removed legacy commands: `get_span_set_alternates`, `set_selected_span`, `get_messages_with_alternates`, `list_conversation_threads`, `fork_from_span`, `switch_thread`, `rename_thread`, `delete_thread`, `get_current_thread_id`, `edit_user_message`
+- Added new commands: `get_turn_alternates`, `get_span_messages`, `list_conversation_views`, `get_current_view_id`
+
+### Event Loop Updated
+
+- `EngineEvent::ParallelComplete` field renamed from `span_set_id` to `turn_id`
+- `session.messages()` → `session.messages_for_display()` in event loop
+
+### Compilation Status
+
+Full workspace compiles with only warnings (no errors):
+- noema-core: 7 warnings (unused helper functions - cleanup later)
+- noema-desktop: 13 warnings (unused imports, serde attributes)
+
+### Pending Work
+
+- Parallel message support needs re-implementation for Session-based engine
+- View-related commands are stubs (pending UI integration)
+- Asset resolution in `get_span_messages()` returns empty content (needs coordinator integration)
+
+**Task 3.3.13 Complete** - ChatEngine and desktop now use new Session<S> API.
+
+---

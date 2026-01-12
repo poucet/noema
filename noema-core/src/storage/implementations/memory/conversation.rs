@@ -39,8 +39,8 @@ impl MemoryConversationStore {
         Self::default()
     }
 
-    /// Create a new conversation (for testing)
-    pub fn create_conversation(&self, user_id: &UserId, name: Option<&str>) -> ConversationId {
+    /// Create a new conversation (internal sync method)
+    fn create_conversation_sync(&self, user_id: &UserId, name: Option<&str>) -> ConversationId {
         let id = ConversationId::new();
         let now = now();
         let conv = StoredConversation {
@@ -75,6 +75,31 @@ impl MemoryConversationStore {
 
 #[async_trait]
 impl ConversationStore for MemoryConversationStore {
+    async fn create_conversation(
+        &self,
+        user_id: &UserId,
+        name: Option<&str>,
+    ) -> Result<ConversationId> {
+        Ok(self.create_conversation_sync(user_id, name))
+    }
+
+    async fn get_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Option<ConversationInfo>> {
+        let conversations = self.conversations.lock().unwrap();
+        Ok(conversations.get(conversation_id.as_str()).map(|c| {
+            ConversationInfo {
+                id: c.id.clone(),
+                name: c.name.clone(),
+                turn_count: c.turn_count,
+                is_private: c.is_private,
+                created_at: c.created_at,
+                updated_at: c.updated_at,
+            }
+        }))
+    }
+
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
         let conversations = self.conversations.lock().unwrap();
         let mut result: Vec<_> = conversations
@@ -154,8 +179,8 @@ mod tests {
         let user_id = UserId::new();
 
         // Create some conversations
-        let _conv1 = store.create_conversation(&user_id, Some("First"));
-        let _conv2 = store.create_conversation(&user_id, Some("Second"));
+        let _conv1 = store.create_conversation_sync(&user_id, Some("First"));
+        let _conv2 = store.create_conversation_sync(&user_id, Some("Second"));
 
         let convs = store.list_conversations(&user_id).await.unwrap();
         assert_eq!(convs.len(), 2);
@@ -166,7 +191,7 @@ mod tests {
         let store = MemoryConversationStore::new();
         let user_id = UserId::new();
 
-        let conv_id = store.create_conversation(&user_id, Some("Test"));
+        let conv_id = store.create_conversation_sync(&user_id, Some("Test"));
 
         let convs = store.list_conversations(&user_id).await.unwrap();
         assert_eq!(convs.len(), 1);
@@ -182,7 +207,7 @@ mod tests {
         let store = MemoryConversationStore::new();
         let user_id = UserId::new();
 
-        let conv_id = store.create_conversation(&user_id, Some("Original"));
+        let conv_id = store.create_conversation_sync(&user_id, Some("Original"));
 
         let convs = store.list_conversations(&user_id).await.unwrap();
         assert_eq!(convs[0].name, Some("Original".to_string()));
@@ -201,7 +226,7 @@ mod tests {
         let store = MemoryConversationStore::new();
         let user_id = UserId::new();
 
-        let conv_id = store.create_conversation(&user_id, Some("Test"));
+        let conv_id = store.create_conversation_sync(&user_id, Some("Test"));
 
         assert!(!store.is_conversation_private(&conv_id).await.unwrap());
 

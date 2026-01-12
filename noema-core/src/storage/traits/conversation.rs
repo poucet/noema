@@ -9,10 +9,23 @@ use crate::storage::types::conversation::ConversationInfo;
 /// Trait for conversation CRUD operations
 ///
 /// This trait provides high-level operations for managing conversations as a whole
-/// (listing, deleting, renaming) - separate from `TurnStore` which handles the
-/// internal Turn/Span/Message/View structure.
+/// (creating, listing, deleting, renaming) - separate from `TurnStore` which handles
+/// the internal Turn/Span/Message/View structure.
 #[async_trait]
 pub trait ConversationStore: Send + Sync {
+    /// Create a new conversation for a user
+    ///
+    /// Creates the conversation record and a main view. Returns the conversation ID.
+    async fn create_conversation(
+        &self,
+        user_id: &UserId,
+        name: Option<&str>,
+    ) -> Result<ConversationId>;
+
+    /// Get conversation info by ID
+    async fn get_conversation(&self, conversation_id: &ConversationId)
+        -> Result<Option<ConversationInfo>>;
+
     /// List all conversations for a user
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>>;
 
@@ -20,11 +33,19 @@ pub trait ConversationStore: Send + Sync {
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> Result<()>;
 
     /// Rename a conversation
-    async fn rename_conversation(&self, conversation_id: &ConversationId, name: Option<&str>) -> Result<()>;
+    async fn rename_conversation(
+        &self,
+        conversation_id: &ConversationId,
+        name: Option<&str>,
+    ) -> Result<()>;
 
     /// Get privacy setting for a conversation
     async fn is_conversation_private(&self, conversation_id: &ConversationId) -> Result<bool>;
 
     /// Set privacy setting for a conversation
-    async fn set_conversation_private(&self, conversation_id: &ConversationId, is_private: bool) -> Result<()>;
+    async fn set_conversation_private(
+        &self,
+        conversation_id: &ConversationId,
+        is_private: bool,
+    ) -> Result<()>;
 }

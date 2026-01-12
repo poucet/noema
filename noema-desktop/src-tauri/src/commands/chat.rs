@@ -2,18 +2,15 @@
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
-use noema_core::storage::{ConversationStore, TurnStore, ViewInfo};
-use noema_core::storage::{SpanRole, MessageRole};
+use noema_core::storage::{ConversationStore, TurnStore, Session, SqliteStore, MessageRole};
 use noema_core::storage::DocumentResolver;
-use noema_core::storage::content::ResolvedContent;
-use noema_core::storage::ids::{ConversationId, ViewId, TurnId, SpanId};
+use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::DisplayContent;
 use crate::logging::log_message;
 use crate::state::AppState;
-use crate::types::{AlternateInfo, ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ToolConfig};
+use crate::types::{ConversationInfo, DisplayMessage, InputContentBlock, ModelInfo, ToolConfig};
 
 
 /// Get current messages in the conversation
@@ -25,8 +22,9 @@ pub async fn get_messages(state: State<'_, Arc<AppState>>) -> Result<Vec<Display
     let session_arc = engine.get_session();
     let session = session_arc.lock().await;
 
+    // messages_for_display returns resolved messages
     Ok(session
-        .messages()
+        .messages_for_display()
         .iter()
         .map(DisplayMessage::from)
         .collect())
@@ -153,7 +151,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                             let session_arc = engine.get_session();
                             let session = session_arc.lock().await;
                             session
-                                .messages()
+                                .messages_for_display()
                                 .iter()
                                 .map(DisplayMessage::from)
                                 .collect::<Vec<_>>()
@@ -194,7 +192,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                         "messages": display_messages
                     }));
                 }
-                Some(EngineEvent::ParallelComplete { span_set_id, alternates }) => {
+                Some(EngineEvent::ParallelComplete { turn_id, alternates }) => {
                     let alternates_json: Vec<serde_json::Value> = alternates
                         .iter()
                         .map(|a| serde_json::json!({
@@ -206,7 +204,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                         }))
                         .collect();
                     let _ = app.emit("parallel_complete", serde_json::json!({
-                        "spanSetId": span_set_id,
+                        "turnId": turn_id,
                         "alternates": alternates_json
                     }));
                     *state.is_processing.lock().await = false;
@@ -327,15 +325,27 @@ pub async fn switch_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> Result<Vec<DisplayMessage>, String> {
-    let session = {
+    let store = {
         let store_guard = state.store.lock().await;
-        let store = store_guard.as_ref().ok_or("App not initialized")?;
-
-        store
-            .open_conversation(&conversation_id)
-            .await
-            .map_err(|e| format!("Failed to open conversation: {}", e))?
+        store_guard
+            .as_ref()
+            .ok_or("App not initialized")?
+            .clone()
     };
+
+    let conv_id = ConversationId::from_string(conversation_id.clone());
+
+    // Open session for the conversation
+    let session = Session::open(Arc::clone(&store), conv_id, store.as_ref())
+        .await
+        .map_err(|e| format!("Failed to open conversation: {}", e))?;
+
+    // Get messages before creating new engine
+    let messages: Vec<DisplayMessage> = session
+        .messages_for_display()
+        .iter()
+        .map(DisplayMessage::from)
+        .collect();
 
     let model_id_str = state.model_id.lock().await.clone();
     let mcp_registry =
@@ -345,19 +355,8 @@ pub async fn switch_conversation(
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
-    // Get messages before creating new engine
-    let chat_messages = session.messages();
-    let messages: Vec<DisplayMessage> = chat_messages
-        .iter()
-        .map(DisplayMessage::from)
-        .collect();
-
-    // Get document resolver (store implements DocumentResolver directly)
-    let document_resolver: Arc<dyn DocumentResolver> = {
-        let store_guard = state.store.lock().await;
-        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-        Arc::clone(store) as Arc<dyn DocumentResolver>
-    };
+    // Store implements DocumentResolver directly
+    let document_resolver: Arc<dyn DocumentResolver> = store;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
@@ -370,16 +369,27 @@ pub async fn switch_conversation(
 /// Create a new conversation
 #[tauri::command]
 pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    let session = {
+    let store = {
         let store_guard = state.store.lock().await;
-        let store = store_guard.as_ref().ok_or("App not initialized")?;
-        let user_id = state.user_id.lock().await;
-        store
-            .create_conversation(&user_id)
-            .map_err(|e| format!("Failed to create conversation: {}", e))?
+        store_guard
+            .as_ref()
+            .ok_or("App not initialized")?
+            .clone()
     };
+    let user_id = state.user_id.lock().await.clone();
 
-    let conversation_id = session.conversation_id().to_string();
+    // Create a new conversation
+    let conv_id = store
+        .create_conversation(&user_id, None)
+        .await
+        .map_err(|e| format!("Failed to create conversation: {}", e))?;
+
+    // Open session for the new conversation
+    let session = Session::open(Arc::clone(&store), conv_id.clone(), store.as_ref())
+        .await
+        .map_err(|e| format!("Failed to open new conversation: {}", e))?;
+
+    let conversation_id = conv_id.as_str().to_string();
     let model_id_str = state.model_id.lock().await.clone();
     let mcp_registry =
         McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
@@ -387,12 +397,8 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
-    // Get document resolver (store implements DocumentResolver directly)
-    let document_resolver: Arc<dyn DocumentResolver> = {
-        let store_guard = state.store.lock().await;
-        let store = store_guard.as_ref().ok_or("Storage not initialized")?;
-        Arc::clone(store) as Arc<dyn DocumentResolver>
-    };
+    // Store implements DocumentResolver directly
+    let document_resolver: Arc<dyn DocumentResolver> = store;
 
     let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
 
@@ -416,8 +422,9 @@ pub async fn delete_conversation(
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
+    let conv_id = ConversationId::from_string(conversation_id);
     store
-        .delete_conversation(&conversation_id)
+        .delete_conversation(&conv_id)
         .await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
@@ -432,6 +439,7 @@ pub async fn rename_conversation(
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
+    let conv_id = ConversationId::from_string(conversation_id);
     let name_opt = if name.trim().is_empty() {
         None
     } else {
@@ -439,7 +447,7 @@ pub async fn rename_conversation(
     };
 
     store
-        .rename_conversation(&conversation_id, name_opt)
+        .rename_conversation(&conv_id, name_opt)
         .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
@@ -453,8 +461,9 @@ pub async fn get_conversation_private(
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
+    let conv_id = ConversationId::from_string(conversation_id);
     store
-        .get_conversation_private(&conversation_id)
+        .is_conversation_private(&conv_id)
         .await
         .map_err(|e| format!("Failed to get conversation privacy: {}", e))
 }
@@ -469,8 +478,9 @@ pub async fn set_conversation_private(
     let store_guard = state.store.lock().await;
     let store = store_guard.as_ref().ok_or("App not initialized")?;
 
+    let conv_id = ConversationId::from_string(conversation_id);
     store
-        .set_conversation_private(&conversation_id, is_private)
+        .set_conversation_private(&conv_id, is_private)
         .await
         .map_err(|e| format!("Failed to set conversation privacy: {}", e))
 }
@@ -504,30 +514,16 @@ pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, Stri
 }
 
 /// Send a message to multiple models in parallel
+/// NOTE: Parallel message support is pending re-implementation for the new Session-based engine
 #[tauri::command]
 pub async fn send_parallel_message(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    message: String,
-    model_ids: Vec<String>,
+    _app: AppHandle,
+    _state: State<'_, Arc<AppState>>,
+    _message: String,
+    _model_ids: Vec<String>,
 ) -> Result<(), String> {
-    if model_ids.is_empty() {
-        return Err("At least one model must be selected".to_string());
-    }
-
-    let message = ChatMessage::user(llm::ChatPayload::text(message));
-
-    // Emit user message immediately
-    let user_msg = DisplayMessage::from(&message);
-    app.emit("user_message", &user_msg)
-        .map_err(|e| e.to_string())?;
-
-    // Send to engine for parallel processing
-    let engine_guard = state.engine.lock().await;
-    let engine = engine_guard.as_ref().ok_or("App not initialized")?;
-    engine.send_parallel_message(message, model_ids);
-
-    Ok(())
+    // TODO: Re-implement parallel message support for Session-based engine
+    Err("Parallel message support is pending re-implementation".to_string())
 }
 
 // ============================================================================
@@ -614,7 +610,7 @@ pub async fn get_span_messages(
                 MessageRole::User => Role::User,
                 MessageRole::Assistant => Role::Assistant,
                 MessageRole::System => Role::System,
-                MessageRole::Tool => Role::Tool,
+                MessageRole::Tool => Role::Assistant, // Tool results rendered like assistant
             },
             content: vec![], // Content needs resolution via coordinator
             span_set_id: None,

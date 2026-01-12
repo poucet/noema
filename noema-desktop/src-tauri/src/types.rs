@@ -248,6 +248,63 @@ impl From<noema_core::storage::content::ResolvedContent> for DisplayContent {
     }
 }
 
+// Session ResolvedContent/ResolvedMessage -> Display types
+impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
+    fn from(content: &noema_core::storage::ResolvedContent) -> Self {
+        use noema_core::storage::ResolvedContent;
+        match content {
+            ResolvedContent::Text { text } => DisplayContent::Text(text.clone()),
+            ResolvedContent::Asset {
+                asset_id,
+                mime_type,
+                filename,
+                ..
+            } => DisplayContent::AssetRef {
+                asset_id: asset_id.clone(),
+                mime_type: mime_type.clone(),
+                filename: filename.clone(),
+            },
+            ResolvedContent::Document { document_id, .. } => DisplayContent::DocumentRef {
+                id: document_id.clone(),
+                title: String::new(), // Title not stored in resolved content
+            },
+            ResolvedContent::ToolCall(call) => DisplayContent::ToolCall {
+                name: call.name.clone(),
+                id: call.id.clone(),
+                arguments: call.arguments.clone(),
+            },
+            ResolvedContent::ToolResult(result) => DisplayContent::ToolResult {
+                id: result.tool_call_id.clone(),
+                content: result
+                    .content
+                    .iter()
+                    .map(DisplayToolResultContent::from)
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl From<&noema_core::storage::ResolvedMessage> for DisplayMessage {
+    fn from(msg: &noema_core::storage::ResolvedMessage) -> Self {
+        use noema_core::storage::MessageRole;
+        // Map MessageRole to llm::Role (Tool messages displayed as Assistant)
+        let role = match msg.role {
+            MessageRole::User => Role::User,
+            MessageRole::Assistant => Role::Assistant,
+            MessageRole::System => Role::System,
+            MessageRole::Tool => Role::Assistant, // Tool results rendered like assistant
+        };
+        Self {
+            role,
+            content: msg.content.iter().map(DisplayContent::from).collect(),
+            span_set_id: None,
+            span_id: None,
+            alternates: None,
+        }
+    }
+}
+
 // MCP server info for frontend
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

@@ -189,18 +189,11 @@ pub fn run() {
             commands::chat::get_favorite_models,
             commands::chat::toggle_favorite_model,
             commands::chat::send_parallel_message,
-            commands::chat::get_span_set_alternates,
-            commands::chat::set_selected_span,
+            // Turn/Span/View commands (Phase 3 UCM)
+            commands::chat::get_turn_alternates,
             commands::chat::get_span_messages,
-            commands::chat::get_messages_with_alternates,
-            // Thread/Fork commands
-            commands::chat::list_conversation_threads,
-            commands::chat::fork_from_span,
-            commands::chat::switch_thread,
-            commands::chat::rename_thread,
-            commands::chat::delete_thread,
-            commands::chat::get_current_thread_id,
-            commands::chat::edit_user_message,
+            commands::chat::list_conversation_views,
+            commands::chat::get_current_view_id,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,
