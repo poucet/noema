@@ -165,9 +165,9 @@ impl<S: StorageTypes> Session<S> {
                 current_role = Some(span_role);
             }
 
-            // Store message content and resolve for caching
+            // Add message to span and resolve for caching
             let (_msg_info, resolved) = self.coordinator
-                .store_message(current_span.as_ref().unwrap(), msg_role, msg.payload.content, origin)
+                .add_message(current_span.as_ref().unwrap(), msg_role, msg.payload.content, origin)
                 .await?;
 
             self.resolved_cache.push(ResolvedMessage::new(msg_role, resolved));

@@ -315,11 +315,11 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         Ok(resolved)
     }
 
-    /// Store a message and add it to a span, returning the resolved content.
+    /// Add a message to a span, returning the resolved content.
     ///
-    /// This coordinates storing content blocks, adding the message to the turn store,
-    /// and resolving the content for caching.
-    pub async fn store_message(
+    /// Stores content blocks, adds the message to the span, and resolves
+    /// content for caching.
+    pub async fn add_message(
         &self,
         span_id: &SpanId,
         role: MessageRole,
