@@ -94,31 +94,31 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.7 | ⚡ Implement edit_turn, fork_view_with_selections, get_view_context_at |
 | ✅ | 3.3.8 | ✅ Unit tests for views and forking |
 
-#### Part B: Session Integration (6 tasks)
+#### Part B: New Session API (6 tasks)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.9 | 🏗️ Create adapter types for session (replaces dual-write) |
-| ⬜ | 3.3.10 | ⚡ Implement commit() using only TurnStore |
-| ⬜ | 3.3.11 | ⚡ Implement open_conversation() loading from main view |
-| ⬜ | 3.3.12 | ⚡ Implement commit_parallel_responses() creating multiple spans |
-| ⬜ | 3.3.13 | 🔧 Update engine to use new session adapter |
+| ✅ | 3.3.9 | 🏗️ Create `Session<S: TurnStore>` with `ResolvedContent`/`ResolvedMessage` types |
+| ✅ | 3.3.10 | 🏗️ Create `ContentBlockResolver` and `AssetResolver` traits |
+| ✅ | 3.3.11 | ⚡ Implement `Session::open()`, `commit()`, `commit_parallel()` |
+| ✅ | 3.3.12 | ⚡ Implement `messages_for_display()` and `messages_for_llm()` with lazy caching |
+| ⬜ | 3.3.13 | 🔧 Update `ChatEngine` to use new `Session<S>` API |
 | ⬜ | 3.3.14 | ✅ Integration tests with engine |
 
-#### Part C: Legacy Cleanup (5 tasks)
+#### Part C: Legacy Cleanup (4 tasks)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.15 | ✅ Verify all features work with new model only |
-| ⬜ | 3.3.16 | 🧹 Drop legacy conversation tables (threads, span_sets, legacy_spans, legacy_span_messages) |
-| ⬜ | 3.3.17 | 🧹 Remove ConversationStore trait and legacy types |
-| ⬜ | 3.3.18 | 🧹 Remove dual-write code paths in session |
+| ✅ | 3.3.15 | 🧹 Remove `SessionStore` and `StorageTransaction` traits |
+| ✅ | 3.3.16 | 🧹 Remove `MemorySession`/`MemoryTransaction` (memory.rs) |
+| ✅ | 3.3.17 | 🧹 Remove `SqliteSession`/`SqliteTransaction` from sqlite.rs |
+| ✅ | 3.3.18 | 🧹 Update docs (lib.rs, mod.rs) for new API |
 
 #### Part D: Final Verification (3 tasks)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.19 | 🔧 User: E2E verification - fork conversation in noema app |
+| ⬜ | 3.3.19 | 🔧 User: E2E verification - app works with new session API |
 | ⬜ | 3.3.20 | 🔧 User: SQL verify views and view_selections have data |
 | ⬜ | 3.3.21 | ✅ Final E2E: fresh install, all conversation features work
 

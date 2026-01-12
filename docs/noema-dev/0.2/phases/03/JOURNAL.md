@@ -816,3 +816,163 @@ Session properly uses TurnStore:
 Compiles cleanly with only warnings about unused helper functions.
 
 ---
+
+## 2026-01-12: Session Abstraction Design
+
+### Problem Analysis
+
+Current `SqliteSession` has several issues:
+1. Tightly coupled to SQLite - can't test without DB
+2. Eagerly resolves content on load - no way to get refs for UI
+3. Mixes runtime state with persistence logic
+4. ChatEngine expects `Vec<ChatMessage>` but UI needs refs
+
+### Design: DB-Agnostic Session + Resolution
+
+Created comprehensive design in OBSERVATIONS.md with 4 layers:
+
+1. **SessionBackend (trait)** - Persistence abstraction
+   - `load_view_path()` returns `Vec<TurnWithContent>` (unresolved)
+   - `commit_turn()` / `commit_parallel()` for writes
+   - Implemented by `SqliteSessionBackend`, `MemorySessionBackend`
+
+2. **Session<B>** - Pure runtime state
+   - conversation_id, view_id, pending messages
+   - NO storage coupling, NO resolution
+   - Generic over backend
+
+3. **LLMResolver / DisplayResolver** - On-demand resolution
+   - LLM: resolves all refs to ContentBlock, uses DocumentFormatter
+   - Display: resolves text only, keeps asset/doc refs for UI
+
+4. **Integration** - ChatEngine uses Session + LLMResolver
+
+### Key Decisions
+
+- **Lazy resolution**: Content resolved only when needed, not on load
+- **Consumer-specific**: Different resolution for UI vs LLM
+- **Testable**: MemorySessionBackend for unit tests
+- **DocumentFormatter**: Used by LLMResolver for @-mentions
+
+### Next Steps
+
+1. Implement `SessionBackend` trait
+2. Implement `SqliteSessionBackend` (thin wrapper around TurnStore)
+3. Create `Session<B>` struct
+4. Implement resolvers
+5. Update ChatEngine
+6. Update desktop commands
+
+---
+
+## 2026-01-12: Session Implementation
+
+### Implemented Files
+
+- **noema-core/src/storage/session/types.rs** - New types:
+  - `PendingMessage` - Message waiting to be committed (uses `StoredContent`)
+  - `ResolvedMessage` - Message with resolved content
+  - `ResolvedContent` - Text resolved, assets/docs cached lazily in-place
+
+- **noema-core/src/storage/session/resolver.rs** - Resolution traits:
+  - `ContentBlockResolver` - Resolves text refs from content_blocks table
+  - `AssetResolver` - Resolves assets (base64) and documents (formatted text)
+
+- **noema-core/src/storage/session/session.rs** - Main `Session<S: TurnStore>`:
+  - `open()` - Load and resolve text once from TurnStore
+  - `commit()` - Write pending messages as a turn
+  - `commit_parallel()` - Write parallel responses
+  - `messages_for_display()` - Returns `&[ResolvedMessage]` (sync)
+  - `messages_for_llm()` - Resolves assets/docs lazily, caches in-place
+
+- **noema-core/src/storage/session/mod.rs** - Updated exports
+
+### Key Design Decisions
+
+1. **No new backend trait** - Session uses `TurnStore` directly
+2. **In-place caching** - `ResolvedContent::Asset/Document` have `resolved: Option<ContentBlock>`
+3. **Single vector** - One `Vec<ResolvedContent>` serves both display and LLM
+4. **MessageRole → llm::Role** - Tool messages map to User role for LLM API
+
+### Compiles
+
+`cargo check --package noema-core` passes with only warnings about unused helper functions.
+
+---
+
+## 2026-01-12: Legacy Session Code Removed
+
+### Removed Legacy Code
+
+Cleaned up old session API in favor of new `Session<S: TurnStore>`:
+
+**Removed:**
+- `memory.rs` - Legacy `MemorySession`/`MemoryTransaction`
+- `SessionStore` trait and `StorageTransaction` trait from mod.rs
+- `SqliteSession` and `SqliteTransaction` from sqlite.rs
+- Legacy session creation methods (`create_conversation`, `open_conversation`)
+
+**Kept:**
+- `SqliteStore` - Concrete store implementing TurnStore, ConversationStore, UserStore, etc.
+- `ConversationStore` implementation
+
+### New Session API (Complete)
+
+The new DB-agnostic session API is now the only session API:
+
+- `Session<S: TurnStore>` - Generic session over any TurnStore
+- `ResolvedContent` - Text resolved, assets/docs cached lazily in-place
+- `ResolvedMessage` - Message with resolved content
+- `PendingMessage` - Message waiting to be committed
+- `ContentBlockResolver` - Resolves text refs from content_blocks
+- `AssetResolver` - Resolves assets (base64) and documents (formatted)
+
+### Key Files
+
+- [session/mod.rs](noema-core/src/storage/session/mod.rs) - Clean exports
+- [session/types.rs](noema-core/src/storage/session/types.rs) - Core types
+- [session/resolver.rs](noema-core/src/storage/session/resolver.rs) - Resolution traits
+- [session/session.rs](noema-core/src/storage/session/session.rs) - `Session<S>` implementation
+- [session/sqlite.rs](noema-core/src/storage/session/sqlite.rs) - `SqliteStore` only
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Consumers                            │
+├────────────────────────┬────────────────────────────────────┤
+│     ChatEngine         │           Desktop UI               │
+│  needs Vec<ChatMessage>│    needs Vec<ResolvedMessage>      │
+└────────────┬───────────┴─────────────────┬──────────────────┘
+             │                             │
+             ▼                             ▼
+┌────────────────────────┐   ┌────────────────────────────────┐
+│    AssetResolver       │   │      (direct access)           │
+│  - resolves assets     │   │  messages_for_display()        │
+│  - formats documents   │   │                                │
+└────────────┬───────────┘   └─────────────────┬──────────────┘
+             │                                 │
+             └────────────────┬────────────────┘
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Session<S: TurnStore>                     │
+│  - conversation_id, view_id                                 │
+│  - cache: Vec<ResolvedMessage> (in-place caching)           │
+│  - pending: Vec<PendingMessage>                             │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    TurnStore (trait)                        │
+│  - get_view_path() → Vec<TurnWithContent>                   │
+│  - add_turn() + add_span() + add_message()                  │
+│  - get_main_view() / create_view()                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Next Steps
+
+1. **Update `ChatEngine`** - Currently references old `SessionStore`/`StorageTransaction`
+2. **Update desktop commands** - After engine is updated
+
+---
