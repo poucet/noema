@@ -2,13 +2,81 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Row};
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::{DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo};
+use crate::storage::types::{Document, DocumentRevision, DocumentSource, DocumentTab, Editable, Stored};
+
+/// Parse a document from a database row
+fn parse_document(row: &Row<'_>) -> rusqlite::Result<Stored<DocumentId, Editable<Document>>> {
+    let source_str: String = row.get(3)?;
+    let id: DocumentId = row.get(0)?;
+    let created_at: i64 = row.get(5)?;
+    let updated_at: i64 = row.get(6)?;
+
+    let doc = Document {
+        user_id: row.get(1)?,
+        title: row.get(2)?,
+        source: source_str.parse().unwrap_or(DocumentSource::UserCreated),
+        source_id: row.get(4)?,
+    };
+
+    Ok(Stored::new(id, Editable::new(doc, updated_at), created_at))
+}
+
+/// Parse referenced assets from JSON
+fn parse_assets(assets_json: Option<String>) -> Vec<AssetId> {
+    assets_json
+        .map(|j| {
+            let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
+            strings.into_iter().map(AssetId::from_string).collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parse a document tab from a database row
+fn parse_document_tab(row: &Row<'_>) -> rusqlite::Result<Stored<TabId, Editable<DocumentTab>>> {
+    let id: TabId = row.get(0)?;
+    let created_at: i64 = row.get(10)?;
+    let updated_at: i64 = row.get(11)?;
+    let assets_json: Option<String> = row.get(7)?;
+
+    let tab = DocumentTab {
+        document_id: row.get(1)?,
+        parent_tab_id: row.get(2)?,
+        tab_index: row.get(3)?,
+        title: row.get(4)?,
+        icon: row.get(5)?,
+        content_markdown: row.get(6)?,
+        referenced_assets: parse_assets(assets_json),
+        source_tab_id: row.get(8)?,
+        current_revision_id: row.get(9)?,
+    };
+
+    Ok(Stored::new(id, Editable::new(tab, updated_at), created_at))
+}
+
+/// Parse a document revision from a database row
+fn parse_document_revision(row: &Row<'_>) -> rusqlite::Result<Stored<RevisionId, DocumentRevision>> {
+    let id: RevisionId = row.get(0)?;
+    let created_at: i64 = row.get(7)?;
+    let assets_json: Option<String> = row.get(6)?;
+
+    let revision = DocumentRevision {
+        tab_id: row.get(1)?,
+        revision_number: row.get(2)?,
+        parent_revision_id: row.get(3)?,
+        content_markdown: row.get(4)?,
+        content_hash: row.get(5)?,
+        referenced_assets: parse_assets(assets_json),
+        created_by: row.get(8)?,
+    };
+
+    Ok(Stored::new(id, revision, created_at))
+}
 
 pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -93,27 +161,14 @@ impl DocumentStore for SqliteStore {
         Ok(id)
     }
 
-    async fn get_document(&self, id: &DocumentId) -> Result<Option<DocumentInfo>> {
+    async fn get_document(&self, id: &DocumentId) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
         let conn = self.conn().lock().unwrap();
         let doc = conn
             .query_row(
                 "SELECT id, user_id, title, source, source_id, created_at, updated_at
                  FROM documents WHERE id = ?1",
                 params![id.as_str()],
-                |row| {
-                    let source_str: String = row.get(3)?;
-                    Ok(DocumentInfo {
-                        id: row.get::<_, DocumentId>(0)?,
-                        user_id: row.get::<_, UserId>(1)?,
-                        title: row.get(2)?,
-                        source: source_str
-                            .parse::<DocumentSource>()
-                            .unwrap_or(DocumentSource::UserCreated),
-                        source_id: row.get(4)?,
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                    })
-                },
+                parse_document,
             )
             .ok();
         Ok(doc)
@@ -124,33 +179,20 @@ impl DocumentStore for SqliteStore {
         user_id: &UserId,
         source: DocumentSource,
         source_id: &str,
-    ) -> Result<Option<DocumentInfo>> {
+    ) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
         let conn = self.conn().lock().unwrap();
         let doc = conn
             .query_row(
                 "SELECT id, user_id, title, source, source_id, created_at, updated_at
                  FROM documents WHERE user_id = ?1 AND source = ?2 AND source_id = ?3",
                 params![user_id.as_str(), source.as_str(), source_id],
-                |row| {
-                    let source_str: String = row.get(3)?;
-                    Ok(DocumentInfo {
-                        id: row.get::<_, DocumentId>(0)?,
-                        user_id: row.get::<_, UserId>(1)?,
-                        title: row.get(2)?,
-                        source: source_str
-                            .parse::<DocumentSource>()
-                            .unwrap_or(DocumentSource::UserCreated),
-                        source_id: row.get(4)?,
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                    })
-                },
+                parse_document,
             )
             .ok();
         Ok(doc)
     }
 
-    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<DocumentInfo>> {
+    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, user_id, title, source, source_id, created_at, updated_at
@@ -158,20 +200,7 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let docs = stmt
-            .query_map(params![user_id.as_str()], |row| {
-                let source_str: String = row.get(3)?;
-                Ok(DocumentInfo {
-                    id: row.get::<_, DocumentId>(0)?,
-                    user_id: row.get::<_, UserId>(1)?,
-                    title: row.get(2)?,
-                    source: source_str
-                        .parse::<DocumentSource>()
-                        .unwrap_or(DocumentSource::UserCreated),
-                    source_id: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                })
-            })?
+            .query_map(params![user_id.as_str()], parse_document)?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -183,7 +212,7 @@ impl DocumentStore for SqliteStore {
         user_id: &UserId,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<DocumentInfo>> {
+    ) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
         let conn = self.conn().lock().unwrap();
         let pattern = format!("%{}%", query);
         let mut stmt = conn.prepare(
@@ -195,20 +224,7 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let docs = stmt
-            .query_map(params![user_id.as_str(), &pattern, limit as i64], |row| {
-                let source_str: String = row.get(3)?;
-                Ok(DocumentInfo {
-                    id: row.get::<_, DocumentId>(0)?,
-                    user_id: row.get::<_, UserId>(1)?,
-                    title: row.get(2)?,
-                    source: source_str
-                        .parse::<DocumentSource>()
-                        .unwrap_or(DocumentSource::UserCreated),
-                    source_id: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                })
-            })?
+            .query_map(params![user_id.as_str(), &pattern, limit as i64], parse_document)?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -273,42 +289,20 @@ impl DocumentStore for SqliteStore {
         Ok(id)
     }
 
-    async fn get_document_tab(&self, id: &TabId) -> Result<Option<DocumentTabInfo>> {
+    async fn get_document_tab(&self, id: &TabId) -> Result<Option<Stored<TabId, Editable<DocumentTab>>>> {
         let conn = self.conn().lock().unwrap();
         let tab = conn
             .query_row(
                 "SELECT id, document_id, parent_tab_id, tab_index, title, icon, content_markdown, referenced_assets, source_tab_id, current_revision_id, created_at, updated_at
                  FROM document_tabs WHERE id = ?1",
                 params![id.as_str()],
-                |row| {
-                    let assets_json: Option<String> = row.get(7)?;
-                    let referenced_assets: Vec<AssetId> = assets_json
-                        .map(|j| {
-                            let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
-                            strings.into_iter().map(AssetId::from_string).collect()
-                        })
-                        .unwrap_or_default();
-                    Ok(DocumentTabInfo {
-                        id: row.get::<_, TabId>(0)?,
-                        document_id: row.get::<_, DocumentId>(1)?,
-                        parent_tab_id: row.get::<_, Option<TabId>>(2)?,
-                        tab_index: row.get(3)?,
-                        title: row.get(4)?,
-                        icon: row.get(5)?,
-                        content_markdown: row.get(6)?,
-                        referenced_assets,
-                        source_tab_id: row.get::<_, Option<TabId>>(8)?,
-                        current_revision_id: row.get::<_, Option<RevisionId>>(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get(11)?,
-                    })
-                },
+                parse_document_tab,
             )
             .ok();
         Ok(tab)
     }
 
-    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<DocumentTabInfo>> {
+    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<Stored<TabId, Editable<DocumentTab>>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, document_id, parent_tab_id, tab_index, title, icon, content_markdown, referenced_assets, source_tab_id, current_revision_id, created_at, updated_at
@@ -316,29 +310,7 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let tabs = stmt
-            .query_map(params![document_id.as_str()], |row| {
-                let assets_json: Option<String> = row.get(7)?;
-                let referenced_assets: Vec<AssetId> = assets_json
-                    .map(|j| {
-                        let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
-                        strings.into_iter().map(AssetId::from_string).collect()
-                    })
-                    .unwrap_or_default();
-                Ok(DocumentTabInfo {
-                    id: row.get::<_, TabId>(0)?,
-                    document_id: row.get::<_, DocumentId>(1)?,
-                    parent_tab_id: row.get::<_, Option<TabId>>(2)?,
-                    tab_index: row.get(3)?,
-                    title: row.get(4)?,
-                    icon: row.get(5)?,
-                    content_markdown: row.get(6)?,
-                    referenced_assets,
-                    source_tab_id: row.get::<_, Option<TabId>>(8)?,
-                    current_revision_id: row.get::<_, Option<RevisionId>>(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            })?
+            .query_map(params![document_id.as_str()], parse_document_tab)?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -438,39 +410,20 @@ impl DocumentStore for SqliteStore {
         Ok(id)
     }
 
-    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<DocumentRevisionInfo>> {
+    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<Stored<RevisionId, DocumentRevision>>> {
         let conn = self.conn().lock().unwrap();
         let rev = conn
             .query_row(
                 "SELECT id, tab_id, revision_number, parent_revision_id, content_markdown, content_hash, referenced_assets, created_at, created_by
                  FROM document_revisions WHERE id = ?1",
                 params![id.as_str()],
-                |row| {
-                    let assets_json: Option<String> = row.get(6)?;
-                    let referenced_assets: Vec<AssetId> = assets_json
-                        .map(|j| {
-                            let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
-                            strings.into_iter().map(AssetId::from_string).collect()
-                        })
-                        .unwrap_or_default();
-                    Ok(DocumentRevisionInfo {
-                        id: row.get::<_, RevisionId>(0)?,
-                        tab_id: row.get::<_, TabId>(1)?,
-                        revision_number: row.get(2)?,
-                        parent_revision_id: row.get::<_, Option<RevisionId>>(3)?,
-                        content_markdown: row.get(4)?,
-                        content_hash: row.get(5)?,
-                        referenced_assets,
-                        created_at: row.get(7)?,
-                        created_by: row.get::<_, UserId>(8)?,
-                    })
-                },
+                parse_document_revision,
             )
             .ok();
         Ok(rev)
     }
 
-    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<DocumentRevisionInfo>> {
+    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<Stored<RevisionId, DocumentRevision>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, tab_id, revision_number, parent_revision_id, content_markdown, content_hash, referenced_assets, created_at, created_by
@@ -478,26 +431,7 @@ impl DocumentStore for SqliteStore {
         )?;
 
         let revs = stmt
-            .query_map(params![tab_id.as_str()], |row| {
-                let assets_json: Option<String> = row.get(6)?;
-                let referenced_assets: Vec<AssetId> = assets_json
-                    .map(|j| {
-                        let strings: Vec<String> = serde_json::from_str(&j).unwrap_or_default();
-                        strings.into_iter().map(AssetId::from_string).collect()
-                    })
-                    .unwrap_or_default();
-                Ok(DocumentRevisionInfo {
-                    id: row.get::<_, RevisionId>(0)?,
-                    tab_id: row.get::<_, TabId>(1)?,
-                    revision_number: row.get(2)?,
-                    parent_revision_id: row.get::<_, Option<RevisionId>>(3)?,
-                    content_markdown: row.get(4)?,
-                    content_hash: row.get(5)?,
-                    referenced_assets,
-                    created_at: row.get(7)?,
-                    created_by: row.get::<_, UserId>(8)?,
-                })
-            })?
+            .query_map(params![tab_id.as_str()], parse_document_revision)?
             .filter_map(|r| r.ok())
             .collect();
 

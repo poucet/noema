@@ -7,8 +7,8 @@ use std::sync::Mutex;
 
 use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::document::{
-    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
+use crate::storage::types::{
+    Document, DocumentRevision, DocumentSource, DocumentTab, Editable, Stored,
 };
 
 fn now() -> i64 {
@@ -21,9 +21,9 @@ fn now() -> i64 {
 /// In-memory document store for testing
 #[derive(Debug, Default)]
 pub struct MemoryDocumentStore {
-    documents: Mutex<HashMap<String, DocumentInfo>>,
-    tabs: Mutex<HashMap<String, DocumentTabInfo>>,
-    revisions: Mutex<HashMap<String, DocumentRevisionInfo>>,
+    documents: Mutex<HashMap<String, Stored<DocumentId, Editable<Document>>>>,
+    tabs: Mutex<HashMap<String, Stored<TabId, Editable<DocumentTab>>>>,
+    revisions: Mutex<HashMap<String, Stored<RevisionId, DocumentRevision>>>,
 }
 
 impl MemoryDocumentStore {
@@ -46,21 +46,19 @@ impl DocumentStore for MemoryDocumentStore {
         let id = DocumentId::new();
         let now = now();
 
-        let doc = DocumentInfo {
-            id: id.clone(),
+        let doc = Document {
             user_id: user_id.clone(),
             title: title.to_string(),
             source,
             source_id: source_id.map(|s| s.to_string()),
-            created_at: now,
-            updated_at: now,
         };
 
-        self.documents.lock().unwrap().insert(id.as_str().to_string(), doc);
+        let stored = Stored::new(id.clone(), Editable::new(doc, now), now);
+        self.documents.lock().unwrap().insert(id.as_str().to_string(), stored);
         Ok(id)
     }
 
-    async fn get_document(&self, id: &DocumentId) -> Result<Option<DocumentInfo>> {
+    async fn get_document(&self, id: &DocumentId) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
         Ok(self.documents.lock().unwrap().get(id.as_str()).cloned())
     }
 
@@ -69,7 +67,7 @@ impl DocumentStore for MemoryDocumentStore {
         user_id: &UserId,
         source: DocumentSource,
         source_id: &str,
-    ) -> Result<Option<DocumentInfo>> {
+    ) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
         let documents = self.documents.lock().unwrap();
         Ok(documents
             .values()
@@ -81,7 +79,7 @@ impl DocumentStore for MemoryDocumentStore {
             .cloned())
     }
 
-    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<DocumentInfo>> {
+    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
         let documents = self.documents.lock().unwrap();
         Ok(documents
             .values()
@@ -95,7 +93,7 @@ impl DocumentStore for MemoryDocumentStore {
         user_id: &UserId,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<DocumentInfo>> {
+    ) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
         let documents = self.documents.lock().unwrap();
         let query_lower = query.to_lowercase();
         let mut results: Vec<_> = documents
@@ -109,8 +107,8 @@ impl DocumentStore for MemoryDocumentStore {
 
     async fn update_document_title(&self, id: &DocumentId, title: &str) -> Result<()> {
         if let Some(doc) = self.documents.lock().unwrap().get_mut(id.as_str()) {
-            doc.title = title.to_string();
-            doc.updated_at = now();
+            doc.content.content.title = title.to_string();
+            doc.content.updated_at = now();
         }
         Ok(())
     }
@@ -155,8 +153,7 @@ impl DocumentStore for MemoryDocumentStore {
         let id = TabId::new();
         let now = now();
 
-        let tab = DocumentTabInfo {
-            id: id.clone(),
+        let tab = DocumentTab {
             document_id: document_id.clone(),
             parent_tab_id: parent_tab_id.cloned(),
             tab_index,
@@ -166,25 +163,24 @@ impl DocumentStore for MemoryDocumentStore {
             referenced_assets: referenced_assets.to_vec(),
             source_tab_id: source_tab_id.cloned(),
             current_revision_id: None,
-            created_at: now,
-            updated_at: now,
         };
 
-        self.tabs.lock().unwrap().insert(id.as_str().to_string(), tab);
+        let stored = Stored::new(id.clone(), Editable::new(tab, now), now);
+        self.tabs.lock().unwrap().insert(id.as_str().to_string(), stored);
 
         // Update document updated_at
         if let Some(doc) = self.documents.lock().unwrap().get_mut(document_id.as_str()) {
-            doc.updated_at = now;
+            doc.content.updated_at = now;
         }
 
         Ok(id)
     }
 
-    async fn get_document_tab(&self, id: &TabId) -> Result<Option<DocumentTabInfo>> {
+    async fn get_document_tab(&self, id: &TabId) -> Result<Option<Stored<TabId, Editable<DocumentTab>>>> {
         Ok(self.tabs.lock().unwrap().get(id.as_str()).cloned())
     }
 
-    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<DocumentTabInfo>> {
+    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<Stored<TabId, Editable<DocumentTab>>>> {
         let tabs = self.tabs.lock().unwrap();
         let mut result: Vec<_> = tabs
             .values()
@@ -204,15 +200,15 @@ impl DocumentStore for MemoryDocumentStore {
         let now = now();
         let mut tabs = self.tabs.lock().unwrap();
         if let Some(tab) = tabs.get_mut(id.as_str()) {
-            tab.content_markdown = Some(content_markdown.to_string());
-            tab.referenced_assets = referenced_assets.to_vec();
-            tab.updated_at = now;
+            tab.content.content.content_markdown = Some(content_markdown.to_string());
+            tab.content.content.referenced_assets = referenced_assets.to_vec();
+            tab.content.updated_at = now;
 
             // Update document updated_at
             let doc_id = tab.document_id.as_str().to_string();
             drop(tabs);
             if let Some(doc) = self.documents.lock().unwrap().get_mut(&doc_id) {
-                doc.updated_at = now;
+                doc.content.updated_at = now;
             }
         }
         Ok(())
@@ -224,16 +220,16 @@ impl DocumentStore for MemoryDocumentStore {
         parent_tab_id: Option<&TabId>,
     ) -> Result<()> {
         if let Some(tab) = self.tabs.lock().unwrap().get_mut(id.as_str()) {
-            tab.parent_tab_id = parent_tab_id.cloned();
-            tab.updated_at = now();
+            tab.content.content.parent_tab_id = parent_tab_id.cloned();
+            tab.content.updated_at = now();
         }
         Ok(())
     }
 
     async fn set_document_tab_revision(&self, tab_id: &TabId, revision_id: &RevisionId) -> Result<()> {
         if let Some(tab) = self.tabs.lock().unwrap().get_mut(tab_id.as_str()) {
-            tab.current_revision_id = Some(revision_id.clone());
-            tab.updated_at = now();
+            tab.content.content.current_revision_id = Some(revision_id.clone());
+            tab.content.updated_at = now();
         }
         Ok(())
     }
@@ -279,28 +275,27 @@ impl DocumentStore for MemoryDocumentStore {
             .map(|r| r.id.clone());
         drop(revisions);
 
-        let revision = DocumentRevisionInfo {
-            id: id.clone(),
+        let revision = DocumentRevision {
             tab_id: tab_id.clone(),
             revision_number,
             parent_revision_id,
             content_markdown: content_markdown.to_string(),
             content_hash: content_hash.to_string(),
             referenced_assets: referenced_assets.to_vec(),
-            created_at: now,
             created_by: created_by.clone(),
         };
 
-        self.revisions.lock().unwrap().insert(id.as_str().to_string(), revision);
+        let stored = Stored::new(id.clone(), revision, now);
+        self.revisions.lock().unwrap().insert(id.as_str().to_string(), stored);
 
         Ok(id)
     }
 
-    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<DocumentRevisionInfo>> {
+    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<Stored<RevisionId, DocumentRevision>>> {
         Ok(self.revisions.lock().unwrap().get(id.as_str()).cloned())
     }
 
-    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<DocumentRevisionInfo>> {
+    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<Stored<RevisionId, DocumentRevision>>> {
         let revisions = self.revisions.lock().unwrap();
         let mut result: Vec<_> = revisions
             .values()

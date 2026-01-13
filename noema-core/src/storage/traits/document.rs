@@ -4,9 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
-use crate::storage::types::document::{
-    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
-};
+use crate::storage::types::{Document, DocumentRevision, DocumentSource, DocumentTab, Editable, Stored};
 
 /// Trait for document storage operations
 #[async_trait]
@@ -23,7 +21,7 @@ pub trait DocumentStore: Send + Sync {
     ) -> Result<DocumentId>;
 
     /// Get a document by ID
-    async fn get_document(&self, id: &DocumentId) -> Result<Option<DocumentInfo>>;
+    async fn get_document(&self, id: &DocumentId) -> Result<Option<Stored<DocumentId, Editable<Document>>>>;
 
     /// Get a document by source and source_id (e.g., find by Google Doc ID)
     async fn get_document_by_source(
@@ -31,10 +29,10 @@ pub trait DocumentStore: Send + Sync {
         user_id: &UserId,
         source: DocumentSource,
         source_id: &str,
-    ) -> Result<Option<DocumentInfo>>;
+    ) -> Result<Option<Stored<DocumentId, Editable<Document>>>>;
 
     /// List all documents for a user
-    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<DocumentInfo>>;
+    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<Stored<DocumentId, Editable<Document>>>>;
 
     /// Search documents by title (case-insensitive)
     async fn search_documents(
@@ -42,7 +40,7 @@ pub trait DocumentStore: Send + Sync {
         user_id: &UserId,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<DocumentInfo>>;
+    ) -> Result<Vec<Stored<DocumentId, Editable<Document>>>>;
 
     /// Update document title
     async fn update_document_title(&self, id: &DocumentId, title: &str) -> Result<()>;
@@ -66,10 +64,10 @@ pub trait DocumentStore: Send + Sync {
     ) -> Result<TabId>;
 
     /// Get a document tab by ID
-    async fn get_document_tab(&self, id: &TabId) -> Result<Option<DocumentTabInfo>>;
+    async fn get_document_tab(&self, id: &TabId) -> Result<Option<Stored<TabId, Editable<DocumentTab>>>>;
 
     /// List all tabs for a document
-    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<DocumentTabInfo>>;
+    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<Stored<TabId, Editable<DocumentTab>>>>;
 
     /// Update tab content
     async fn update_document_tab_content(
@@ -106,8 +104,8 @@ pub trait DocumentStore: Send + Sync {
     ) -> Result<RevisionId>;
 
     /// Get a revision by ID
-    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<DocumentRevisionInfo>>;
+    async fn get_document_revision(&self, id: &RevisionId) -> Result<Option<Stored<RevisionId, DocumentRevision>>>;
 
     /// List revisions for a tab
-    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<DocumentRevisionInfo>>;
+    async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<Stored<RevisionId, DocumentRevision>>>;
 }

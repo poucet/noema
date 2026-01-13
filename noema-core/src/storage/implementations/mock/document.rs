@@ -5,9 +5,7 @@ use async_trait::async_trait;
 
 use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::{
-    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
-};
+use crate::storage::types::{Document, DocumentRevision, DocumentSource, DocumentTab, Editable, Stored};
 
 /// Mock document store that returns unimplemented for all operations
 pub struct MockDocumentStore;
@@ -23,7 +21,7 @@ impl DocumentStore for MockDocumentStore {
     ) -> Result<DocumentId> {
         unimplemented!()
     }
-    async fn get_document(&self, _: &DocumentId) -> Result<Option<DocumentInfo>> {
+    async fn get_document(&self, _: &DocumentId) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
         unimplemented!()
     }
     async fn get_document_by_source(
@@ -31,10 +29,10 @@ impl DocumentStore for MockDocumentStore {
         _: &UserId,
         _: DocumentSource,
         _: &str,
-    ) -> Result<Option<DocumentInfo>> {
+    ) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
         unimplemented!()
     }
-    async fn list_documents(&self, _: &UserId) -> Result<Vec<DocumentInfo>> {
+    async fn list_documents(&self, _: &UserId) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
         unimplemented!()
     }
     async fn search_documents(
@@ -42,7 +40,7 @@ impl DocumentStore for MockDocumentStore {
         _: &UserId,
         _: &str,
         _: usize,
-    ) -> Result<Vec<DocumentInfo>> {
+    ) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
         unimplemented!()
     }
     async fn update_document_title(&self, _: &DocumentId, _: &str) -> Result<()> {
@@ -64,10 +62,10 @@ impl DocumentStore for MockDocumentStore {
     ) -> Result<TabId> {
         unimplemented!()
     }
-    async fn get_document_tab(&self, _: &TabId) -> Result<Option<DocumentTabInfo>> {
+    async fn get_document_tab(&self, _: &TabId) -> Result<Option<Stored<TabId, Editable<DocumentTab>>>> {
         unimplemented!()
     }
-    async fn list_document_tabs(&self, _: &DocumentId) -> Result<Vec<DocumentTabInfo>> {
+    async fn list_document_tabs(&self, _: &DocumentId) -> Result<Vec<Stored<TabId, Editable<DocumentTab>>>> {
         unimplemented!()
     }
     async fn update_document_tab_content(
@@ -97,10 +95,10 @@ impl DocumentStore for MockDocumentStore {
     ) -> Result<RevisionId> {
         unimplemented!()
     }
-    async fn get_document_revision(&self, _: &RevisionId) -> Result<Option<DocumentRevisionInfo>> {
+    async fn get_document_revision(&self, _: &RevisionId) -> Result<Option<Stored<RevisionId, DocumentRevision>>> {
         unimplemented!()
     }
-    async fn list_document_revisions(&self, _: &TabId) -> Result<Vec<DocumentRevisionInfo>> {
+    async fn list_document_revisions(&self, _: &TabId) -> Result<Vec<Stored<RevisionId, DocumentRevision>>> {
         unimplemented!()
     }
 }
