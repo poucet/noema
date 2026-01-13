@@ -141,6 +141,9 @@ impl TurnStore for MemoryConversationStore {
     async fn get_main_view(&self, conversation_id: &ConversationId) -> Result<Option<ViewInfo>> {
         self.turn_store.get_main_view(conversation_id).await
     }
+    async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
+        self.turn_store.get_view(view_id).await
+    }
     async fn get_views(&self, conversation_id: &ConversationId) -> Result<Vec<ViewInfo>> {
         self.turn_store.get_views(conversation_id).await
     }

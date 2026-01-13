@@ -532,8 +532,8 @@ impl TurnStore for SqliteStore {
             "INSERT INTO views (id, conversation_id, name, is_main, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                id.as_str(),
-                conversation_id.as_str(),
+                id,
+                conversation_id,
                 name,
                 is_main as i32,
                 now
@@ -561,24 +561,24 @@ impl TurnStore for SqliteStore {
 
         let views = stmt
             .query_map(params![conversation_id.as_str()], |row| {
-                let id: String = row.get(0)?;
-                let cid: String = row.get(1)?;
+                let id: ViewId = row.get(0)?;
+                let cid: ConversationId = row.get(1)?;
                 let name: Option<String> = row.get(2)?;
                 let is_main_int: i32 = row.get(3)?;
-                let forked_from: Option<String> = row.get(4)?;
-                let forked_at: Option<String> = row.get(5)?;
+                let forked_from: Option<ViewId> = row.get(4)?;
+                let forked_at: Option<TurnId> = row.get(5)?;
                 let created: i64 = row.get(6)?;
                 Ok((id, cid, name, is_main_int, forked_from, forked_at, created))
             })?
             .filter_map(|r| r.ok())
             .map(
                 |(id, cid, name, is_main_int, forked_from, forked_at, created)| ViewInfo {
-                    id: ViewId::from_string(id),
-                    conversation_id: ConversationId::from_string(cid),
+                    id,
+                    conversation_id: cid,
                     name,
                     is_main: is_main_int != 0,
-                    forked_from_view_id: forked_from.map(ViewId::from_string),
-                    forked_at_turn_id: forked_at.map(TurnId::from_string),
+                    forked_from_view_id: forked_from,
+                    forked_at_turn_id: forked_at,
                     created_at: created,
                 },
             )
@@ -594,12 +594,12 @@ impl TurnStore for SqliteStore {
              FROM views WHERE conversation_id = ?1 AND is_main = 1",
             params![conversation_id.as_str()],
             |row| {
-                let id: String = row.get(0)?;
-                let cid: String = row.get(1)?;
+                let id: ViewId = row.get(0)?;
+                let cid: ConversationId = row.get(1)?;
                 let name: Option<String> = row.get(2)?;
                 let is_main_int: i32 = row.get(3)?;
-                let forked_from: Option<String> = row.get(4)?;
-                let forked_at: Option<String> = row.get(5)?;
+                let forked_from: Option<ViewId> = row.get(4)?;
+                let forked_at: Option<TurnId> = row.get(5)?;
                 let created: i64 = row.get(6)?;
                 Ok((id, cid, name, is_main_int, forked_from, forked_at, created))
             },
@@ -607,12 +607,12 @@ impl TurnStore for SqliteStore {
 
         match result {
             Ok((id, cid, name, is_main_int, forked_from, forked_at, created)) => Ok(Some(ViewInfo {
-                id: ViewId::from_string(id),
-                conversation_id: ConversationId::from_string(cid),
+                id,
+                conversation_id: cid,
                 name,
                 is_main: is_main_int != 0,
-                forked_from_view_id: forked_from.map(ViewId::from_string),
-                forked_at_turn_id: forked_at.map(TurnId::from_string),
+                forked_from_view_id: forked_from,
+                forked_at_turn_id: forked_at,
                 created_at: created,
             })),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

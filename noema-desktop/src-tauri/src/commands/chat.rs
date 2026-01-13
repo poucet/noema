@@ -222,7 +222,7 @@ pub fn start_engine_event_loop(app: AppHandle) {
                     EngineEvent::ParallelComplete { turn_id, alternates } => {
                         let _ = app.emit("parallel_complete", ParallelCompleteEvent {
                             conversation_id: conversation_id.clone(),
-                            turn_id: TurnId::from_string(turn_id),
+                            turn_id: turn_id,
                             alternates: alternates.into_iter().map(Into::into).collect(),
                         });
                         state.set_processing(&conversation_id, false).await;

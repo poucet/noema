@@ -6,6 +6,7 @@
 //! - Content storage via the coordinator
 //! - Tool execution via MCP registry
 
+use crate::storage::ids::TurnId;
 use crate::{Agent, ConversationContext, McpAgent, McpRegistry, McpToolRegistry};
 use crate::storage::session::Session;
 use crate::storage::traits::StorageTypes;
@@ -59,7 +60,7 @@ pub enum EngineEvent {
         messages: Vec<ChatMessage>,
     },
     ParallelComplete {
-        turn_id: String,
+        turn_id: TurnId,
         alternates: Vec<ParallelAlternateInfo>,
     },
     ParallelModelError {
