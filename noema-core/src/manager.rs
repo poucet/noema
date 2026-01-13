@@ -16,7 +16,7 @@ use crate::context::ConversationContext;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, TurnId, ViewId};
-use crate::storage::session::{Session, ResolvedMessage};
+use crate::storage::session::{Session};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::{MessageRole, OriginKind, SpanRole};
 use crate::storage::DocumentResolver;

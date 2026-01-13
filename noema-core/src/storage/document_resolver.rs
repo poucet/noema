@@ -10,14 +10,14 @@ use async_trait::async_trait;
 use futures::future::join_all;
 use llm::{ChatRequest, ContentBlock};
 
-use crate::storage::ids::DocumentId;
+use crate::storage::ids::{DocumentId, TabId};
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::{DocumentInfo, DocumentTabInfo};
+use crate::storage::types::{Document, DocumentTab, Editable, Stored};
 
 /// A resolved document with its content and tabs
 pub struct ResolvedDocument {
-    pub document: DocumentInfo,
-    pub tabs: Vec<DocumentTabInfo>,
+    pub document: Stored<DocumentId, Editable<Document>>,
+    pub tabs: Vec<Stored<TabId, Editable<DocumentTab>>>,
 }
 
 /// Trait for resolving document references to their content

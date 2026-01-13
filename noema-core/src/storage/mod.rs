@@ -65,16 +65,18 @@ pub use traits::{
 // Types
 pub use types::{
     // Asset
-    Asset, StoredAsset,
+    Asset,
     // Blob
     StoredBlob,
     // ContentBlock
-    ContentBlock, ContentOrigin, ContentType, OriginKind, StoredContentBlock, StoreResult,
+    ContentBlock, ContentOrigin, ContentType, HashedContentBlock, OriginKind, StoreResult,
     // Conversation
-    ConversationInfo, ForkInfo, MessageInfo, MessageRole, MessageWithContent,
-    SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
+    Conversation, ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole,
+    Turn, TurnWithContent, View, ViewSelection,
     // Document
-    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
+    Document, DocumentRevision, DocumentSource, DocumentTab,
+    // Stored wrappers
+    Editable, Stored,
     // User
     UserInfo,
 };

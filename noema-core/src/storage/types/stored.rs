@@ -67,13 +67,6 @@ impl<Id, T> Deref for Stored<Id, T> {
     }
 }
 
-impl<Id: Clone, T> Stored<Id, T> {
-    /// Clone just the ID
-    pub fn clone_id(&self) -> Id {
-        self.id.clone()
-    }
-}
-
 // ============================================================================
 // Editable wrapper
 // ============================================================================

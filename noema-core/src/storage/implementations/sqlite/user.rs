@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
-use uuid::Uuid;
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;

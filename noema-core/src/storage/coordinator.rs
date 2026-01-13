@@ -197,7 +197,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
 
         // Conversation has main_view_id - use it
         self.open_session_with_view(&conv.main_view_id).await
-            .map(|resolved| (conv.main_view_id, resolved))
+            .map(|resolved| (conv.main_view_id.clone(), resolved))
     }
 
     /// Create a new conversation with its main view.
@@ -282,10 +282,10 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     // Look up asset to get blob_hash and load data for LLM
                     let stored_asset = self.asset_store.get(asset_id).await?
                         .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", asset_id))?;
-                    let blob_hash = stored_asset.asset.blob_hash.clone();
+                    let blob_hash = &stored_asset.blob_hash;
 
                     // Load blob data and create resolved ContentBlock for LLM
-                    let resolved_block = match self.blob_store.get(&blob_hash).await {
+                    let resolved_block = match self.blob_store.get(blob_hash).await {
                         Ok(data) => {
                             let base64_data = STANDARD.encode(&data);
                             if mime_type.starts_with("image/") {
@@ -385,9 +385,9 @@ impl<S: StorageTypes> ContentResolver for StorageCoordinator<S> {
             .ok_or_else(|| anyhow::anyhow!("Asset not found: {}", id))?;
 
         // Use blob_hash to fetch from blob store
-        let data = self.blob_store.get(&stored_asset.asset.blob_hash).await?;
+        let data = self.blob_store.get(&stored_asset.blob_hash).await?;
 
-        Ok((data, stored_asset.asset.mime_type))
+        Ok((data, stored_asset.mime_type.clone()))
     }
 }
 
