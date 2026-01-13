@@ -16,7 +16,7 @@ pub use content_block::{
     ContentBlock, ContentOrigin, ContentType, OriginKind, StoredContentBlock, StoreResult,
 };
 pub use conversation::{
-    ConversationInfo, MessageContentInfo, MessageInfo, MessageRole, MessageWithContent,
+    ConversationInfo, ForkInfo, MessageInfo, MessageRole, MessageWithContent,
     SpanInfo, SpanRole, SpanWithMessages, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
 };
 pub use document::{

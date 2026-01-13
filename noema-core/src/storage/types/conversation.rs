@@ -2,15 +2,15 @@
 //!
 //! This module defines types for the Turn/Span/Message hierarchy:
 //!
-//! - `TurnInfo` - A position in the conversation sequence
+//! - `TurnInfo` - A structural node that can have multiple spans
 //! - `SpanInfo` - A span of messages at a turn (one alternative)
 //! - `MessageInfo` - Individual message within a span
-//! - `ViewInfo` - A path through spans (main view or fork)
+//! - `ViewInfo` - A path through turns/spans (defines order)
 
 use serde::{Deserialize, Serialize};
 
 use crate::storage::content::StoredContent;
-use crate::storage::ids::{ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, ViewId};
 
 // ============================================================================
 // Span Role
@@ -125,21 +125,17 @@ impl From<llm::api::Role> for MessageRole {
 // Turn
 // ============================================================================
 
-/// A turn in a conversation - a position in the sequence
+/// A turn - a structural node that can have multiple spans
 ///
-/// Each turn represents a point where someone "speaks" (user or assistant).
-/// Turns are ordered by sequence_number within a conversation.
-/// Each turn can have multiple alternative spans.
+/// Turns are independent entities; views link them together and define order.
+/// A turn represents a point where someone "speaks" (user or assistant).
+/// Multiple views can reference the same turn through view_selections.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnInfo {
     /// Unique identifier
     pub id: TurnId,
-    /// Parent conversation
-    pub conversation_id: ConversationId,
     /// Role for all spans at this turn (user or assistant)
     pub role: SpanRole,
-    /// Position in conversation (0-indexed, unique per conversation)
-    pub sequence_number: i32,
     /// Unix timestamp when created
     pub created_at: i64,
 }
@@ -162,8 +158,6 @@ pub struct TurnInfo {
 pub struct SpanInfo {
     /// Unique identifier
     pub id: SpanId,
-    /// Parent turn
-    pub turn_id: TurnId,
     /// Model that generated this span (for assistant spans)
     pub model_id: Option<String>,
     /// Number of messages in this span
@@ -199,48 +193,33 @@ pub struct MessageInfo {
 pub struct MessageWithContent {
     /// The message metadata
     pub message: MessageInfo,
-    /// Content items in order
-    pub content: Vec<MessageContentInfo>,
-}
-
-/// A single content item within a message
-///
-/// Maps directly to a row in the `message_content` table.
-/// Uses `StoredContent` directly - refs-only design.
-#[derive(Clone, Debug)]
-pub struct MessageContentInfo {
-    /// Unique identifier
-    pub id: MessageContentId,
-    /// Parent message
-    pub message_id: MessageId,
-    /// Order within message (0-indexed)
-    pub sequence_number: i32,
-    /// Content (uses StoredContent - refs-only)
-    pub content: StoredContent,
+    /// Content items in order (StoredContent refs)
+    pub content: Vec<StoredContent>,
 }
 
 // ============================================================================
 // View Types
 // ============================================================================
 
+/// Fork origin information - where a view was forked from
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ForkInfo {
+    /// View this was forked from
+    pub from_view_id: ViewId,
+    /// Turn where the fork occurred
+    pub at_turn_id: TurnId,
+}
+
 /// A view through a conversation - selects one span per turn
 ///
-/// Views create named paths through conversations. The "main" view is the
-/// default path. Additional views can be created for forks or comparisons.
+/// Views are entities that conversations point to. The "main" view is stored
+/// in ConversationInfo.main_view_id. Forked views track their origin.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewInfo {
     /// Unique identifier
     pub id: ViewId,
-    /// Parent conversation
-    pub conversation_id: ConversationId,
-    /// Human-readable name (optional)
-    pub name: Option<String>,
-    /// Whether this is the main/default view
-    pub is_main: bool,
-    /// View this was forked from (if any)
-    pub forked_from_view_id: Option<ViewId>,
-    /// Turn where the fork occurred (if forked)
-    pub forked_at_turn_id: Option<TurnId>,
+    /// Fork origin (None for main views, Some for forked views)
+    pub fork: Option<ForkInfo>,
     /// Unix timestamp when created
     pub created_at: i64,
 }
@@ -291,6 +270,8 @@ pub struct ConversationInfo {
     pub id: ConversationId,
     /// Human-readable name/title
     pub name: Option<String>,
+    /// The main view for this conversation
+    pub main_view_id: ViewId,
     /// Number of turns in the conversation
     pub turn_count: usize,
     /// Whether this conversation contains private/sensitive content
