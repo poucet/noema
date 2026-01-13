@@ -697,12 +697,12 @@ impl TurnStore for SqliteStore {
             conn.query_row(
                 "SELECT conversation_id FROM views WHERE id = ?1",
                 params![view_id.as_str()],
-                |row| row.get::<_, String>(0),
+                |row| row.get::<_, ConversationId>(0),
             )?
         };
 
         let turns = self
-            .get_turns(&ConversationId::from_string(conversation_id))
+            .get_turns(&conversation_id)
             .await?;
 
         let mut result = Vec::new();

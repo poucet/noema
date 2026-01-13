@@ -185,3 +185,28 @@ Wire these to the frontend UI:
 2. View list in sidebar or dropdown
 3. Span selection in alternates panel
 
+---
+
+## 2026-01-13: Architecture Cleanup
+
+### Lazy Engine Creation
+
+Previously `init_app` would create a session/engine for the most recent conversation at startup, even if the UI wasn't displaying it. Now:
+
+- `init_app` only initializes: storage, user, model settings, MCP registry
+- Engine/session created on-demand via `load_conversation` or `new_conversation`
+- All engines share the same MCP registry via `ChatEngine::with_shared_registry()`
+
+### Session No Longer Stores conversation_id
+
+The view already belongs to a conversation (via `views.conversation_id`), so storing it redundantly on Session was unnecessary.
+
+**Changes:**
+- `Session` struct only stores `view_id`
+- `StorageCoordinator::start_turn()` now takes only `view_id` and looks up conversation via `get_view()`
+- Added `TurnStore::get_view(view_id)` method
+- Removed `Session::conversation_id()` accessor
+- `Session::new()` and `Session::open_view()` no longer require conversation_id parameter
+
+This simplifies the API: the view is the source of truth for conversation context.
+
