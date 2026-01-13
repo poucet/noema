@@ -4,7 +4,8 @@
 
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
 use noema_core::storage::ids::{AssetId, DocumentId, TabId, UserId};
-use noema_core::storage::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo};
+use noema_core::storage::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo, Stores, UserStore};
+use crate::state::AppStorage;
 use rmcp::model::RawContent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -101,16 +102,15 @@ pub struct DocumentContentResponse {
 /// List all documents for the current user
 #[tauri::command]
 pub async fn list_documents(state: State<'_, Arc<AppState>>) -> Result<Vec<DocumentInfoResponse>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
     // Get default user
-    let user = coordinator
+    let user = stores.user()
         .get_or_create_default_user()
         .await
         .map_err(|e| e.to_string())?;
 
-    let docs = coordinator
-        .document_store()
+    let docs = stores.document()
         .list_documents(&user.id)
         .await
         .map_err(|e| e.to_string())?;
@@ -123,9 +123,9 @@ pub async fn get_document(
     state: State<'_, Arc<AppState>>,
     doc_id: DocumentId,
 ) -> Result<Option<DocumentInfoResponse>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let doc = coordinator.document_store().get_document(&doc_id).await.map_err(|e| e.to_string())?;
+    let doc = stores.document().get_document(&doc_id).await.map_err(|e| e.to_string())?;
     Ok(doc.map(DocumentInfoResponse::from))
 }
 
@@ -135,15 +135,14 @@ pub async fn get_document_by_google_id(
     state: State<'_, Arc<AppState>>,
     google_doc_id: String,
 ) -> Result<Option<DocumentInfoResponse>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let user = coordinator
+    let user = stores.user()
         .get_or_create_default_user()
         .await
         .map_err(|e| e.to_string())?;
 
-    let doc = coordinator
-        .document_store()
+    let doc = stores.document()
         .get_document_by_source(&user.id, DocumentSource::GoogleDrive, &google_doc_id)
         .await
         .map_err(|e| e.to_string())?;
@@ -156,19 +155,18 @@ pub async fn get_document_content(
     state: State<'_, Arc<AppState>>,
     doc_id: DocumentId,
 ) -> Result<DocumentContentResponse, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
+    let document_store = stores.document();
 
     // Get document metadata
-    let doc = coordinator
-        .document_store()
+    let doc = document_store
         .get_document(&doc_id)
         .await
         .map_err(|e| e.to_string())?
         .ok_or("Document not found")?;
 
     // Get all tabs for this document
-    let tabs = coordinator
-        .document_store()
+    let tabs = document_store
         .list_document_tabs(&doc_id)
         .await
         .map_err(|e| e.to_string())?;
@@ -185,10 +183,9 @@ pub async fn get_document_tab(
     state: State<'_, Arc<AppState>>,
     tab_id: TabId,
 ) -> Result<Option<DocumentTabResponse>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let tab = coordinator
-        .document_store()
+    let tab = stores.document()
         .get_document_tab(&tab_id)
         .await
         .map_err(|e| e.to_string())?;
@@ -198,9 +195,9 @@ pub async fn get_document_tab(
 /// Delete a document and all its tabs/revisions
 #[tauri::command]
 pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: DocumentId) -> Result<bool, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    coordinator.document_store().delete_document(&doc_id).await.map_err(|e| e.to_string())
+    stores.document().delete_document(&doc_id).await.map_err(|e| e.to_string())
 }
 
 /// Sync a Google Doc (trigger refresh from MCP server)
@@ -440,14 +437,16 @@ pub async fn import_google_doc(
     info!("Importing Google Doc: {}", google_doc_id);
 
     // First check if this doc is already imported
+    let stores = state.get_stores()?;
     let coordinator = state.get_coordinator()?;
-    let user = coordinator
+    let document_store = stores.document();
+
+    let user = stores.user()
         .get_or_create_default_user()
         .await
         .map_err(|e| e.to_string())?;
 
-    if let Some(existing) = coordinator
-        .document_store()
+    if let Some(existing) = document_store
         .get_document_by_source(&user.id, DocumentSource::GoogleDrive, &google_doc_id)
         .await
         .map_err(|e| e.to_string())?
@@ -516,11 +515,10 @@ pub async fn import_google_doc(
     );
 
     // Store the document and its content
-    // (We already have the coordinator and user from the check above)
+    // (We already have the stores and user from the check above)
 
     // Create the document
-    let doc_id = coordinator
-        .document_store()
+    let doc_id = document_store
         .create_document(
             &user.id,
             &extract_response.title,
@@ -589,8 +587,7 @@ pub async fn import_google_doc(
         }
 
         let source_tab_id = TabId::from_string(tab.source_tab_id.clone());
-        let tab_id = coordinator
-            .document_store()
+        let tab_id = document_store
             .create_document_tab(
                 &doc_id,
                 None, // Set parent in second pass
@@ -614,8 +611,7 @@ pub async fn import_google_doc(
                 tab_id_map.get(&tab.source_tab_id),
                 tab_id_map.get(parent_source_id),
             ) {
-                coordinator
-                    .document_store()
+                document_store
                     .update_document_tab_parent(tab_id, Some(parent_id))
                     .await
                     .map_err(|e| format!("Failed to update tab parent: {}", e))?;
@@ -624,8 +620,7 @@ pub async fn import_google_doc(
     }
 
     // Fetch and return the created document
-    let doc = coordinator
-        .document_store()
+    let doc = document_store
         .get_document(&doc_id)
         .await
         .map_err(|e| e.to_string())?
@@ -642,15 +637,14 @@ pub async fn search_documents(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<DocumentInfoResponse>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let user = coordinator
+    let user = stores.user()
         .get_or_create_default_user()
         .await
         .map_err(|e| e.to_string())?;
 
-    let docs = coordinator
-        .document_store()
+    let docs = stores.document()
         .search_documents(&user.id, &query, limit.unwrap_or(10))
         .await
         .map_err(|e| e.to_string())?;
