@@ -12,7 +12,7 @@ pub mod user;
 
 // Re-exports for convenience
 pub use asset::Asset;
-pub use blob::StoredBlob;
+pub use blob::BlobHash;
 pub use content_block::{
     ContentBlock, ContentOrigin, ContentType, HashedContentBlock, OriginKind, StoreResult,
 };
