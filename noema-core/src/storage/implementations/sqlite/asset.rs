@@ -9,7 +9,7 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{Asset, StoredAsset};
+use crate::storage::types::{Asset, Stored};
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -54,7 +54,7 @@ impl AssetStore for SqliteStore {
         Ok(id)
     }
 
-    async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>> {
+    async fn get(&self, id: &AssetId) -> Result<Option<Stored<AssetId, Asset>>> {
         let conn = self.conn().lock().unwrap();
         let asset = conn
             .query_row(
@@ -62,16 +62,16 @@ impl AssetStore for SqliteStore {
                  FROM assets WHERE id = ?1",
                 params![id.as_str()],
                 |row| {
-                    Ok(StoredAsset {
-                        id: id.clone(),
-                        asset: Asset {
+                    Ok(Stored::new(
+                        id.clone(),
+                        Asset {
                             blob_hash: row.get(0)?,
                             mime_type: row.get(1)?,
                             size_bytes: row.get(2)?,
                             is_private: row.get::<_, i32>(3)? != 0,
                         },
-                        created_at: row.get(4)?,
-                    })
+                        row.get(4)?,
+                    ))
                 },
             )
             .ok();
@@ -137,10 +137,10 @@ mod tests {
         let id = store.create_asset(asset).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
-        assert_eq!(stored.blob_hash(), "abc123hash");
-        assert_eq!(stored.mime_type(), "image/png");
-        assert_eq!(stored.size_bytes(), 1024);
-        assert!(!stored.is_private());
+        assert_eq!(stored.blob_hash, "abc123hash");
+        assert_eq!(stored.mime_type, "image/png");
+        assert_eq!(stored.size_bytes, 1024);
+        assert!(!stored.is_private);
     }
 
     #[tokio::test]
@@ -160,7 +160,7 @@ mod tests {
         // Both should exist and have the same blob_hash
         let stored1 = store.get(&id1).await.unwrap().unwrap();
         let stored2 = store.get(&id2).await.unwrap().unwrap();
-        assert_eq!(stored1.blob_hash(), stored2.blob_hash());
+        assert_eq!(stored1.blob_hash, stored2.blob_hash);
     }
 
     #[tokio::test]
@@ -197,6 +197,6 @@ mod tests {
         let id = store.create_asset(asset).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
-        assert!(stored.is_private());
+        assert!(stored.is_private);
     }
 }

@@ -1,8 +1,8 @@
 //! Asset types for storage
 
-use crate::storage::ids::AssetId;
-
 /// Asset metadata for storage (input form)
+///
+/// Use with `Stored<AssetId, Asset>` for the full stored representation.
 #[derive(Debug, Clone)]
 pub struct Asset {
     /// SHA-256 hash of the blob content (references the blob store)
@@ -35,39 +35,3 @@ impl Asset {
         self
     }
 }
-
-/// A stored asset with metadata from the database
-#[derive(Debug, Clone)]
-pub struct StoredAsset {
-    /// Unique identifier (UUID)
-    pub id: AssetId,
-
-    /// The asset metadata
-    pub asset: Asset,
-
-    /// When this asset was created (unix timestamp ms)
-    pub created_at: i64,
-}
-
-impl StoredAsset {
-    /// Get the blob hash (for fetching from blob store)
-    pub fn blob_hash(&self) -> &str {
-        &self.asset.blob_hash
-    }
-
-    /// Get the MIME type
-    pub fn mime_type(&self) -> &str {
-        &self.asset.mime_type
-    }
-
-    /// Get the size in bytes
-    pub fn size_bytes(&self) -> i64 {
-        self.asset.size_bytes
-    }
-
-    /// Check if private
-    pub fn is_private(&self) -> bool {
-        self.asset.is_private
-    }
-}
-

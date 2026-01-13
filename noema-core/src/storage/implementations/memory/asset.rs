@@ -8,12 +8,12 @@ use uuid::Uuid;
 
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{Asset, StoredAsset};
+use crate::storage::types::{Asset, Stored};
 
 /// In-memory asset store for testing
 #[derive(Debug, Default)]
 pub struct MemoryAssetStore {
-    assets: Mutex<HashMap<String, StoredAsset>>,
+    assets: Mutex<HashMap<AssetId, Stored<AssetId, Asset>>>,
 }
 
 impl MemoryAssetStore {
@@ -35,27 +35,27 @@ impl AssetStore for MemoryAssetStore {
         let mut assets = self.assets.lock().unwrap();
         let id = AssetId::from_string(Uuid::new_v4().to_string());
 
-        let stored = StoredAsset {
-            id: id.clone(),
+        let stored = Stored::new(
+            id.clone(),
             asset,
-            created_at: Self::now(),
-        };
-        assets.insert(id.as_str().to_string(), stored);
+            Self::now(),
+        );
+        assets.insert(id.clone(), stored);
 
         Ok(id)
     }
 
-    async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>> {
+    async fn get(&self, id: &AssetId) -> Result<Option<Stored<AssetId, Asset>>> {
         let assets = self.assets.lock().unwrap();
-        Ok(assets.get(id.as_str()).cloned())
+        Ok(assets.get(id).cloned())
     }
 
     async fn exists(&self, id: &AssetId) -> Result<bool> {
-        Ok(self.assets.lock().unwrap().contains_key(id.as_str()))
+        Ok(self.assets.lock().unwrap().contains_key(id))
     }
 
     async fn delete(&self, id: &AssetId) -> Result<bool> {
-        Ok(self.assets.lock().unwrap().remove(id.as_str()).is_some())
+        Ok(self.assets.lock().unwrap().remove(id).is_some())
     }
 }
 

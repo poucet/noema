@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::storage::ids::AssetId;
-use crate::storage::types::asset::{Asset, StoredAsset};
+use crate::storage::types::{Asset, Stored};
 
 /// Trait for asset storage operations
 ///
@@ -20,7 +20,7 @@ pub trait AssetStore: Send + Sync {
     async fn create_asset(&self, asset: Asset) -> Result<AssetId>;
 
     /// Get an asset by ID
-    async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>>;
+    async fn get(&self, id: &AssetId) -> Result<Option<Stored<AssetId, Asset>>>;
 
     /// Check if an asset exists
     async fn exists(&self, id: &AssetId) -> Result<bool>;
