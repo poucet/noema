@@ -6,10 +6,10 @@ use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::storage::ids::{ConversationId, UserId};
 use noema_core::storage::traits::StorageTypes;
 use noema_core::storage::{FsBlobStore, SqliteStore};
-use noema_core::{ConversationManager, McpRegistry};
+use noema_core::{ConversationManager, ManagerEvent, McpRegistry};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::{mpsc, Mutex, OnceCell};
 
 // ============================================================================
 // App Storage Types - Define once via StorageTypes
@@ -33,6 +33,11 @@ impl StorageTypes for AppStorage {
 pub type AppCoordinator = StorageCoordinator<AppStorage>;
 pub type AppManager = ConversationManager<AppStorage>;
 
+/// Tagged event for routing to UI - includes conversation ID for dispatch
+pub type TaggedEvent = (ConversationId, ManagerEvent);
+pub type EventSender = mpsc::UnboundedSender<TaggedEvent>;
+pub type EventReceiver = mpsc::UnboundedReceiver<TaggedEvent>;
+
 pub struct AppState {
     /// Storage coordinator - initialized once at startup
     pub coordinator: OnceCell<Arc<AppCoordinator>>,
@@ -40,6 +45,10 @@ pub struct AppState {
     pub managers: Mutex<HashMap<ConversationId, AppManager>>,
     /// MCP registry (shared across all conversations) - initialized once at startup
     pub mcp_registry: OnceCell<Arc<Mutex<McpRegistry>>>,
+    /// Shared event sender - managers send events here tagged with conversation ID
+    pub event_tx: EventSender,
+    /// Shared event receiver - single consumer dispatches to UI
+    pub event_rx: Mutex<Option<EventReceiver>>,
     /// Current user ID (from database)
     pub user_id: Mutex<UserId>,
     /// Full model ID in "provider/model" format
@@ -64,10 +73,15 @@ impl AppState {
         // Load pending OAuth states from disk
         let pending_states = load_pending_oauth_states().unwrap_or_default();
 
+        // Create shared event channel
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+
         Self {
             coordinator: OnceCell::new(),
             managers: Mutex::new(HashMap::new()),
             mcp_registry: OnceCell::new(),
+            event_tx,
+            event_rx: Mutex::new(Some(event_rx)),
             user_id: Mutex::new(UserId::new()),
             model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
@@ -78,6 +92,16 @@ impl AppState {
             browser_audio_controller: Mutex::new(None),
             init_lock: std::sync::Mutex::new(false),
         }
+    }
+
+    /// Take the event receiver (can only be called once)
+    pub async fn take_event_receiver(&self) -> Option<EventReceiver> {
+        self.event_rx.lock().await.take()
+    }
+
+    /// Get a clone of the event sender for passing to managers
+    pub fn event_sender(&self) -> EventSender {
+        self.event_tx.clone()
     }
 
     /// Get the coordinator, returns error if not initialized
