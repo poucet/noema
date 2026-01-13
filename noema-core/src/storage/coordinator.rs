@@ -19,7 +19,7 @@ use crate::storage::content::{ContentResolver, InputContent, StoredContent};
 use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, TurnId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
-    AssetStore, BlobStore, ConversationStore, StorageTypes, TextStore, TurnStore, UserStore,
+    AssetStore, BlobStore, ConversationStore, StorageTypes, Stores, TextStore, TurnStore, UserStore,
 };
 use crate::storage::types::{
     Asset, ContentBlock as ContentBlockData, ContentOrigin, ConversationInfo, MessageRole,
@@ -29,7 +29,7 @@ use crate::storage::types::{
 /// Coordinates storage across all store types.
 ///
 /// Generic over `S: StorageTypes` which bundles all storage type associations.
-/// Access individual stores via associated types: `S::Blob`, `S::Asset`, etc.
+/// Takes a `Stores<S>` implementation to access individual stores.
 pub struct StorageCoordinator<S: StorageTypes> {
     blob_store: Arc<S::Blob>,
     asset_store: Arc<S::Asset>,
@@ -42,7 +42,22 @@ pub struct StorageCoordinator<S: StorageTypes> {
 }
 
 impl<S: StorageTypes> StorageCoordinator<S> {
-    /// Create a new storage coordinator
+    /// Create a new storage coordinator from a Stores implementation
+    pub fn from_stores(stores: &impl Stores<S>) -> Self {
+        Self {
+            blob_store: stores.blob(),
+            asset_store: stores.asset(),
+            content_block_store: stores.text(),
+            conversation_store: stores.conversation(),
+            turn_store: stores.turn(),
+            user_store: stores.user(),
+            document_store: stores.document(),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Create a new storage coordinator from individual store instances
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blob_store: Arc<S::Blob>,
         asset_store: Arc<S::Asset>,

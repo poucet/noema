@@ -3,7 +3,9 @@
 use config::PathManager;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
 use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::storage::{FsBlobStore, SqliteStore};
+use noema_core::storage::traits::UserStore;
+use noema_core::storage::{FsBlobStore, SqliteStore, Stores};
+use crate::state::AppStorage;
 use noema_core::McpRegistry;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -154,24 +156,19 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     // Create blob store
     let blob_store = Arc::new(FsBlobStore::new(blob_dir));
 
-    // Create the SQL store
-    let store = SqliteStore::open(&db_path)
+    // Create the SQL store (implements multiple traits)
+    let sqlite_store = SqliteStore::open(&db_path)
         .map_err(|e| format!("Failed to open database: {}", e))?;
-    let store = Arc::new(store);
+    let sqlite_store = Arc::new(sqlite_store);
 
-    // Create storage coordinator with all stores
-    // SqliteStore implements: AssetStore, TextStore, ConversationStore, TurnStore, UserStore, DocumentStore
-    let coordinator = Arc::new(StorageCoordinator::new(
-        blob_store,      // BlobStore
-        store.clone(),   // AssetStore
-        store.clone(),   // TextStore
-        store.clone(),   // ConversationStore
-        store.clone(),   // TurnStore
-        store.clone(),   // UserStore
-        store.clone(),   // DocumentStore
-    ));
+    // Store the stores for direct access by commands
+    let stores = crate::state::AppStores::new(sqlite_store, blob_store);
 
+    // Create storage coordinator from stores
+    let coordinator = Arc::new(StorageCoordinator::<AppStorage>::from_stores(&stores));
     let _ = state.coordinator.set(coordinator);
+
+    state.init_stores(stores)?;
     Ok(())
 }
 
@@ -181,19 +178,20 @@ fn init_config() -> Result<(), String> {
 }
 
 async fn init_user(state: &AppState) -> Result<(), String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
+    let user_store = stores.user();
 
     // First check if user email is explicitly configured in settings
     let settings = config::Settings::load();
     let user = if let Some(email) = settings.user_email {
         // User has configured a specific email - get or create that user
-        coordinator
+        user_store
             .get_or_create_user_by_email(&email)
             .await
             .map_err(|e| format!("Failed to get/create user: {}", e))?
     } else {
         // No email configured - use smart selection logic
-        let users = coordinator
+        let users = user_store
             .list_users()
             .await
             .map_err(|e| format!("Failed to list users: {}", e))?;
@@ -201,7 +199,7 @@ async fn init_user(state: &AppState) -> Result<(), String> {
         match users.len() {
             0 => {
                 // No users exist - create default user
-                coordinator
+                user_store
                     .get_or_create_default_user()
                     .await
                     .map_err(|e| format!("Failed to create default user: {}", e))?

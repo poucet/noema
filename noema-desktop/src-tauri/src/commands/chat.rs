@@ -2,7 +2,8 @@
 
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{MessageRole, InputContent, Session};
+use noema_core::storage::{ConversationStore, MessageRole, InputContent, Session, Stores, TurnStore};
+use crate::state::AppStorage;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -233,17 +234,19 @@ pub async fn list_models(_state: State<'_, Arc<AppState>>) -> Result<Vec<ModelIn
 /// List all conversations for the current user
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
     let user_id = state.user_id.lock().await.clone();
 
-    let convos = coordinator
+    let convos = stores
+        .conversation()
         .list_conversations(&user_id)
         .await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
     let mut result = Vec::with_capacity(convos.len());
     for conv in convos {
-        let view = coordinator
+        let view = stores
+            .turn()
             .get_view(&conv.main_view_id)
             .await
             .map_err(|e| format!("Failed to get view: {}", e))?
@@ -336,8 +339,9 @@ pub async fn delete_conversation(
 ) -> Result<(), String> {
     state.managers.lock().await.remove(&conversation_id);
 
-    let coordinator = state.get_coordinator()?;
-    coordinator
+    let stores = state.get_stores()?;
+    stores
+        .conversation()
         .delete_conversation(&conversation_id)
         .await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
@@ -350,11 +354,12 @@ pub async fn rename_conversation(
     conversation_id: ConversationId,
     name: String,
 ) -> Result<(), String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
     let name_opt = if name.trim().is_empty() { None } else { Some(name.as_str()) };
 
-    coordinator
+    stores
+        .conversation()
         .rename_conversation(&conversation_id, name_opt)
         .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
@@ -366,8 +371,9 @@ pub async fn get_conversation_private(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<bool, String> {
-    let coordinator = state.get_coordinator()?;
-    coordinator
+    let stores = state.get_stores()?;
+    stores
+        .conversation()
         .is_conversation_private(&conversation_id)
         .await
         .map_err(|e| format!("Failed to get conversation privacy: {}", e))
@@ -380,8 +386,9 @@ pub async fn set_conversation_private(
     conversation_id: ConversationId,
     is_private: bool,
 ) -> Result<(), String> {
-    let coordinator = state.get_coordinator()?;
-    coordinator
+    let stores = state.get_stores()?;
+    stores
+        .conversation()
         .set_conversation_private(&conversation_id, is_private)
         .await
         .map_err(|e| format!("Failed to set conversation privacy: {}", e))

@@ -5,7 +5,7 @@ use noema_audio::VoiceCoordinator;
 use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::storage::ids::{ConversationId, UserId};
 use noema_core::storage::traits::StorageTypes;
-use noema_core::storage::{FsBlobStore, SqliteStore};
+use noema_core::storage::{FsBlobStore, SqliteStore, Stores};
 use noema_core::{ConversationManager, ManagerEvent, McpRegistry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +30,44 @@ impl StorageTypes for AppStorage {
     type Document = SqliteStore;
 }
 
+/// Holds all store instances for the application.
+///
+/// Uses a single SqliteStore for all SQL-based stores, sharing the connection pool.
+pub struct AppStores {
+    sqlite: Arc<SqliteStore>,
+    blob: Arc<FsBlobStore>,
+}
+
+impl AppStores {
+    pub fn new(sqlite: Arc<SqliteStore>, blob: Arc<FsBlobStore>) -> Self {
+        Self { sqlite, blob }
+    }
+}
+
+impl Stores<AppStorage> for AppStores {
+    fn conversation(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn turn(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn user(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn document(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn blob(&self) -> Arc<FsBlobStore> {
+        self.blob.clone()
+    }
+    fn asset(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn text(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+}
+
 pub type AppCoordinator = StorageCoordinator<AppStorage>;
 pub type AppManager = ConversationManager<AppStorage>;
 
@@ -39,7 +77,9 @@ pub type EventSender = mpsc::UnboundedSender<TaggedEvent>;
 pub type EventReceiver = mpsc::UnboundedReceiver<TaggedEvent>;
 
 pub struct AppState {
-    /// Storage coordinator - initialized once at startup
+    /// All stores - initialized once at startup
+    stores: OnceCell<AppStores>,
+    /// Storage coordinator for multi-store operations - initialized once at startup
     pub coordinator: OnceCell<Arc<AppCoordinator>>,
     /// Managers per conversation - enables parallel conversations
     pub managers: Mutex<HashMap<ConversationId, AppManager>>,
@@ -77,6 +117,7 @@ impl AppState {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         Self {
+            stores: OnceCell::new(),
             coordinator: OnceCell::new(),
             managers: Mutex::new(HashMap::new()),
             mcp_registry: OnceCell::new(),
@@ -102,6 +143,20 @@ impl AppState {
     /// Get a clone of the event sender for passing to managers
     pub fn event_sender(&self) -> EventSender {
         self.event_tx.clone()
+    }
+
+    /// Get stores, returns error if not initialized
+    pub fn get_stores(&self) -> Result<&AppStores, String> {
+        self.stores
+            .get()
+            .ok_or_else(|| "Storage not initialized".to_string())
+    }
+
+    /// Initialize stores (called once at startup)
+    pub fn init_stores(&self, stores: AppStores) -> Result<(), String> {
+        self.stores
+            .set(stores)
+            .map_err(|_| "Stores already initialized".to_string())
     }
 
     /// Get the coordinator, returns error if not initialized

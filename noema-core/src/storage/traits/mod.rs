@@ -54,3 +54,35 @@ pub trait StorageTypes: Send + Sync + 'static {
     /// Document storage
     type Document: DocumentStore + Send + Sync;
 }
+
+use std::sync::Arc;
+
+/// Provides access to store instances.
+///
+/// Implement this trait to define how stores are accessed. The implementation
+/// can share underlying storage (e.g., a single SqliteStore) across multiple
+/// accessor methods.
+///
+/// ```ignore
+/// pub struct AppStores {
+///     sqlite: Arc<SqliteStore>,
+///     blob: Arc<FsBlobStore>,
+/// }
+///
+/// impl Stores<AppStorage> for AppStores {
+///     fn conversation(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
+///     fn turn(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
+///     fn user(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
+///     fn document(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
+///     fn blob(&self) -> Arc<FsBlobStore> { self.blob.clone() }
+/// }
+/// ```
+pub trait Stores<S: StorageTypes>: Send + Sync {
+    fn conversation(&self) -> Arc<S::Conversation>;
+    fn turn(&self) -> Arc<S::Turn>;
+    fn user(&self) -> Arc<S::User>;
+    fn document(&self) -> Arc<S::Document>;
+    fn blob(&self) -> Arc<S::Blob>;
+    fn asset(&self) -> Arc<S::Asset>;
+    fn text(&self) -> Arc<S::Text>;
+}
