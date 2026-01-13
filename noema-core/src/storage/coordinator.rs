@@ -450,7 +450,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                         }
                         Err(_) => None,
                     };
-                    ResolvedContent::asset_resolved(
+                    ResolvedContent::asset(
                         asset_id.clone(),
                         blob_hash,
                         mime_type.clone(),

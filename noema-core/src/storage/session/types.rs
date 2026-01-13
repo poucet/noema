@@ -91,22 +91,8 @@ impl ResolvedContent {
         Self::Text { text: text.into() }
     }
 
-    /// Create an asset reference (unresolved)
+    /// Create an asset reference (potentially resolved)
     pub fn asset(
-        asset_id: impl Into<AssetId>,
-        blob_hash: impl Into<String>,
-        mime_type: impl Into<String>,
-    ) -> Self {
-        Self::Asset {
-            asset_id: asset_id.into(),
-            blob_hash: blob_hash.into(),
-            mime_type: mime_type.into(),
-            resolved: None,
-        }
-    }
-
-    /// Create an asset reference with pre-resolved content block
-    pub fn asset_resolved(
         asset_id: impl Into<AssetId>,
         blob_hash: impl Into<String>,
         mime_type: impl Into<String>,
@@ -170,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_resolved_content_asset_unresolved() {
-        let content = ResolvedContent::asset("asset-123", "abc123hash", "image/png");
+        let content = ResolvedContent::asset("asset-123", "abc123hash", "image/png", None);
         assert!(content.needs_resolution());
         assert!(content.cached_block().is_none());
     }
