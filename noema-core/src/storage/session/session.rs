@@ -260,8 +260,9 @@ impl<S: StorageTypes> Session<S> {
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
             };
 
+
             // Get or create turn and span based on commit mode and role changes
-            let (turn_id, span_id) = match commit_mode {
+            match commit_mode {
                 CommitMode::AtTurn(tid) => {
                     // Regeneration: create span at existing turn once, reuse for all messages
                     if current_span.is_none() {
@@ -271,7 +272,6 @@ impl<S: StorageTypes> Session<S> {
                         current_turn = Some(tid.clone());
                         current_span = Some(span);
                     }
-                    (current_turn.as_ref().unwrap().clone(), current_span.as_ref().unwrap().clone())
                 }
                 CommitMode::NewTurns => {
                     // Normal: create new turn when role changes
@@ -284,12 +284,13 @@ impl<S: StorageTypes> Session<S> {
                         current_span = Some(span);
                         current_role = Some(span_role);
                     }
-                    (current_turn.as_ref().unwrap().clone(), current_span.as_ref().unwrap().clone())
                 }
             };
+            let turn_id = current_turn.as_ref().unwrap();
+            let span_id = current_span.as_ref().unwrap();
 
             let resolved = self.coordinator
-                .add_message(&span_id, &turn_id, msg_role, msg.payload.content, origin)
+                .add_message(span_id, turn_id, msg_role, msg.payload.content, origin)
                 .await?;
             self.resolved_cache.push(resolved);
         }

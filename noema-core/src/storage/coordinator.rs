@@ -183,12 +183,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.blob_store.get(hash).await
     }
 
-    /// Get access to the turn store
-    pub fn turn_store(&self) -> &Arc<S::Turn> {
-        &self.turn_store
-    }
-
-
     /// Get access to the document store
     pub fn document_store(&self) -> &Arc<S::Document> {
         &self.document_store
