@@ -56,11 +56,6 @@ impl TextStore for SqliteStore {
         let hash = content_hash(&content.text);
         let conn = self.conn().lock().unwrap();
 
-        // Check for existing content with same hash (deduplication)
-        if let Some(existing_id) = find_by_hash_internal(&conn, &hash)? {
-            return Ok(Keyed::new(existing_id, ContentHash::from_string(hash)));
-        }
-
         // Insert new content block
         let id = ContentBlockId::new();
         let now = unix_timestamp();
@@ -146,29 +141,6 @@ impl TextStore for SqliteStore {
             .context("Failed to check content block existence")?;
 
         Ok(count > 0)
-    }
-
-    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>> {
-        let conn = self.conn().lock().unwrap();
-        find_by_hash_internal(&conn, hash)
-    }
-}
-
-/// Internal helper for hash lookup (used by both store and find_by_hash)
-fn find_by_hash_internal(conn: &Connection, hash: &str) -> Result<Option<ContentBlockId>> {
-    let result = conn.query_row(
-        "SELECT id FROM content_blocks WHERE content_hash = ?1 LIMIT 1",
-        params![hash],
-        |row| {
-            let id: String = row.get(0)?;
-            Ok(ContentBlockId::from_string(id))
-        },
-    );
-
-    match result {
-        Ok(id) => Ok(Some(id)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e).context("Failed to find content block by hash"),
     }
 }
 
@@ -285,7 +257,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deduplication() {
+    async fn test_no_deduplication() {
+        // Each ContentBlock gets its own ID even with same text,
+        // because metadata (origin, content_type, is_private) may differ
         let store = SqliteStore::in_memory().unwrap();
 
         let content1 = ContentBlock::plain("Duplicate me");
@@ -295,8 +269,8 @@ mod tests {
         let content2 = ContentBlock::plain("Duplicate me");
         let result2 = store.store(content2).await.unwrap();
 
-        assert_eq!(result1.id, result2.id, "IDs should match for deduplicated content");
-        assert_eq!(result1, result2);
+        assert_ne!(result1.id, result2.id);
+        assert_eq!(result1.content.as_str(), result2.content.as_str()); // same hash
     }
 
     #[tokio::test]
@@ -319,21 +293,6 @@ mod tests {
 
         assert!(store.exists(&result.id).await.unwrap());
         assert!(!store.exists(&ContentBlockId::new()).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn test_find_by_hash() {
-        let store = SqliteStore::in_memory().unwrap();
-
-        let content = ContentBlock::plain("Find by hash");
-        let result = store.store(content).await.unwrap();
-
-        let found = store.find_by_hash(&result.hash).await.unwrap().unwrap();
-        assert_eq!(found, result.id);
-
-        // Non-existent hash
-        let not_found = store.find_by_hash("nonexistent").await.unwrap();
-        assert!(not_found.is_none());
     }
 
     #[tokio::test]

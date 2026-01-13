@@ -13,7 +13,6 @@ use crate::storage::types::{stored, ContentBlock, ContentHash, Hashed, Keyed};
 #[derive(Debug, Default)]
 pub struct MemoryTextStore {
     blocks: Mutex<HashMap<ContentBlockId, StoredTextBlock>>,
-    hash_index: Mutex<HashMap<ContentHash, ContentBlockId>>,
 }
 
 impl MemoryTextStore {
@@ -34,15 +33,10 @@ impl TextStore for MemoryTextStore {
     async fn store(&self, content: ContentBlock) -> Result<StoredContentRef> {
         let hash = ContentHash::from_text(&content.text);
 
-        // Check for existing by hash
-        {
-            let hash_index = self.hash_index.lock().unwrap();
-            if let Some(existing_id) = hash_index.get(&hash) {
-                return Ok(Keyed::new(existing_id.clone(), hash));
-            }
-        }
+        // Note: We intentionally do NOT deduplicate by hash here.
+        // Each ContentBlock may have different metadata (origin, content_type, is_private)
+        // even if the text content is the same.
 
-        // Create new
         let id = ContentBlockId::new();
         let stored_block = stored(
             id.clone(),
@@ -50,12 +44,7 @@ impl TextStore for MemoryTextStore {
             Self::now(),
         );
 
-        {
-            let mut blocks = self.blocks.lock().unwrap();
-            let mut hash_index = self.hash_index.lock().unwrap();
-            blocks.insert(id.clone(), stored_block);
-            hash_index.insert(hash.clone(), id.clone());
-        }
+        self.blocks.lock().unwrap().insert(id.clone(), stored_block);
 
         Ok(Keyed::new(id, hash))
     }
@@ -72,11 +61,6 @@ impl TextStore for MemoryTextStore {
 
     async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
         Ok(self.blocks.lock().unwrap().contains_key(id))
-    }
-
-    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>> {
-        let hash_index = self.hash_index.lock().unwrap();
-        Ok(hash_index.get(&ContentHash::from_string(hash)).cloned())
     }
 }
 
@@ -96,13 +80,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deduplication() {
+    async fn test_no_deduplication() {
+        // Each ContentBlock gets its own ID even with same text,
+        // because metadata (origin, content_type, is_private) may differ
         let store = MemoryTextStore::new();
 
         let first = store.store(ContentBlock::plain("same")).await.unwrap();
-
         let second = store.store(ContentBlock::plain("same")).await.unwrap();
-        assert_eq!(first.id.as_str(), second.id.as_str());
+
+        assert_ne!(first.id.as_str(), second.id.as_str());
+        assert_eq!(first.content.as_str(), second.content.as_str()); // same hash
     }
 
     #[tokio::test]
@@ -115,16 +102,4 @@ mod tests {
         assert_eq!(text, Some("test text".to_string()));
     }
 
-    #[tokio::test]
-    async fn test_find_by_hash() {
-        let store = MemoryTextStore::new();
-        let content = ContentBlock::plain("findme");
-
-        let result = store.store(content).await.unwrap();
-        let found = store.find_by_hash(result.content.as_str()).await.unwrap();
-        assert_eq!(found.map(|id| id.as_str().to_string()), Some(result.id.as_str().to_string()));
-
-        let not_found = store.find_by_hash("nonexistent").await.unwrap();
-        assert!(not_found.is_none());
-    }
 }

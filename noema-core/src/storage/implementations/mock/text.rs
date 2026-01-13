@@ -64,8 +64,4 @@ impl TextStore for MockTextStore {
     async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
         Ok(self.blocks.lock().unwrap().contains_key(id.as_str()))
     }
-
-    async fn find_by_hash(&self, _hash: &str) -> Result<Option<ContentBlockId>> {
-        Ok(None)
-    }
 }

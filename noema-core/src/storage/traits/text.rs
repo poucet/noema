@@ -18,8 +18,8 @@ pub type StoredContentRef = Keyed<ContentBlockId, ContentHash>;
 pub trait TextStore: Send + Sync {
     /// Store text content, returning ID and hash
     ///
-    /// If content with the same hash already exists, returns the existing ID
-    /// (content deduplication).
+    /// Each store creates a new entry - no deduplication by hash,
+    /// since metadata (origin, content_type, is_private) may differ.
     async fn store(&self, content: ContentBlock) -> Result<StoredContentRef>;
 
     /// Get a content block by ID
@@ -30,7 +30,4 @@ pub trait TextStore: Send + Sync {
 
     /// Check if a content block exists
     async fn exists(&self, id: &ContentBlockId) -> Result<bool>;
-
-    /// Find content block by hash (for deduplication checks)
-    async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>>;
 }
