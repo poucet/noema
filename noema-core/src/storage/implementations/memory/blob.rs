@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -50,6 +49,8 @@ impl BlobStore for MemoryBlobStore {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[tokio::test]
@@ -57,9 +58,9 @@ mod tests {
         let store = MemoryBlobStore::new();
         let data = b"hello world";
 
-        let stored = store.store(data).await.unwrap();
+        let blob_hash: BlobHash = store.store(data).await.unwrap();
 
-        let retrieved = store.get(&stored.hash).await.unwrap();
+        let retrieved = store.get(&blob_hash).await.unwrap();
         assert_eq!(retrieved, data);
     }
 
@@ -71,7 +72,7 @@ mod tests {
         let first = store.store(data).await.unwrap();
 
         let second = store.store(data).await.unwrap();
-        assert_eq!(first.hash, second.hash);
+        assert_eq!(first, second);
     }
 
     #[tokio::test]
@@ -79,10 +80,12 @@ mod tests {
         let store = MemoryBlobStore::new();
         let data = b"test";
 
-        assert!(!store.exists("nonexistent").await);
+        let invalid_hash = FromStr::from_str("nonexistent").unwrap();
 
-        let stored = store.store(data).await.unwrap();
-        assert!(store.exists(&stored.hash).await);
+        assert!(!store.exists(&invalid_hash).await);
+
+        let blob_hash = store.store(data).await.unwrap();
+        assert!(store.exists(&blob_hash).await);
     }
 
     #[tokio::test]
@@ -90,11 +93,11 @@ mod tests {
         let store = MemoryBlobStore::new();
         let data = b"delete me";
 
-        let stored = store.store(data).await.unwrap();
-        assert!(store.exists(&stored.hash).await);
+        let blob_hash = store.store(data).await.unwrap();
+        assert!(store.exists(&blob_hash).await);
 
-        assert!(store.delete(&stored.hash).await.unwrap());
-        assert!(!store.exists(&stored.hash).await);
-        assert!(!store.delete(&stored.hash).await.unwrap());
+        assert!(store.delete(&blob_hash).await.unwrap());
+        assert!(!store.exists(&blob_hash).await);
+        assert!(!store.delete(&blob_hash).await.unwrap());
     }
 }
