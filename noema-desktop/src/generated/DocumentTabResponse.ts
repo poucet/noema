@@ -3,4 +3,4 @@
 /**
  * Document tab response for the frontend
  */
-export type DocumentTabResponse = { id: string, documentId: string, parentTabId: string | null, tabIndex: number, title: string, icon: string | null, contentMarkdown: string | null, referencedAssets: Array<string>, sourceTabId: string | null, currentRevisionId: string | null, createdAt: bigint, updatedAt: bigint, };
+export type DocumentTabResponse = { id: string, documentId: string, parentTabId: string | null, tabIndex: number, title: string, icon: string | null, contentMarkdown: string | null, referencedAssets: string[], sourceTabId: string | null, currentRevisionId: string | null, createdAt: bigint, updatedAt: bigint, };

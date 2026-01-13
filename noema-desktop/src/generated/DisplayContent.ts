@@ -5,4 +5,4 @@ export type DisplayContent = { "text": string } | { "image": { data: string, mim
 /**
  * URL to fetch the asset (e.g., noema-asset://localhost/{blob_hash})
  */
-url: string, mimeType: string, filename: string | null, } } | { "documentRef": { id: string, } } | { "toolCall": { name: string, id: string, arguments: unknown, } } | { "toolResult": { id: string, content: Array<DisplayToolResultContent>, } };
+url: string, mimeType: string, } } | { "documentRef": { id: string, } } | { "toolCall": { name: string, id: string, arguments: unknown, } } | { "toolResult": { id: string, content: Array<DisplayToolResultContent>, } };
