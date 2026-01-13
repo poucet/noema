@@ -1,12 +1,14 @@
 //! Asset types for storage
 
+use crate::storage::types::BlobHash;
+
 /// Asset metadata for storage (input form)
 ///
 /// Use with `Stored<AssetId, Asset>` for the full stored representation.
 #[derive(Debug, Clone)]
 pub struct Asset {
     /// SHA-256 hash of the blob content (references the blob store)
-    pub blob_hash: String,
+    pub blob_hash: BlobHash,
 
     /// MIME type of the asset (e.g., "image/png", "audio/mp3")
     pub mime_type: String,
@@ -20,7 +22,7 @@ pub struct Asset {
 
 impl Asset {
     /// Create a new asset with required fields
-    pub fn new(blob_hash: impl Into<String>, mime_type: impl Into<String>, size_bytes: i64) -> Self {
+    pub fn new(blob_hash: impl Into<BlobHash>, mime_type: impl Into<String>, size_bytes: i64) -> Self {
         Self {
             blob_hash: blob_hash.into(),
             mime_type: mime_type.into(),

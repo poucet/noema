@@ -22,7 +22,7 @@ use crate::storage::traits::{
     AssetStore, BlobStore, ConversationStore, StorageTypes, Stores, TextStore, TurnStore,
 };
 use crate::storage::types::{
-    Asset, ContentBlock as ContentBlockData, ContentOrigin, MessageRole, OriginKind,
+    Asset, BlobHash, ContentBlock as ContentBlockData, ContentOrigin, MessageRole, OriginKind,
     TurnWithContent,
 };
 
@@ -145,13 +145,13 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     /// and return the asset ID.
     pub async fn store_asset(&self, base64_data: &str, mime_type: &str) -> Result<AssetId> {
         let bytes = STANDARD.decode(base64_data)?;
-        let stored_blob = self.blob_store.store(&bytes).await?;
-        let asset = Asset::new(&stored_blob.hash, mime_type, bytes.len() as i64);
+        let blob_hash = self.blob_store.store(&bytes).await?;
+        let asset = Asset::new(blob_hash, mime_type, bytes.len() as i64);
         self.asset_store.create_asset(asset).await
     }
 
     /// Get blob data by hash
-    pub async fn get_blob(&self, hash: &str) -> Result<Vec<u8>> {
+    pub async fn get_blob(&self, hash: &BlobHash) -> Result<Vec<u8>> {
         self.blob_store.get(hash).await
     }
 
@@ -306,7 +306,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     };
                     ResolvedContent::asset(
                         asset_id.clone(),
-                        blob_hash,
+                        blob_hash.clone(),
                         mime_type.clone(),
                         resolved_block,
                     )

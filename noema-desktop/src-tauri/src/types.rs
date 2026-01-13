@@ -235,7 +235,7 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
             } => DisplayContent::AssetRef {
                 url: format!(
                     "noema-asset://localhost/{}?mime_type={}",
-                    blob_hash,
+                    blob_hash.as_str(),
                     urlencoding::encode(mime_type)
                 ),
                 mime_type: mime_type.clone(),

@@ -8,10 +8,11 @@ mod state;
 mod types;
 
 use config::PathManager;
+use noema_core::storage::types::BlobHash;
 use tauri::http::Response;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 pub use logging::{init_logging, log_message};
 pub use state::AppState;
@@ -41,6 +42,7 @@ async fn handle_asset_request(
             .body("Missing blob_hash".as_bytes().to_vec())
             .unwrap();
     }
+    let blob_hash: BlobHash = BlobHash::from_str(blob_hash).unwrap();
 
     // Get coordinator from app state
     let coordinator = match app_state.get_coordinator() {
@@ -55,13 +57,13 @@ async fn handle_asset_request(
     };
 
     // Fetch blob directly by hash
-    let data = match coordinator.get_blob(blob_hash).await {
+    let data = match coordinator.get_blob(&blob_hash).await {
         Ok(data) => data,
         Err(_) => {
             return Response::builder()
                 .status(404)
                 .header("Content-Type", "text/plain")
-                .body(format!("Blob not found: {}", blob_hash).into_bytes())
+                .body(format!("Blob not found: {}", blob_hash.as_str()).into_bytes())
                 .unwrap();
         }
     };
@@ -84,7 +86,7 @@ async fn handle_asset_request(
         .header("Content-Type", mime_type)
         .header("Content-Length", data.len().to_string())
         .header("Cache-Control", "public, max-age=31536000, immutable")
-        .header("ETag", format!("\"{}\"", blob_hash))
+        .header("ETag", format!("\"{}\"", blob_hash.as_str()))
         .body(data)
         .unwrap()
 }

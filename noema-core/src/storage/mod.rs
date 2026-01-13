@@ -66,8 +66,6 @@ pub use traits::{
 pub use types::{
     // Asset
     Asset,
-    // Blob
-    StoredBlob,
     // ContentBlock
     ContentBlock, ContentOrigin, ContentType, HashedContentBlock, OriginKind, StoreResult,
     // Conversation

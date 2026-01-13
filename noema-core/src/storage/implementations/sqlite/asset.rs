@@ -9,7 +9,7 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{stored, Asset, Stored};
+use crate::storage::types::{BlobHash, stored, Asset, Stored};
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -43,7 +43,7 @@ impl AssetStore for SqliteStore {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 id.as_str(),
-                asset.blob_hash,
+                asset.blob_hash.as_str(),
                 asset.mime_type,
                 asset.size_bytes,
                 asset.is_private as i32,
@@ -62,10 +62,11 @@ impl AssetStore for SqliteStore {
                  FROM assets WHERE id = ?1",
                 params![id.as_str()],
                 |row| {
+                    let blob_hash_str: String = row.get(0)?;
                     Ok(stored(
                         id.clone(),
                         Asset {
-                            blob_hash: row.get(0)?,
+                            blob_hash: blob_hash_str.parse().unwrap(),
                             mime_type: row.get(1)?,
                             size_bytes: row.get(2)?,
                             is_private: row.get::<_, i32>(3)? != 0,

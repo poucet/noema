@@ -9,7 +9,7 @@ use llm::{ContentBlock, ToolCall, ToolResult};
 
 use crate::storage::content::StoredContent;
 use crate::storage::ids::{AssetId, DocumentId, TurnId};
-use crate::storage::types::MessageRole;
+use crate::storage::types::{BlobHash, MessageRole};
 
 // ============================================================================
 // PendingMessage - not yet committed
@@ -65,7 +65,7 @@ pub enum ResolvedContent {
     Asset {
         asset_id: AssetId,
         /// Blob hash for serving via asset protocol
-        blob_hash: String,
+        blob_hash: BlobHash,
         mime_type: String,
         /// Cached base64-encoded ContentBlock for LLM - populated on first use
         resolved: Option<ContentBlock>,
@@ -94,7 +94,7 @@ impl ResolvedContent {
     /// Create an asset reference (potentially resolved)
     pub fn asset(
         asset_id: impl Into<AssetId>,
-        blob_hash: impl Into<String>,
+        blob_hash: impl Into<BlobHash>,
         mime_type: impl Into<String>,
         resolved: Option<ContentBlock>,
     ) -> Self {
