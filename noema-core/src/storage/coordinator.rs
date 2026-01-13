@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::storage::content::{ContentResolver, InputContent, StoredContent};
-use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, UserId, ViewId};
+use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, TurnId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
     AssetStore, BlobStore, ConversationStore, StorageTypes, TextStore, TurnStore, UserStore,

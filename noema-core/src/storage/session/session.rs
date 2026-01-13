@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::context::{ConversationContext, MessagesGuard};
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
-use crate::storage::ids::{ConversationId, ViewId};
+use crate::storage::ids::{ConversationId, TurnId, ViewId};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::{MessageRole, OriginKind, SpanRole};
 
@@ -61,6 +61,8 @@ pub struct Session<S: StorageTypes> {
     llm_cache_valid: bool,
     /// Pending messages (ChatMessage) not yet committed
     pending: Vec<ChatMessage>,
+    /// Target turn for next commit (None = create new turn, Some = add span at turn)
+    commit_target: Option<TurnId>,
 }
 
 impl<S: StorageTypes> Session<S> {
@@ -82,6 +84,7 @@ impl<S: StorageTypes> Session<S> {
             llm_cache: Vec::new(),
             llm_cache_valid: false,
             pending: Vec::new(),
+            commit_target: None,
         })
     }
 
@@ -99,6 +102,7 @@ impl<S: StorageTypes> Session<S> {
             llm_cache: Vec::new(),
             llm_cache_valid: false,
             pending: Vec::new(),
+            commit_target: None,
         }
     }
 
@@ -120,6 +124,7 @@ impl<S: StorageTypes> Session<S> {
             llm_cache: Vec::new(),
             llm_cache_valid: false,
             pending: Vec::new(),
+            commit_target: None,
         })
     }
 
@@ -155,24 +160,21 @@ impl<S: StorageTypes> Session<S> {
 
     /// Truncate session context to before a specific turn.
     ///
-    /// Sets the session cache to messages up to (but not including) the target turn.
-    /// Use this before regenerating a response, then call `commit_at_turn()` to
-    /// store the new response as an alternate span.
+    /// Sets the session cache to messages up to (but not including) the target turn,
+    /// and sets the commit target so the next `commit()` creates a new span at that turn.
     ///
     /// # Arguments
-    /// * `turn_id` - The turn to truncate before
-    pub async fn truncate_to_turn(
-        &mut self,
-        turn_id: &crate::storage::ids::TurnId,
-    ) -> Result<()> {
+    /// * `turn_id` - The turn to truncate before (next commit adds span here)
+    pub async fn truncate_to_turn(&mut self, turn_id: TurnId) -> Result<()> {
         let context = self.coordinator
-            .get_context_before_turn(&self.view_id, turn_id)
+            .get_context_before_turn(&self.view_id, &turn_id)
             .await?;
 
         self.resolved_cache = context;
         self.llm_cache.clear();
         self.llm_cache_valid = false;
         self.pending.clear();
+        self.commit_target = Some(turn_id);
 
         Ok(())
     }
@@ -181,19 +183,7 @@ impl<S: StorageTypes> Session<S> {
     ///
     /// Creates a new span at the specified turn, stores pending messages,
     /// and selects the new span in the current view.
-    ///
-    /// # Arguments
-    /// * `turn_id` - The turn to add the span to
-    /// * `model_id` - Optional model ID to record on the span
-    pub async fn commit_at_turn(
-        &mut self,
-        turn_id: &crate::storage::ids::TurnId,
-        model_id: Option<&str>,
-    ) -> Result<()> {
-        if self.pending.is_empty() {
-            return Ok(());
-        }
-
+    async fn commit_at_turn(&mut self, turn_id: &TurnId, model_id: Option<&str>) -> Result<()> {
         let messages = std::mem::take(&mut self.pending);
 
         // Create span at the existing turn
@@ -250,10 +240,17 @@ impl<S: StorageTypes> Session<S> {
 
     /// Commit pending messages to storage
     ///
-    /// Groups messages by role, creates turns/spans as needed, and stores content.
+    /// If `commit_target` is set (from `truncate_to_turn`), creates a new span at that turn.
+    /// Otherwise, creates new turns as needed based on message roles.
     pub async fn commit(&mut self, model_id: Option<&str>) -> Result<()> {
         if self.pending.is_empty() {
+            self.commit_target = None;
             return Ok(());
+        }
+
+        // Check if we're committing at an existing turn (regeneration)
+        if let Some(turn_id) = self.commit_target.take() {
+            return self.commit_at_turn(&turn_id, model_id).await;
         }
 
         let messages = std::mem::take(&mut self.pending);

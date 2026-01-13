@@ -668,8 +668,8 @@ pub async fn get_current_view_id(
 
 /// Regenerate response at a specific turn
 ///
-/// Creates a new span at the turn and triggers the LLM to generate a new
-/// response. The new span is automatically selected in the current view.
+/// Truncates context to before the turn and triggers the LLM to generate a new
+/// response. The new span is automatically created and selected in the current view.
 ///
 /// # Arguments
 /// * `conversation_id` - The conversation containing the turn
@@ -682,7 +682,6 @@ pub async fn regenerate_response(
     turn_id: TurnId,
     tool_config: Option<ToolConfig>,
 ) -> Result<(), String> {
-    // Convert ToolConfig from Tauri types to core types
     let core_tool_config = match tool_config {
         Some(tc) => CoreToolConfig {
             enabled: tc.enabled,
@@ -694,7 +693,16 @@ pub async fn regenerate_response(
 
     let engines = state.engines.lock().await;
     let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
-    engine.regenerate(turn_id, core_tool_config);
+
+    // Truncate session to before the turn (sets commit_target for next commit)
+    {
+        let session_arc = engine.get_session();
+        let mut session = session_arc.lock().await;
+        session.truncate_to_turn(turn_id).await.map_err(|e| e.to_string())?;
+    }
+
+    // Process pending will run LLM and commit at the turn
+    engine.process_pending(core_tool_config);
 
     Ok(())
 }

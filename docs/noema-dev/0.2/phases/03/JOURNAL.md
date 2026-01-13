@@ -254,15 +254,52 @@ regenerateResponse(conversationId: string, turnId: string, toolConfig?: ToolConf
 
 ### Flow
 
-1. Engine sends `Regenerate` command
-2. Session calls `truncate_to_turn()` - sets cache to messages before turn
+1. Tauri command calls `session.truncate_to_turn(turn_id)` - sets cache and `commit_target`
+2. Tauri calls `engine.process_pending()`
 3. Engine runs agent to generate new response
-4. On success, session calls `commit_at_turn()` which:
-   - Creates new span via `add_span_at_turn()`
-   - Stores messages via `add_message()`
-   - Updates session cache
+4. On success, `session.commit()` checks `commit_target` and delegates to `commit_at_turn()`
 
 ### Next Steps
 
 Wire frontend regenerate button to call `regenerateResponse()`.
+
+---
+
+## 2026-01-13: Engine Simplification
+
+Refactored `ChatEngine` to reduce code duplication and simplify the command set.
+
+### Design: Session Owns Commit Mode
+
+Instead of the engine needing different code paths for normal messages vs regeneration, the session now tracks how the next commit should behave:
+
+```rust
+// In Session
+commit_target: Option<TurnId>,  // None = new turn, Some = add span at turn
+```
+
+- `truncate_to_turn(turn_id)` sets `commit_target = Some(turn_id)`
+- `commit()` checks `commit_target` and delegates to `commit_at_turn()` if set
+- Engine just calls `commit()` - doesn't need to know about regeneration
+
+### Simplified Engine Commands
+
+Before:
+- `SendMessage` - add message, run LLM, commit
+- `ProcessPending` - run LLM, commit
+- `Regenerate` - truncate, run LLM, commit at turn (duplicate logic)
+
+After:
+- `SendMessage` - add message, then shared execute_and_commit
+- `ProcessPending` - shared execute_and_commit
+
+The shared `execute_and_commit` helper handles LLM execution and commit for both cases.
+
+### Tauri Layer Handles Truncation
+
+The `regenerate_response` Tauri command now:
+1. Calls `session.truncate_to_turn(turn_id)` directly
+2. Calls `engine.process_pending()`
+
+This keeps the engine simple while still supporting regeneration.
 
