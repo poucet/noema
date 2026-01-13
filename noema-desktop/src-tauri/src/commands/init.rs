@@ -1,20 +1,17 @@
 //! Application initialization command
 
 use config::PathManager;
-use llm::create_model;
 use noema_core::mcp::{start_auto_connect, ServerStatus};
-use noema_core::storage::ids::ConversationId;
 use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::storage::session::Session;
-use noema_core::storage::{DocumentResolver, FsBlobStore, SqliteStore};
-use noema_core::{ChatEngine, McpRegistry};
+use noema_core::storage::{FsBlobStore, SqliteStore};
+use noema_core::McpRegistry;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::chat::start_engine_event_loop;
 use crate::gdocs_server::{self, GDocsServerState};
 use crate::logging::log_message;
-use crate::state::{AppCoordinator, AppSession, AppState};
+use crate::state::AppState;
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {
@@ -74,28 +71,23 @@ async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
     })?;
     log_message("User initialized");
 
-    let (session, coordinator) = init_session(state).await.map_err(|e| {
-        log_message(&format!("ERROR in init_session: {}", e));
-        e
-    })?;
-    let conversation_id = session.conversation_id();
-    log_message("Session initialized");
+    // Initialize default model name (no engine yet - created when conversation is loaded)
+    let model_name = init_default_model(state).await?;
+    log_message(&format!("Default model set: {}", model_name));
 
     // Start embedded Google Docs MCP server
     start_gdocs_server(&app).await;
 
-    let mcp_registry = init_mcp();
+    // Initialize MCP registry (global, not per-conversation)
+    let mcp_registry = init_mcp(state)?;
     log_message("MCP registry loaded");
 
-    let (model_name, mcp_registry_arc) = init_engine(state, session, coordinator, mcp_registry).await?;
-    log_message(&format!("Engine initialized with model: {}", model_name));
-
-    // Start the engine event loop (runs continuously)
+    // Start the engine event loop (runs continuously, polls all loaded engines)
     start_engine_event_loop(app.clone());
     log_message("Event loop started");
 
     // Start auto-connect for MCP servers (runs in background)
-    start_mcp_auto_connect(app, mcp_registry_arc).await;
+    start_mcp_auto_connect(app, mcp_registry).await;
     log_message("MCP auto-connect started");
 
     Ok(model_name)
@@ -229,54 +221,23 @@ async fn init_user(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-async fn init_session(state: &AppState) -> Result<(AppSession, Arc<AppCoordinator>), String> {
-    let coordinator = state.get_coordinator()?;
-    let user_id = state.user_id.lock().await.clone();
+/// Initialize MCP registry (global, shared across all engines)
+fn init_mcp(state: &AppState) -> Result<Arc<tokio::sync::Mutex<McpRegistry>>, String> {
+    let registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
+    let registry_arc = Arc::new(tokio::sync::Mutex::new(registry));
 
-    // Try to open the most recent conversation, or create a new one if none exist
-    let conversations = coordinator
-        .list_conversations(&user_id)
-        .await
-        .map_err(|e| format!("Failed to list conversations: {}", e))?;
-
-    let conversation_id = if let Some(most_recent) = conversations.first() {
-        most_recent.id.clone()
-    } else {
-        // No conversations exist, create a new one
-        coordinator
-            .create_conversation(&user_id, None)
-            .await
-            .map_err(|e| format!("Failed to create conversation: {}", e))?
-    };
-
-    // Open session for the conversation
-    let session = Session::open(coordinator.clone(), conversation_id)
-        .await
-        .map_err(|e| format!("Failed to open session: {}", e))?;
-
-    Ok((session, coordinator))
+    let _ = state.mcp_registry.set(registry_arc.clone());
+    Ok(registry_arc)
 }
 
-fn init_mcp() -> McpRegistry {
-    McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()))
-}
-
-async fn init_engine(
-    state: &AppState,
-    session: AppSession,
-    coordinator: Arc<AppCoordinator>,
-    mcp_registry: McpRegistry,
-) -> Result<(String, Arc<tokio::sync::Mutex<McpRegistry>>), String> {
+/// Initialize default model settings (no engine created yet)
+async fn init_default_model(state: &AppState) -> Result<String, String> {
     const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
 
-    // Load default model from settings, fall back to hardcoded default
     let settings = config::Settings::load();
     let model_id = settings
         .default_model
         .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
-
-    let model =
-        create_model(&model_id).map_err(|e| format!("Failed to create model: {}", e))?;
 
     let model_display_name = model_id
         .split('/')
@@ -287,19 +248,5 @@ async fn init_engine(
     *state.model_id.lock().await = model_id;
     *state.model_name.lock().await = model_display_name.clone();
 
-    // Get conversation ID from session
-    let conversation_id = session.conversation_id().clone();
-
-    // Coordinator implements DocumentResolver
-    let document_resolver: Arc<dyn DocumentResolver> = coordinator;
-
-    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
-
-    // Get the MCP registry Arc from the engine to store in AppState
-    let mcp_registry_arc = engine.get_mcp_registry();
-    let _ = state.mcp_registry.set(mcp_registry_arc.clone());
-
-    state.engines.lock().await.insert(conversation_id, engine);
-
-    Ok((model_display_name, mcp_registry_arc))
+    Ok(model_display_name)
 }

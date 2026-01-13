@@ -94,14 +94,31 @@ pub struct ChatEngine<S: StorageTypes> {
 }
 
 impl<S: StorageTypes> ChatEngine<S> {
+    /// Create a new ChatEngine with a fresh MCP registry
     pub fn new(
         session: Session<S>,
         model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: McpRegistry,
         document_resolver: Arc<dyn DocumentResolver>,
     ) -> Self {
+        Self::with_shared_registry(
+            session,
+            model,
+            Arc::new(Mutex::new(mcp_registry)),
+            document_resolver,
+        )
+    }
+
+    /// Create a new ChatEngine with a shared MCP registry
+    ///
+    /// Use this when multiple engines should share the same MCP server connections.
+    pub fn with_shared_registry(
+        session: Session<S>,
+        model: Arc<dyn ChatModel + Send + Sync>,
+        mcp_registry: Arc<Mutex<McpRegistry>>,
+        document_resolver: Arc<dyn DocumentResolver>,
+    ) -> Self {
         let session = Arc::new(Mutex::new(session));
-        let mcp_registry = Arc::new(Mutex::new(mcp_registry));
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 

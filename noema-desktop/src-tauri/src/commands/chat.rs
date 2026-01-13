@@ -1,7 +1,7 @@
 //! Chat-related Tauri commands
 
 use llm::{ChatMessage, Role, create_model, list_all_models};
-use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
+use noema_core::{ChatEngine, EngineEvent, ToolConfig as CoreToolConfig};
 use noema_core::storage::{TurnStore, Session, MessageRole, InputContent};
 use noema_core::storage::DocumentResolver;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
@@ -377,8 +377,7 @@ pub async fn load_conversation(
         .collect();
 
     let model_id_str = state.model_id.lock().await.clone();
-    let mcp_registry =
-        McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
+    let mcp_registry = state.get_mcp_registry()?;
 
     // Create model
     let model = create_model(&model_id_str)
@@ -387,7 +386,7 @@ pub async fn load_conversation(
     // Coordinator implements DocumentResolver
     let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
-    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
+    let engine = ChatEngine::with_shared_registry(session, model, mcp_registry, document_resolver);
     state.engines.lock().await.insert(conversation_id, engine);
 
     Ok(messages)
@@ -412,8 +411,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
         .map_err(|e| format!("Failed to open new conversation: {}", e))?;
 
     let model_id_str = state.model_id.lock().await.clone();
-    let mcp_registry =
-        McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
+    let mcp_registry = state.get_mcp_registry()?;
 
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
@@ -421,7 +419,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     // Coordinator implements DocumentResolver
     let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
-    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
+    let engine = ChatEngine::with_shared_registry(session, model, mcp_registry, document_resolver);
     state.engines.lock().await.insert(conv_id.clone(), engine);
 
     Ok(conv_id.as_str().to_string())
@@ -725,13 +723,12 @@ pub async fn switch_view(
 
     // Create new engine with the new session
     let model_id_str = state.model_id.lock().await.clone();
-    let mcp_registry =
-        McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
+    let mcp_registry = state.get_mcp_registry()?;
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
     let document_resolver: Arc<dyn DocumentResolver> = coordinator;
 
-    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
+    let engine = ChatEngine::with_shared_registry(session, model, mcp_registry, document_resolver);
 
     // Replace the engine for this conversation
     state.engines.lock().await.insert(conversation_id, engine);
