@@ -179,34 +179,6 @@ impl<S: StorageTypes> Session<S> {
         Ok(())
     }
 
-    /// Commit pending messages to an existing turn as a new span.
-    ///
-    /// Creates a new span at the specified turn, stores pending messages,
-    /// and selects the new span in the current view.
-    async fn commit_at_turn(&mut self, turn_id: &TurnId, model_id: Option<&str>) -> Result<()> {
-        let messages = std::mem::take(&mut self.pending);
-
-        // Create span at the existing turn
-        let span_id = self.coordinator
-            .add_span_at_turn(&self.view_id, turn_id, model_id)
-            .await?;
-
-        // Add all messages to the span
-        for msg in messages {
-            let msg_role = llm_role_to_message_role(msg.role);
-            let origin = llm_role_to_origin(msg.role);
-
-            let resolved = self.coordinator
-                .add_message(&span_id, msg_role, msg.payload.content, origin)
-                .await?;
-
-            self.resolved_cache.push(resolved);
-        }
-
-        self.llm_cache_valid = false;
-        Ok(())
-    }
-
     /// Add a user message from UI input
     ///
     /// Stores content (text, images, audio) and adds to pending queue.
@@ -248,14 +220,10 @@ impl<S: StorageTypes> Session<S> {
             return Ok(());
         }
 
-        // Check if we're committing at an existing turn (regeneration)
-        if let Some(turn_id) = self.commit_target.take() {
-            return self.commit_at_turn(&turn_id, model_id).await;
-        }
-
         let messages = std::mem::take(&mut self.pending);
+        let commit_at_turn = self.commit_target.take();
 
-        // Track current turn state for grouping
+        // Track current span for adding messages
         let mut current_role: Option<SpanRole> = None;
         let mut current_span: Option<crate::storage::ids::SpanId> = None;
 
@@ -267,16 +235,24 @@ impl<S: StorageTypes> Session<S> {
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
             };
 
-            // Start new turn when role changes (user→assistant or assistant→user)
+            // Get or create span for this message
             if current_role != Some(span_role) {
-                let span_id = self.coordinator
-                    .start_turn(&self.view_id, span_role, model_id)
-                    .await?;
+                let span_id = if let Some(ref turn_id) = commit_at_turn {
+                    // Regeneration: add span at existing turn
+                    self.coordinator
+                        .add_span_at_turn(&self.view_id, turn_id, model_id)
+                        .await?
+                } else {
+                    // Normal: create new turn
+                    self.coordinator
+                        .start_turn(&self.view_id, span_role, model_id)
+                        .await?
+                };
                 current_span = Some(span_id);
                 current_role = Some(span_role);
             }
 
-            // Add message to span and resolve for caching
+            // Add message to span
             let resolved = self.coordinator
                 .add_message(current_span.as_ref().unwrap(), msg_role, msg.payload.content, origin)
                 .await?;
