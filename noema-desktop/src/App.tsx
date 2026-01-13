@@ -7,6 +7,7 @@ import { ModelSelector } from "./components/ModelSelector";
 import { FavoriteModelChips } from "./components/FavoriteModelChips";
 import { Settings } from "./components/Settings";
 import { DocumentPanel } from "./components/DocumentPanel";
+import { ViewSelector } from "./components/ViewSelector";
 import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock, ToolConfig } from "./generated";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
@@ -42,7 +43,9 @@ function App() {
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   // Document selected in the documents activity (shown in main panel)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  // Current view ID (null = main view) - value may be needed later for view switching
+  // View management for conversation forks
+  const [views, setViews] = useState<tauri.ViewInfo[]>([]);
+  const [currentViewId, setCurrentViewId] = useState<string | null>(null);
   // Prefilled input text (used when forking from a user message to let them edit and resend)
   const [prefilledInput, setPrefilledInput] = useState<string>("");
   // Tools enabled state - controls whether MCP tools are sent to the model
@@ -163,6 +166,12 @@ function App() {
         // Load messages for this conversation
         const msgs = await tauri.loadConversation(convId);
         setMessages(Array.isArray(msgs) ? msgs : []);
+
+        // Load views for this conversation
+        const convViews = await tauri.listConversationViews(convId);
+        setViews(convViews);
+        const viewId = await tauri.getCurrentViewId(convId);
+        setCurrentViewId(viewId);
 
         // Load models in background
         tauri.listModels().then(setModels).catch(console.error);
@@ -388,6 +397,11 @@ function App() {
       // Load privacy status for this conversation
       const isPrivate = await tauri.getConversationPrivate(id);
       setIsConversationPrivate(isPrivate);
+      // Load views for this conversation
+      const convViews = await tauri.listConversationViews(id);
+      setViews(convViews);
+      const viewId = await tauri.getCurrentViewId(id);
+      setCurrentViewId(viewId);
     } catch (err) {
       appLog.error("Select conversation error", String(err));
       setError(String(err));
@@ -492,12 +506,30 @@ function App() {
       // Switch to the new forked view
       const msgs = await tauri.switchView(currentConversationId, newView.id);
       setMessages(msgs);
+      setCurrentViewId(newView.id);
+      // Refresh views list
+      const convViews = await tauri.listConversationViews(currentConversationId);
+      setViews(convViews);
       // For user messages, prefill the input with their original text so they can edit and resend
       if (role === "user" && userText) {
         setPrefilledInput(userText);
       }
     } catch (err) {
       appLog.error("Fork error", String(err));
+      setError(String(err));
+    }
+  };
+
+  // Switch to a different view in the current conversation
+  const handleSwitchView = async (viewId: string) => {
+    appLog.info(`Switching to view: ${viewId}`);
+    try {
+      setError(null);
+      const msgs = await tauri.switchView(currentConversationId, viewId);
+      setMessages(msgs);
+      setCurrentViewId(viewId);
+    } catch (err) {
+      appLog.error("Switch view error", String(err));
       setError(String(err));
     }
   };
@@ -717,6 +749,14 @@ function App() {
                 )}
                 <span>{isConversationPrivate ? "Private" : "Not Private"}</span>
               </button>
+            )}
+            {/* View selector - shown when conversation has multiple views (forks) */}
+            {activeActivity === "conversations" && views.length > 1 && (
+              <ViewSelector
+                views={views}
+                currentViewId={currentViewId}
+                onSwitchView={handleSwitchView}
+              />
             )}
           </div>
           {activeActivity === "conversations" && (

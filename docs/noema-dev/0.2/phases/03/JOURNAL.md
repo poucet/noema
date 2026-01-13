@@ -376,3 +376,52 @@ Hover over assistant message → see action buttons (copy, regenerate, fork) to 
 
 ---
 
+## 2026-01-13: Select Span and Fork Wiring (3.3.D2b, 3.3.D4b)
+
+Wired span selection and fork functionality to frontend.
+
+### Changes
+
+**AlternatesSelector.tsx:**
+- Changed from `spanSetId` to `turnId` (new UCM model terminology)
+- `onConfirmSelection` now receives `(turnId, spanId)`
+
+**MessageBubble.tsx:**
+- Updated props to use `turnId` instead of `spanSetId` for switching alternates
+- Fork handler now passes `turnId` instead of `spanId`
+- Updated `canFork` check to use `turnId`
+
+**App.tsx:**
+- `handleSwitchAlternate` now calls `tauri.selectSpan(conversationId, turnId, spanId)`
+- `handleFork` now immediately calls `forkConversation` + `switchView` (no more pending fork)
+- Removed legacy `pendingForkSpanId` state
+- Added `handleSwitchView` for view switching
+
+**Cleanup:**
+- Removed `pendingFork` prop from SidePanel, ChatInput, ConversationsPanel
+- Simplified to `prefilledText` + `onClearPrefill` for user message editing after fork
+
+---
+
+## 2026-01-13: View Selector UI (3.3.D4c, 3.3.D5b)
+
+Added ViewSelector component for switching between conversation views (forks).
+
+### New Component: ViewSelector.tsx
+
+Dropdown in top bar showing all views for current conversation:
+- Only appears when conversation has multiple views
+- Shows current view name with fork icon
+- Dropdown lists all views with main/fork icons
+- Click to switch views
+
+### App.tsx Integration
+
+- Added `views` and `currentViewId` state
+- Load views when selecting conversation or on init
+- Update views after forking
+- Added `handleSwitchView` function
+- ViewSelector in top bar next to privacy toggle
+
+---
+
