@@ -710,7 +710,7 @@ pub async fn switch_view(
     let coordinator = state.get_coordinator()?;
 
     // Open a new session for the target view
-    let session = Session::open_view(coordinator.clone(), conversation_id.clone(), view_id)
+    let session = Session::open_view(coordinator.clone(), view_id)
         .await
         .map_err(|e| format!("Failed to open view: {}", e))?;
 

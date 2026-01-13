@@ -92,6 +92,9 @@ pub trait TurnStore: Send + Sync {
     /// Get the main view for a conversation
     async fn get_main_view(&self, conversation_id: &ConversationId) -> Result<Option<ViewInfo>>;
 
+    /// Get a view by its ID
+    async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>>;
+
     /// Select a span for a turn within a view
     ///
     /// Updates which span is selected at the given turn for the given view.

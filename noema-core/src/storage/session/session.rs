@@ -1,7 +1,7 @@
 //! DB-agnostic Session implementation
 //!
 //! Session provides:
-//! - Runtime state management (conversation_id, view_id, cache)
+//! - Runtime state management (view_id, cache)
 //! - Pending message buffer for uncommitted changes
 //! - Lazy resolution of assets/documents for LLM
 //! - Implements ConversationContext directly
@@ -49,7 +49,7 @@ use super::types::{ResolvedContent, ResolvedMessage};
 pub struct Session<S: StorageTypes> {
     /// Storage coordinator - provides access to all stores
     coordinator: Arc<StorageCoordinator<S>>,
-    conversation_id: ConversationId,
+    /// Current view being used (conversation derived from view when needed)
     view_id: ViewId,
     /// Cached resolved messages (text resolved, assets/docs cached lazily)
     resolved_cache: Vec<ResolvedMessage>,
@@ -74,7 +74,6 @@ impl<S: StorageTypes> Session<S> {
 
         Ok(Self {
             coordinator,
-            conversation_id,
             view_id,
             resolved_cache,
             llm_cache: Vec::new(),
@@ -86,12 +85,10 @@ impl<S: StorageTypes> Session<S> {
     /// Create a new session for a new conversation (not yet persisted)
     pub fn new(
         coordinator: Arc<StorageCoordinator<S>>,
-        conversation_id: ConversationId,
         view_id: ViewId,
     ) -> Self {
         Self {
             coordinator,
-            conversation_id,
             view_id,
             resolved_cache: Vec::new(),
             llm_cache: Vec::new(),
@@ -105,24 +102,18 @@ impl<S: StorageTypes> Session<S> {
     /// Use this when switching to a non-main view (e.g., after forking).
     pub async fn open_view(
         coordinator: Arc<StorageCoordinator<S>>,
-        conversation_id: ConversationId,
         view_id: ViewId,
     ) -> Result<Self> {
         let resolved_cache = coordinator.open_session_with_view(&view_id).await?;
 
         Ok(Self {
             coordinator,
-            conversation_id,
             view_id,
             resolved_cache,
             llm_cache: Vec::new(),
             llm_cache_valid: false,
             pending: Vec::new(),
         })
-    }
-
-    pub fn conversation_id(&self) -> &ConversationId {
-        &self.conversation_id
     }
 
     pub fn view_id(&self) -> &ViewId {
@@ -212,7 +203,7 @@ impl<S: StorageTypes> Session<S> {
             // Start new turn when role changes (user→assistant or assistant→user)
             if current_role != Some(span_role) {
                 let span_id = self.coordinator
-                    .start_turn(&self.conversation_id, &self.view_id, span_role, model_id)
+                    .start_turn(&self.view_id, span_role, model_id)
                     .await?;
                 current_span = Some(span_id);
                 current_role = Some(span_role);

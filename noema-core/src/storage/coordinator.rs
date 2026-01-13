@@ -250,15 +250,21 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     /// Start a new turn in a conversation view.
     ///
     /// Creates a turn, adds a span to it, and selects that span in the view.
+    /// Looks up the conversation_id from the view.
     /// Returns the span ID for adding messages.
     pub async fn start_turn(
         &self,
-        conversation_id: &ConversationId,
         view_id: &ViewId,
         role: crate::storage::types::SpanRole,
         model_id: Option<&str>,
     ) -> Result<SpanId> {
-        let turn = self.conversation_store.add_turn(conversation_id, role).await?;
+        // Look up conversation_id from view
+        let view = self.conversation_store
+            .get_view(view_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("View not found: {}", view_id))?;
+
+        let turn = self.conversation_store.add_turn(&view.conversation_id, role).await?;
         let span = self.conversation_store.add_span(&turn.id, model_id).await?;
         self.conversation_store.select_span(view_id, &turn.id, &span.id).await?;
         Ok(span.id)

@@ -269,6 +269,11 @@ impl TurnStore for MemoryTurnStore {
             .cloned())
     }
 
+    async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
+        let views = self.views.lock().unwrap();
+        Ok(views.get(view_id).cloned())
+    }
+
     async fn select_span(
         &self,
         view_id: &ViewId,

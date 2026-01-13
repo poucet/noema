@@ -620,6 +620,39 @@ impl TurnStore for SqliteStore {
         }
     }
 
+    async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
+        let conn = self.conn().lock().unwrap();
+        let result = conn.query_row(
+            "SELECT id, conversation_id, name, is_main, forked_from_view_id, forked_at_turn_id, created_at
+             FROM views WHERE id = ?1",
+            params![view_id.as_str()],
+            |row| {
+                let id: ViewId = row.get(0)?;
+                let cid: ConversationId = row.get(1)?;
+                let name: Option<String> = row.get(2)?;
+                let is_main_int: i32 = row.get(3)?;
+                let forked_from: Option<ViewId> = row.get(4)?;
+                let forked_at: Option<TurnId> = row.get(5)?;
+                let created: i64 = row.get(6)?;
+                Ok((id, cid, name, is_main_int, forked_from, forked_at, created))
+            },
+        );
+
+        match result {
+            Ok((id, cid, name, is_main_int, forked_from, forked_at, created)) => Ok(Some(ViewInfo {
+                id,
+                conversation_id: cid,
+                name,
+                is_main: is_main_int != 0,
+                forked_from_view_id: forked_from,
+                forked_at_turn_id: forked_at,
+                created_at: created,
+            })),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     async fn select_span(
         &self,
         view_id: &ViewId,
@@ -703,7 +736,7 @@ impl TurnStore for SqliteStore {
         name: Option<&str>,
     ) -> Result<ViewInfo> {
         let conn = self.conn().lock().unwrap();
-        let (conversation_id, _): (String, i32) = conn.query_row(
+        let (conversation_id, _): (ConversationId, i32) = conn.query_row(
             "SELECT conversation_id, is_main FROM views WHERE id = ?1",
             params![view_id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -740,7 +773,7 @@ impl TurnStore for SqliteStore {
 
         Ok(ViewInfo {
             id: new_id,
-            conversation_id: ConversationId::from_string(conversation_id),
+            conversation_id: conversation_id,
             name: name.map(|s| s.to_string()),
             is_main: false,
             forked_from_view_id: Some(view_id.clone()),
