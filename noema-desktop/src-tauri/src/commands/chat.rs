@@ -2,7 +2,7 @@
 
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{ConversationStore, DocumentResolver, MessageRole, InputContent, Session, Stores, TurnStore};
+use noema_core::storage::{ConversationStore, DocumentResolver, InputContent, MessageRole, Session, StorageTypes, Stores, TurnStore};
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,9 +17,9 @@ use crate::types::{
 };
 
 /// Enrich messages with alternate span information for each turn
-async fn enrich_with_alternates<S: Stores>(
+async fn enrich_with_alternates<S: StorageTypes, T: Stores<S>>(
     messages: Vec<DisplayMessage>,
-    stores: &S,
+    stores: &T,
     view_id: &ViewId,
 ) -> Vec<DisplayMessage> {
     // Collect unique turn IDs from messages
@@ -339,7 +339,7 @@ pub async fn load_conversation(
                 .map(DisplayMessage::from)
                 .collect();
             // Enrich with alternates
-            let messages = enrich_with_alternates(messages, stores.as_ref(), &view_id).await;
+            let messages = enrich_with_alternates(messages, stores, &view_id).await;
             return Ok(messages);
         }
     }
@@ -368,7 +368,7 @@ pub async fn load_conversation(
     state.managers.lock().await.insert(conversation_id, manager);
 
     // Enrich with alternates
-    let messages = enrich_with_alternates(messages, stores.as_ref(), &view_id).await;
+    let messages = enrich_with_alternates(messages, stores, &view_id).await;
     Ok(messages)
 }
 

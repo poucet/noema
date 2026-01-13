@@ -3,7 +3,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use llm::Role;
 use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::traits::TurnStore;
