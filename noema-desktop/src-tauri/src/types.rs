@@ -449,27 +449,30 @@ impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
 pub struct ThreadInfoResponse {
     #[ts(type = "string")]
     pub id: ViewId,
-    #[ts(type = "string")]
-    pub conversation_id: ConversationId,
+    /// The view this was forked from (None for main views)
     #[ts(type = "string | null")]
-    pub parent_span_id: Option<TurnId>,
-    pub name: Option<String>,
-    pub status: String,
+    pub forked_from_view_id: Option<ViewId>,
+    /// The turn at which this view forked (None for main views)
+    #[ts(type = "string | null")]
+    pub forked_at_turn_id: Option<TurnId>,
     pub created_at: i64,
-    /// Whether this is the main view
+    /// Whether this is the main view (derived from fork being None)
     pub is_main: bool,
 }
 
 impl From<noema_core::storage::ViewInfo> for ThreadInfoResponse {
     fn from(info: noema_core::storage::ViewInfo) -> Self {
+        let is_main = info.fork.is_none();
+        let (forked_from_view_id, forked_at_turn_id) = match info.fork {
+            Some(fork) => (Some(fork.from_view_id), Some(fork.at_turn_id)),
+            None => (None, None),
+        };
         Self {
             id: info.id,
-            conversation_id: info.conversation_id,
-            parent_span_id: info.forked_at_turn_id,
-            name: info.name,
-            status: "active".to_string(), // Views are always active
+            forked_from_view_id,
+            forked_at_turn_id,
             created_at: info.created_at,
-            is_main: info.is_main,
+            is_main,
         }
     }
 }

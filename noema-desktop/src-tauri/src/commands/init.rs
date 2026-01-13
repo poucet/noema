@@ -159,15 +159,15 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     let store = Arc::new(store);
 
     // Create storage coordinator with all stores
-    // StorageCoordinator<B, A, T, C, U, D>
-    // SqliteStore implements: AssetStore, TextStore, ConversationStore, UserStore, DocumentStore
+    // SqliteStore implements: AssetStore, TextStore, ConversationStore, TurnStore, UserStore, DocumentStore
     let coordinator = Arc::new(StorageCoordinator::new(
-        blob_store,      // B: BlobStore
-        store.clone(),   // A: AssetStore
-        store.clone(),   // T: TextStore
-        store.clone(),   // C: ConversationStore
-        store.clone(),   // U: UserStore
-        store.clone(),   // D: DocumentStore
+        blob_store,      // BlobStore
+        store.clone(),   // AssetStore
+        store.clone(),   // TextStore
+        store.clone(),   // ConversationStore
+        store.clone(),   // TurnStore
+        store.clone(),   // UserStore
+        store.clone(),   // DocumentStore
     ));
 
     let _ = state.coordinator.set(coordinator);

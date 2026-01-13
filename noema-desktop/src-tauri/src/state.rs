@@ -26,6 +26,7 @@ impl StorageTypes for AppStorage {
     type Asset = SqliteStore;
     type Text = SqliteStore;
     type Conversation = SqliteStore;
+    type Turn = SqliteStore;
     type User = SqliteStore;
     type Document = SqliteStore;
 }

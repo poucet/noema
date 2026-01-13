@@ -1,8 +1,8 @@
 //! Chat-related Tauri commands
 
-use llm::{ChatMessage, Role, create_model, list_all_models};
+use llm::{Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{TurnStore, Session, MessageRole, InputContent};
+use noema_core::storage::{ConversationStore, TurnStore, Session, MessageRole, InputContent};
 use noema_core::storage::DocumentResolver;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::sync::Arc;
@@ -399,9 +399,9 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     let coordinator = state.get_coordinator()?;
     let user_id = state.user_id.lock().await.clone();
 
-    // Create a new conversation
+    // Create a new conversation with its main view
     let conv_id = coordinator
-        .create_conversation(&user_id, None)
+        .create_conversation_with_view(&user_id, None)
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
@@ -529,23 +529,18 @@ pub async fn send_parallel_message(
 }
 
 // ============================================================================
-// Turn/Span/View Commands (Phase 3 - Pending Implementation)
+// Turn/Span/View Commands (Phase 3)
 // ============================================================================
 //
-// The following commands are pending reimplementation with the new Turn/Span/View model:
-// - get_span_set_alternates -> use TurnStore::get_spans(turn_id)
-// - set_selected_span -> use TurnStore::select_span(view_id, turn_id, span_id)
-// - get_span_messages -> use TurnStore::get_messages_with_content(span_id)
-// - get_messages_with_alternates -> use TurnStore::get_view_path(view_id)
-// - list_conversation_threads -> use TurnStore::get_views(conversation_id)
-// - fork_from_span -> use TurnStore::fork_view(view_id, at_turn_id, name)
-// - switch_thread -> use TurnStore::get_view_path(view_id)
-// - rename_thread -> (view rename not yet implemented)
-// - delete_thread -> (view delete not yet implemented)
-// - edit_user_message -> use TurnStore::edit_turn(view_id, turn_id, ...)
-//
-// For now, the basic get_messages command works through SqliteSession
-// which uses get_view_path internally.
+// API mapping for the Turn/Span/View model:
+// - get_turn_alternates -> TurnStore::get_spans(turn_id)
+// - select_span -> TurnStore::select_span(view_id, turn_id, span_id)
+// - get_span_messages -> TurnStore::get_messages(span_id)
+// - get_messages -> TurnStore::get_view_path(view_id)
+// - list_conversation_views -> Coordinator::get_conversation() + TurnStore::get_view()
+// - fork_conversation -> TurnStore::fork_view(view_id, at_turn_id)
+// - switch_view -> Session::open_view(coordinator, conversation_id, view_id)
+// - edit_turn -> TurnStore::edit_turn(view_id, turn_id, messages, model_id, create_fork)
 
 use crate::types::ThreadInfoResponse;
 
@@ -570,7 +565,7 @@ pub async fn get_turn_alternates(
     let coordinator = state.get_coordinator()?;
 
     let spans = coordinator
-        .conversation_store()
+        .turn_store()
         .get_spans(&turn_id)
         .await
         .map_err(|e| format!("Failed to get spans: {}", e))?;
@@ -596,8 +591,8 @@ pub async fn get_span_messages(
     let coordinator = state.get_coordinator()?;
 
     let messages = coordinator
-        .conversation_store()
-        .get_messages_with_content(&span_id)
+        .turn_store()
+        .get_messages(&span_id)
         .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
 
@@ -621,6 +616,10 @@ pub async fn get_span_messages(
 }
 
 /// List all views (branches) for a conversation
+///
+/// NOTE: In the new model, views are standalone entities linked via main_view_id on conversations.
+/// Listing all views (including forks) for a conversation requires traversing fork relationships.
+/// For now, returns just the main view.
 #[tauri::command]
 pub async fn list_conversation_views(
     state: State<'_, Arc<AppState>>,
@@ -628,13 +627,14 @@ pub async fn list_conversation_views(
 ) -> Result<Vec<ThreadInfoResponse>, String> {
     let coordinator = state.get_coordinator()?;
 
-    let views = coordinator
-        .conversation_store()
-        .get_views(&conversation_id)
+    let main_view = coordinator
+        .get_main_view(&conversation_id)
         .await
-        .map_err(|e| format!("Failed to list views: {}", e))?;
+        .map_err(|e| format!("Failed to get main view: {}", e))?;
 
-    Ok(views.into_iter().map(ThreadInfoResponse::from).collect())
+    // TODO: To list all views including forks, we'd need to traverse fork relationships
+    // For now, just return the main view
+    Ok(vec![ThreadInfoResponse::from(main_view)])
 }
 
 /// Get the current view ID for a conversation
@@ -662,7 +662,6 @@ pub async fn get_current_view_id(
 /// # Arguments
 /// * `conversation_id` - The conversation to fork
 /// * `at_turn_id` - The turn to fork at (new view diverges from here)
-/// * `name` - Optional name for the new view/branch
 ///
 /// # Returns
 /// The newly created view info
@@ -671,7 +670,6 @@ pub async fn fork_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
     at_turn_id: TurnId,
-    name: Option<String>,
 ) -> Result<ThreadInfoResponse, String> {
     // Get current view ID from loaded engine
     let current_view_id = {
@@ -685,8 +683,8 @@ pub async fn fork_conversation(
     let coordinator = state.get_coordinator()?;
 
     let new_view = coordinator
-        .conversation_store()
-        .fork_view(&current_view_id, &at_turn_id, name.as_deref())
+        .turn_store()
+        .fork_view(&current_view_id, &at_turn_id)
         .await
         .map_err(|e| format!("Failed to fork conversation: {}", e))?;
 
@@ -710,7 +708,7 @@ pub async fn switch_view(
     let coordinator = state.get_coordinator()?;
 
     // Open a new session for the target view
-    let session = Session::open_view(coordinator.clone(), view_id)
+    let session = Session::open_view(coordinator.clone(), conversation_id.clone(), view_id)
         .await
         .map_err(|e| format!("Failed to open view: {}", e))?;
 
@@ -764,7 +762,7 @@ pub async fn select_span(
     let coordinator = state.get_coordinator()?;
 
     coordinator
-        .conversation_store()
+        .turn_store()
         .select_span(&current_view_id, &turn_id, &span_id)
         .await
         .map_err(|e| format!("Failed to select span: {}", e))?;
