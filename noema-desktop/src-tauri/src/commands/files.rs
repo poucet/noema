@@ -78,7 +78,6 @@ pub async fn store_asset(
     state: State<'_, Arc<AppState>>,
     data: String,      // base64 encoded
     mime_type: String,
-    filename: Option<String>,
 ) -> Result<AssetId, String> {
     use base64::Engine;
 
@@ -89,7 +88,7 @@ pub async fn store_asset(
     let coordinator = state.get_coordinator()?;
 
     coordinator
-        .store_asset(&bytes, &mime_type, filename)
+        .store_asset(&bytes, &mime_type)
         .await
         .map_err(|e| format!("Failed to store asset: {}", e))
 }

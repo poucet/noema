@@ -58,8 +58,6 @@ pub enum StoredContent {
     AssetRef {
         asset_id: AssetId,
         mime_type: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        filename: Option<String>,
     },
 
     /// Reference to a document (for RAG) - displayed as chip in UI,
@@ -116,12 +114,10 @@ impl StoredContent {
     pub fn asset_ref(
         asset_id: impl Into<AssetId>,
         mime_type: impl Into<String>,
-        filename: Option<String>,
     ) -> Self {
         StoredContent::AssetRef {
             asset_id: asset_id.into(),
             mime_type: mime_type.into(),
-            filename,
         }
     }
 
@@ -194,11 +190,9 @@ impl StoredContent {
             StoredContent::AssetRef {
                 asset_id,
                 mime_type,
-                filename,
             } => Ok(ResolvedContent::AssetRef {
                 asset_id: asset_id.clone(),
                 mime_type: mime_type.clone(),
-                filename: filename.clone(),
             }),
             StoredContent::DocumentRef { document_id } => {
                 // Document title is looked up separately by UI
@@ -229,8 +223,6 @@ pub enum ResolvedContent {
     AssetRef {
         asset_id: AssetId,
         mime_type: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        filename: Option<String>,
     },
     DocumentRef {
         document_id: DocumentId,
@@ -396,7 +388,7 @@ mod tests {
         assert!(text_ref.is_text_ref());
         assert!(!text_ref.is_asset_ref());
 
-        let asset_ref = StoredContent::asset_ref("xyz", "image/png", None);
+        let asset_ref = StoredContent::asset_ref("xyz", "image/png");
         assert!(!asset_ref.is_text_ref());
         assert!(asset_ref.is_asset_ref());
     }
@@ -407,13 +399,13 @@ mod tests {
         let text_ref = StoredContent::text_ref(id.clone());
         assert_eq!(text_ref.content_block_id(), Some(&id));
 
-        let asset_ref = StoredContent::asset_ref("xyz", "image/png", None);
+        let asset_ref = StoredContent::asset_ref("xyz", "image/png");
         assert_eq!(asset_ref.content_block_id(), None);
     }
 
     #[test]
     fn test_asset_id() {
-        let asset_ref = StoredContent::asset_ref("abc123", "image/png", Some("photo.png".into()));
+        let asset_ref = StoredContent::asset_ref("abc123", "image/png");
         assert_eq!(asset_ref.asset_id(), Some(&AssetId::from("abc123")));
 
         let text_ref = StoredContent::text_ref(ContentBlockId::from_string("xyz"));
@@ -424,7 +416,7 @@ mod tests {
     fn test_stored_payload_has_asset_refs() {
         let payload = StoredPayload::new(vec![
             StoredContent::text_ref(ContentBlockId::from_string("a")),
-            StoredContent::asset_ref("b", "image/png", None),
+            StoredContent::asset_ref("b", "image/png"),
         ]);
         assert!(payload.has_asset_refs());
 

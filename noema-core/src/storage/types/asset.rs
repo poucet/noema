@@ -11,9 +11,6 @@ pub struct Asset {
     /// MIME type of the asset (e.g., "image/png", "audio/mp3")
     pub mime_type: String,
 
-    /// Original filename (if known)
-    pub original_filename: Option<String>,
-
     /// Size in bytes
     pub size_bytes: i64,
 
@@ -30,17 +27,10 @@ impl Asset {
         Self {
             blob_hash: blob_hash.into(),
             mime_type: mime_type.into(),
-            original_filename: None,
             size_bytes,
             local_path: None,
             is_private: false,
         }
-    }
-
-    /// Set the original filename
-    pub fn with_filename(mut self, filename: impl Into<String>) -> Self {
-        self.original_filename = Some(filename.into());
-        self
     }
 
     /// Set the local path
@@ -78,11 +68,6 @@ impl StoredAsset {
     /// Get the MIME type
     pub fn mime_type(&self) -> &str {
         &self.asset.mime_type
-    }
-
-    /// Get the original filename
-    pub fn original_filename(&self) -> Option<&str> {
-        self.asset.original_filename.as_deref()
     }
 
     /// Get the size in bytes

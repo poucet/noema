@@ -58,7 +58,6 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
             -- For asset_ref: reference to blob storage
             asset_id TEXT,
             mime_type TEXT,
-            filename TEXT,
             -- For document_ref: reference to document
             document_id TEXT,
             -- For tool_call/tool_result: structured JSON
@@ -100,7 +99,7 @@ fn load_message_content(
     message_id: &MessageId,
 ) -> Result<Vec<StoredContent>> {
     let mut stmt = conn.prepare(
-        "SELECT content_type, content_block_id, asset_id, mime_type, filename, document_id, tool_data
+        "SELECT content_type, content_block_id, asset_id, mime_type, document_id, tool_data
          FROM message_content WHERE message_id = ?1
          ORDER BY sequence_number",
     )?;
@@ -111,19 +110,17 @@ fn load_message_content(
             let content_block_id: Option<ContentBlockId> = row.get(1)?;
             let asset_id: Option<AssetId> = row.get(2)?;
             let mime_type: Option<String> = row.get(3)?;
-            let filename: Option<String> = row.get(4)?;
-            let document_id: Option<DocumentId> = row.get(5)?;
-            let tool_data: Option<String> = row.get(6)?;
-            Ok((content_type, content_block_id, asset_id, mime_type, filename, document_id, tool_data))
+            let document_id: Option<DocumentId> = row.get(4)?;
+            let tool_data: Option<String> = row.get(5)?;
+            Ok((content_type, content_block_id, asset_id, mime_type, document_id, tool_data))
         })?
         .filter_map(|r| r.ok())
-        .filter_map(|(content_type, content_block_id, asset_id, mime_type, filename, document_id, tool_data)| {
+        .filter_map(|(content_type, content_block_id, asset_id, mime_type, document_id, tool_data)| {
             match content_type.as_str() {
                 "text" => Some(StoredContent::TextRef { content_block_id: content_block_id? }),
                 "asset_ref" => Some(StoredContent::AssetRef {
                     asset_id: asset_id?,
                     mime_type: mime_type?,
-                    filename,
                 }),
                 "document_ref" => Some(StoredContent::DocumentRef { document_id: document_id? }),
                 "tool_call" => {
@@ -692,10 +689,9 @@ fn insert_message_content(
             StoredContent::AssetRef {
                 asset_id,
                 mime_type,
-                filename,
             } => {
                 conn.execute(
-                    "INSERT INTO message_content (id, message_id, sequence_number, content_type, asset_id, mime_type, filename)
+                    "INSERT INTO message_content (id, message_id, sequence_number, content_type, asset_id, mime_type)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         content_id,
@@ -703,9 +699,7 @@ fn insert_message_content(
                         content_seq as i32,
                         "asset_ref",
                         asset_id,
-                        mime_type,
-                        filename.as_deref()
-                    ],
+                        mime_type                    ],
                 )?;
             }
             StoredContent::DocumentRef { document_id } => {

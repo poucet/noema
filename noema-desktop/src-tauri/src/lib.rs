@@ -203,7 +203,6 @@ pub fn run() {
             commands::voice::stop_voice_session,
             // File/Asset commands
             commands::files::save_file,
-            commands::files::store_asset,
             // Logging
             logging::log_debug,
             // MCP server commands

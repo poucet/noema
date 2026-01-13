@@ -18,7 +18,6 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             blob_hash TEXT NOT NULL,
             mime_type TEXT NOT NULL,
-            original_filename TEXT,
             size_bytes INTEGER NOT NULL,
             local_path TEXT,
             is_private INTEGER NOT NULL DEFAULT 0,
@@ -41,13 +40,12 @@ impl AssetStore for SqliteStore {
         let id = AssetId::from_string(Uuid::new_v4().to_string());
 
         conn.execute(
-            "INSERT INTO assets (id, blob_hash, mime_type, original_filename, size_bytes, local_path, is_private, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO assets (id, blob_hash, mime_type, size_bytes, local_path, is_private, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 id.as_str(),
                 asset.blob_hash,
                 asset.mime_type,
-                asset.original_filename,
                 asset.size_bytes,
                 asset.local_path,
                 asset.is_private as i32,
@@ -62,7 +60,7 @@ impl AssetStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let asset = conn
             .query_row(
-                "SELECT blob_hash, mime_type, original_filename, size_bytes, local_path, is_private, created_at
+                "SELECT blob_hash, mime_type, size_bytes, local_path, is_private, created_at
                  FROM assets WHERE id = ?1",
                 params![id.as_str()],
                 |row| {
@@ -71,12 +69,11 @@ impl AssetStore for SqliteStore {
                         asset: Asset {
                             blob_hash: row.get(0)?,
                             mime_type: row.get(1)?,
-                            original_filename: row.get(2)?,
-                            size_bytes: row.get(3)?,
-                            local_path: row.get(4)?,
-                            is_private: row.get::<_, i32>(5)? != 0,
+                            size_bytes: row.get(2)?,
+                            local_path: row.get(3)?,
+                            is_private: row.get::<_, i32>(4)? != 0,
                         },
-                        created_at: row.get(6)?,
+                        created_at: row.get(5)?,
                     })
                 },
             )
@@ -138,7 +135,7 @@ mod tests {
     async fn test_create_and_get() {
         let store = SqliteStore::in_memory().unwrap();
 
-        let asset = Asset::new("abc123hash", "image/png", 1024).with_filename("test.png");
+        let asset = Asset::new("abc123hash", "image/png", 1024);
 
         let id = store.create_asset(asset).await.unwrap();
 
@@ -146,7 +143,6 @@ mod tests {
         assert_eq!(stored.blob_hash(), "abc123hash");
         assert_eq!(stored.mime_type(), "image/png");
         assert_eq!(stored.size_bytes(), 1024);
-        assert_eq!(stored.original_filename(), Some("test.png"));
         assert!(!stored.is_private());
     }
 
@@ -212,7 +208,6 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
 
         let asset = Asset::new("local_path_hash", "image/png", 256)
-            .with_filename("photo.png")
             .with_local_path("/home/user/photos/photo.png");
 
         let id = store.create_asset(asset).await.unwrap();

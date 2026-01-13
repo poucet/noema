@@ -540,7 +540,7 @@ pub async fn import_google_doc(
             .map_err(|e| format!("Failed to decode image: {}", e))?;
 
         let asset_id = coordinator
-            .store_asset(&data, &image.mime_type, None)
+            .store_asset(&data, &image.mime_type)
             .await
             .map_err(|e| format!("Failed to store image: {}", e))?;
 
