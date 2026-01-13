@@ -196,25 +196,31 @@ function App() {
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
 
-    tauri.onUserMessage((msg) => {
-      setMessages((prev) => {
-        // Avoid adding duplicate user messages (can happen with rapid voice input)
-        // Check if the last message is already this user message
-        if (prev.length > 0) {
-          const lastMsg = prev[prev.length - 1];
-          if (lastMsg.role === "user" && msg.role === "user") {
-            const lastText = lastMsg.content.find((c) => "text" in c);
-            const newText = msg.content.find((c) => "text" in c);
-            if (lastText && newText && "text" in lastText && "text" in newText) {
-              if (lastText.text === newText.text) {
-                return prev; // Skip duplicate
+    tauri.onUserMessage(({ conversationId, message: msg }) => {
+      // Only update if this event is for the current conversation
+      setCurrentConversationId((currentId) => {
+        if (currentId === conversationId) {
+          setMessages((prev) => {
+            // Avoid adding duplicate user messages (can happen with rapid voice input)
+            // Check if the last message is already this user message
+            if (prev.length > 0) {
+              const lastMsg = prev[prev.length - 1];
+              if (lastMsg.role === "user" && msg.role === "user") {
+                const lastText = lastMsg.content.find((c) => "text" in c);
+                const newText = msg.content.find((c) => "text" in c);
+                if (lastText && newText && "text" in lastText && "text" in newText) {
+                  if (lastText.text === newText.text) {
+                    return prev; // Skip duplicate
+                  }
+                }
               }
             }
-          }
+            return [...prev, msg];
+          });
+          setIsLoading(true);
         }
-        return [...prev, msg];
+        return currentId;
       });
-      setIsLoading(true);
     }).then((unlisten) => unlisteners.push(unlisten));
 
     tauri.onStreamingMessage(({ conversationId, message: msg }) => {
