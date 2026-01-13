@@ -1,13 +1,14 @@
 //! TurnStore trait for Turn/Span/Message storage operations
 //!
 //! This trait defines the operations for the Turn/Span/Message/View
-//! conversation structure (Phase 3 Unified Content Model).
+//! conversation structure. Turns are structural nodes; views define
+//! ordering via selections.
 
 use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::storage::content::StoredContent;
-use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::types::conversation::{
     MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole,
     TurnInfo, TurnWithContent, ViewInfo,
@@ -18,29 +19,20 @@ use crate::storage::types::conversation::{
 pub trait TurnStore: Send + Sync {
     // ========== Turn Management ==========
 
-    /// Add a new turn to a conversation
+    /// Create a new turn
     ///
-    /// Creates a turn at the next sequence number. Also creates a default span
-    /// for the turn and selects it in the main view.
-    async fn add_turn(
-        &self,
-        conversation_id: &ConversationId,
-        role: SpanRole,
-    ) -> Result<TurnInfo>;
-
-    /// Get all turns for a conversation in sequence order
-    async fn get_turns(&self, conversation_id: &ConversationId) -> Result<Vec<TurnInfo>>;
+    /// Creates a turn with the given role. Use select_span to add it to a view.
+    async fn create_turn(&self, role: SpanRole) -> Result<TurnInfo>;
 
     /// Get a specific turn by ID
     async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<TurnInfo>>;
 
     // ========== Span Management ==========
 
-    /// Add a new span to a turn
+    /// Create a new span for a turn
     ///
-    /// Creates an additional span at the given turn (for parallel responses
-    /// or regenerations).
-    async fn add_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<SpanInfo>;
+    /// Creates a span at the given turn (for parallel responses or regenerations).
+    async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<SpanInfo>;
 
     /// Get all spans for a turn
     async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<SpanInfo>>;
@@ -64,33 +56,18 @@ pub trait TurnStore: Send + Sync {
         content: &[StoredContent],
     ) -> Result<MessageInfo>;
 
-    /// Get all messages for a span in sequence order (metadata only)
-    async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageInfo>>;
-
     /// Get all messages for a span with content loaded
-    async fn get_messages_with_content(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>>;
+    async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>>;
 
     /// Get a specific message by ID
     async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>>;
 
     // ========== View Management ==========
 
-    /// Create a new view for a conversation
+    /// Create a new view
     ///
-    /// If `is_main` is true, this becomes the main view. A conversation can
-    /// only have one main view.
-    async fn create_view(
-        &self,
-        conversation_id: &ConversationId,
-        name: Option<&str>,
-        is_main: bool,
-    ) -> Result<ViewInfo>;
-
-    /// Get all views for a conversation
-    async fn get_views(&self, conversation_id: &ConversationId) -> Result<Vec<ViewInfo>>;
-
-    /// Get the main view for a conversation
-    async fn get_main_view(&self, conversation_id: &ConversationId) -> Result<Option<ViewInfo>>;
+    /// Views are linked to conversations via ConversationInfo.main_view_id.
+    async fn create_view(&self) -> Result<ViewInfo>;
 
     /// Get a view by its ID
     async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>>;
@@ -120,21 +97,6 @@ pub trait TurnStore: Send + Sync {
         &self,
         view_id: &ViewId,
         at_turn_id: &TurnId,
-        name: Option<&str>,
-    ) -> Result<ViewInfo>;
-
-    /// Fork a view with custom span selections
-    ///
-    /// Creates a new view from the given view, copying selections up to the fork
-    /// point, then applying the provided custom selections for turns at/after
-    /// the fork point. This enables "splicing" - reusing spans from the original
-    /// path after an edit.
-    async fn fork_view_with_selections(
-        &self,
-        view_id: &ViewId,
-        at_turn_id: &TurnId,
-        name: Option<&str>,
-        selections: &[(TurnId, SpanId)],
     ) -> Result<ViewInfo>;
 
     /// Get the view path up to (but not including) a specific turn
@@ -163,27 +125,6 @@ pub trait TurnStore: Send + Sync {
         messages: Vec<(MessageRole, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
-        fork_name: Option<&str>,
     ) -> Result<(SpanInfo, Option<ViewInfo>)>;
 
-    // ========== Convenience Methods ==========
-
-    /// Add a complete user turn (turn + span + message)
-    ///
-    /// Creates a user turn with a single span containing the given message.
-    async fn add_user_turn(
-        &self,
-        conversation_id: &ConversationId,
-        text: &str,
-    ) -> Result<(TurnInfo, SpanInfo, MessageInfo)>;
-
-    /// Add a complete assistant turn (turn + span + message)
-    ///
-    /// Creates an assistant turn with a single span containing the given message.
-    async fn add_assistant_turn(
-        &self,
-        conversation_id: &ConversationId,
-        model_id: &str,
-        text: &str,
-    ) -> Result<(TurnInfo, SpanInfo, MessageInfo)>;
 }

@@ -45,8 +45,10 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Asset: AssetStore + Send + Sync;
     /// Text content storage
     type Text: TextStore + Send + Sync;
-    /// Conversation storage (includes TurnStore via supertrait)
+    /// Conversation lifecycle storage
     type Conversation: ConversationStore + Send + Sync;
+    /// Turn/Span/Message/View storage
+    type Turn: TurnStore + Send + Sync;
     /// User storage
     type User: UserStore + Send + Sync;
     /// Document storage
