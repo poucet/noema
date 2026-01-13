@@ -408,6 +408,7 @@ impl TurnStore for SqliteStore {
         Ok(ViewInfo {
             id,
             fork: None,
+            turn_count: 0,
             created_at: now,
         })
     }
@@ -415,24 +416,27 @@ impl TurnStore for SqliteStore {
     async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT id, forked_from_view_id, forked_at_turn_id, created_at FROM views WHERE id = ?1",
+            "SELECT v.id, v.forked_from_view_id, v.forked_at_turn_id, v.created_at,
+                    (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = v.id) as turn_count
+             FROM views v WHERE v.id = ?1",
             params![view_id],
             |row| {
                 let id: ViewId = row.get(0)?;
                 let forked_from: Option<ViewId> = row.get(1)?;
                 let forked_at: Option<TurnId> = row.get(2)?;
                 let created: i64 = row.get(3)?;
-                Ok((id, forked_from, forked_at, created))
+                let turn_count: usize = row.get(4)?;
+                Ok((id, forked_from, forked_at, created, turn_count))
             },
         );
 
         match result {
-            Ok((id, forked_from, forked_at, created)) => {
+            Ok((id, forked_from, forked_at, created, turn_count)) => {
                 let fork = match (forked_from, forked_at) {
                     (Some(from_view_id), Some(at_turn_id)) => Some(ForkInfo { from_view_id, at_turn_id }),
                     _ => None,
                 };
-                Ok(Some(ViewInfo { id, fork, created_at: created }))
+                Ok(Some(ViewInfo { id, fork, turn_count, created_at: created }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -563,12 +567,16 @@ impl TurnStore for SqliteStore {
             params![new_id, view_id, fork_seq],
         )?;
 
+        // turn_count is the number of copied selections (fork_seq since sequence starts at 0)
+        let turn_count = fork_seq as usize;
+
         Ok(ViewInfo {
             id: new_id,
             fork: Some(ForkInfo {
                 from_view_id: view_id.clone(),
                 at_turn_id: at_turn_id.clone(),
             }),
+            turn_count,
             created_at: now,
         })
     }

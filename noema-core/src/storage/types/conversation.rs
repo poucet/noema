@@ -220,6 +220,8 @@ pub struct ViewInfo {
     pub id: ViewId,
     /// Fork origin (None for main views, Some for forked views)
     pub fork: Option<ForkInfo>,
+    /// Number of turns selected in this view
+    pub turn_count: usize,
     /// Unix timestamp when created
     pub created_at: i64,
 }
@@ -250,15 +252,6 @@ pub struct TurnWithContent {
     pub messages: Vec<MessageWithContent>,
 }
 
-/// A span with its messages
-#[derive(Clone, Debug)]
-pub struct SpanWithMessages {
-    /// The span
-    pub span: SpanInfo,
-    /// Messages in the span (with content loaded)
-    pub messages: Vec<MessageWithContent>,
-}
-
 // ============================================================================
 // Conversation Info (for listing)
 // ============================================================================
@@ -272,14 +265,10 @@ pub struct ConversationInfo {
     pub name: Option<String>,
     /// The main view for this conversation
     pub main_view_id: ViewId,
-    /// Number of turns in the conversation
-    pub turn_count: usize,
     /// Whether this conversation contains private/sensitive content
     pub is_private: bool,
     /// Unix timestamp when created
     pub created_at: i64,
-    /// Unix timestamp when last updated
-    pub updated_at: i64,
 }
 
 #[cfg(test)]

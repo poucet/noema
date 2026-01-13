@@ -203,6 +203,7 @@ impl TurnStore for MemoryTurnStore {
         let view = ViewInfo {
             id: ViewId::new(),
             fork: None,
+            turn_count: 0,
             created_at: now(),
         };
 
@@ -212,7 +213,18 @@ impl TurnStore for MemoryTurnStore {
 
     async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
         let views = self.views.lock().unwrap();
-        Ok(views.get(view_id).cloned())
+        let selections = self.view_selections.lock().unwrap();
+
+        Ok(views.get(view_id).map(|v| {
+            let turn_count = selections
+                .iter()
+                .filter(|((vid, _), _)| vid == view_id)
+                .count();
+            ViewInfo {
+                turn_count,
+                ..v.clone()
+            }
+        }))
     }
 
     async fn select_span(
@@ -298,25 +310,29 @@ impl TurnStore for MemoryTurnStore {
                 .ok_or_else(|| anyhow::anyhow!("Turn not in view"))?
         };
 
+        // Copy selections before the fork point and count them
+        let new_selections: Vec<_> = {
+            let selections = self.view_selections.lock().unwrap();
+            selections
+                .iter()
+                .filter(|((vid, _), sel)| vid == view_id && sel.sequence_number < at_turn_seq)
+                .map(|((_, tid), sel)| (tid.clone(), sel.clone()))
+                .collect()
+        };
+
+        let turn_count = new_selections.len();
+
         let new_view = ViewInfo {
             id: ViewId::new(),
             fork: Some(ForkInfo {
                 from_view_id: view_id.clone(),
                 at_turn_id: at_turn_id.clone(),
             }),
+            turn_count,
             created_at: now(),
         };
 
-        // Copy selections before the fork point
         {
-            let selections = self.view_selections.lock().unwrap();
-            let new_selections: Vec<_> = selections
-                .iter()
-                .filter(|((vid, _), sel)| vid == view_id && sel.sequence_number < at_turn_seq)
-                .map(|((_, tid), sel)| (tid.clone(), sel.clone()))
-                .collect();
-
-            drop(selections);
             let mut selections = self.view_selections.lock().unwrap();
             for (tid, sel) in new_selections {
                 selections.insert((new_view.id.clone(), tid), sel);

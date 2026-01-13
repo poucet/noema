@@ -64,9 +64,8 @@ impl ConversationStore for SqliteStore {
     ) -> Result<Option<ConversationInfo>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT c.id, c.title, c.main_view_id, c.is_private, c.created_at, c.updated_at,
-                    (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = c.main_view_id) as turn_count
-             FROM conversations c WHERE c.id = ?1",
+            "SELECT id, title, main_view_id, is_private, created_at
+             FROM conversations WHERE id = ?1",
             params![conversation_id.as_str()],
             |row| {
                 let id: ConversationId = row.get(0)?;
@@ -74,22 +73,18 @@ impl ConversationStore for SqliteStore {
                 let main_view_id: ViewId = row.get(2)?;
                 let is_private: i32 = row.get(3)?;
                 let created_at: i64 = row.get(4)?;
-                let updated_at: i64 = row.get(5)?;
-                let turn_count: usize = row.get(6)?;
-                Ok((id, name, main_view_id, is_private, created_at, updated_at, turn_count))
+                Ok((id, name, main_view_id, is_private, created_at))
             },
         );
 
         match result {
-            Ok((id, name, main_view_id, is_private, created_at, updated_at, turn_count)) => {
+            Ok((id, name, main_view_id, is_private, created_at)) => {
                 Ok(Some(ConversationInfo {
                     id,
                     name,
                     main_view_id,
-                    turn_count,
                     is_private: is_private != 0,
                     created_at,
-                    updated_at,
                 }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -100,11 +95,10 @@ impl ConversationStore for SqliteStore {
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.title, c.main_view_id, c.is_private, c.created_at, c.updated_at,
-                    (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = c.main_view_id) as turn_count
-             FROM conversations c
-             WHERE c.user_id = ?1 AND c.main_view_id IS NOT NULL
-             ORDER BY c.updated_at DESC",
+            "SELECT id, title, main_view_id, is_private, created_at
+             FROM conversations
+             WHERE user_id = ?1 AND main_view_id IS NOT NULL
+             ORDER BY created_at DESC",
         )?;
 
         let conversations = stmt
@@ -114,22 +108,16 @@ impl ConversationStore for SqliteStore {
                 let main_view_id: ViewId = row.get(2)?;
                 let is_private: i32 = row.get(3)?;
                 let created_at: i64 = row.get(4)?;
-                let updated_at: i64 = row.get(5)?;
-                let turn_count: usize = row.get(6)?;
-                Ok((id, name, main_view_id, is_private, created_at, updated_at, turn_count))
+                Ok((id, name, main_view_id, is_private, created_at))
             })?
             .filter_map(|r| r.ok())
-            .map(
-                |(id, name, main_view_id, is_private, created_at, updated_at, turn_count)| ConversationInfo {
-                    id,
-                    name,
-                    main_view_id,
-                    turn_count,
-                    is_private: is_private != 0,
-                    created_at,
-                    updated_at,
-                },
-            )
+            .map(|(id, name, main_view_id, is_private, created_at)| ConversationInfo {
+                id,
+                name,
+                main_view_id,
+                is_private: is_private != 0,
+                created_at,
+            })
             .collect();
 
         Ok(conversations)

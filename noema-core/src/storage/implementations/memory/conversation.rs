@@ -35,10 +35,8 @@ struct ConversationEntry {
 struct ConversationInfoPartial {
     id: ConversationId,
     name: Option<String>,
-    turn_count: usize,
     is_private: bool,
     created_at: i64,
-    updated_at: i64,
 }
 
 impl ConversationEntry {
@@ -47,10 +45,8 @@ impl ConversationEntry {
             id: self.info.id.clone(),
             name: self.info.name.clone(),
             main_view_id: self.main_view_id.clone()?,
-            turn_count: self.info.turn_count,
             is_private: self.info.is_private,
             created_at: self.info.created_at,
-            updated_at: self.info.updated_at,
         })
     }
 }
@@ -96,10 +92,8 @@ impl MemoryConversationStore {
             info: ConversationInfoPartial {
                 id: id.clone(),
                 name: name.map(|s| s.to_string()),
-                turn_count: 0,
                 is_private: false,
                 created_at: now,
-                updated_at: now,
             },
         };
         self.conversations
@@ -107,19 +101,6 @@ impl MemoryConversationStore {
             .unwrap()
             .insert(id.as_str().to_string(), entry);
         id
-    }
-
-    /// Increment turn count for a conversation (for testing)
-    pub fn increment_turn_count(&self, conversation_id: &ConversationId) {
-        if let Some(entry) = self
-            .conversations
-            .lock()
-            .unwrap()
-            .get_mut(conversation_id.as_str())
-        {
-            entry.info.turn_count += 1;
-            entry.info.updated_at = now();
-        }
     }
 
     /// Get the inner turn store for direct TurnStore access
@@ -155,7 +136,7 @@ impl ConversationStore for MemoryConversationStore {
             .filter(|e| e.user_id == *user_id)
             .filter_map(|e| e.to_info())
             .collect();
-        result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(result)
     }
 
@@ -179,7 +160,6 @@ impl ConversationStore for MemoryConversationStore {
             .get_mut(conversation_id.as_str())
         {
             entry.info.name = name.map(|s| s.to_string());
-            entry.info.updated_at = now();
         }
         Ok(())
     }
@@ -204,7 +184,6 @@ impl ConversationStore for MemoryConversationStore {
             .get_mut(conversation_id.as_str())
         {
             entry.info.is_private = is_private;
-            entry.info.updated_at = now();
         }
         Ok(())
     }
@@ -221,7 +200,6 @@ impl ConversationStore for MemoryConversationStore {
             .get_mut(conversation_id.as_str())
         {
             entry.main_view_id = Some(view_id.clone());
-            entry.info.updated_at = now();
         }
         Ok(())
     }

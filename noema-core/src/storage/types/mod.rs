@@ -17,7 +17,7 @@ pub use content_block::{
 };
 pub use conversation::{
     ConversationInfo, ForkInfo, MessageInfo, MessageRole, MessageWithContent,
-    SpanInfo, SpanRole, SpanWithMessages, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
+    SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
 };
 pub use document::{
     DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,

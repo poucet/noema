@@ -332,11 +332,23 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
     let coordinator = state.get_coordinator()?;
     let user_id = state.user_id.lock().await.clone();
 
-    coordinator
+    let convos = coordinator
         .list_conversations(&user_id)
         .await
-        .map(|convos| convos.into_iter().map(ConversationInfo::from).collect())
-        .map_err(|e| format!("Failed to list conversations: {}", e))
+        .map_err(|e| format!("Failed to list conversations: {}", e))?;
+
+    let mut result = Vec::with_capacity(convos.len());
+    for conv in convos {
+        let view = coordinator
+            .turn_store()
+            .get_view(&conv.main_view_id)
+            .await
+            .map_err(|e| format!("Failed to get view: {}", e))?
+            .ok_or_else(|| format!("View not found: {}", conv.main_view_id))?;
+        result.push(ConversationInfo::from_parts(conv, &view));
+    }
+
+    Ok(result)
 }
 
 /// Load a conversation (creating an engine for it if not already loaded)

@@ -4,7 +4,6 @@ use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
 use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::storage::ids::{ConversationId, UserId};
-use noema_core::storage::session::Session;
 use noema_core::storage::traits::StorageTypes;
 use noema_core::storage::{FsBlobStore, SqliteStore};
 use noema_core::{ChatEngine, McpRegistry};
@@ -31,7 +30,6 @@ impl StorageTypes for AppStorage {
     type Document = SqliteStore;
 }
 
-pub type AppSession = Session<AppStorage>;
 pub type AppCoordinator = StorageCoordinator<AppStorage>;
 pub type AppEngine = ChatEngine<AppStorage>;
 

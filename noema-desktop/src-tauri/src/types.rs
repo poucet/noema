@@ -27,18 +27,20 @@ pub struct ConversationInfo {
     /// Whether this conversation is marked as private (warns before using cloud models)
     pub is_private: bool,
     pub created_at: i64,
-    pub updated_at: i64,
 }
 
-impl From<noema_core::storage::ConversationInfo> for ConversationInfo {
-    fn from(info: noema_core::storage::ConversationInfo) -> Self {
+impl ConversationInfo {
+    /// Create from core ConversationInfo and ViewInfo (for turn_count)
+    pub fn from_parts(
+        conv: noema_core::storage::ConversationInfo,
+        view: &noema_core::storage::ViewInfo,
+    ) -> Self {
         Self {
-            id: info.id,
-            name: info.name,
-            message_count: info.turn_count,
-            is_private: info.is_private,
-            created_at: info.created_at,
-            updated_at: info.updated_at,
+            id: conv.id,
+            name: conv.name,
+            message_count: view.turn_count,
+            is_private: conv.is_private,
+            created_at: conv.created_at,
         }
     }
 }
@@ -455,6 +457,8 @@ pub struct ThreadInfoResponse {
     /// The turn at which this view forked (None for main views)
     #[ts(type = "string | null")]
     pub forked_at_turn_id: Option<TurnId>,
+    /// Number of turns in this view
+    pub turn_count: usize,
     pub created_at: i64,
     /// Whether this is the main view (derived from fork being None)
     pub is_main: bool,
@@ -471,6 +475,7 @@ impl From<noema_core::storage::ViewInfo> for ThreadInfoResponse {
             id: info.id,
             forked_from_view_id,
             forked_at_turn_id,
+            turn_count: info.turn_count,
             created_at: info.created_at,
             is_main,
         }
