@@ -5,7 +5,7 @@ use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig
 use noema_core::storage::{MessageRole, InputContent, Session};
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::logging::log_message;
 use crate::state::AppState;
@@ -25,18 +25,12 @@ pub async fn get_messages(
     let managers = state.managers.lock().await;
     let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
 
-    // Get committed messages
-    let mut msgs: Vec<DisplayMessage> = manager
-        .messages_for_display()
+    let msgs: Vec<DisplayMessage> = manager
+        .all_messages()
         .await
         .iter()
         .map(DisplayMessage::from)
         .collect();
-
-    // Add pending messages (not yet committed to storage)
-    for pending in manager.pending_messages().await {
-        msgs.push(DisplayMessage::from(&pending));
-    }
 
     Ok(msgs)
 }
@@ -271,7 +265,7 @@ pub async fn load_conversation(
         let managers = state.managers.lock().await;
         if let Some(manager) = managers.get(&conversation_id) {
             let messages: Vec<DisplayMessage> = manager
-                .messages_for_display()
+                .all_messages()
                 .await
                 .iter()
                 .map(DisplayMessage::from)

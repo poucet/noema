@@ -429,17 +429,7 @@ impl<S: StorageTypes> ConversationManager<S> {
     pub fn conversation_id(&self) -> &ConversationId {
         &self.conversation_id
     }
-
-    /// Get the coordinator for direct storage access (e.g., fork operations)
-    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> {
-        &self.coordinator
-    }
-
-    /// Get the MCP registry
-    pub fn mcp_registry(&self) -> &Arc<Mutex<McpRegistry>> {
-        &self.mcp_registry
-    }
-
+    
     /// Get current model name
     pub fn model_name(&self) -> &str {
         self.model.name()
@@ -450,14 +440,9 @@ impl<S: StorageTypes> ConversationManager<S> {
         self.session.lock().await.view_id().clone()
     }
 
-    /// Get committed messages for display
-    pub async fn messages_for_display(&self) -> Vec<ResolvedMessage> {
-        self.session.lock().await.messages_for_display().to_vec()
-    }
-
-    /// Get pending (uncommitted) messages
-    pub async fn pending_messages(&self) -> Vec<ChatMessage> {
-        self.session.lock().await.pending_messages().to_vec()
+    /// Get all messages (committed + pending) for display
+    pub async fn all_messages(&self) -> Vec<ChatMessage> {
+        self.session.lock().await.all_messages()
     }
 
     /// Clear the session cache (used when view selection changes)

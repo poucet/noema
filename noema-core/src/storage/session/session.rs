@@ -142,6 +142,26 @@ impl<S: StorageTypes> Session<S> {
         &self.pending
     }
 
+    /// Get all messages (committed + pending) as ChatMessages for display
+    /// This combines resolved messages converted to ChatMessages with pending messages.
+    pub fn all_messages(&self) -> Vec<ChatMessage> {
+        let mut result = Vec::with_capacity(self.resolved_cache.len() + self.pending.len());
+
+        // Convert resolved messages to ChatMessages
+        for msg in &self.resolved_cache {
+            let blocks = resolved_message_to_blocks(msg);
+            let role = msg.role.into();
+            result.push(ChatMessage::new(role, ChatPayload::new(blocks)));
+        }
+
+        // Add pending messages
+        for msg in &self.pending {
+            result.push(msg.clone());
+        }
+
+        result
+    }
+
     /// Clear the session cache (used when switching views)
     pub fn clear_cache(&mut self) {
         self.resolved_cache.clear();
