@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::storage::ids::{ContentBlockId, UserId};
-use super::Keyed;
 
 // ============================================================================
 // ContentHash - SHA-256 hash for text content
@@ -35,9 +34,6 @@ impl ContentHash {
         &self.0
     }
 }
-
-/// Result of storing content (may be existing or new)
-pub type StoreResult = Keyed<ContentBlockId, ContentHash>;
 
 // ============================================================================
 // Origin types

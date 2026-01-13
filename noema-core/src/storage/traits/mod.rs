@@ -14,7 +14,7 @@ pub use asset::{AssetStore, StoredAsset};
 pub use blob::BlobStore;
 pub use conversation::{ConversationStore, StoredConversation};
 pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
-pub use text::{TextStore, StoredTextBlock};
+pub use text::{TextStore, StoredTextBlock, StoredContentRef};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage, StoredView};
 pub use user::UserStore;
 

@@ -3,12 +3,15 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::storage::{Hashed, Stored};
+use crate::storage::{Hashed, Keyed, Stored};
 use crate::storage::ids::ContentBlockId;
-use crate::storage::types::{ContentBlock, StoreResult};
+use crate::storage::types::{ContentBlock, ContentHash};
 
 /// Stored representation of a content block (immutable, content-addressed)
 pub type StoredTextBlock = Stored<ContentBlockId, Hashed<ContentBlock>>;
+
+/// Reference to stored content: ID + hash
+pub type StoredContentRef = Keyed<ContentBlockId, ContentHash>;
 
 /// Trait for content block storage operations
 #[async_trait]
@@ -17,7 +20,7 @@ pub trait TextStore: Send + Sync {
     ///
     /// If content with the same hash already exists, returns the existing ID
     /// (content deduplication).
-    async fn store(&self, content: ContentBlock) -> Result<StoreResult>;
+    async fn store(&self, content: ContentBlock) -> Result<StoredContentRef>;
 
     /// Get a content block by ID
     async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>>;

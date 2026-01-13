@@ -7,8 +7,8 @@ use rusqlite::{params, Connection};
 use super::SqliteStore;
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
-use crate::storage::traits::{StoredTextBlock, TextStore};
-use crate::storage::types::{stored, ContentBlock, ContentHash, ContentOrigin, ContentType, Hashed, Keyed, OriginKind, StoreResult};
+use crate::storage::traits::{StoredTextBlock, TextStore, StoredContentRef};
+use crate::storage::types::{stored, ContentBlock, ContentHash, ContentOrigin, ContentType, Hashed, Keyed, OriginKind};
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -52,7 +52,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 
 #[async_trait]
 impl TextStore for SqliteStore {
-    async fn store(&self, content: ContentBlock) -> Result<StoreResult> {
+    async fn store(&self, content: ContentBlock) -> Result<StoredContentRef> {
         let hash = content_hash(&content.text);
         let conn = self.conn().lock().unwrap();
 
@@ -296,7 +296,7 @@ mod tests {
         let result2 = store.store(content2).await.unwrap();
 
         assert_eq!(result1.id, result2.id, "IDs should match for deduplicated content");
-        assert_eq!(result1.hash, result2.hash);
+        assert_eq!(result1, result2);
     }
 
     #[tokio::test]

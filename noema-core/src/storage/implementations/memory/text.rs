@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::storage::ids::ContentBlockId;
-use crate::storage::traits::{StoredTextBlock, TextStore};
-use crate::storage::types::{stored, ContentBlock, ContentHash, Hashed, Keyed, StoreResult};
+use crate::storage::traits::{StoredTextBlock, TextStore, StoredContentRef};
+use crate::storage::types::{stored, ContentBlock, ContentHash, Hashed, Keyed};
 
 /// In-memory content block store for testing
 #[derive(Debug, Default)]
@@ -31,7 +31,7 @@ impl MemoryTextStore {
 
 #[async_trait]
 impl TextStore for MemoryTextStore {
-    async fn store(&self, content: ContentBlock) -> Result<StoreResult> {
+    async fn store(&self, content: ContentBlock) -> Result<StoredContentRef> {
         let hash = ContentHash::from_text(&content.text);
 
         // Check for existing by hash
