@@ -1,26 +1,23 @@
-//! TextStore trait for content-addressed text storage
+//! TextStore trait for text content storage
 
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::storage::{Hashed, Keyed, Stored};
+use crate::storage::{Hashed, Stored};
 use crate::storage::ids::ContentBlockId;
-use crate::storage::types::{ContentBlock, ContentHash};
+use crate::storage::types::ContentBlock;
 
-/// Stored representation of a content block (immutable, content-addressed)
+/// Stored representation of a content block (immutable)
 pub type StoredTextBlock = Stored<ContentBlockId, Hashed<ContentBlock>>;
-
-/// Reference to stored content: ID + hash
-pub type StoredContentRef = Keyed<ContentBlockId, ContentHash>;
 
 /// Trait for content block storage operations
 #[async_trait]
 pub trait TextStore: Send + Sync {
-    /// Store text content, returning ID and hash
+    /// Store text content, returning the new block's ID
     ///
     /// Each store creates a new entry - no deduplication by hash,
     /// since metadata (origin, content_type, is_private) may differ.
-    async fn store(&self, content: ContentBlock) -> Result<StoredContentRef>;
+    async fn store(&self, content: ContentBlock) -> Result<ContentBlockId>;
 
     /// Get a content block by ID
     async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>>;

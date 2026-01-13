@@ -13,9 +13,7 @@ pub mod user;
 // Re-exports for convenience
 pub use asset::Asset;
 pub use blob::BlobHash;
-pub use content_block::{
-    ContentBlock, ContentHash, ContentOrigin, ContentType, OriginKind,
-};
+pub use content_block::{ContentBlock, ContentOrigin, ContentType, OriginKind};
 pub use conversation::{
     Conversation, ForkInfo, Message, MessageRole, MessageWithContent,
     Span, SpanRole, Turn, TurnWithContent, View, ViewSelection,

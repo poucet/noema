@@ -58,7 +58,7 @@ pub mod document_resolver;
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, ConversationStore, DocumentStore, StorageTypes, StoredContentRef,
+    AssetStore, BlobStore, ConversationStore, DocumentStore, StorageTypes,
     Stores, TextStore, TurnStore, UserStore,
 };
 
@@ -67,7 +67,7 @@ pub use types::{
     // Asset
     Asset,
     // ContentBlock
-    ContentBlock, ContentHash, ContentOrigin, ContentType, OriginKind,
+    ContentBlock, ContentOrigin, ContentType, OriginKind,
     // Conversation
     Conversation, ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole,
     Turn, TurnWithContent, View, ViewSelection,

@@ -7,8 +7,8 @@ use rusqlite::{params, Connection};
 use super::SqliteStore;
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
-use crate::storage::traits::{StoredTextBlock, TextStore, StoredContentRef};
-use crate::storage::types::{stored, ContentBlock, ContentHash, ContentOrigin, ContentType, Hashed, Keyed, OriginKind};
+use crate::storage::traits::{StoredTextBlock, TextStore};
+use crate::storage::types::{stored, ContentBlock, ContentOrigin, ContentType, Hashed, OriginKind};
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -52,11 +52,10 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 
 #[async_trait]
 impl TextStore for SqliteStore {
-    async fn store(&self, content: ContentBlock) -> Result<StoredContentRef> {
+    async fn store(&self, content: ContentBlock) -> Result<ContentBlockId> {
         let hash = content_hash(&content.text);
         let conn = self.conn().lock().unwrap();
 
-        // Insert new content block
         let id = ContentBlockId::new();
         let now = unix_timestamp();
 
@@ -79,7 +78,7 @@ impl TextStore for SqliteStore {
         )
         .context("Failed to insert content block")?;
 
-        Ok(Keyed::new(id, ContentHash::from_string(hash)))
+        Ok(id)
     }
 
     async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>> {
@@ -245,12 +244,9 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
 
         let content = ContentBlock::plain("Test content");
-        let result = store.store(content).await.unwrap();
+        let id = store.store(content).await.unwrap();
 
-        assert!(!result.hash.is_empty());
-
-        // Retrieve and verify
-        let stored = store.get(&result.id).await.unwrap().unwrap();
+        let stored = store.get(&id).await.unwrap().unwrap();
         assert_eq!(stored.text(), "Test content");
         assert_eq!(stored.content_type(), &ContentType::Plain);
         assert!(!stored.is_private());
@@ -262,15 +258,10 @@ mod tests {
         // because metadata (origin, content_type, is_private) may differ
         let store = SqliteStore::in_memory().unwrap();
 
-        let content1 = ContentBlock::plain("Duplicate me");
-        let result1 = store.store(content1).await.unwrap();
+        let id1 = store.store(ContentBlock::plain("Duplicate me")).await.unwrap();
+        let id2 = store.store(ContentBlock::plain("Duplicate me")).await.unwrap();
 
-        // Store same content again
-        let content2 = ContentBlock::plain("Duplicate me");
-        let result2 = store.store(content2).await.unwrap();
-
-        assert_ne!(result1.id, result2.id);
-        assert_eq!(result1.content.as_str(), result2.content.as_str()); // same hash
+        assert_ne!(id1, id2);
     }
 
     #[tokio::test]
@@ -278,9 +269,9 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
 
         let content = ContentBlock::markdown("# Header");
-        let result = store.store(content).await.unwrap();
+        let id = store.store(content).await.unwrap();
 
-        let text = store.get_text(&result.id).await.unwrap().unwrap();
+        let text = store.get_text(&id).await.unwrap().unwrap();
         assert_eq!(text, "# Header");
     }
 
@@ -289,9 +280,9 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
 
         let content = ContentBlock::plain("Exists test");
-        let result = store.store(content).await.unwrap();
+        let id = store.store(content).await.unwrap();
 
-        assert!(store.exists(&result.id).await.unwrap());
+        assert!(store.exists(&id).await.unwrap());
         assert!(!store.exists(&ContentBlockId::new()).await.unwrap());
     }
 
@@ -304,8 +295,8 @@ mod tests {
         let content = ContentBlock::markdown("User content")
             .with_origin(ContentOrigin::user(UserId::from_string("user-123")));
 
-        let result = store.store(content).await.unwrap();
-        let stored = store.get(&result.id).await.unwrap().unwrap();
+        let id = store.store(content).await.unwrap();
+        let stored = store.get(&id).await.unwrap().unwrap();
 
         assert_eq!(stored.origin().kind(), OriginKind::User);
         assert_eq!(
@@ -319,9 +310,9 @@ mod tests {
         let store = SqliteStore::in_memory().unwrap();
 
         let content = ContentBlock::plain("Private data").private();
-        let result = store.store(content).await.unwrap();
+        let id = store.store(content).await.unwrap();
 
-        let stored = store.get(&result.id).await.unwrap().unwrap();
+        let stored = store.get(&id).await.unwrap().unwrap();
         assert!(stored.is_private());
     }
 }
