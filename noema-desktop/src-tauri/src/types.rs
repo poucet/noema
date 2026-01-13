@@ -505,9 +505,12 @@ pub struct ModelChangedEvent {
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
-pub struct HistoryClearedEvent {
+pub struct TruncatedEvent {
     #[ts(type = "string")]
     pub conversation_id: ConversationId,
+    /// None means full clear, Some means truncated to before this turn
+    #[ts(type = "string | null")]
+    pub turn_id: Option<TurnId>,
 }
 
 /// Configuration for which tools to enable for a message.
@@ -557,7 +560,7 @@ mod ts_export {
         MessageCompleteEvent::export_all().expect("Failed to export MessageCompleteEvent");
         ErrorEvent::export_all().expect("Failed to export ErrorEvent");
         ModelChangedEvent::export_all().expect("Failed to export ModelChangedEvent");
-        HistoryClearedEvent::export_all().expect("Failed to export HistoryClearedEvent");
+        TruncatedEvent::export_all().expect("Failed to export TruncatedEvent");
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
         DisplayInputContent::export_all().expect("Failed to export DisplayInputContent");
         ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");

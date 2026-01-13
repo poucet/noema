@@ -154,24 +154,27 @@ impl<S: StorageTypes> Session<S> {
         self.pending.clear();
     }
 
-    /// Truncate session context to before a specific turn.
+    /// Truncate session context.
     ///
-    /// Sets the session cache to messages up to (but not including) the target turn.
-    /// Use with `commit(model_id, Some(&turn_id))` to add a new span at that turn.
+    /// If `turn_id` is Some, truncates to before that turn (keeping messages from earlier turns).
+    /// If `turn_id` is None, clears all context.
     ///
-    /// # Arguments
-    /// * `turn_id` - The turn to truncate before
-    pub async fn truncate_to_turn(&mut self, turn_id: &TurnId) -> Result<()> {
-        let context = self.coordinator
-            .get_context_before_turn(&self.view_id, turn_id)
-            .await?;
-
-        self.resolved_cache = context;
+    /// Works entirely in-memory on the resolved cache.
+    pub fn truncate(&mut self, turn_id: Option<&TurnId>) {
+        match turn_id {
+            Some(tid) => {
+                // Find first message with this turn_id and truncate there
+                if let Some(pos) = self.resolved_cache.iter().position(|msg| &msg.turn_id == tid) {
+                    self.resolved_cache.truncate(pos);
+                }
+            }
+            None => {
+                self.resolved_cache.clear();
+            }
+        }
         self.llm_cache.clear();
         self.llm_cache_valid = false;
         self.pending.clear();
-
-        Ok(())
     }
 
     /// Add a user message from UI input

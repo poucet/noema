@@ -50,7 +50,8 @@ pub enum EngineCommand {
     /// Run LLM on pending messages and commit with the specified mode
     ProcessPending(ToolConfig, CommitMode),
     SetModel(Arc<dyn ChatModel + Send + Sync>),
-    ClearHistory,
+    /// Truncate context to before a specific turn (None = truncate all)
+    TruncateToTurn(Option<TurnId>),
 }
 
 #[derive(Debug, Clone)]
@@ -61,7 +62,8 @@ pub enum EngineEvent {
     MessageComplete(Vec<ChatMessage>),
     Error(String),
     ModelChanged(String),
-    HistoryCleared,
+    /// Context was truncated - None means full clear, Some(turn_id) means truncated to before that turn
+    Truncated(Option<TurnId>),
 }
 
 /// Chat engine that manages conversation sessions
@@ -199,11 +201,10 @@ impl<S: StorageTypes> ChatEngine<S> {
                     model = new_model;
                     let _ = event_tx.send(EngineEvent::ModelChanged(name));
                 }
-                EngineCommand::ClearHistory => {
+                EngineCommand::TruncateToTurn(turn_id) => {
                     let mut sess = session.lock().await;
-                    sess.clear_cache();
-                    sess.clear_pending();
-                    let _ = event_tx.send(EngineEvent::HistoryCleared);
+                    sess.truncate(turn_id.as_ref());
+                    let _ = event_tx.send(EngineEvent::Truncated(turn_id));
                 }
             }
         }
@@ -231,7 +232,11 @@ impl<S: StorageTypes> ChatEngine<S> {
     }
 
     pub fn clear_history(&self) {
-        let _ = self.cmd_tx.send(EngineCommand::ClearHistory);
+        let _ = self.cmd_tx.send(EngineCommand::TruncateToTurn(None));
+    }
+
+    pub fn truncate_to_turn(&self, turn_id: TurnId) {
+        let _ = self.cmd_tx.send(EngineCommand::TruncateToTurn(Some(turn_id)));
     }
 
     pub fn try_recv(&mut self) -> Option<EngineEvent> {

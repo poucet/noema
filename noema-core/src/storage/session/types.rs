@@ -8,7 +8,7 @@
 use llm::{ContentBlock, ToolCall, ToolResult};
 
 use crate::storage::content::StoredContent;
-use crate::storage::ids::{AssetId, DocumentId};
+use crate::storage::ids::{AssetId, DocumentId, TurnId};
 use crate::storage::types::MessageRole;
 
 // ============================================================================
@@ -37,11 +37,13 @@ impl PendingMessage {
 pub struct ResolvedMessage {
     pub role: MessageRole,
     pub content: Vec<ResolvedContent>,
+    /// Turn this message belongs to (for truncation)
+    pub turn_id: TurnId,
 }
 
 impl ResolvedMessage {
-    pub fn new(role: MessageRole, content: Vec<ResolvedContent>) -> Self {
-        Self { role, content }
+    pub fn new(role: MessageRole, content: Vec<ResolvedContent>, turn_id: TurnId) -> Self {
+        Self { role, content, turn_id }
     }
 }
 

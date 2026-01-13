@@ -376,9 +376,10 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         let mut messages = Vec::new();
 
         for turn in path {
+            let turn_id = turn.turn.id.clone();
             for msg in &turn.messages {
                 let resolved = self.resolve_stored_content(&msg.content).await?;
-                messages.push(ResolvedMessage::new(msg.message.role, resolved));
+                messages.push(ResolvedMessage::new(msg.message.role, resolved, turn_id.clone()));
             }
         }
 

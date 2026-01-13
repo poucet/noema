@@ -265,54 +265,120 @@ Wire frontend regenerate button to call `regenerateResponse()`.
 
 ---
 
-## 2026-01-13: Engine Simplification with Explicit CommitMode
+## 2026-01-13: Engine Simplification
 
-Refactored `ChatEngine` to be agnostic of commit semantics. The engine just runs the LLM and passes through the commit mode.
+Refactored `ChatEngine` to reduce code duplication and simplify the command set.
 
-### Design: Explicit CommitMode Parameter
+### Design: Session Owns Commit Mode
 
-Instead of hidden state in Session, commit mode is an explicit parameter passed through:
-
-```rust
-pub enum CommitMode {
-    NewTurns,           // Normal: create turns as role changes
-    AtTurn(TurnId),     // Regeneration: add span at existing turn
-}
-```
-
-- `truncate_to_turn(turn_id)` just truncates context (no hidden state)
-- `commit(model_id, commit_mode)` takes explicit mode parameter
-- Engine passes `CommitMode` through without interpreting it
-
-### Engine Commands
+Instead of the engine needing different code paths for normal messages vs regeneration, the session now tracks how the next commit should behave:
 
 ```rust
-pub enum EngineCommand {
-    AddMessage(ChatMessage),                    // Add to pending
-    ProcessPending(ToolConfig, CommitMode),     // Run LLM, commit with mode
-    SetModel(...),
-    ClearHistory,
-}
+// In Session
+commit_target: Option<TurnId>,  // None = new turn, Some = add span at turn
 ```
 
-Convenience method `send_message()` combines AddMessage + ProcessPending with default mode.
+- `truncate_to_turn(turn_id)` sets `commit_target = Some(turn_id)`
+- `commit()` checks `commit_target` and delegates to `commit_at_turn()` if set
+- Engine just calls `commit()` - doesn't need to know about regeneration
 
-### Commit Logic (Unified)
+### Simplified Engine Commands
 
-Single loop handles both modes:
-- `CommitMode::AtTurn(turn_id)`: Create span at turn once, reuse for all messages
-- `CommitMode::NewTurns`: Create new turn when role changes
+Before:
+- `SendMessage` - add message, run LLM, commit
+- `ProcessPending` - run LLM, commit
+- `Regenerate` - truncate, run LLM, commit at turn (duplicate logic)
 
-### Tauri Layer Decides Mode
+After:
+- `SendMessage` - add message, then shared execute_and_commit
+- `ProcessPending` - shared execute_and_commit
 
-```rust
-// Normal message
-engine.process_pending(tool_config, CommitMode::default());
+The shared `execute_and_commit` helper handles LLM execution and commit for both cases.
 
-// Regeneration
-session.truncate_to_turn(&turn_id).await?;
-engine.process_pending(tool_config, CommitMode::AtTurn(turn_id));
+### Tauri Layer Handles Truncation
+
+The `regenerate_response` Tauri command now:
+1. Calls `engine.truncate_to_turn(turn_id)`
+2. Calls `engine.process_pending()`
+
+This keeps the engine simple while still supporting regeneration.
+
+---
+
+## Refactor: Engine Truncation and Events
+
+### Changes Made
+
+1. **Unified truncation command**: Replaced `ClearHistory` with `TruncateToTurn(Option<TurnId>)`
+   - `None` = clear all history
+   - `Some(turn_id)` = truncate to before that turn
+
+2. **In-memory truncation**: Session's `truncate()` now works entirely in-memory
+   - Added `turn_id` field to `ResolvedMessage` to track turn boundaries
+   - Coordinator's `resolve_path()` now passes turn_id when building messages
+   - `truncate()` finds first message with target turn_id and truncates there
+
+3. **Renamed event**: `HistoryCleared` → `Truncated(Option<TurnId>)`
+   - UI now knows whether it was a full clear or truncate to specific turn
+
+4. **chat.rs updated**: `regenerate_response` now uses `engine.truncate_to_turn()` instead of reaching into session directly
+
+---
+
+## Next: Architecture Refactor - ConversationManager
+
+### Problem Identified
+
+Boundaries between Engine, Session, and Storage are blurred:
+- Engine knows about Session
+- Session knows about Coordinator (storage)
+- chat.rs reaches through Engine to get Session to call storage operations
+
+### Proposed Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ConversationManager                       │
+│  - Owns Engine, Session, has Coordinator                    │
+│  - API: send_message(InputContent), regenerate(turn_id)     │
+│  - Handles: store input → session.add → engine.run → commit │
+└─────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│     Engine      │  │    Session      │  │   Coordinator   │
+│  - Background   │  │  - Cache        │  │  - Storage ops  │
+│    thread       │  │  - Pending      │  │  - Turn/Span    │
+│  - Agent exec   │  │  - ChatMessage  │  │  - Content      │
+│  - Model        │  │    queue        │  │                 │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
-This keeps the engine simple - it's just a pass-through for LLM execution.
+### New Responsibilities
+
+**Engine** (simplified):
+- `RunAgent(ToolConfig)` - runs agent on session's pending, adds response to pending
+- `SetModel` - change model
+- No commit, no storage awareness
+- Pure ChatMessage API
+
+**Session** (simplified):
+- `add(ChatMessage)` - add to pending
+- `pending()` / `messages()` - access state
+- `truncate(Option<TurnId>)` - in-memory truncation
+- No storage calls
+
+**ConversationManager** (new):
+- `send_message(InputContent)` → store via coordinator → session.add → engine.run → commit via coordinator
+- `regenerate(turn_id)` → truncate → engine.run → commit at turn
+- Owns the event channel to UI
+- Single API that chat.rs talks to
+
+### Implementation Plan
+
+1. Create ConversationManager struct that owns Engine, Session, Coordinator
+2. Simplify Engine - remove commit, just RunAgent command
+3. Simplify Session - remove storage calls, just runtime state
+4. Move orchestration logic from chat.rs to ConversationManager
+5. Update chat.rs to use ConversationManager instead of Engine directly
 

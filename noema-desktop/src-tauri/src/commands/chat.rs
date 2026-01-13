@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{
-    ConversationInfo, DisplayMessage, ErrorEvent, HistoryClearedEvent, DisplayInputContent,
+    ConversationInfo, DisplayMessage, ErrorEvent, TruncatedEvent, DisplayInputContent,
     MessageCompleteEvent, ModelChangedEvent, ModelInfo, StreamingMessageEvent, ToolConfig,
 };
 
@@ -180,9 +180,10 @@ pub fn start_engine_event_loop(app: AppHandle) {
                             model: name,
                         });
                     }
-                    EngineEvent::HistoryCleared => {
-                        let _ = app.emit("history_cleared", HistoryClearedEvent {
+                    EngineEvent::Truncated(turn_id) => {
+                        let _ = app.emit("truncated", TruncatedEvent {
                             conversation_id: conversation_id.clone(),
+                            turn_id,
                         });
                     }
                 }
@@ -632,14 +633,8 @@ pub async fn regenerate_response(
     let engines = state.engines.lock().await;
     let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
 
-    // Truncate session to before the turn
-    {
-        let session_arc = engine.get_session();
-        let mut session = session_arc.lock().await;
-        session.truncate_to_turn(&turn_id).await.map_err(|e| e.to_string())?;
-    }
-
-    // Process pending will run LLM and commit at the specified turn
+    // Send truncate command followed by process - engine handles both
+    engine.truncate_to_turn(turn_id.clone());
     engine.process_pending(core_tool_config, CommitMode::AtTurn(turn_id));
 
     Ok(())
