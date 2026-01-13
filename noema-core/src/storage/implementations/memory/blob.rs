@@ -7,57 +7,44 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::storage::traits::BlobStore;
-use crate::storage::types::StoredBlob;
+use crate::storage::types::BlobHash;
 
 /// In-memory blob store for testing
 #[derive(Debug, Default)]
 pub struct MemoryBlobStore {
-    blobs: Mutex<HashMap<String, Vec<u8>>>,
+    blobs: Mutex<HashMap<BlobHash, Vec<u8>>>,
 }
 
 impl MemoryBlobStore {
     pub fn new() -> Self {
         Self::default()
     }
-
-    fn compute_hash(data: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        hex::encode(hasher.finalize())
-    }
 }
 
 #[async_trait]
 impl BlobStore for MemoryBlobStore {
-    async fn store(&self, data: &[u8]) -> Result<StoredBlob> {
-        let hash = Self::compute_hash(data);
+    async fn store(&self, data: &[u8]) -> Result<BlobHash> {
+        let hash = BlobHash::hash(data);
         let mut blobs = self.blobs.lock().unwrap();
         blobs.insert(hash.clone(), data.to_vec());
 
-        Ok(StoredBlob {
-            hash,
-            size: data.len(),
-        })
+        Ok(hash)
     }
 
-    async fn get(&self, hash: &str) -> Result<Vec<u8>> {
+    async fn get(&self, hash: &BlobHash) -> Result<Vec<u8>> {
         let blobs = self.blobs.lock().unwrap();
         blobs
             .get(hash)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Blob not found: {}", hash))
+            .ok_or_else(|| anyhow::anyhow!("Blob not found: {}", hash.as_str()))
     }
 
-    async fn exists(&self, hash: &str) -> bool {
+    async fn exists(&self, hash: &BlobHash) -> bool {
         self.blobs.lock().unwrap().contains_key(hash)
     }
 
-    async fn delete(&self, hash: &str) -> Result<bool> {
+    async fn delete(&self, hash: &BlobHash) -> Result<bool> {
         Ok(self.blobs.lock().unwrap().remove(hash).is_some())
-    }
-
-    async fn list_all(&self) -> Result<Vec<String>> {
-        Ok(self.blobs.lock().unwrap().keys().cloned().collect())
     }
 }
 
@@ -71,7 +58,6 @@ mod tests {
         let data = b"hello world";
 
         let stored = store.store(data).await.unwrap();
-        assert_eq!(stored.size, data.len());
 
         let retrieved = store.get(&stored.hash).await.unwrap();
         assert_eq!(retrieved, data);

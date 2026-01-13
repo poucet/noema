@@ -6,9 +6,8 @@
 //! - Efficient storage (no Base64 overhead)
 
 use crate::storage::traits::BlobStore;
-use crate::storage::types::StoredBlob;
+use crate::storage::types::BlobHash;
 use async_trait::async_trait;
-use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -29,7 +28,8 @@ impl FsBlobStore {
     }
 
     /// Get the filesystem path for a blob
-    pub fn path_for(&self, hash: &str) -> PathBuf {
+    pub fn path_for(&self, hash: &BlobHash) -> PathBuf {
+        let hash = hash.as_str();
         if hash.len() < 2 {
             return self.root.join(hash);
         }
@@ -37,37 +37,18 @@ impl FsBlobStore {
         self.root.join(shard).join(hash)
     }
 
-    /// Compute SHA-256 hash of data
-    pub fn compute_hash(data: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        let result = hasher.finalize();
-        hex::encode(result)
-    }
-
     /// Get the size of a blob without reading its contents
-    pub async fn size(&self, hash: &str) -> anyhow::Result<u64> {
+    pub async fn size(&self, hash: &BlobHash) -> anyhow::Result<u64> {
         let path = self.path_for(hash);
         let metadata = fs::metadata(&path).await?;
         Ok(metadata.len())
     }
 
     /// Verify that a blob's content matches its hash
-    pub async fn verify(&self, hash: &str) -> anyhow::Result<bool> {
+    pub async fn verify(&self, hash: &BlobHash) -> anyhow::Result<bool> {
         let data = self.get(hash).await?;
-        let computed = Self::compute_hash(&data);
-        Ok(computed == hash)
-    }
-
-    /// Get total size of all blobs in bytes
-    pub async fn total_size(&self) -> anyhow::Result<u64> {
-        let mut total = 0u64;
-
-        for hash in self.list_all().await? {
-            total += self.size(&hash).await?;
-        }
-
-        Ok(total)
+        let computed = BlobHash::hash(&data);
+        Ok(computed == *hash)
     }
 
     /// Clean up orphaned temp files
@@ -105,16 +86,13 @@ impl FsBlobStore {
 
 #[async_trait]
 impl BlobStore for FsBlobStore {
-    async fn store(&self, data: &[u8]) -> anyhow::Result<StoredBlob> {
-        let hash = Self::compute_hash(data);
+    async fn store(&self, data: &[u8]) -> anyhow::Result<BlobHash> {
+        let hash = BlobHash::hash(data);
         let path = self.path_for(&hash);
 
         // Check if already exists (deduplication)
         if fs::try_exists(&path).await? {
-            return Ok(StoredBlob {
-                hash,
-                size: data.len(),
-            });
+            return Ok(hash)
         }
 
         // Create shard directory if needed
@@ -129,23 +107,20 @@ impl BlobStore for FsBlobStore {
         file.sync_all().await?;
         fs::rename(&temp_path, &path).await?;
 
-        Ok(StoredBlob {
-            hash,
-            size: data.len(),
-        })
+        Ok(hash)
     }
 
-    async fn get(&self, hash: &str) -> anyhow::Result<Vec<u8>> {
+    async fn get(&self, hash: &BlobHash) -> anyhow::Result<Vec<u8>> {
         let path = self.path_for(hash);
         let data = fs::read(&path).await?;
         Ok(data)
     }
 
-    async fn exists(&self, hash: &str) -> bool {
+    async fn exists(&self, hash: &BlobHash) -> bool {
         self.path_for(hash).exists()
     }
 
-    async fn delete(&self, hash: &str) -> anyhow::Result<bool> {
+    async fn delete(&self, hash: &BlobHash) -> anyhow::Result<bool> {
         let path = self.path_for(hash);
         if path.exists() {
             fs::remove_file(&path).await?;
@@ -153,41 +128,6 @@ impl BlobStore for FsBlobStore {
         } else {
             Ok(false)
         }
-    }
-
-    async fn list_all(&self) -> anyhow::Result<Vec<String>> {
-        let mut hashes = Vec::new();
-
-        if !fs::try_exists(&self.root).await? {
-            return Ok(hashes);
-        }
-
-        let mut shard_entries = fs::read_dir(&self.root).await?;
-        while let Some(shard_entry) = shard_entries.next_entry().await? {
-            let shard_path = shard_entry.path();
-
-            if !shard_path.is_dir() {
-                continue;
-            }
-
-            let mut blob_entries = fs::read_dir(&shard_path).await?;
-            while let Some(blob_entry) = blob_entries.next_entry().await? {
-                let blob_path = blob_entry.path();
-
-                if blob_path.is_file() {
-                    if let Some(filename) = blob_path.file_name() {
-                        if let Some(hash) = filename.to_str() {
-                            // Skip temp files
-                            if !hash.ends_with(".tmp") {
-                                hashes.push(hash.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(hashes)
     }
 }
 
@@ -206,10 +146,9 @@ mod tests {
         let store = temp_blob_store();
         let data = b"Hello, World!".to_vec();
 
-        let stored: StoredBlob = store.store(&data).await.unwrap();
-        assert_eq!(stored.size, data.len());
+        let stored: BlobHash = store.store(&data).await.unwrap();
 
-        let retrieved = store.get(&stored.hash).await.unwrap();
+        let retrieved = store.get(&stored).await.unwrap();
         assert_eq!(retrieved, data);
 
         // Clean up
@@ -221,26 +160,12 @@ mod tests {
         let store = temp_blob_store();
         let data = b"Duplicate data".to_vec();
 
-        let first = store.store(&data).await.unwrap();
-        assert_eq!(first.size, data.len());
-
+        let first = store.store(&data).await.unwrap();  
         let second = store.store(&data).await.unwrap();
-        assert_eq!(second.size, data.len());
-        assert_eq!(first.hash, second.hash);
+        assert_eq!(first, second);
 
         // Clean up
         fs::remove_dir_all(&store.root).await.ok();
-    }
-
-    #[test]
-    fn test_hash_computation() {
-        let data = b"test";
-        let hash = FsBlobStore::compute_hash(data);
-        // Known SHA-256 hash of "test"
-        assert_eq!(
-            hash,
-            "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-        );
     }
 
     #[tokio::test]
@@ -249,7 +174,7 @@ mod tests {
         let data = b"Verify me".to_vec();
 
         let stored = store.store(&data).await.unwrap();
-        assert!(store.verify(&stored.hash).await.unwrap());
+        assert!(store.verify(&stored).await.unwrap());
 
         // Clean up
         fs::remove_dir_all(&store.root).await.ok();
@@ -261,12 +186,11 @@ mod tests {
         let data = b"Delete me".to_vec();
 
         let stored = store.store(&data).await.unwrap();
-        assert!(store.exists(&stored.hash).await);
+        assert!(store.exists(&stored).await);
 
-        assert!(store.delete(&stored.hash).await.unwrap());
-        assert!(!store.exists(&stored.hash).await);
-        assert!(!store.delete(&stored.hash).await.unwrap());
-
+        assert!(store.delete(&stored).await.unwrap());
+        assert!(!store.exists(&stored).await);
+        assert!(!store.delete(&stored).await.unwrap());
         // Clean up
         fs::remove_dir_all(&store.root).await.ok();
     }
