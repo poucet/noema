@@ -21,6 +21,7 @@ export type { ToolConfig } from "./ToolConfig";
 export type { ThreadInfoResponse } from "./ThreadInfoResponse";
 
 // Event payload types
+export type { UserMessageEvent } from "./UserMessageEvent";
 export type { StreamingMessageEvent } from "./StreamingMessageEvent";
 export type { MessageCompleteEvent } from "./MessageCompleteEvent";
 export type { ErrorEvent } from "./ErrorEvent";

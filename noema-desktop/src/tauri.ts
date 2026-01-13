@@ -12,6 +12,7 @@ import type {
   DisplayMessage,
   InputContentBlock,
   ToolConfig,
+  UserMessageEvent,
   StreamingMessageEvent,
   MessageCompleteEvent,
   ErrorEvent,
@@ -20,7 +21,7 @@ import type {
 } from "./generated";
 
 // Re-export event payload types for consumers
-export type { StreamingMessageEvent, MessageCompleteEvent, ErrorEvent, ModelChangedEvent, HistoryClearedEvent } from "./generated";
+export type { UserMessageEvent, StreamingMessageEvent, MessageCompleteEvent, ErrorEvent, ModelChangedEvent, HistoryClearedEvent } from "./generated";
 
 // Tauri commands
 export async function initApp(): Promise<string> {
@@ -118,9 +119,9 @@ export async function sendParallelMessage(
 
 // Event listeners
 export function onUserMessage(
-  callback: (message: DisplayMessage) => void
+  callback: (payload: UserMessageEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<DisplayMessage>("user_message", (event) =>
+  return listen<UserMessageEvent>("user_message", (event) =>
     callback(event.payload)
   );
 }
