@@ -237,17 +237,15 @@ impl<S: StorageTypes> Session<S> {
 
             // Get or create span for this message
             if current_role != Some(span_role) {
-                let span_id = if let Some(ref turn_id) = commit_at_turn {
-                    // Regeneration: add span at existing turn
-                    self.coordinator
-                        .add_span_at_turn(&self.view_id, turn_id, model_id)
-                        .await?
+                // Get turn_id: either from commit_target or create a new turn
+                let turn_id = if let Some(ref id) = commit_at_turn {
+                    id.clone()
                 } else {
-                    // Normal: create new turn
-                    self.coordinator
-                        .start_turn(&self.view_id, span_role, model_id)
-                        .await?
+                    self.coordinator.create_turn(span_role).await?
                 };
+
+                // Create span at turn and select it
+                let span_id = self.coordinator.create_and_select_span(&self.view_id, &turn_id, model_id).await?;
                 current_span = Some(span_id);
                 current_role = Some(span_role);
             }

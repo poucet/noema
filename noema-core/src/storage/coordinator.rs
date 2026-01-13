@@ -258,6 +258,24 @@ impl<S: StorageTypes> StorageCoordinator<S> {
 
     // ========== Turn/Span Methods ==========
 
+    /// Create a new turn (without span or selection).
+    pub async fn create_turn(&self, role: crate::storage::types::SpanRole) -> Result<TurnId> {
+        let turn = self.turn_store.create_turn(role).await?;
+        Ok(turn.id)
+    }
+
+    /// Create a span at a turn and select it in the view.
+    pub async fn create_and_select_span(
+        &self,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+        model_id: Option<&str>,
+    ) -> Result<SpanId> {
+        let span = self.turn_store.create_span(turn_id, model_id).await?;
+        self.turn_store.select_span(view_id, turn_id, &span.id).await?;
+        Ok(span.id)
+    }
+
     /// Start a new turn in a conversation view.
     ///
     /// Creates a turn, adds a span to it, and selects that span in the view.
@@ -268,10 +286,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         role: crate::storage::types::SpanRole,
         model_id: Option<&str>,
     ) -> Result<SpanId> {
-        let turn = self.turn_store.create_turn(role).await?;
-        let span = self.turn_store.create_span(&turn.id, model_id).await?;
-        self.turn_store.select_span(view_id, &turn.id, &span.id).await?;
-        Ok(span.id)
+        let turn_id = self.create_turn(role).await?;
+        self.create_and_select_span(view_id, &turn_id, model_id).await
     }
 
     // ========== User Delegation Methods ==========
@@ -481,15 +497,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         turn_id: &TurnId,
         model_id: Option<&str>,
     ) -> Result<SpanId> {
-        let new_span = self.turn_store
-            .create_span(turn_id, model_id)
-            .await?;
-
-        self.turn_store
-            .select_span(view_id, turn_id, &new_span.id)
-            .await?;
-
-        Ok(new_span.id)
+        self.create_and_select_span(view_id, turn_id, model_id).await
     }
 }
 
