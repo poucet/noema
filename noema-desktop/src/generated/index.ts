@@ -19,11 +19,6 @@ export type { ProviderInfoResponse as ProviderInfo } from "./ProviderInfoRespons
 export type { ReferencedDocument } from "./ReferencedDocument";
 export type { ToolConfig } from "./ToolConfig";
 export type { ThreadInfoResponse } from "./ThreadInfoResponse";
-export type { ParallelAlternateInfo } from "./ParallelAlternateInfo";
-export type { ParallelComplete } from "./ParallelComplete";
-export type { ParallelModelComplete } from "./ParallelModelComplete";
-export type { ParallelModelError } from "./ParallelModelError";
-export type { ParallelStreamingMessage } from "./ParallelStreamingMessage";
 
 // Event payload types
 export type { StreamingMessageEvent } from "./StreamingMessageEvent";
@@ -31,7 +26,3 @@ export type { MessageCompleteEvent } from "./MessageCompleteEvent";
 export type { ErrorEvent } from "./ErrorEvent";
 export type { ModelChangedEvent } from "./ModelChangedEvent";
 export type { HistoryClearedEvent } from "./HistoryClearedEvent";
-export type { ParallelStreamingMessageEvent } from "./ParallelStreamingMessageEvent";
-export type { ParallelModelCompleteEvent } from "./ParallelModelCompleteEvent";
-export type { ParallelCompleteEvent } from "./ParallelCompleteEvent";
-export type { ParallelModelErrorEvent } from "./ParallelModelErrorEvent";

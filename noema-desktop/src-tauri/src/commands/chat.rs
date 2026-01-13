@@ -12,9 +12,7 @@ use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{
     ConversationInfo, DisplayMessage, ErrorEvent, HistoryClearedEvent, DisplayInputContent,
-    MessageCompleteEvent, ModelChangedEvent, ModelInfo, ParallelCompleteEvent,
-    ParallelModelCompleteEvent, ParallelModelErrorEvent, ParallelStreamingMessageEvent,
-    StreamingMessageEvent, ToolConfig,
+    MessageCompleteEvent, ModelChangedEvent, ModelInfo, StreamingMessageEvent, ToolConfig,
 };
 
 
@@ -156,28 +154,12 @@ pub fn start_engine_event_loop(app: AppHandle) {
                             message: DisplayMessage::from(&msg),
                         });
                     }
-                    EngineEvent::MessageComplete => {
-                        // Get all messages after completion (committed + pending)
-                        let messages = {
-                            let engines = state.engines.lock().await;
-                            if let Some(engine) = engines.get(&conversation_id) {
-                                let session_arc = engine.get_session();
-                                let session = session_arc.lock().await;
-
-                                let mut msgs: Vec<DisplayMessage> = session
-                                    .messages_for_display()
-                                    .iter()
-                                    .map(DisplayMessage::from)
-                                    .collect();
-
-                                for pending in session.pending_messages() {
-                                    msgs.push(DisplayMessage::from(pending));
-                                }
-                                msgs
-                            } else {
-                                vec![]
-                            }
-                        };
+                    EngineEvent::MessageComplete(chat_messages) => {
+                        // Convert ChatMessages from engine to DisplayMessages for frontend
+                        let messages: Vec<DisplayMessage> = chat_messages
+                            .iter()
+                            .map(DisplayMessage::from)
+                            .collect();
                         let _ = app.emit("message_complete", MessageCompleteEvent {
                             conversation_id: conversation_id.clone(),
                             messages,
@@ -201,37 +183,6 @@ pub fn start_engine_event_loop(app: AppHandle) {
                     EngineEvent::HistoryCleared => {
                         let _ = app.emit("history_cleared", HistoryClearedEvent {
                             conversation_id: conversation_id.clone(),
-                        });
-                    }
-                    // Parallel execution events
-                    EngineEvent::ParallelStreamingMessage { model_id, message } => {
-                        state.set_processing(&conversation_id, true).await;
-                        let _ = app.emit("parallel_streaming_message", ParallelStreamingMessageEvent {
-                            conversation_id: conversation_id.clone(),
-                            model_id,
-                            message: DisplayMessage::from(&message),
-                        });
-                    }
-                    EngineEvent::ParallelModelComplete { model_id, messages } => {
-                        let _ = app.emit("parallel_model_complete", ParallelModelCompleteEvent {
-                            conversation_id: conversation_id.clone(),
-                            model_id,
-                            messages: messages.iter().map(DisplayMessage::from).collect(),
-                        });
-                    }
-                    EngineEvent::ParallelComplete { turn_id, alternates } => {
-                        let _ = app.emit("parallel_complete", ParallelCompleteEvent {
-                            conversation_id: conversation_id.clone(),
-                            turn_id: turn_id,
-                            alternates: alternates.into_iter().map(Into::into).collect(),
-                        });
-                        state.set_processing(&conversation_id, false).await;
-                    }
-                    EngineEvent::ParallelModelError { model_id, error } => {
-                        let _ = app.emit("parallel_model_error", ParallelModelErrorEvent {
-                            conversation_id: conversation_id.clone(),
-                            model_id,
-                            error,
                         });
                     }
                 }
@@ -525,19 +476,6 @@ pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, Stri
     settings.toggle_favorite_model(&model_id);
     settings.save().map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(settings.favorite_models)
-}
-
-/// Send a message to multiple models in parallel
-/// NOTE: Parallel message support is pending re-implementation for the new Session-based engine
-#[tauri::command]
-pub async fn send_parallel_message(
-    _app: AppHandle,
-    _state: State<'_, Arc<AppState>>,
-    _message: String,
-    _model_ids: Vec<String>,
-) -> Result<(), String> {
-    // TODO: Re-implement parallel message support for Session-based engine
-    Err("Parallel message support is pending re-implementation".to_string())
 }
 
 // ============================================================================

@@ -419,31 +419,6 @@ impl From<DisplayInputContent> for noema_core::storage::InputContent {
     }
 }
 
-/// Information about a parallel model response (for UI display)
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelAlternateInfo {
-    #[ts(type = "string")]
-    pub span_id: SpanId,
-    pub model_id: String,
-    pub model_display_name: String,
-    pub message_count: usize,
-    pub is_selected: bool,
-}
-
-impl From<noema_core::ParallelAlternateInfo> for ParallelAlternateInfo {
-    fn from(info: noema_core::ParallelAlternateInfo) -> Self {
-        Self {
-            span_id: SpanId::from_string(info.span_id),
-            model_id: info.model_id,
-            model_display_name: info.model_display_name,
-            message_count: info.message_count,
-            is_selected: info.is_selected,
-        }
-    }
-}
-
 /// Information about a view/branch in a conversation (replaces legacy Thread concept)
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -480,43 +455,6 @@ impl From<noema_core::storage::ViewInfo> for ThreadInfoResponse {
             is_main,
         }
     }
-}
-
-/// Streaming message from a specific model during parallel execution
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelStreamingMessage {
-    pub model_id: String,
-    pub message: DisplayMessage,
-}
-
-/// A model completed its response during parallel execution
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelModelComplete {
-    pub model_id: String,
-    pub messages: Vec<DisplayMessage>,
-}
-
-/// All parallel models have completed
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelComplete {
-    #[ts(type = "string")]
-    pub span_set_id: TurnId,
-    pub alternates: Vec<ParallelAlternateInfo>,
-}
-
-/// Error from a specific model during parallel execution
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelModelError {
-    pub model_id: String,
-    pub error: String,
 }
 
 // =============================================================================
@@ -572,51 +510,6 @@ pub struct HistoryClearedEvent {
     pub conversation_id: ConversationId,
 }
 
-/// Payload for parallel_streaming_message event
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelStreamingMessageEvent {
-    #[ts(type = "string")]
-    pub conversation_id: ConversationId,
-    pub model_id: String,
-    pub message: DisplayMessage,
-}
-
-/// Payload for parallel_model_complete event
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelModelCompleteEvent {
-    #[ts(type = "string")]
-    pub conversation_id: ConversationId,
-    pub model_id: String,
-    pub messages: Vec<DisplayMessage>,
-}
-
-/// Payload for parallel_complete event
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelCompleteEvent {
-    #[ts(type = "string")]
-    pub conversation_id: ConversationId,
-    #[ts(type = "string")]
-    pub turn_id: TurnId,
-    pub alternates: Vec<ParallelAlternateInfo>,
-}
-
-/// Payload for parallel_model_error event
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ParallelModelErrorEvent {
-    #[ts(type = "string")]
-    pub conversation_id: ConversationId,
-    pub model_id: String,
-    pub error: String,
-}
-
 /// Configuration for which tools to enable for a message.
 /// Designed to be extensible for future tool set selection.
 #[derive(Debug, Clone, Default, Deserialize, TS)]
@@ -660,20 +553,11 @@ mod ts_export {
         McpToolInfo::export_all().expect("Failed to export McpToolInfo");
         AddMcpServerRequest::export_all().expect("Failed to export AddMcpServerRequest");
         Attachment::export_all().expect("Failed to export Attachment");
-        ParallelAlternateInfo::export_all().expect("Failed to export ParallelAlternateInfo");
-        ParallelStreamingMessage::export_all().expect("Failed to export ParallelStreamingMessage");
-        ParallelModelComplete::export_all().expect("Failed to export ParallelModelComplete");
-        ParallelComplete::export_all().expect("Failed to export ParallelComplete");
-        ParallelModelError::export_all().expect("Failed to export ParallelModelError");
         StreamingMessageEvent::export_all().expect("Failed to export StreamingMessageEvent");
         MessageCompleteEvent::export_all().expect("Failed to export MessageCompleteEvent");
         ErrorEvent::export_all().expect("Failed to export ErrorEvent");
         ModelChangedEvent::export_all().expect("Failed to export ModelChangedEvent");
         HistoryClearedEvent::export_all().expect("Failed to export HistoryClearedEvent");
-        ParallelStreamingMessageEvent::export_all().expect("Failed to export ParallelStreamingMessageEvent");
-        ParallelModelCompleteEvent::export_all().expect("Failed to export ParallelModelCompleteEvent");
-        ParallelCompleteEvent::export_all().expect("Failed to export ParallelCompleteEvent");
-        ParallelModelErrorEvent::export_all().expect("Failed to export ParallelModelErrorEvent");
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
         DisplayInputContent::export_all().expect("Failed to export DisplayInputContent");
         ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");

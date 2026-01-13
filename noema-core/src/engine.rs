@@ -55,38 +55,13 @@ pub enum EngineCommand {
 
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
+    /// Streaming message (during LLM execution)
     Message(ChatMessage),
-    MessageComplete,
+    /// LLM execution and commit completed - includes all committed messages
+    MessageComplete(Vec<ChatMessage>),
     Error(String),
     ModelChanged(String),
     HistoryCleared,
-
-    // Parallel execution events
-    ParallelStreamingMessage {
-        model_id: String,
-        message: ChatMessage,
-    },
-    ParallelModelComplete {
-        model_id: String,
-        messages: Vec<ChatMessage>,
-    },
-    ParallelComplete {
-        turn_id: TurnId,
-        alternates: Vec<ParallelAlternateInfo>,
-    },
-    ParallelModelError {
-        model_id: String,
-        error: String,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub struct ParallelAlternateInfo {
-    pub span_id: String,
-    pub model_id: String,
-    pub model_display_name: String,
-    pub message_count: usize,
-    pub is_selected: bool,
 }
 
 /// Chat engine that manages conversation sessions
@@ -192,7 +167,7 @@ impl<S: StorageTypes> ChatEngine<S> {
 
                     match execute_result {
                         Ok(_) => {
-                            // Send pending messages to UI
+                            // Send pending messages to UI (streaming)
                             {
                                 let sess = session.lock().await;
                                 for msg in sess.pending() {
@@ -202,16 +177,17 @@ impl<S: StorageTypes> ChatEngine<S> {
 
                             // Commit with the specified mode
                             let model_id = model.id();
-                            let commit_result = {
-                                let mut sess = session.lock().await;
-                                sess.commit(Some(model_id), &commit_mode).await
-                            };
-
-                            if let Err(e) = commit_result {
+                            let mut sess = session.lock().await;
+                            if let Err(e) = sess.commit(Some(model_id), &commit_mode).await {
                                 let _ = event_tx.send(EngineEvent::Error(format!("Failed to commit: {}", e)));
+                            } else {
+                                // Get all messages after commit for the complete event
+                                let messages = match sess.messages().await {
+                                    Ok(guard) => guard.to_vec(),
+                                    Err(_) => vec![],
+                                };
+                                let _ = event_tx.send(EngineEvent::MessageComplete(messages));
                             }
-
-                            let _ = event_tx.send(EngineEvent::MessageComplete);
                         }
                         Err(e) => {
                             let _ = event_tx.send(EngineEvent::Error(e.to_string()));

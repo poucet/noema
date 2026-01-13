@@ -184,7 +184,6 @@ pub fn run() {
             commands::chat::get_model_name,
             commands::chat::get_favorite_models,
             commands::chat::toggle_favorite_model,
-            commands::chat::send_parallel_message,
             // Turn/Span/View commands (Phase 3 UCM)
             commands::chat::get_turn_alternates,
             commands::chat::get_span_messages,
