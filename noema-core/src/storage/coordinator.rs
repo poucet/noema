@@ -456,6 +456,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     pub async fn add_message(
         &self,
         span_id: &SpanId,
+        turn_id: &TurnId,
         role: MessageRole,
         content: Vec<ContentBlock>,
         origin: OriginKind,
@@ -469,7 +470,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         // Resolve for caching
         let resolved = self.resolve_stored_content(&stored).await?;
 
-        Ok(ResolvedMessage::new(role, resolved))
+        Ok(ResolvedMessage::new(role, resolved, turn_id.clone()))
     }
 
     /// Get resolved context up to (but not including) a specific turn.

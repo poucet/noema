@@ -1,0 +1,437 @@
+//! ConversationManager - orchestrates storage, session, and agent execution
+//!
+//! This is the main API for managing a conversation. It coordinates:
+//! - Storage operations (storing user input, committing messages)
+//! - Session state (pending messages, cache)
+//! - Agent execution in a background task
+//! - Event streaming to UI
+
+use anyhow::Result;
+use llm::{ChatMessage, ChatModel, ChatPayload};
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
+use tokio::task::JoinHandle;
+
+use crate::context::ConversationContext;
+use crate::engine::{CommitMode, ToolConfig};
+use crate::storage::content::InputContent;
+use crate::storage::coordinator::StorageCoordinator;
+use crate::storage::ids::{ConversationId, TurnId};
+use crate::storage::session::Session;
+use crate::storage::traits::StorageTypes;
+use crate::storage::types::{MessageRole, OriginKind, SpanRole};
+use crate::storage::DocumentResolver;
+use crate::{Agent, McpAgent, McpRegistry, McpToolRegistry};
+
+// ============================================================================
+// Commands and Events
+// ============================================================================
+
+/// Commands sent to the background task
+pub enum ManagerCommand {
+    /// Send user input, run agent, commit
+    SendMessage {
+        content: Vec<InputContent>,
+        tool_config: ToolConfig,
+    },
+    /// Run agent on current pending (used after truncate for regeneration)
+    RunAgent {
+        tool_config: ToolConfig,
+        commit_mode: CommitMode,
+    },
+    /// Truncate context to before a specific turn (None = clear all)
+    Truncate(Option<TurnId>),
+    /// Change the model
+    SetModel(Arc<dyn ChatModel + Send + Sync>),
+}
+
+/// Events emitted from the background task
+#[derive(Debug, Clone)]
+pub enum ManagerEvent {
+    /// User message was added (for immediate UI feedback)
+    UserMessageAdded(ChatMessage),
+    /// Streaming message from agent
+    StreamingMessage(ChatMessage),
+    /// Agent execution and commit completed - includes all committed messages
+    Complete(Vec<ChatMessage>),
+    /// Error occurred
+    Error(String),
+    /// Model was changed
+    ModelChanged(String),
+    /// Context was truncated
+    Truncated(Option<TurnId>),
+}
+
+// ============================================================================
+// ConversationManager
+// ============================================================================
+
+/// Manages a single conversation's lifecycle
+///
+/// Owns the session and coordinates storage operations with agent execution.
+/// All operations are processed in a background task to avoid blocking.
+pub struct ConversationManager<S: StorageTypes> {
+    conversation_id: ConversationId,
+    coordinator: Arc<StorageCoordinator<S>>,
+    mcp_registry: Arc<Mutex<McpRegistry>>,
+    cmd_tx: mpsc::UnboundedSender<ManagerCommand>,
+    event_rx: mpsc::UnboundedReceiver<ManagerEvent>,
+    model: Arc<dyn ChatModel + Send + Sync>,
+    #[allow(dead_code)]
+    task_handle: JoinHandle<()>,
+}
+
+impl<S: StorageTypes> ConversationManager<S> {
+    /// Create a new ConversationManager for a conversation
+    pub fn new(
+        session: Session<S>,
+        coordinator: Arc<StorageCoordinator<S>>,
+        model: Arc<dyn ChatModel + Send + Sync>,
+        mcp_registry: Arc<Mutex<McpRegistry>>,
+    ) -> Self {
+        let conversation_id = session.conversation_id().clone();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+
+        let session = Arc::new(Mutex::new(session));
+        let session_clone = Arc::clone(&session);
+        let coordinator_clone = Arc::clone(&coordinator);
+        let mcp_registry_clone = Arc::clone(&mcp_registry);
+        let initial_model = Arc::clone(&model);
+
+        let task_handle = tokio::spawn(async move {
+            Self::background_loop(
+                session_clone,
+                coordinator_clone,
+                initial_model,
+                mcp_registry_clone,
+                cmd_rx,
+                event_tx,
+            )
+            .await;
+        });
+
+        Self {
+            conversation_id,
+            coordinator,
+            mcp_registry,
+            cmd_tx,
+            event_rx,
+            model,
+            task_handle,
+        }
+    }
+
+    async fn background_loop(
+        session: Arc<Mutex<Session<S>>>,
+        coordinator: Arc<StorageCoordinator<S>>,
+        mut model: Arc<dyn ChatModel + Send + Sync>,
+        mcp_registry: Arc<Mutex<McpRegistry>>,
+        mut cmd_rx: mpsc::UnboundedReceiver<ManagerCommand>,
+        event_tx: mpsc::UnboundedSender<ManagerEvent>,
+    ) {
+        // Create agent with MCP tool registry
+        let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
+        // Coordinator implements DocumentResolver
+        let document_resolver: Arc<dyn DocumentResolver> = coordinator.clone();
+        let agent = McpAgent::new(Arc::new(tool_registry), 10, document_resolver.clone());
+
+        while let Some(cmd) = cmd_rx.recv().await {
+            match cmd {
+                ManagerCommand::SendMessage { content, tool_config } => {
+                    // Step 1: Store user input and add to pending
+                    let add_result = Self::store_and_add_user_message(
+                        &session,
+                        &coordinator,
+                        content,
+                    ).await;
+
+                    match add_result {
+                        Ok(user_msg) => {
+                            // Emit user message for immediate UI feedback
+                            let _ = event_tx.send(ManagerEvent::UserMessageAdded(user_msg));
+
+                            // Step 2: Run agent
+                            Self::run_agent_and_commit(
+                                &session,
+                                &coordinator,
+                                &agent,
+                                &model,
+                                tool_config,
+                                CommitMode::NewTurns,
+                                &event_tx,
+                            ).await;
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(ManagerEvent::Error(format!("Failed to add message: {}", e)));
+                        }
+                    }
+                }
+
+                ManagerCommand::RunAgent { tool_config, commit_mode } => {
+                    Self::run_agent_and_commit(
+                        &session,
+                        &coordinator,
+                        &agent,
+                        &model,
+                        tool_config,
+                        commit_mode,
+                        &event_tx,
+                    ).await;
+                }
+
+                ManagerCommand::Truncate(turn_id) => {
+                    let mut sess = session.lock().await;
+                    sess.truncate(turn_id.as_ref());
+                    let _ = event_tx.send(ManagerEvent::Truncated(turn_id));
+                }
+
+                ManagerCommand::SetModel(new_model) => {
+                    let name = new_model.name().to_string();
+                    model = new_model;
+                    let _ = event_tx.send(ManagerEvent::ModelChanged(name));
+                }
+            }
+        }
+    }
+
+    /// Store user input content and add to session pending
+    async fn store_and_add_user_message(
+        session: &Arc<Mutex<Session<S>>>,
+        coordinator: &Arc<StorageCoordinator<S>>,
+        content: Vec<InputContent>,
+    ) -> Result<ChatMessage> {
+        if content.is_empty() {
+            anyhow::bail!("Empty content");
+        }
+
+        // Store content and get refs
+        let stored = coordinator
+            .store_input_content(content, OriginKind::User)
+            .await?;
+
+        // Resolve refs to ContentBlocks
+        let mut blocks = Vec::with_capacity(stored.len());
+        for item in stored {
+            let block = item.resolve(coordinator.as_ref()).await?;
+            blocks.push(block);
+        }
+
+        // Create ChatMessage and add to pending
+        let message = ChatMessage::user(ChatPayload::new(blocks));
+        {
+            let mut sess = session.lock().await;
+            sess.add(message.clone());
+        }
+
+        Ok(message)
+    }
+
+    /// Run agent and commit results
+    async fn run_agent_and_commit(
+        session: &Arc<Mutex<Session<S>>>,
+        coordinator: &Arc<StorageCoordinator<S>>,
+        agent: &McpAgent,
+        model: &Arc<dyn ChatModel + Send + Sync>,
+        tool_config: ToolConfig,
+        commit_mode: CommitMode,
+        event_tx: &mpsc::UnboundedSender<ManagerEvent>,
+    ) {
+        // Run agent
+        let execute_result = {
+            let mut sess = session.lock().await;
+            if tool_config.enabled {
+                agent.execute_stream(&mut *sess, model.clone()).await
+            } else {
+                agent.execute_stream_no_tools(&mut *sess, model.clone()).await
+            }
+        };
+
+        match execute_result {
+            Ok(_) => {
+                // Send streaming messages
+                {
+                    let sess = session.lock().await;
+                    for msg in sess.pending() {
+                        // Skip user messages (already sent)
+                        if msg.role != llm::Role::User {
+                            let _ = event_tx.send(ManagerEvent::StreamingMessage(msg.clone()));
+                        }
+                    }
+                }
+
+                // Commit pending messages
+                let commit_result = Self::commit_pending(
+                    session,
+                    coordinator,
+                    Some(model.id()),
+                    &commit_mode,
+                ).await;
+
+                match commit_result {
+                    Ok(_) => {
+                        // Get all messages for complete event
+                        let messages = {
+                            let mut sess = session.lock().await;
+                            match sess.messages().await {
+                                Ok(guard) => guard.to_vec(),
+                                Err(_) => vec![],
+                            }
+                        };
+                        let _ = event_tx.send(ManagerEvent::Complete(messages));
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(ManagerEvent::Error(format!("Failed to commit: {}", e)));
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = event_tx.send(ManagerEvent::Error(e.to_string()));
+            }
+        }
+    }
+
+    /// Commit pending messages to storage
+    async fn commit_pending(
+        session: &Arc<Mutex<Session<S>>>,
+        coordinator: &Arc<StorageCoordinator<S>>,
+        model_id: Option<&str>,
+        commit_mode: &CommitMode,
+    ) -> Result<()> {
+        let mut sess = session.lock().await;
+
+        if sess.pending().is_empty() {
+            return Ok(());
+        }
+
+        let view_id = sess.view_id().clone();
+        let pending: Vec<ChatMessage> = sess.pending().to_vec();
+
+        // Track current turn and span for adding messages
+        let mut current_turn: Option<TurnId> = None;
+        let mut current_span = None;
+        let mut current_role = None;
+
+        for msg in pending {
+            let msg_role = llm_role_to_message_role(msg.role);
+            let origin = llm_role_to_origin(msg.role);
+            let span_role = match msg_role {
+                MessageRole::User | MessageRole::System => SpanRole::User,
+                MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
+            };
+
+            // Get or create turn and span based on commit mode
+            let (turn_id, span_id) = match commit_mode {
+                CommitMode::AtTurn(tid) => {
+                    if current_span.is_none() {
+                        let span = coordinator
+                            .create_and_select_span(&view_id, tid, model_id)
+                            .await?;
+                        current_turn = Some(tid.clone());
+                        current_span = Some(span);
+                    }
+                    (current_turn.as_ref().unwrap().clone(), current_span.as_ref().unwrap().clone())
+                }
+                CommitMode::NewTurns => {
+                    if current_role != Some(span_role) {
+                        let tid = coordinator.create_turn(span_role).await?;
+                        let span = coordinator
+                            .create_and_select_span(&view_id, &tid, model_id)
+                            .await?;
+                        current_turn = Some(tid);
+                        current_span = Some(span);
+                        current_role = Some(span_role);
+                    }
+                    (current_turn.as_ref().unwrap().clone(), current_span.as_ref().unwrap().clone())
+                }
+            };
+
+            let resolved = coordinator
+                .add_message(&span_id, &turn_id, msg_role, msg.payload.content, origin)
+                .await?;
+            sess.add_resolved(resolved);
+        }
+
+        sess.clear_pending();
+        Ok(())
+    }
+
+    // ========================================================================
+    // Public API
+    // ========================================================================
+
+    /// Send a user message
+    pub fn send_message(&self, content: Vec<InputContent>, tool_config: ToolConfig) {
+        let _ = self.cmd_tx.send(ManagerCommand::SendMessage { content, tool_config });
+    }
+
+    /// Regenerate response at a turn
+    pub fn regenerate(&self, turn_id: TurnId, tool_config: ToolConfig) {
+        let _ = self.cmd_tx.send(ManagerCommand::Truncate(Some(turn_id.clone())));
+        let _ = self.cmd_tx.send(ManagerCommand::RunAgent {
+            tool_config,
+            commit_mode: CommitMode::AtTurn(turn_id),
+        });
+    }
+
+    /// Clear all history
+    pub fn clear_history(&self) {
+        let _ = self.cmd_tx.send(ManagerCommand::Truncate(None));
+    }
+
+    /// Set the model
+    pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>) {
+        self.model = Arc::clone(&model);
+        let _ = self.cmd_tx.send(ManagerCommand::SetModel(model));
+    }
+
+    /// Try to receive an event (non-blocking)
+    pub fn try_recv(&mut self) -> Option<ManagerEvent> {
+        self.event_rx.try_recv().ok()
+    }
+
+    /// Receive next event (blocking)
+    pub async fn next_event(&mut self) -> Option<ManagerEvent> {
+        self.event_rx.recv().await
+    }
+
+    /// Get conversation ID
+    pub fn conversation_id(&self) -> &ConversationId {
+        &self.conversation_id
+    }
+
+    /// Get the coordinator for direct storage access (e.g., fork operations)
+    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> {
+        &self.coordinator
+    }
+
+    /// Get the MCP registry
+    pub fn mcp_registry(&self) -> &Arc<Mutex<McpRegistry>> {
+        &self.mcp_registry
+    }
+
+    /// Get current model name
+    pub fn model_name(&self) -> &str {
+        self.model.name()
+    }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+fn llm_role_to_message_role(role: llm::Role) -> MessageRole {
+    match role {
+        llm::Role::User => MessageRole::User,
+        llm::Role::Assistant => MessageRole::Assistant,
+        llm::Role::System => MessageRole::System,
+    }
+}
+
+fn llm_role_to_origin(role: llm::Role) -> OriginKind {
+    match role {
+        llm::Role::User => OriginKind::User,
+        llm::Role::Assistant => OriginKind::Assistant,
+        llm::Role::System => OriginKind::System,
+    }
+}

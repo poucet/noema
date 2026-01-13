@@ -152,6 +152,13 @@ impl<S: StorageTypes> Session<S> {
     /// Clear pending messages without committing
     pub fn clear_pending(&mut self) {
         self.pending.clear();
+        self.llm_cache_valid = false;
+    }
+
+    /// Add a resolved message to the cache (used by ConversationManager after commit)
+    pub fn add_resolved(&mut self, msg: ResolvedMessage) {
+        self.resolved_cache.push(msg);
+        self.llm_cache_valid = false;
     }
 
     /// Truncate session context.
@@ -212,7 +219,7 @@ impl<S: StorageTypes> Session<S> {
     ///
     /// # Arguments
     /// * `model_id` - The model that generated assistant messages
-    /// * `commit_mode` - How to commit: NewTurns (create turns) or AtTurn (add span at wisting turn)
+    /// * `commit_mode` - How to commit: NewTurns (create turns) or AtTurn (add span at existing turn)
     pub async fn commit(&mut self, model_id: Option<&str>, commit_mode: &CommitMode) -> Result<()> {
         if self.pending.is_empty() {
             return Ok(());
@@ -220,7 +227,8 @@ impl<S: StorageTypes> Session<S> {
 
         let messages = std::mem::take(&mut self.pending);
 
-        // Track current span for adding messages
+        // Track current turn and span for adding messages
+        let mut current_turn: Option<TurnId> = None;
         let mut current_span: Option<SpanId> = None;
         let mut current_role: Option<SpanRole> = None;
 
@@ -232,34 +240,36 @@ impl<S: StorageTypes> Session<S> {
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
             };
 
-            // Get or create span based on commit mode and role changes
-            let span_id = match commit_mode {
-                CommitMode::AtTurn(turn_id) => {
+            // Get or create turn and span based on commit mode and role changes
+            let (turn_id, span_id) = match commit_mode {
+                CommitMode::AtTurn(tid) => {
                     // Regeneration: create span at existing turn once, reuse for all messages
                     if current_span.is_none() {
                         let span = self.coordinator
-                            .create_and_select_span(&self.view_id, turn_id, model_id)
+                            .create_and_select_span(&self.view_id, tid, model_id)
                             .await?;
+                        current_turn = Some(tid.clone());
                         current_span = Some(span);
                     }
-                    current_span.as_ref().unwrap().clone()
+                    (current_turn.as_ref().unwrap().clone(), current_span.as_ref().unwrap().clone())
                 }
                 CommitMode::NewTurns => {
                     // Normal: create new turn when role changes
                     if current_role != Some(span_role) {
-                        let turn_id = self.coordinator.create_turn(span_role).await?;
+                        let tid = self.coordinator.create_turn(span_role).await?;
                         let span = self.coordinator
-                            .create_and_select_span(&self.view_id, &turn_id, model_id)
+                            .create_and_select_span(&self.view_id, &tid, model_id)
                             .await?;
+                        current_turn = Some(tid);
                         current_span = Some(span);
                         current_role = Some(span_role);
                     }
-                    current_span.as_ref().unwrap().clone()
+                    (current_turn.as_ref().unwrap().clone(), current_span.as_ref().unwrap().clone())
                 }
             };
 
             let resolved = self.coordinator
-                .add_message(&span_id, msg_role, msg.payload.content, origin)
+                .add_message(&span_id, &turn_id, msg_role, msg.payload.content, origin)
                 .await?;
             self.resolved_cache.push(resolved);
         }
