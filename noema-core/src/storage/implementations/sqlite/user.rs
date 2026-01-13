@@ -58,7 +58,7 @@ impl UserStore for SqliteStore {
         }
 
         // Create default user
-        let id = UserId::from_string(Uuid::new_v4().to_string());
+        let id = UserId::new();
         let now = unix_timestamp();
         conn.execute(
             "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
@@ -96,7 +96,7 @@ impl UserStore for SqliteStore {
 
         // Create new user
         let conn = self.conn().lock().unwrap();
-        let id = UserId::from_string(Uuid::new_v4().to_string());
+        let id = UserId::new();
         let now = unix_timestamp();
 
         conn.execute(

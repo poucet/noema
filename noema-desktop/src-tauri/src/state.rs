@@ -68,7 +68,7 @@ impl AppState {
             coordinator: OnceCell::new(),
             engines: Mutex::new(HashMap::new()),
             mcp_registry: OnceCell::new(),
-            user_id: Mutex::new(UserId::from_string(String::new())),
+            user_id: Mutex::new(UserId::new()),
             model_id: Mutex::new(String::new()),
             model_name: Mutex::new(String::new()),
             voice_coordinator: Mutex::new(None),
