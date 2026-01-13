@@ -61,26 +61,30 @@ impl AssetStore for MemoryAssetStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::{implementations::memory::blob, types::BlobHash};
+
     use super::*;
 
     #[tokio::test]
     async fn test_create_and_get() {
         let store = MemoryAssetStore::new();
-        let asset = Asset::new("test-blob-hash", "image/png", 1024);
+        let blob_hash: BlobHash = "test-blob-hash".parse().unwrap();  
+        let asset = Asset::new(blob_hash, "image/png", 1024);
 
         let id = store.create_asset(asset.clone()).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
         assert_eq!(stored.mime_type, "image/png");
         assert_eq!(stored.size_bytes, 1024);
-        assert_eq!(stored.blob_hash, "test-blob-hash");
+        assert_eq!(stored.blob_hash.as_str(), "test-blob-hash");
     }
 
     #[tokio::test]
     async fn test_exists() {
         let store = MemoryAssetStore::new();
 
-        let id = store.create_asset(Asset::new("hash", "text/plain", 100)).await.unwrap();
+        let blob_hash: BlobHash = "hash".parse().unwrap();    
+        let id = store.create_asset(Asset::new(blob_hash, "text/plain", 100)).await.unwrap();
         assert!(store.exists(&id).await.unwrap());
 
         let fake_id = AssetId::from_string("nonexistent".to_string());
@@ -90,8 +94,8 @@ mod tests {
     #[tokio::test]
     async fn test_delete() {
         let store = MemoryAssetStore::new();
-
-        let id = store.create_asset(Asset::new("hash", "text/plain", 50)).await.unwrap();
+        let blob_hash: BlobHash = "hash".parse().unwrap();    
+        let id = store.create_asset(Asset::new(blob_hash, "text/plain", 50)).await.unwrap();
         assert!(store.exists(&id).await.unwrap());
 
         assert!(store.delete(&id).await.unwrap());
@@ -102,9 +106,10 @@ mod tests {
     #[tokio::test]
     async fn test_same_blob_different_ids() {
         let store = MemoryAssetStore::new();
+        let blob_hash: BlobHash = "same_hash".parse().unwrap();
 
-        let id1 = store.create_asset(Asset::new("same_hash", "image/png", 100)).await.unwrap();
-        let id2 = store.create_asset(Asset::new("same_hash", "image/png", 100)).await.unwrap();
+        let id1 = store.create_asset(Asset::new(blob_hash.clone(), "image/png", 100)).await.unwrap();
+        let id2 = store.create_asset(Asset::new(blob_hash, "image/png", 100)).await.unwrap();
 
         // Different IDs for same blob
         assert_ne!(id1.as_str(), id2.as_str());
