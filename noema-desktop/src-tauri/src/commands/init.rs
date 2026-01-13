@@ -8,7 +8,7 @@ use noema_core::McpRegistry;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::commands::chat::start_engine_event_loop;
+use crate::commands::chat::start_event_receiver_loop;
 use crate::gdocs_server::{self, GDocsServerState};
 use crate::logging::log_message;
 use crate::state::AppState;
@@ -40,7 +40,8 @@ pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result
     }
 
     // Run initialization, resetting the lock on error so retry is possible
-    match do_init(app, &state).await {
+    let state_arc = state.inner().clone();
+    match do_init(app, state_arc).await {
         Ok(result) => Ok(result),
         Err(e) => {
             // Reset the lock so user can retry after fixing the issue
@@ -52,43 +53,43 @@ pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result
     }
 }
 
-async fn do_init(app: AppHandle, state: &AppState) -> Result<String, String> {
+async fn do_init(app: AppHandle, state: Arc<AppState>) -> Result<String, String> {
     log_message("Starting app initialization");
 
     // Load config first so env vars are available
     init_config()?;
     log_message("Config loaded");
 
-    init_storage(state).await.map_err(|e| {
+    init_storage(&state).await.map_err(|e| {
         log_message(&format!("ERROR in init_storage: {}", e));
         e
     })?;
     log_message("Storage initialized");
 
-    init_user(state).await.map_err(|e| {
+    init_user(&state).await.map_err(|e| {
         log_message(&format!("ERROR in init_user: {}", e));
         e
     })?;
     log_message("User initialized");
 
     // Initialize default model name (no engine yet - created when conversation is loaded)
-    let model_name = init_default_model(state).await?;
+    let model_name = init_default_model(&state).await?;
     log_message(&format!("Default model set: {}", model_name));
 
     // Start embedded Google Docs MCP server
     start_gdocs_server(&app).await;
 
     // Initialize MCP registry (global, not per-conversation)
-    let mcp_registry = init_mcp(state)?;
+    let mcp_registry = init_mcp(&state)?;
     log_message("MCP registry loaded");
 
-    // Start the engine event loop (runs continuously, polls all loaded engines)
-    start_engine_event_loop(app.clone());
-    log_message("Event loop started");
-
     // Start auto-connect for MCP servers (runs in background)
-    start_mcp_auto_connect(app, mcp_registry).await;
+    start_mcp_auto_connect(app.clone(), mcp_registry).await;
     log_message("MCP auto-connect started");
+
+    // Start the shared event receiver loop (listens for events from all managers)
+    start_event_receiver_loop(app, state).await;
+    log_message("Event receiver loop started");
 
     Ok(model_name)
 }
