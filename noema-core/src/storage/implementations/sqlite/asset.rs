@@ -9,7 +9,7 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{BlobHash, stored, Asset, Stored};
+use crate::storage::types::{stored, Asset, Stored};
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -100,7 +100,7 @@ impl AssetStore for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::types::blob;
+    use crate::storage::types::blob::BlobHash;
 
     use super::*;
     use rusqlite::Connection;

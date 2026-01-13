@@ -84,8 +84,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             ContentBlock::Text { text } => {
                 let content_block =
                     ContentBlockData::plain(&text).with_origin(ContentOrigin::from_kind(origin));
-                let result = self.content_block_store.store(content_block).await?;
-                Ok(StoredContent::text_ref(result.id))
+                let content_block_id = self.content_block_store.store(content_block).await?;
+                Ok(StoredContent::text_ref(content_block_id))
             }
             ContentBlock::Image { data, mime_type } => {
                 let asset_id = self.store_asset(&data, &mime_type).await?;
@@ -119,8 +119,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                 InputContent::Text { text } => {
                     let content_block =
                         ContentBlockData::plain(&text).with_origin(ContentOrigin::from_kind(origin));
-                    let result = self.content_block_store.store(content_block).await?;
-                    StoredContent::text_ref(result.id)
+                    let content_block_id = self.content_block_store.store(content_block).await?;
+                    StoredContent::text_ref(content_block_id)
                 }
                 InputContent::Image { data, mime_type } => {
                     let asset_id = self.store_asset(&data, &mime_type).await?;
