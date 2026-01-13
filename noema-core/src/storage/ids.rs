@@ -71,6 +71,24 @@ macro_rules! define_id {
                 id.0
             }
         }
+
+        #[cfg(feature = "rusqlite")]
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                value: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                value.as_str().map(|s| Self(s.to_string()))
+            }
+        }
+
+        #[cfg(feature = "rusqlite")]
+        impl rusqlite::types::ToSql for $name {
+            fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+                Ok(rusqlite::types::ToSqlOutput::Borrowed(
+                    rusqlite::types::ValueRef::Text(self.0.as_bytes()),
+                ))
+            }
+        }
     };
 }
 
