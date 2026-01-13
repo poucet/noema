@@ -461,6 +461,16 @@ impl From<noema_core::storage::ViewInfo> for ThreadInfoResponse {
 // Event Payloads - typed payloads for Tauri events
 // =============================================================================
 
+/// Payload for user_message event (immediate feedback when user sends)
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/generated/")]
+pub struct UserMessageEvent {
+    #[ts(type = "string")]
+    pub conversation_id: ConversationId,
+    pub message: DisplayMessage,
+}
+
 /// Payload for streaming_message event
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -556,6 +566,7 @@ mod ts_export {
         McpToolInfo::export_all().expect("Failed to export McpToolInfo");
         AddMcpServerRequest::export_all().expect("Failed to export AddMcpServerRequest");
         Attachment::export_all().expect("Failed to export Attachment");
+        UserMessageEvent::export_all().expect("Failed to export UserMessageEvent");
         StreamingMessageEvent::export_all().expect("Failed to export StreamingMessageEvent");
         MessageCompleteEvent::export_all().expect("Failed to export MessageCompleteEvent");
         ErrorEvent::export_all().expect("Failed to export ErrorEvent");

@@ -6,7 +6,7 @@ use noema_core::storage::coordinator::StorageCoordinator;
 use noema_core::storage::ids::{ConversationId, UserId};
 use noema_core::storage::traits::StorageTypes;
 use noema_core::storage::{FsBlobStore, SqliteStore};
-use noema_core::{ChatEngine, McpRegistry};
+use noema_core::{ConversationManager, McpRegistry};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
@@ -31,13 +31,13 @@ impl StorageTypes for AppStorage {
 }
 
 pub type AppCoordinator = StorageCoordinator<AppStorage>;
-pub type AppEngine = ChatEngine<AppStorage>;
+pub type AppManager = ConversationManager<AppStorage>;
 
 pub struct AppState {
     /// Storage coordinator - initialized once at startup
     pub coordinator: OnceCell<Arc<AppCoordinator>>,
-    /// Engines per conversation - enables parallel conversations
-    pub engines: Mutex<HashMap<ConversationId, AppEngine>>,
+    /// Managers per conversation - enables parallel conversations
+    pub managers: Mutex<HashMap<ConversationId, AppManager>>,
     /// MCP registry (shared across all conversations) - initialized once at startup
     pub mcp_registry: OnceCell<Arc<Mutex<McpRegistry>>>,
     /// Current user ID (from database)
@@ -66,7 +66,7 @@ impl AppState {
 
         Self {
             coordinator: OnceCell::new(),
-            engines: Mutex::new(HashMap::new()),
+            managers: Mutex::new(HashMap::new()),
             mcp_registry: OnceCell::new(),
             user_id: Mutex::new(UserId::new()),
             model_id: Mutex::new(String::new()),

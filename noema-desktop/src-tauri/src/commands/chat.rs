@@ -1,9 +1,8 @@
 //! Chat-related Tauri commands
 
 use llm::{Role, create_model, list_all_models};
-use noema_core::{ChatEngine, CommitMode, EngineEvent, ToolConfig as CoreToolConfig};
+use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
 use noema_core::storage::{ConversationStore, TurnStore, Session, MessageRole, InputContent};
-use noema_core::storage::DocumentResolver;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -13,6 +12,7 @@ use crate::state::AppState;
 use crate::types::{
     ConversationInfo, DisplayMessage, ErrorEvent, TruncatedEvent, DisplayInputContent,
     MessageCompleteEvent, ModelChangedEvent, ModelInfo, StreamingMessageEvent, ToolConfig,
+    UserMessageEvent,
 };
 
 

@@ -16,8 +16,8 @@ use crate::context::ConversationContext;
 use crate::engine::{CommitMode, ToolConfig};
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
-use crate::storage::ids::{ConversationId, TurnId};
-use crate::storage::session::Session;
+use crate::storage::ids::{ConversationId, TurnId, ViewId};
+use crate::storage::session::{Session, ResolvedMessage};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::{MessageRole, OriginKind, SpanRole};
 use crate::storage::DocumentResolver;
@@ -72,6 +72,7 @@ pub enum ManagerEvent {
 /// All operations are processed in a background task to avoid blocking.
 pub struct ConversationManager<S: StorageTypes> {
     conversation_id: ConversationId,
+    session: Arc<Mutex<Session<S>>>,
     coordinator: Arc<StorageCoordinator<S>>,
     mcp_registry: Arc<Mutex<McpRegistry>>,
     cmd_tx: mpsc::UnboundedSender<ManagerCommand>,
@@ -113,6 +114,7 @@ impl<S: StorageTypes> ConversationManager<S> {
 
         Self {
             conversation_id,
+            session,
             coordinator,
             mcp_registry,
             cmd_tx,
@@ -413,6 +415,26 @@ impl<S: StorageTypes> ConversationManager<S> {
     /// Get current model name
     pub fn model_name(&self) -> &str {
         self.model.name()
+    }
+
+    /// Get the current view ID
+    pub async fn view_id(&self) -> ViewId {
+        self.session.lock().await.view_id().clone()
+    }
+
+    /// Get committed messages for display
+    pub async fn messages_for_display(&self) -> Vec<ResolvedMessage> {
+        self.session.lock().await.messages_for_display().to_vec()
+    }
+
+    /// Get pending (uncommitted) messages
+    pub async fn pending_messages(&self) -> Vec<ChatMessage> {
+        self.session.lock().await.pending_messages().to_vec()
+    }
+
+    /// Clear the session cache (used when view selection changes)
+    pub async fn clear_cache(&self) {
+        self.session.lock().await.clear_cache();
     }
 }
 
