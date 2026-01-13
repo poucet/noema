@@ -230,7 +230,6 @@ This ensures no orphan spans are created if the LLM call fails.
 
 **StorageCoordinator:**
 - `get_context_before_turn(view_id, turn_id)` - Returns resolved messages up to (not including) the turn
-- `add_span_at_turn(view_id, turn_id, model_id)` - Creates span at turn, selects it in view, returns SpanId
 
 **Session:**
 - `truncate_to_turn(turn_id)` - Sets session cache to context before the turn
