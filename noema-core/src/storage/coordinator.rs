@@ -11,7 +11,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
-use llm::ContentBlock;
+use llm::{ContentBlock, Role};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ use crate::storage::traits::{
     AssetStore, BlobStore, ConversationStore, StorageTypes, Stores, TextStore, TurnStore,
 };
 use crate::storage::types::{
-    Asset, BlobHash, ContentBlock as ContentBlockData, ContentOrigin, MessageRole, OriginKind,
+    Asset, BlobHash, ContentBlock as ContentBlockData, ContentOrigin, OriginKind,
     TurnWithContent,
 };
 
@@ -331,7 +331,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         &self,
         span_id: &SpanId,
         turn_id: &TurnId,
-        role: MessageRole,
+        role: Role,
         content: Vec<ContentBlock>,
         origin: OriginKind,
     ) -> Result<ResolvedMessage> {

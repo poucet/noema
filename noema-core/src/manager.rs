@@ -18,7 +18,7 @@ use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, TurnId, ViewId};
 use crate::storage::session::{ResolvedMessage, Session};
 use crate::storage::traits::StorageTypes;
-use crate::storage::types::{MessageRole, OriginKind};
+use crate::storage::types::OriginKind;
 use crate::storage::DocumentResolver;
 use crate::{Agent, McpAgent, McpRegistry, McpToolRegistry};
 
@@ -351,9 +351,8 @@ impl<S: StorageTypes> ConversationManager<S> {
         let mut current_role = None;
 
         for msg in pending {
-            let msg_role = llm_role_to_message_role(msg.role);
-            let origin = llm_role_to_origin(msg.role);
-            let span_role = Role::from(msg_role);
+            let origin = OriginKind::from(msg.role);
+            let span_role = msg.role;
 
             // Get or create turn and span based on commit mode
             let (turn_id, span_id) = match commit_mode {
@@ -382,7 +381,7 @@ impl<S: StorageTypes> ConversationManager<S> {
             };
 
             let resolved = coordinator
-                .add_message(&span_id, &turn_id, msg_role, msg.payload.content, origin)
+                .add_message(&span_id, &turn_id, msg.role, msg.payload.content, origin)
                 .await?;
             sess.add_resolved(resolved);
         }
@@ -440,6 +439,11 @@ impl<S: StorageTypes> ConversationManager<S> {
         self.session.lock().await.all_messages()
     }
 
+    /// Get messages for display with turn_id preserved (for alternates enrichment)
+    pub async fn messages_for_display(&self) -> Vec<ResolvedMessage> {
+        self.session.lock().await.messages_for_display().to_vec()
+    }
+
     /// Clear the session cache (used when view selection changes)
     pub async fn clear_cache(&self) {
         self.session.lock().await.clear_cache();
@@ -449,14 +453,6 @@ impl<S: StorageTypes> ConversationManager<S> {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-fn llm_role_to_message_role(role: llm::Role) -> MessageRole {
-    match role {
-        llm::Role::User => MessageRole::User,
-        llm::Role::Assistant => MessageRole::Assistant,
-        llm::Role::System => MessageRole::System,
-    }
-}
 
 fn llm_role_to_origin(role: llm::Role) -> OriginKind {
     match role {

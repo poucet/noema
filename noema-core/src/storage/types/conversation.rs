@@ -14,80 +14,6 @@ use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::types::Stored;
 
-// ============================================================================
-// Message Role
-// ============================================================================
-
-/// Role for individual messages within a span
-///
-/// While spans have a Role (system/user/assistant), individual messages can have
-/// more specific roles for multi-step flows (e.g., tool calls within an assistant span).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MessageRole {
-    /// User message
-    User,
-    /// Assistant message
-    Assistant,
-    /// System message
-    System,
-    /// Tool call or result
-    Tool,
-}
-
-impl MessageRole {
-    /// Get static string representation (zero allocation)
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::System => "system",
-            MessageRole::Tool => "tool",
-        }
-    }
-}
-
-impl std::fmt::Display for MessageRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for MessageRole {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "user" => Ok(MessageRole::User),
-            "assistant" => Ok(MessageRole::Assistant),
-            "system" => Ok(MessageRole::System),
-            "tool" => Ok(MessageRole::Tool),
-            _ => Err(()),
-        }
-    }
-}
-
-/// Convert from LLM Role to MessageRole
-impl From<llm::api::Role> for MessageRole {
-    fn from(role: llm::api::Role) -> Self {
-        match role {
-            llm::api::Role::User => MessageRole::User,
-            llm::api::Role::Assistant => MessageRole::Assistant,
-            llm::api::Role::System => MessageRole::System,
-        }
-    }
-}
-
-impl From<MessageRole> for llm::Role {
-    fn from(role: MessageRole) -> Self {
-        match role {
-            MessageRole::User => llm::Role::User,
-            MessageRole::Assistant => llm::Role::Assistant,
-            MessageRole::System => llm::Role::System,
-            MessageRole::Tool => llm::Role::User,
-        }
-    }
-}
 
 // ============================================================================
 // Turn
@@ -185,12 +111,12 @@ pub struct Message {
     /// Order within span (0-indexed)
     pub sequence_number: i32,
     /// Message role (can differ from span role for tool messages)
-    pub role: MessageRole,
+    pub role: Role,
 }
 
 impl Message {
     /// Create a new message
-    pub fn new(span_id: SpanId, sequence_number: i32, role: MessageRole) -> Self {
+    pub fn new(span_id: SpanId, sequence_number: i32, role: Role) -> Self {
         Self {
             span_id,
             sequence_number,
@@ -330,19 +256,4 @@ impl Conversation {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_message_role_roundtrip() {
-        for role in [
-            MessageRole::User,
-            MessageRole::Assistant,
-            MessageRole::System,
-            MessageRole::Tool,
-        ] {
-            let s = role.as_str();
-            let parsed: MessageRole = s.parse().unwrap();
-            assert_eq!(parsed, role);
-        }
-    }
 }

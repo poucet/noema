@@ -69,7 +69,7 @@ pub use types::{
     // ContentBlock
     ContentBlock, ContentOrigin, ContentType, OriginKind,
     // Conversation
-    Conversation, ForkInfo, Message, MessageRole, MessageWithContent, Span,
+    Conversation, ForkInfo, Message, MessageWithContent, Span,
     Turn, TurnWithContent, View, ViewSelection,
     // Document
     Document, DocumentRevision, DocumentSource, DocumentTab,

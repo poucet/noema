@@ -2,7 +2,7 @@
 
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{ConversationStore, DocumentResolver, InputContent, MessageRole, Session, StorageTypes, Stores, TurnStore};
+use noema_core::storage::{ConversationStore, DocumentResolver, InputContent, Session, StorageTypes, Stores, TurnStore};
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -332,8 +332,9 @@ pub async fn load_conversation(
         let managers = state.managers.lock().await;
         if let Some(manager) = managers.get(&conversation_id) {
             let view_id = manager.view_id().await;
+            // Use messages_for_display to preserve turn_id for alternates enrichment
             let messages: Vec<DisplayMessage> = manager
-                .all_messages()
+                .messages_for_display()
                 .await
                 .iter()
                 .map(DisplayMessage::from)
@@ -545,12 +546,7 @@ pub async fn get_span_messages(
     Ok(messages
         .into_iter()
         .map(|m| DisplayMessage {
-            role: match m.message.role {
-                MessageRole::User => Role::User,
-                MessageRole::Assistant => Role::Assistant,
-                MessageRole::System => Role::System,
-                MessageRole::Tool => Role::Assistant,
-            },
+            role: llm::Role::from(m.message.role),
             content: vec![],
             turn_id: None,
             span_id: Some(span_id.clone()),

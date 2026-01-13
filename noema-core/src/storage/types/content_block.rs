@@ -2,6 +2,7 @@
 //!
 //! Content blocks are immutable text content with origin metadata.
 
+use llm::Role;
 use serde::{Deserialize, Serialize};
 
 use crate::storage::ids::{ContentBlockId, UserId};
@@ -43,6 +44,16 @@ impl OriginKind {
             "system" => Some(OriginKind::System),
             "import" => Some(OriginKind::Import),
             _ => None,
+        }
+    }
+}
+
+impl From<Role> for OriginKind {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::User => OriginKind::User,
+            Role::Assistant => OriginKind::Assistant,
+            Role::System => OriginKind::System,
         }
     }
 }

@@ -11,7 +11,7 @@ use llm::Role;
 use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::types::{
-    Message, MessageRole, MessageWithContent, Span,
+    Message, MessageWithContent, Span,
     Stored, Turn, TurnWithContent, View,
 };
 
@@ -65,7 +65,7 @@ pub trait TurnStore: Send + Sync {
     async fn add_message(
         &self,
         span_id: &SpanId,
-        role: MessageRole,
+        role: Role,
         content: &[StoredContent],
     ) -> Result<StoredMessage>;
 
@@ -140,7 +140,7 @@ pub trait TurnStore: Send + Sync {
         &self,
         view_id: &ViewId,
         turn_id: &TurnId,
-        messages: Vec<(MessageRole, Vec<StoredContent>)>,
+        messages: Vec<(Role, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
     ) -> Result<(StoredSpan, Option<StoredView>)>;

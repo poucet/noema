@@ -2,12 +2,13 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use llm::Role;
 
 use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    Message, MessageRole, MessageWithContent, Span, Stored, Turn, TurnWithContent, View,
+    Message, MessageWithContent, Span, Stored, Turn, TurnWithContent, View,
 };
 
 /// Mock turn store that returns unimplemented for all operations
@@ -33,7 +34,7 @@ impl TurnStore for MockTurnStore {
     async fn add_message(
         &self,
         _: &SpanId,
-        _: MessageRole,
+        _: Role,
         _: &[StoredContent],
     ) -> Result<Stored<MessageId, Message>> {
         unimplemented!()
@@ -72,7 +73,7 @@ impl TurnStore for MockTurnStore {
         &self,
         _: &ViewId,
         _: &TurnId,
-        _: Vec<(MessageRole, Vec<StoredContent>)>,
+        _: Vec<(Role, Vec<StoredContent>)>,
         _: Option<&str>,
         _: bool,
     ) -> Result<(Stored<SpanId, Span>, Option<Stored<ViewId, View>>)> {

@@ -17,7 +17,7 @@ use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, SpanId, TurnId, ViewId};
 use crate::storage::traits::StorageTypes;
-use crate::storage::types::{MessageRole, OriginKind};
+use crate::storage::types::OriginKind;
 
 use super::types::{ResolvedContent, ResolvedMessage};
 
@@ -253,9 +253,8 @@ impl<S: StorageTypes> Session<S> {
         let mut current_role: Option<Role> = None;
 
         for msg in messages {
-            let msg_role = llm_role_to_message_role(msg.role);
-            let origin = llm_role_to_origin(msg.role);
-            let span_role = Role::from(msg_role);
+            let origin = OriginKind::from(msg.role);
+            let span_role = msg.role;
 
             // Get or create turn and span based on commit mode and role changes
             match commit_mode {
@@ -286,7 +285,7 @@ impl<S: StorageTypes> Session<S> {
             let span_id = current_span.as_ref().unwrap();
 
             let resolved = self.coordinator
-                .add_message(span_id, turn_id, msg_role, msg.payload.content, origin)
+                .add_message(span_id, turn_id, msg.role, msg.payload.content, origin)
                 .await?;
             self.resolved_cache.push(resolved);
         }
@@ -380,25 +379,3 @@ fn resolved_message_to_blocks(msg: &ResolvedMessage) -> Vec<ContentBlock> {
         })
         .collect()
 }
-
-fn llm_role_to_message_role(role: llm::Role) -> MessageRole {
-    match role {
-        llm::Role::User => MessageRole::User,
-        llm::Role::Assistant => MessageRole::Assistant,
-        llm::Role::System => MessageRole::System,
-    }
-}
-
-fn llm_role_to_origin(role: llm::Role) -> OriginKind {
-    match role {
-        llm::Role::User => OriginKind::User,
-        llm::Role::Assistant => OriginKind::Assistant,
-        llm::Role::System => OriginKind::System,
-    }
-}
-
-// ============================================================================
-// MessageRole -> llm::Role conversion
-// ============================================================================
-
-

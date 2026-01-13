@@ -4,10 +4,10 @@
 //! - `ResolvedContent` - Content with text resolved, assets/docs cached lazily
 //! - `ResolvedMessage` - A message with resolved content
 
-use llm::{ContentBlock, ToolCall, ToolResult};
+use llm::{ContentBlock, Role, ToolCall, ToolResult};
 
 use crate::storage::ids::{AssetId, DocumentId, TurnId};
-use crate::storage::types::{BlobHash, MessageRole};
+use crate::storage::types::{BlobHash};
 
 // ============================================================================
 // ResolvedMessage - cached for display and LLM
@@ -16,14 +16,14 @@ use crate::storage::types::{BlobHash, MessageRole};
 /// A resolved message with cached content
 #[derive(Clone, Debug)]
 pub struct ResolvedMessage {
-    pub role: MessageRole,
+    pub role: Role,
     pub content: Vec<ResolvedContent>,
     /// Turn this message belongs to (for truncation)
     pub turn_id: TurnId,
 }
 
 impl ResolvedMessage {
-    pub fn new(role: MessageRole, content: Vec<ResolvedContent>, turn_id: TurnId) -> Self {
+    pub fn new(role: Role, content: Vec<ResolvedContent>, turn_id: TurnId) -> Self {
         Self { role, content, turn_id }
     }
 }

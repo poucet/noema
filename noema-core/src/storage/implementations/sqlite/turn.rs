@@ -13,7 +13,7 @@ use crate::storage::ids::{
 };
 use crate::storage::traits::{StoredMessage, StoredSpan, StoredTurn, StoredView, TurnStore};
 use crate::storage::types::{
-    stored, ForkInfo, Message, MessageRole, MessageWithContent, Span,
+    stored, ForkInfo, Message, MessageWithContent, Span,
     Turn, TurnWithContent, View,
 };
 
@@ -261,7 +261,7 @@ impl TurnStore for SqliteStore {
     async fn add_message(
         &self,
         span_id: &SpanId,
-        role: MessageRole,
+        role: Role,
         content: &[StoredContent],
     ) -> Result<StoredMessage> {
         let conn = self.conn().lock().unwrap();
@@ -316,7 +316,7 @@ impl TurnStore for SqliteStore {
             })?
             .filter_map(|r| r.ok())
             .filter_map(|(id, sid, seq, role_str, created)| {
-                let role = role_str.parse::<MessageRole>().ok()?;
+                let role = role_str.parse::<Role>().ok()?;
                 let message = Message::new(sid, seq, role);
                 Some(stored(id, message, created))
             })
@@ -350,7 +350,7 @@ impl TurnStore for SqliteStore {
         match result {
             Ok((id, sid, seq, role_str, created)) => {
                 let role = role_str
-                    .parse::<MessageRole>()
+                    .parse::<Role>()
                     .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
                 let message = Message::new(sid, seq, role);
                 Ok(Some(stored(id, message, created)))
@@ -638,7 +638,7 @@ impl TurnStore for SqliteStore {
         &self,
         view_id: &ViewId,
         turn_id: &TurnId,
-        messages: Vec<(MessageRole, Vec<StoredContent>)>,
+        messages: Vec<(Role, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
     ) -> Result<(StoredSpan, Option<StoredView>)> {
@@ -793,14 +793,14 @@ mod tests {
         let content_block_id = ContentBlockId::new();
         let content = vec![StoredContent::text_ref(content_block_id)];
         let _message = store
-            .add_message(&span.id, MessageRole::User, &content)
+            .add_message(&span.id, Role::User, &content)
             .await
             .unwrap();
 
         // Verify message (get_messages returns MessageWithContent)
         let messages = store.get_messages(&span.id).await.unwrap();
         assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].message.role, MessageRole::User);
+        assert_eq!(messages[0].message.role, Role::User);
         assert_eq!(messages[0].content.len(), 1);
 
         // Check span message count updated
@@ -820,7 +820,7 @@ mod tests {
         let span1 = store.create_span(&turn1.id, None).await.unwrap();
         let content_block_id = ContentBlockId::new();
         let content = vec![StoredContent::text_ref(content_block_id)];
-        store.add_message(&span1.id, MessageRole::User, &content).await.unwrap();
+        store.add_message(&span1.id, Role::User, &content).await.unwrap();
         store.select_span(&view.id, &turn1.id, &span1.id).await.unwrap();
 
         // Create assistant turn with span and message, select in view
@@ -828,7 +828,7 @@ mod tests {
         let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
         let content_block_id2 = ContentBlockId::new();
         let content2 = vec![StoredContent::text_ref(content_block_id2)];
-        store.add_message(&span2.id, MessageRole::Assistant, &content2).await.unwrap();
+        store.add_message(&span2.id, Role::Assistant, &content2).await.unwrap();
         store.select_span(&view.id, &turn2.id, &span2.id).await.unwrap();
 
         // Get view path
