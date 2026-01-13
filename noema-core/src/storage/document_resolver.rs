@@ -12,12 +12,12 @@ use llm::{ChatRequest, ContentBlock};
 
 use crate::storage::ids::{DocumentId, TabId};
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::{Document, DocumentTab, Editable, Stored};
+use crate::storage::types::{Document, DocumentTab, StoredEditable};
 
 /// A resolved document with its content and tabs
 pub struct ResolvedDocument {
-    pub document: Stored<DocumentId, Editable<Document>>,
-    pub tabs: Vec<Stored<TabId, Editable<DocumentTab>>>,
+    pub document: StoredEditable<DocumentId, Document>,
+    pub tabs: Vec<StoredEditable<TabId, DocumentTab>>,
 }
 
 /// Trait for resolving document references to their content
