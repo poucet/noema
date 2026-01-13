@@ -439,9 +439,9 @@ pub async fn get_turn_alternates(
     state: State<'_, Arc<AppState>>,
     turn_id: TurnId,
 ) -> Result<Vec<SpanInfoResponse>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let spans = coordinator
+    let spans = stores.turn()
         .get_spans(&turn_id)
         .await
         .map_err(|e| format!("Failed to get spans: {}", e))?;
@@ -464,10 +464,10 @@ pub async fn get_span_messages(
     state: State<'_, Arc<AppState>>,
     span_id: SpanId,
 ) -> Result<Vec<DisplayMessage>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let messages = coordinator
-        .get_span_messages(&span_id)
+    let messages = stores.turn()
+        .get_messages(&span_id)
         .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
 
@@ -494,12 +494,19 @@ pub async fn list_conversation_views(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<ThreadInfoResponse>, String> {
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let main_view = coordinator
-        .get_main_view(&conversation_id)
+    let conv = stores.conversation()
+        .get_conversation(&conversation_id)
         .await
-        .map_err(|e| format!("Failed to get main view: {}", e))?;
+        .map_err(|e| format!("Failed to get conversation: {}", e))?
+        .ok_or_else(|| format!("Conversation not found: {}", conversation_id))?;
+
+    let main_view = stores.turn()
+        .get_view(&conv.main_view_id)
+        .await
+        .map_err(|e| format!("Failed to get main view: {}", e))?
+        .ok_or_else(|| format!("View not found: {}", conv.main_view_id))?;
 
     Ok(vec![ThreadInfoResponse::from(main_view)])
 }
@@ -552,9 +559,9 @@ pub async fn fork_conversation(
         manager.view_id().await
     };
 
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    let new_view = coordinator
+    let new_view = stores.turn()
         .fork_view(&current_view_id, &at_turn_id)
         .await
         .map_err(|e| format!("Failed to fork conversation: {}", e))?;
@@ -607,9 +614,9 @@ pub async fn select_span(
         manager.view_id().await
     };
 
-    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
 
-    coordinator
+    stores.turn()
         .select_span(&current_view_id, &turn_id, &span_id)
         .await
         .map_err(|e| format!("Failed to select span: {}", e))?;
