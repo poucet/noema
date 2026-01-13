@@ -266,7 +266,13 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         for item in content {
             let r = match item {
                 StoredContent::TextRef { content_block_id } => {
-                    let text = self.content_block_store.require_text(content_block_id).await?;
+                    let text = self
+                        .content_block_store
+                        .get_text(content_block_id)
+                        .await?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Content block not found: {}", content_block_id)
+                        })?;
                     ResolvedContent::text(text)
                 }
                 StoredContent::AssetRef {
@@ -359,19 +365,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
 
         self.resolve_path(&context_path).await
     }
-
-    /// Add a new span at an existing turn.
-    ///
-    /// Creates a new span at the turn and selects it in the view.
-    /// Returns the span ID for adding messages.
-    pub async fn add_span_at_turn(
-        &self,
-        view_id: &ViewId,
-        turn_id: &TurnId,
-        model_id: Option<&str>,
-    ) -> Result<SpanId> {
-        self.create_and_select_span(view_id, turn_id, model_id).await
-    }
 }
 
 /// Implement ContentResolver for the generic coordinator
@@ -402,253 +395,11 @@ impl<S: StorageTypes> ContentResolver for StorageCoordinator<S> {
 mod tests {
     use super::*;
     use crate::storage::content::StoredContent;
-    use crate::storage::ids::{ConversationId, DocumentId, MessageId, RevisionId, SpanId, TabId, TurnId, ViewId};
-    use crate::storage::traits::{AssetStore, BlobStore, ConversationStore, DocumentStore, TextStore, TurnStore, UserStore};
-    use crate::storage::types::{
-        ConversationInfo, DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
-        FullDocumentInfo, MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole,
-        StoredAsset, StoredBlob, StoreResult, StoredContentBlock, TurnInfo, TurnWithContent,
-        UserInfo, ViewInfo,
+    use crate::storage::implementations::mock::{
+        MockAssetStore, MockBlobStore, MockConversationStore, MockStorage, MockTextStore,
+        MockTurnStore,
     };
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    use uuid::Uuid;
-
-    /// Mock storage types bundled together
-    struct MockStorage;
-
-    impl StorageTypes for MockStorage {
-        type Blob = MockBlobStore;
-        type Asset = MockAssetStore;
-        type Text = MockTextStore;
-        type Conversation = MockConversationStore;
-        type Turn = MockTurnStore;
-        type User = MockUserStore;
-        type Document = MockDocumentStore;
-    }
-
-    // Mock conversation store
-    struct MockConversationStore;
-
-    #[async_trait]
-    impl ConversationStore for MockConversationStore {
-        async fn create_conversation(&self, _: &UserId, _: Option<&str>) -> Result<ConversationId> { unimplemented!() }
-        async fn get_conversation(&self, _: &ConversationId) -> Result<Option<ConversationInfo>> { unimplemented!() }
-        async fn list_conversations(&self, _: &UserId) -> Result<Vec<ConversationInfo>> { unimplemented!() }
-        async fn delete_conversation(&self, _: &ConversationId) -> Result<()> { unimplemented!() }
-        async fn rename_conversation(&self, _: &ConversationId, _: Option<&str>) -> Result<()> { unimplemented!() }
-        async fn is_conversation_private(&self, _: &ConversationId) -> Result<bool> { unimplemented!() }
-        async fn set_conversation_private(&self, _: &ConversationId, _: bool) -> Result<()> { unimplemented!() }
-        async fn set_main_view_id(&self, _: &ConversationId, _: &ViewId) -> Result<()> { unimplemented!() }
-    }
-
-    // Mock turn store
-    struct MockTurnStore;
-
-    #[async_trait]
-    impl TurnStore for MockTurnStore {
-        async fn create_turn(&self, _: SpanRole) -> Result<TurnInfo> { unimplemented!() }
-        async fn get_turn(&self, _: &TurnId) -> Result<Option<TurnInfo>> { unimplemented!() }
-        async fn create_span(&self, _: &TurnId, _: Option<&str>) -> Result<SpanInfo> { unimplemented!() }
-        async fn get_spans(&self, _: &TurnId) -> Result<Vec<SpanInfo>> { unimplemented!() }
-        async fn get_span(&self, _: &SpanId) -> Result<Option<SpanInfo>> { unimplemented!() }
-        async fn add_message(&self, _: &SpanId, _: MessageRole, _: &[StoredContent]) -> Result<MessageInfo> { unimplemented!() }
-        async fn get_messages(&self, _: &SpanId) -> Result<Vec<MessageWithContent>> { unimplemented!() }
-        async fn get_message(&self, _: &MessageId) -> Result<Option<MessageInfo>> { unimplemented!() }
-        async fn create_view(&self) -> Result<ViewInfo> { unimplemented!() }
-        async fn get_view(&self, _: &ViewId) -> Result<Option<ViewInfo>> { unimplemented!() }
-        async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> { unimplemented!() }
-        async fn get_selected_span(&self, _: &ViewId, _: &TurnId) -> Result<Option<SpanId>> { unimplemented!() }
-        async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
-        async fn fork_view(&self, _: &ViewId, _: &TurnId) -> Result<ViewInfo> { unimplemented!() }
-        async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
-        async fn edit_turn(&self, _: &ViewId, _: &TurnId, _: Vec<(MessageRole, Vec<StoredContent>)>, _: Option<&str>, _: bool) -> Result<(SpanInfo, Option<ViewInfo>)> { unimplemented!() }
-    }
-
-    // Mock user store
-    struct MockUserStore;
-
-    #[async_trait]
-    impl UserStore for MockUserStore {
-        async fn get_or_create_default_user(&self) -> Result<UserInfo> { unimplemented!() }
-        async fn get_user_by_email(&self, _: &str) -> Result<Option<UserInfo>> { unimplemented!() }
-        async fn get_or_create_user_by_email(&self, _: &str) -> Result<UserInfo> { unimplemented!() }
-        async fn list_users(&self) -> Result<Vec<UserInfo>> { unimplemented!() }
-    }
-
-    // Mock document store
-    struct MockDocumentStore;
-
-    #[async_trait]
-    impl DocumentStore for MockDocumentStore {
-        async fn create_document(&self, _: &UserId, _: &str, _: DocumentSource, _: Option<&str>) -> Result<DocumentId> { unimplemented!() }
-        async fn get_document(&self, _: &DocumentId) -> Result<Option<DocumentInfo>> { unimplemented!() }
-        async fn get_document_by_source(&self, _: &UserId, _: DocumentSource, _: &str) -> Result<Option<DocumentInfo>> { unimplemented!() }
-        async fn list_documents(&self, _: &UserId) -> Result<Vec<DocumentInfo>> { unimplemented!() }
-        async fn search_documents(&self, _: &UserId, _: &str, _: usize) -> Result<Vec<DocumentInfo>> { unimplemented!() }
-        async fn update_document_title(&self, _: &DocumentId, _: &str) -> Result<()> { unimplemented!() }
-        async fn delete_document(&self, _: &DocumentId) -> Result<bool> { unimplemented!() }
-        async fn create_document_tab(&self, _: &DocumentId, _: Option<&TabId>, _: i32, _: &str, _: Option<&str>, _: Option<&str>, _: &[AssetId], _: Option<&TabId>) -> Result<TabId> { unimplemented!() }
-        async fn get_document_tab(&self, _: &TabId) -> Result<Option<DocumentTabInfo>> { unimplemented!() }
-        async fn list_document_tabs(&self, _: &DocumentId) -> Result<Vec<DocumentTabInfo>> { unimplemented!() }
-        async fn update_document_tab_content(&self, _: &TabId, _: &str, _: &[AssetId]) -> Result<()> { unimplemented!() }
-        async fn update_document_tab_parent(&self, _: &TabId, _: Option<&TabId>) -> Result<()> { unimplemented!() }
-        async fn set_document_tab_revision(&self, _: &TabId, _: &RevisionId) -> Result<()> { unimplemented!() }
-        async fn delete_document_tab(&self, _: &TabId) -> Result<bool> { unimplemented!() }
-        async fn create_document_revision(&self, _: &TabId, _: &str, _: &str, _: &[AssetId], _: &UserId) -> Result<RevisionId> { unimplemented!() }
-        async fn get_document_revision(&self, _: &RevisionId) -> Result<Option<DocumentRevisionInfo>> { unimplemented!() }
-        async fn list_document_revisions(&self, _: &TabId) -> Result<Vec<DocumentRevisionInfo>> { unimplemented!() }
-    }
-
-    // Mock blob store for testing
-    struct MockBlobStore {
-        blobs: Mutex<HashMap<String, Vec<u8>>>,
-    }
-
-    impl MockBlobStore {
-        fn new() -> Self {
-            Self {
-                blobs: Mutex::new(HashMap::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl BlobStore for MockBlobStore {
-        async fn store(&self, data: &[u8]) -> Result<StoredBlob> {
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(data);
-            let hash = hex::encode(hasher.finalize());
-
-            let mut blobs = self.blobs.lock().unwrap();
-            let is_new = !blobs.contains_key(&hash);
-            blobs.insert(hash.clone(), data.to_vec());
-
-            Ok(StoredBlob {
-                hash,
-                size: data.len(),
-                is_new,
-            })
-        }
-
-        async fn get(&self, hash: &str) -> Result<Vec<u8>> {
-            let blobs = self.blobs.lock().unwrap();
-            blobs
-                .get(hash)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("Blob not found"))
-        }
-
-        async fn exists(&self, hash: &str) -> bool {
-            self.blobs.lock().unwrap().contains_key(hash)
-        }
-
-        async fn delete(&self, hash: &str) -> Result<bool> {
-            Ok(self.blobs.lock().unwrap().remove(hash).is_some())
-        }
-
-        async fn list_all(&self) -> Result<Vec<String>> {
-            Ok(self.blobs.lock().unwrap().keys().cloned().collect())
-        }
-    }
-
-    // Mock asset store for testing
-    struct MockAssetStore {
-        assets: Mutex<HashMap<String, Asset>>,
-    }
-
-    impl MockAssetStore {
-        fn new() -> Self {
-            Self {
-                assets: Mutex::new(HashMap::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl AssetStore for MockAssetStore {
-        async fn create_asset(&self, asset: Asset) -> Result<AssetId> {
-            let mut assets = self.assets.lock().unwrap();
-            let id = AssetId::from_string(Uuid::new_v4().to_string());
-            assets.insert(id.as_str().to_string(), asset);
-            Ok(id)
-        }
-
-        async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>> {
-            let assets = self.assets.lock().unwrap();
-            Ok(assets.get(id.as_str()).map(|asset| StoredAsset {
-                id: id.clone(),
-                asset: asset.clone(),
-                created_at: 0,
-            }))
-        }
-
-        async fn exists(&self, id: &AssetId) -> Result<bool> {
-            Ok(self.assets.lock().unwrap().contains_key(id.as_str()))
-        }
-
-        async fn delete(&self, id: &AssetId) -> Result<bool> {
-            Ok(self.assets.lock().unwrap().remove(id.as_str()).is_some())
-        }
-    }
-
-    // Mock content block store for testing
-    struct MockTextStore {
-        blocks: Mutex<HashMap<String, String>>,
-        counter: Mutex<u64>,
-    }
-
-    impl MockTextStore {
-        fn new() -> Self {
-            Self {
-                blocks: Mutex::new(HashMap::new()),
-                counter: Mutex::new(0),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl TextStore for MockTextStore {
-        async fn store(&self, block: ContentBlockData) -> Result<StoreResult> {
-            let mut counter = self.counter.lock().unwrap();
-            *counter += 1;
-            let id = ContentBlockId::from_string(format!("block-{}", *counter));
-            let hash = format!("hash-{}", *counter);
-
-            let mut blocks = self.blocks.lock().unwrap();
-            blocks.insert(id.as_str().to_string(), block.text);
-
-            Ok(StoreResult {
-                id,
-                hash,
-                is_new: true,
-            })
-        }
-
-        async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredContentBlock>> {
-            let blocks = self.blocks.lock().unwrap();
-            Ok(blocks.get(id.as_str()).map(|text| StoredContentBlock {
-                id: id.clone(),
-                content_hash: "hash".to_string(),
-                content: ContentBlockData::plain(text),
-                created_at: 0,
-            }))
-        }
-
-        async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>> {
-            let blocks = self.blocks.lock().unwrap();
-            Ok(blocks.get(id.as_str()).cloned())
-        }
-
-        async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
-            Ok(self.blocks.lock().unwrap().contains_key(id.as_str()))
-        }
-
-        async fn find_by_hash(&self, _hash: &str) -> Result<Option<ContentBlockId>> {
-            Ok(None)
-        }
-    }
+    use crate::storage::traits::AssetStore;
 
     fn make_coordinator(content_block_store: Arc<MockTextStore>) -> StorageCoordinator<MockStorage> {
         StorageCoordinator::new(
