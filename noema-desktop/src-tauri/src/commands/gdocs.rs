@@ -2,7 +2,6 @@
 //!
 //! Uses the episteme-compatible document model with documents, tabs, and revisions.
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
 use noema_core::storage::ids::{AssetId, DocumentId, TabId, UserId};
 use noema_core::storage::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo};
@@ -535,12 +534,8 @@ pub async fn import_google_doc(
     let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     for image in &extract_response.images {
-        let data = BASE64
-            .decode(&image.data_base64)
-            .map_err(|e| format!("Failed to decode image: {}", e))?;
-
         let asset_id = coordinator
-            .store_asset(&data, &image.mime_type)
+            .store_asset(&image.data_base64, &image.mime_type)
             .await
             .map_err(|e| format!("Failed to store image: {}", e))?;
 

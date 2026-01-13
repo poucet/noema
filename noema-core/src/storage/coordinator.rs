@@ -82,11 +82,11 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                 Ok(StoredContent::text_ref(result.id))
             }
             ContentBlock::Image { data, mime_type } => {
-                let asset_id = self.store_base64_asset(&data, &mime_type).await?;
+                let asset_id = self.store_asset(&data, &mime_type).await?;
                 Ok(StoredContent::asset_ref(asset_id, mime_type))
             }
             ContentBlock::Audio { data, mime_type } => {
-                let asset_id = self.store_base64_asset(&data, &mime_type).await?;
+                let asset_id = self.store_asset(&data, &mime_type).await?;
                 Ok(StoredContent::asset_ref(asset_id, mime_type))
             }
             ContentBlock::DocumentRef { id, .. } => Ok(StoredContent::document_ref(id)),
@@ -117,11 +117,11 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     StoredContent::text_ref(result.id)
                 }
                 InputContent::Image { data, mime_type } => {
-                    let asset_id = self.store_base64_asset(&data, &mime_type).await?;
+                    let asset_id = self.store_asset(&data, &mime_type).await?;
                     StoredContent::asset_ref(asset_id, mime_type)
                 }
                 InputContent::Audio { data, mime_type } => {
-                    let asset_id = self.store_base64_asset(&data, &mime_type).await?;
+                    let asset_id = self.store_asset(&data, &mime_type).await?;
                     StoredContent::asset_ref(asset_id, mime_type)
                 }
                 InputContent::DocumentRef { id } => StoredContent::document_ref(id),
@@ -137,24 +137,10 @@ impl<S: StorageTypes> StorageCoordinator<S> {
 
     /// Decode base64 data, store in blob storage, register in asset storage,
     /// and return the asset ID.
-    async fn store_base64_asset(&self, base64_data: &str, mime_type: &str) -> Result<AssetId> {
+    pub async fn store_asset(&self, base64_data: &str, mime_type: &str) -> Result<AssetId> {
         let bytes = STANDARD.decode(base64_data)?;
-        self.store_asset(&bytes, mime_type).await
-    }
-
-    /// Store raw bytes as an asset.
-    ///
-    /// Stores the data in blob storage and registers metadata in the asset store.
-    /// Returns the asset ID for referencing.
-    pub async fn store_asset(
-        &self,
-        data: &[u8],
-        mime_type: &str,
-    ) -> Result<AssetId> {
-        let stored_blob = self.blob_store.store(data).await?;
-
-        let asset = Asset::new(&stored_blob.hash, mime_type, data.len() as i64);
-
+        let stored_blob = self.blob_store.store(&bytes).await?;
+        let asset = Asset::new(&stored_blob.hash, mime_type, bytes.len() as i64);
         self.asset_store.create_asset(asset).await
     }
 

@@ -79,16 +79,10 @@ pub async fn store_asset(
     data: String,      // base64 encoded
     mime_type: String,
 ) -> Result<AssetId, String> {
-    use base64::Engine;
-
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(&data)
-        .map_err(|e| format!("Failed to decode base64: {}", e))?;
-
     let coordinator = state.get_coordinator()?;
 
     coordinator
-        .store_asset(&bytes, &mime_type)
+        .store_asset(&data, &mime_type)
         .await
         .map_err(|e| format!("Failed to store asset: {}", e))
 }
