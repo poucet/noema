@@ -38,6 +38,13 @@ pub enum EngineCommand {
     SendMessage(ChatPayload, ToolConfig),
     /// Process pending messages (already added to session via add_user_message)
     ProcessPending(ToolConfig),
+    /// Regenerate response at a specific turn
+    ///
+    /// Creates a new span at the turn and generates a new assistant response.
+    Regenerate {
+        turn_id: TurnId,
+        tool_config: ToolConfig,
+    },
     SetModel(Arc<dyn ChatModel + Send + Sync>),
     ClearHistory,
 }
@@ -248,6 +255,56 @@ impl<S: StorageTypes> ChatEngine<S> {
                         }
                     }
                 }
+                EngineCommand::Regenerate { turn_id, tool_config } => {
+                    // 1. Truncate context to before the turn
+                    let truncate_result = {
+                        let mut sess = session.lock().await;
+                        sess.truncate_to_turn(&turn_id).await
+                    };
+
+                    if let Err(e) = truncate_result {
+                        let _ = event_tx.send(EngineEvent::Error(format!("Failed to truncate context: {}", e)));
+                        continue;
+                    }
+
+                    // 2. Run LLM to generate new response
+                    let execute_result = {
+                        let mut sess = session.lock().await;
+                        if tool_config.enabled {
+                            agent.execute_stream(&mut *sess, model.clone()).await
+                        } else {
+                            agent.execute_stream_no_tools(&mut *sess, model.clone()).await
+                        }
+                    };
+
+                    match execute_result {
+                        Ok(_) => {
+                            // Send pending messages to UI
+                            {
+                                let sess = session.lock().await;
+                                for msg in sess.pending() {
+                                    let _ = event_tx.send(EngineEvent::Message(msg.clone()));
+                                }
+                            }
+
+                            // 3. Commit as new span at the turn (only if LLM succeeded)
+                            let model_id = model.id();
+                            let commit_result = {
+                                let mut sess = session.lock().await;
+                                sess.commit_at_turn(&turn_id, Some(model_id)).await
+                            };
+
+                            if let Err(e) = commit_result {
+                                let _ = event_tx.send(EngineEvent::Error(format!("Failed to commit: {}", e)));
+                            }
+
+                            let _ = event_tx.send(EngineEvent::MessageComplete);
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(EngineEvent::Error(e.to_string()));
+                        }
+                    }
+                }
                 EngineCommand::SetModel(new_model) => {
                     let name = new_model.name().to_string();
                     model = new_model;
@@ -270,6 +327,13 @@ impl<S: StorageTypes> ChatEngine<S> {
     /// Process pending messages that were added via session.add_user_message()
     pub fn process_pending(&self, tool_config: ToolConfig) {
         let _ = self.cmd_tx.send(EngineCommand::ProcessPending(tool_config));
+    }
+
+    /// Regenerate response at a specific turn
+    ///
+    /// Creates a new span at the turn and generates a new assistant response.
+    pub fn regenerate(&self, turn_id: TurnId, tool_config: ToolConfig) {
+        let _ = self.cmd_tx.send(EngineCommand::Regenerate { turn_id, tool_config });
     }
 
     pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>) {

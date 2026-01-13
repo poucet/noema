@@ -455,6 +455,42 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         Ok(ResolvedMessage::new(role, resolved))
     }
 
+    /// Get resolved context up to (but not including) a specific turn.
+    ///
+    /// Used for regeneration - returns messages that should be sent to LLM
+    /// before generating a new response at the target turn.
+    pub async fn get_context_before_turn(
+        &self,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+    ) -> Result<Vec<ResolvedMessage>> {
+        let context_path = self.turn_store
+            .get_view_context_at(view_id, turn_id)
+            .await?;
+
+        self.resolve_path(&context_path).await
+    }
+
+    /// Add a new span at an existing turn.
+    ///
+    /// Creates a new span at the turn and selects it in the view.
+    /// Returns the span ID for adding messages.
+    pub async fn add_span_at_turn(
+        &self,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+        model_id: Option<&str>,
+    ) -> Result<SpanId> {
+        let new_span = self.turn_store
+            .create_span(turn_id, model_id)
+            .await?;
+
+        self.turn_store
+            .select_span(view_id, turn_id, &new_span.id)
+            .await?;
+
+        Ok(new_span.id)
+    }
 }
 
 /// Implement ContentResolver for the generic coordinator

@@ -136,7 +136,7 @@ User clicks "regenerate" on assistant message → creates new span at same turn,
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.D1a | ⚡ Backend: `regenerate_response` command - add_span at turn, select in view |
+| ✅ | 3.3.D1a | ⚡ Backend: `regenerate_response` command - add_span at turn, select in view |
 | ⬜ | 3.3.D1b | 🔧 Frontend: Wire regenerate button to new command |
 | ⬜ | 3.3.D1c | ✅ User: Verify regenerate creates alternate, can switch between |
 

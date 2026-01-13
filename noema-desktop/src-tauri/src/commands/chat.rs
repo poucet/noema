@@ -666,6 +666,39 @@ pub async fn get_current_view_id(
 // View/Fork Operations (Phase 3 UCM - Part D User Journeys)
 // ============================================================================
 
+/// Regenerate response at a specific turn
+///
+/// Creates a new span at the turn and triggers the LLM to generate a new
+/// response. The new span is automatically selected in the current view.
+///
+/// # Arguments
+/// * `conversation_id` - The conversation containing the turn
+/// * `turn_id` - The turn to regenerate (must be an assistant turn)
+/// * `tool_config` - Optional configuration for which tools to enable
+#[tauri::command]
+pub async fn regenerate_response(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+    turn_id: TurnId,
+    tool_config: Option<ToolConfig>,
+) -> Result<(), String> {
+    // Convert ToolConfig from Tauri types to core types
+    let core_tool_config = match tool_config {
+        Some(tc) => CoreToolConfig {
+            enabled: tc.enabled,
+            server_ids: tc.server_ids,
+            tool_names: tc.tool_names,
+        },
+        None => CoreToolConfig::all_enabled(),
+    };
+
+    let engines = state.engines.lock().await;
+    let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
+    engine.regenerate(turn_id, core_tool_config);
+
+    Ok(())
+}
+
 /// Fork a conversation at a specific turn
 ///
 /// Creates a new view (branch) that shares history up to but not including the

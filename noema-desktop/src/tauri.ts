@@ -476,6 +476,18 @@ export interface ThreadInfoResponse {
 }
 
 /**
+ * Regenerate response at a specific turn
+ * Creates a new span at the turn and triggers the LLM to generate a new response.
+ */
+export async function regenerateResponse(
+  conversationId: string,
+  turnId: string,
+  toolConfig?: ToolConfig
+): Promise<void> {
+  return invoke<void>("regenerate_response", { conversationId, turnId, toolConfig });
+}
+
+/**
  * Fork a conversation at a specific turn
  * Creates a new view (branch) that shares history up to but not including the specified turn.
  */

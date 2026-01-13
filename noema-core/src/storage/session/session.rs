@@ -130,12 +130,7 @@ impl<S: StorageTypes> Session<S> {
     pub fn view_id(&self) -> &ViewId {
         &self.view_id
     }
-
-    /// Get access to the storage coordinator
-    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> {
-        &self.coordinator
-    }
-
+    
     /// Get committed messages for display - returns cached ResolvedContent
     pub fn messages_for_display(&self) -> &[ResolvedMessage] {
         &self.resolved_cache
@@ -156,6 +151,70 @@ impl<S: StorageTypes> Session<S> {
     /// Clear pending messages without committing
     pub fn clear_pending(&mut self) {
         self.pending.clear();
+    }
+
+    /// Truncate session context to before a specific turn.
+    ///
+    /// Sets the session cache to messages up to (but not including) the target turn.
+    /// Use this before regenerating a response, then call `commit_at_turn()` to
+    /// store the new response as an alternate span.
+    ///
+    /// # Arguments
+    /// * `turn_id` - The turn to truncate before
+    pub async fn truncate_to_turn(
+        &mut self,
+        turn_id: &crate::storage::ids::TurnId,
+    ) -> Result<()> {
+        let context = self.coordinator
+            .get_context_before_turn(&self.view_id, turn_id)
+            .await?;
+
+        self.resolved_cache = context;
+        self.llm_cache.clear();
+        self.llm_cache_valid = false;
+        self.pending.clear();
+
+        Ok(())
+    }
+
+    /// Commit pending messages to an existing turn as a new span.
+    ///
+    /// Creates a new span at the specified turn, stores pending messages,
+    /// and selects the new span in the current view.
+    ///
+    /// # Arguments
+    /// * `turn_id` - The turn to add the span to
+    /// * `model_id` - Optional model ID to record on the span
+    pub async fn commit_at_turn(
+        &mut self,
+        turn_id: &crate::storage::ids::TurnId,
+        model_id: Option<&str>,
+    ) -> Result<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+
+        let messages = std::mem::take(&mut self.pending);
+
+        // Create span at the existing turn
+        let span_id = self.coordinator
+            .add_span_at_turn(&self.view_id, turn_id, model_id)
+            .await?;
+
+        // Add all messages to the span
+        for msg in messages {
+            let msg_role = llm_role_to_message_role(msg.role);
+            let origin = llm_role_to_origin(msg.role);
+
+            let resolved = self.coordinator
+                .add_message(&span_id, msg_role, msg.payload.content, origin)
+                .await?;
+
+            self.resolved_cache.push(resolved);
+        }
+
+        self.llm_cache_valid = false;
+        Ok(())
     }
 
     /// Add a user message from UI input

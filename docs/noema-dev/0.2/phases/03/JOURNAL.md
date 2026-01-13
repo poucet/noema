@@ -210,3 +210,59 @@ The view already belongs to a conversation (via `views.conversation_id`), so sto
 
 This simplifies the API: the view is the source of truth for conversation context.
 
+---
+
+## 2026-01-13: Regenerate Response Backend Implementation
+
+Implemented `regenerate_response` command for Journey 1: Regenerate Response.
+
+### Design Decision: Create Span Only After LLM Succeeds
+
+Rather than creating a span before running the LLM (which would leave orphan spans on failure), the regeneration flow is:
+
+1. **Truncate context** - Session sets cache to messages before the target turn (no storage changes)
+2. **Run LLM** - Agent generates response using truncated context
+3. **Commit at turn** - Only on success, create span and store messages
+
+This ensures no orphan spans are created if the LLM call fails.
+
+### New Methods
+
+**StorageCoordinator:**
+- `get_context_before_turn(view_id, turn_id)` - Returns resolved messages up to (not including) the turn
+- `add_span_at_turn(view_id, turn_id, model_id)` - Creates span at turn, selects it in view, returns SpanId
+
+**Session:**
+- `truncate_to_turn(turn_id)` - Sets session cache to context before the turn
+- `commit_at_turn(turn_id, model_id)` - Creates span at turn and stores pending messages
+
+**ChatEngine:**
+- `EngineCommand::Regenerate { turn_id, tool_config }` - New command variant
+- `regenerate(turn_id, tool_config)` - Public method to trigger regeneration
+
+### Tauri Command
+
+```rust
+regenerate_response(conversation_id, turn_id, tool_config?)
+```
+
+### TypeScript Binding
+
+```typescript
+regenerateResponse(conversationId: string, turnId: string, toolConfig?: ToolConfig): Promise<void>
+```
+
+### Flow
+
+1. Engine sends `Regenerate` command
+2. Session calls `truncate_to_turn()` - sets cache to messages before turn
+3. Engine runs agent to generate new response
+4. On success, session calls `commit_at_turn()` which:
+   - Creates new span via `add_span_at_turn()`
+   - Stores messages via `add_message()`
+   - Updates session cache
+
+### Next Steps
+
+Wire frontend regenerate button to call `regenerateResponse()`.
+
