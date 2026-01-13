@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{Asset, Stored};
+use crate::storage::types::{stored, Asset, Stored};
 
 /// In-memory asset store for testing
 #[derive(Debug, Default)]
@@ -35,7 +35,7 @@ impl AssetStore for MemoryAssetStore {
         let mut assets = self.assets.lock().unwrap();
         let id = AssetId::from_string(Uuid::new_v4().to_string());
 
-        let stored = Stored::new(
+        let stored = stored(
             id.clone(),
             asset,
             Self::now(),

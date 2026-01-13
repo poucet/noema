@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::storage::ids::{ConversationId, UserId, ViewId};
 use crate::storage::traits::ConversationStore;
-use crate::storage::types::{Conversation, Stored};
+use crate::storage::types::{stored, Conversation, Stored};
 
 use super::turn::MemoryTurnStore;
 
@@ -40,7 +40,7 @@ impl ConversationEntry {
             main_view_id: self.main_view_id.clone()?,
             is_private: self.is_private,
         };
-        Some(Stored::new(self.id.clone(), conversation, self.created_at))
+        Some(stored(self.id.clone(), conversation, self.created_at))
     }
 }
 

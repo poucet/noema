@@ -6,10 +6,9 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::storage::{HashedContentBlock, Stored};
 use crate::storage::ids::ContentBlockId;
 use crate::storage::traits::TextStore;
-use crate::storage::types::{ContentBlock, StoreResult};
+use crate::storage::types::{stored, ContentBlock, HashedContentBlock, StoreResult, Stored};
 
 /// In-memory content block store for testing
 #[derive(Debug, Default)]
@@ -55,16 +54,16 @@ impl TextStore for MemoryTextStore {
 
         // Create new
         let id = ContentBlockId::new();
-        let stored   = Stored::new(
-            id.clone(), 
-            HashedContentBlock { content_hash: hash.clone(), content }, 
-            Self::now()
+        let stored_block = stored(
+            id.clone(),
+            HashedContentBlock { content_hash: hash.clone(), content },
+            Self::now(),
         );
 
         {
             let mut blocks = self.blocks.lock().unwrap();
             let mut hash_index = self.hash_index.lock().unwrap();
-            blocks.insert(id.clone(), stored);
+            blocks.insert(id.clone(), stored_block);
             hash_index.insert(hash.clone(), id.clone());
         }
 

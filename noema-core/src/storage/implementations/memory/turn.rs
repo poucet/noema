@@ -9,7 +9,7 @@ use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole, Stored, Turn,
+    stored, ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole, Stored, Turn,
     TurnWithContent, View,
 };
 
@@ -60,7 +60,7 @@ impl TurnStore for MemoryTurnStore {
 
         let id = TurnId::new();
         let now = now();
-        let turn = Stored::new(id.clone(), Turn { role }, now);
+        let turn = stored(id.clone(), Turn { role }, now);
 
         turns.insert(id, turn.clone());
         Ok(turn)
@@ -82,7 +82,7 @@ impl TurnStore for MemoryTurnStore {
             model_id: model_id.map(|s| s.to_string()),
             message_count: 0,
         };
-        let stored = Stored::new(id.clone(), span, now);
+        let stored = stored(id.clone(), span, now);
 
         spans.insert(id, InternalSpan {
             span: stored.clone(),
@@ -107,7 +107,7 @@ impl TurnStore for MemoryTurnStore {
                     message_count,
                     model_id: s.span.model_id.clone(),
                 };
-                Stored::new(s.span.id.clone(), span, s.span.created_at)
+                stored(s.span.id.clone(), span, s.span.created_at)
             })
             .collect();
         result.sort_by_key(|s| s.created_at);
@@ -127,7 +127,7 @@ impl TurnStore for MemoryTurnStore {
                 message_count,
                 model_id: s.span.model_id.clone(),
             };
-            Stored::new(s.span.id.clone(), span, s.span.created_at)
+            stored(s.span.id.clone(), span, s.span.created_at)
         }))
     }
 
@@ -158,7 +158,7 @@ impl TurnStore for MemoryTurnStore {
             sequence_number,
             role,
         };
-        let stored = Stored::new(message_id.clone(), msg, now);
+        let stored = stored(message_id.clone(), msg, now);
 
         messages.insert(message_id.clone(), stored.clone());
         message_content_map.insert(message_id, content.to_vec());
@@ -207,7 +207,7 @@ impl TurnStore for MemoryTurnStore {
             fork: None,
             turn_count: 0,
         };
-        let stored = Stored::new(id.clone(), view, now);
+        let stored = stored(id.clone(), view, now);
 
         views.insert(id, stored.clone());
         Ok(stored)
@@ -226,7 +226,7 @@ impl TurnStore for MemoryTurnStore {
                 turn_count,
                 fork: v.fork.clone(),
             };
-            Stored::new(v.id.clone(), view, v.created_at)
+            stored(v.id.clone(), view, v.created_at)
         }))
     }
 
@@ -334,7 +334,7 @@ impl TurnStore for MemoryTurnStore {
             }),
             turn_count,
         };
-        let stored = Stored::new(id.clone(), view, now);
+        let stored = stored(id.clone(), view, now);
 
         {
             let mut selections = self.view_selections.lock().unwrap();
