@@ -6,10 +6,9 @@ use std::sync::Mutex;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::storage::HashedContentBlock;
 use crate::storage::ids::ContentBlockId;
 use crate::storage::traits::TextStore;
-use crate::storage::types::{ContentBlock, StoreResult, Stored};
+use crate::storage::types::{stored, ContentBlock, HashedContentBlock, StoreResult, Stored};
 
 /// Mock text store with in-memory storage
 pub struct MockTextStore {
@@ -52,7 +51,7 @@ impl TextStore for MockTextStore {
     async fn get(&self, id: &ContentBlockId) -> Result<Option<Stored<ContentBlockId, HashedContentBlock>>> {
         let blocks = self.blocks.lock().unwrap();
         Ok(blocks.get(id.as_str()).map(|text| 
-            Stored::new(
+            stored(
                 id.clone(),
                 HashedContentBlock {
                     content: ContentBlock::plain(text.clone()),

@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{Asset, Stored};
+use crate::storage::types::{Asset, Stored, stored};
 
 /// Mock asset store with in-memory storage
 pub struct MockAssetStore {
@@ -41,7 +41,7 @@ impl AssetStore for MockAssetStore {
 
     async fn get(&self, id: &AssetId) -> Result<Option<Stored<AssetId, Asset>>> {
         let assets = self.assets.lock().unwrap();
-        Ok(assets.get(id.as_str()).map(|asset| Stored::new(
+        Ok(assets.get(id.as_str()).map(|asset| stored(
             id.clone(),
             asset.clone(),
             0,
