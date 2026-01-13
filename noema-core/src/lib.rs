@@ -18,7 +18,6 @@
 pub mod agent;
 pub mod agents;
 pub mod context;
-pub mod engine;
 pub mod manager;
 pub mod mcp;
 pub mod storage;
@@ -28,13 +27,7 @@ pub use agent::Agent;
 pub use agents::{McpAgent, SimpleAgent, ToolAgent};
 pub use context::{ConversationContext, MessagesGuard};
 
-// Shared types
-pub use engine::{CommitMode, ToolConfig};
-
-// Legacy engine exports (deprecated, use ConversationManager instead)
-pub use engine::{ChatEngine, EngineCommand, EngineEvent};
-
 // New manager API
-pub use manager::{ConversationManager, ManagerCommand, ManagerEvent};
+pub use manager::{ConversationManager, ManagerCommand, ManagerEvent, SharedEventSender, ToolConfig};
 
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
