@@ -365,14 +365,15 @@ pub struct ReferencedDocument {
 
 /// Input content block from frontend - structured content for user messages.
 /// This preserves the exact position of document references and attachments inline with text.
+///
+/// This is the TypeScript-facing type that mirrors `noema_core::storage::InputContent`.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
-
 #[ts(export, export_to = "../../src/generated/")]
 pub enum InputContentBlock {
     /// Plain text segment
-    Text { 
-        text: String 
+    Text {
+        text: String
     },
     /// Reference to a document (inline position preserved)
     DocumentRef {
@@ -380,25 +381,40 @@ pub enum InputContentBlock {
         id: DocumentId,
     },
     /// Inline base64 image (for new uploads)
-    Image { 
-        data: String,  
-        #[serde(rename = "mimeType")] 
-        mime_type: String 
+    Image {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String
     },
     /// Inline base64 audio (for new uploads)
-    Audio { 
-        data: String, 
-        #[serde(rename = "mimeType")] 
-        mime_type: String 
+    Audio {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String
     },
     /// Reference to already-stored asset in blob storage
-    AssetRef { 
+    AssetRef {
         #[serde(rename = "assetId")]
         #[ts(type = "string")]
-        asset_id: AssetId, 
-        #[serde(rename = "mimeType")] 
-        mime_type: String 
+        asset_id: AssetId,
+        #[serde(rename = "mimeType")]
+        mime_type: String
     },
+}
+
+impl From<InputContentBlock> for noema_core::storage::InputContent {
+    fn from(block: InputContentBlock) -> Self {
+        use noema_core::storage::InputContent;
+        match block {
+            InputContentBlock::Text { text } => InputContent::Text { text },
+            InputContentBlock::DocumentRef { id } => InputContent::DocumentRef { id },
+            InputContentBlock::Image { data, mime_type } => InputContent::Image { data, mime_type },
+            InputContentBlock::Audio { data, mime_type } => InputContent::Audio { data, mime_type },
+            InputContentBlock::AssetRef { asset_id, mime_type } => {
+                InputContent::AssetRef { asset_id, mime_type }
+            }
+        }
+    }
 }
 
 /// Information about a parallel model response (for UI display)

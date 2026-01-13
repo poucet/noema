@@ -4,7 +4,7 @@ use llm::{ChatMessage, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
 use noema_core::storage::{TurnStore, Session, MessageRole, InputContent};
 use noema_core::storage::DocumentResolver;
-use noema_core::storage::ids::{AssetId, ConversationId, TurnId, SpanId};
+use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -64,28 +64,11 @@ pub async fn send_message(
         return Err("Message must have content".to_string());
     }
 
-    // Convert Tauri InputContentBlock to core InputContent
+    // Convert Tauri InputContentBlock to core InputContent, filtering empty text
     let input_content: Vec<InputContent> = content
         .into_iter()
-        .filter_map(|block| match block {
-            InputContentBlock::Text { text } if !text.is_empty() => {
-                Some(InputContent::Text { text })
-            }
-            InputContentBlock::Text { .. } => None,
-            InputContentBlock::DocumentRef { id } => Some(InputContent::DocumentRef { id }),
-            InputContentBlock::Image { data, mime_type } => {
-                Some(InputContent::Image { data, mime_type })
-            }
-            InputContentBlock::Audio { data, mime_type } => {
-                Some(InputContent::Audio { data, mime_type })
-            }
-            InputContentBlock::AssetRef { asset_id, mime_type } => {
-                Some(InputContent::AssetRef {
-                    asset_id: AssetId::from_string(asset_id),
-                    mime_type,
-                })
-            }
-        })
+        .filter(|block| !matches!(block, InputContentBlock::Text { text } if text.is_empty()))
+        .map(InputContent::from)
         .collect();
 
     if input_content.is_empty() {
