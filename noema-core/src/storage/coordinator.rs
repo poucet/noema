@@ -82,8 +82,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     ) -> Result<StoredContent> {
         match block {
             ContentBlock::Text { text } => {
-                let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
-                let content_block = ContentBlockData::plain(&text).with_origin(content_origin);
+                let content_block =
+                    ContentBlockData::plain(&text).with_origin(ContentOrigin::from_kind(origin));
                 let result = self.content_block_store.store(content_block).await?;
                 Ok(StoredContent::text_ref(result.id))
             }
@@ -117,8 +117,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         for item in content {
             let stored_item = match item {
                 InputContent::Text { text } => {
-                    let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
-                    let content_block = ContentBlockData::plain(&text).with_origin(content_origin);
+                    let content_block =
+                        ContentBlockData::plain(&text).with_origin(ContentOrigin::from_kind(origin));
                     let result = self.content_block_store.store(content_block).await?;
                     StoredContent::text_ref(result.id)
                 }

@@ -48,67 +48,96 @@ impl OriginKind {
 }
 
 /// Provenance information for content
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ContentOrigin {
-    /// What kind of entity created this content
-    pub kind: Option<OriginKind>,
-
-    /// User who created or owns this content (if applicable)
-    pub user_id: Option<UserId>,
-
-    /// Model ID that generated this content (for assistant-generated)
-    pub model_id: Option<String>,
-
-    /// Source identifier (e.g., import URL, external system ID)
-    pub source_id: Option<String>,
-
-    /// Parent content this was derived from (for edits, transformations)
-    pub parent_id: Option<ContentBlockId>,
+    kind: OriginKind,
+    user_id: Option<UserId>,
+    model_id: Option<String>,
+    source_id: Option<String>,
+    parent_id: Option<ContentBlockId>,
 }
 
 impl ContentOrigin {
     /// Create origin for user-created content
     pub fn user(user_id: UserId) -> Self {
         Self {
-            kind: Some(OriginKind::User),
+            kind: OriginKind::User,
             user_id: Some(user_id),
-            ..Default::default()
+            model_id: None,
+            source_id: None,
+            parent_id: None,
         }
     }
 
     /// Create origin for assistant-generated content
     pub fn assistant(model_id: impl Into<String>) -> Self {
         Self {
-            kind: Some(OriginKind::Assistant),
+            kind: OriginKind::Assistant,
+            user_id: None,
             model_id: Some(model_id.into()),
-            ..Default::default()
+            source_id: None,
+            parent_id: None,
         }
     }
 
     /// Create origin for assistant-generated content with user context
     pub fn assistant_for_user(user_id: UserId, model_id: impl Into<String>) -> Self {
         Self {
-            kind: Some(OriginKind::Assistant),
+            kind: OriginKind::Assistant,
             user_id: Some(user_id),
             model_id: Some(model_id.into()),
-            ..Default::default()
+            source_id: None,
+            parent_id: None,
         }
     }
 
     /// Create origin for system-generated content
     pub fn system() -> Self {
         Self {
-            kind: Some(OriginKind::System),
-            ..Default::default()
+            kind: OriginKind::System,
+            user_id: None,
+            model_id: None,
+            source_id: None,
+            parent_id: None,
         }
     }
 
     /// Create origin for imported content
     pub fn import(source_id: impl Into<String>) -> Self {
         Self {
-            kind: Some(OriginKind::Import),
+            kind: OriginKind::Import,
+            user_id: None,
+            model_id: None,
             source_id: Some(source_id.into()),
-            ..Default::default()
+            parent_id: None,
+        }
+    }
+
+    /// Create origin from an OriginKind (for simple cases)
+    pub fn from_kind(kind: OriginKind) -> Self {
+        Self {
+            kind,
+            user_id: None,
+            model_id: None,
+            source_id: None,
+            parent_id: None,
+        }
+    }
+
+    /// Create origin from database fields
+    pub(crate) fn from_db(
+        kind: OriginKind,
+        user_id: Option<String>,
+        model_id: Option<String>,
+        source_id: Option<String>,
+        parent_id: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            user_id: user_id.map(UserId::from_string),
+            model_id,
+            source_id,
+            parent_id: parent_id.map(ContentBlockId::from_string),
         }
     }
 
@@ -116,6 +145,43 @@ impl ContentOrigin {
     pub fn with_parent(mut self, parent_id: ContentBlockId) -> Self {
         self.parent_id = Some(parent_id);
         self
+    }
+
+    /// Set the user ID
+    pub fn with_user(mut self, user_id: UserId) -> Self {
+        self.user_id = Some(user_id);
+        self
+    }
+
+    /// Set the model ID
+    pub fn with_model(mut self, model_id: impl Into<String>) -> Self {
+        self.model_id = Some(model_id.into());
+        self
+    }
+
+    /// Get the origin kind
+    pub fn kind(&self) -> OriginKind {
+        self.kind
+    }
+
+    /// Get the user ID
+    pub fn user_id(&self) -> Option<&UserId> {
+        self.user_id.as_ref()
+    }
+
+    /// Get the model ID
+    pub fn model_id(&self) -> Option<&str> {
+        self.model_id.as_deref()
+    }
+
+    /// Get the source ID
+    pub fn source_id(&self) -> Option<&str> {
+        self.source_id.as_deref()
+    }
+
+    /// Get the parent ID
+    pub fn parent_id(&self) -> Option<&ContentBlockId> {
+        self.parent_id.as_ref()
     }
 }
 
@@ -158,7 +224,7 @@ impl ContentType {
 // ============================================================================
 
 /// Core content block data (shared between input and stored forms)
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ContentBlock {
     /// The text content
     pub text: String,
@@ -174,30 +240,33 @@ pub struct ContentBlock {
 }
 
 impl ContentBlock {
-    /// Create a new plain text content block
+    /// Create a new plain text content block (defaults to System origin)
     pub fn plain(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             content_type: ContentType::Plain,
-            ..Default::default()
+            is_private: false,
+            origin: ContentOrigin::system(),
         }
     }
 
-    /// Create a new markdown content block
+    /// Create a new markdown content block (defaults to System origin)
     pub fn markdown(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             content_type: ContentType::Markdown,
-            ..Default::default()
+            is_private: false,
+            origin: ContentOrigin::system(),
         }
     }
 
-    /// Create a new typst content block
+    /// Create a new typst content block (defaults to System origin)
     pub fn typst(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             content_type: ContentType::Typst,
-            ..Default::default()
+            is_private: false,
+            origin: ContentOrigin::system(),
         }
     }
 
@@ -286,15 +355,15 @@ mod tests {
     #[test]
     fn test_content_origin_user() {
         let origin = ContentOrigin::user(UserId::from_string("user-123"));
-        assert_eq!(origin.kind, Some(OriginKind::User));
-        assert_eq!(origin.user_id.as_ref().map(|id| id.as_str()), Some("user-123"));
+        assert_eq!(origin.kind(), OriginKind::User);
+        assert_eq!(origin.user_id().map(|id| id.as_str()), Some("user-123"));
     }
 
     #[test]
     fn test_content_origin_assistant() {
         let origin = ContentOrigin::assistant("claude-3-opus");
-        assert_eq!(origin.kind, Some(OriginKind::Assistant));
-        assert_eq!(origin.model_id.as_deref(), Some("claude-3-opus"));
+        assert_eq!(origin.kind(), OriginKind::Assistant);
+        assert_eq!(origin.model_id(), Some("claude-3-opus"));
     }
 
     #[test]
@@ -302,7 +371,7 @@ mod tests {
         let parent = ContentBlockId::from_string("parent-123");
         let origin = ContentOrigin::user(UserId::from_string("user-1"))
             .with_parent(parent.clone());
-        assert_eq!(origin.parent_id.as_ref().map(|id| id.as_str()), Some("parent-123"));
+        assert_eq!(origin.parent_id().map(|id| id.as_str()), Some("parent-123"));
     }
 
     #[test]

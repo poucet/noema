@@ -78,11 +78,11 @@ impl TextStore for SqliteStore {
                 content.content_type.as_str(),
                 &content.text,
                 content.is_private as i32,
-                content.origin.kind.as_ref().map(|k| k.as_str()),
-                content.origin.user_id.as_ref().map(|id| id.as_str()),
-                content.origin.model_id.as_deref(),
-                content.origin.source_id.as_deref(),
-                content.origin.parent_id.as_ref().map(|id| id.as_str()),
+                content.origin.kind().as_str(),
+                content.origin.user_id().map(|id| id.as_str()),
+                content.origin.model_id(),
+                content.origin.source_id(),
+                content.origin.parent_id().map(|id| id.as_str()),
                 now,
             ],
         )
@@ -247,15 +247,16 @@ impl RowData {
                 OriginKind::from_str(s)
                     .ok_or_else(|| anyhow::anyhow!("Invalid origin kind: {}", s))
             })
-            .transpose()?;
+            .transpose()?
+            .unwrap_or(OriginKind::System);
 
-        let origin = ContentOrigin {
-            kind: origin_kind,
-            user_id: self.origin_user_id.map(|s| s.into()),
-            model_id: self.origin_model_id,
-            source_id: self.origin_source_id,
-            parent_id: self.origin_parent_id.map(|s| s.into()),
-        };
+        let origin = ContentOrigin::from_db(
+            origin_kind,
+            self.origin_user_id,
+            self.origin_model_id,
+            self.origin_source_id,
+            self.origin_parent_id,
+        );
 
         Ok(StoredContentBlock {
             id: ContentBlockId::from_string(self.id),
