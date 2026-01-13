@@ -16,7 +16,7 @@ pub use conversation::{ConversationStore, StoredConversation};
 pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use text::{TextStore, StoredTextBlock};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage, StoredView};
-pub use user::UserStore;
+pub use user::{StoredUser, UserStore};
 
 /// Bundles all storage type associations into a single trait.
 ///

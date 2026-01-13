@@ -7,8 +7,8 @@ use rusqlite::{params, Connection};
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::UserId;
-use crate::storage::traits::UserStore;
-use crate::storage::types::UserInfo;
+use crate::storage::traits::{StoredUser, UserStore};
+use crate::storage::types::{Keyed, User};
 
 /// Default user email for single-tenant local mode
 pub const DEFAULT_USER_EMAIL: &str = "human@noema";
@@ -35,19 +35,19 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
 
 #[async_trait]
 impl UserStore for SqliteStore {
-    async fn get_or_create_default_user(&self) -> Result<UserInfo> {
+    async fn get_or_create_default_user(&self) -> Result<StoredUser> {
         let conn = self.conn().lock().unwrap();
 
         // Try to get existing user
-        let user: Option<UserInfo> = conn
+        let user: Option<StoredUser> = conn
             .query_row(
                 "SELECT id, email FROM users WHERE email = ?1",
                 params![DEFAULT_USER_EMAIL],
                 |row| {
-                    Ok(UserInfo {
-                        id: row.get::<_, UserId>(0)?,
-                        email: row.get(1)?,
-                    })
+                    Ok(Keyed::new(
+                        row.get::<_, UserId>(0)?,
+                        User::new(row.get::<_, String>(1)?),
+                    ))
                 },
             )
             .ok();
@@ -64,30 +64,27 @@ impl UserStore for SqliteStore {
             params![id.as_str(), DEFAULT_USER_EMAIL, now, now],
         )?;
 
-        Ok(UserInfo {
-            id,
-            email: DEFAULT_USER_EMAIL.to_string(),
-        })
+        Ok(Keyed::new(id, User::new(DEFAULT_USER_EMAIL)))
     }
 
-    async fn get_user_by_email(&self, email: &str) -> Result<Option<UserInfo>> {
+    async fn get_user_by_email(&self, email: &str) -> Result<Option<StoredUser>> {
         let conn = self.conn().lock().unwrap();
         let user = conn
             .query_row(
                 "SELECT id, email FROM users WHERE email = ?1",
                 params![email],
                 |row| {
-                    Ok(UserInfo {
-                        id: row.get::<_, UserId>(0)?,
-                        email: row.get(1)?,
-                    })
+                    Ok(Keyed::new(
+                        row.get::<_, UserId>(0)?,
+                        User::new(row.get::<_, String>(1)?),
+                    ))
                 },
             )
             .ok();
         Ok(user)
     }
 
-    async fn get_or_create_user_by_email(&self, email: &str) -> Result<UserInfo> {
+    async fn get_or_create_user_by_email(&self, email: &str) -> Result<StoredUser> {
         // Try to get existing user first
         if let Some(user) = self.get_user_by_email(email).await? {
             return Ok(user);
@@ -103,21 +100,18 @@ impl UserStore for SqliteStore {
             params![id.as_str(), email, now, now],
         )?;
 
-        Ok(UserInfo {
-            id,
-            email: email.to_string(),
-        })
+        Ok(Keyed::new(id, User::new(email)))
     }
 
-    async fn list_users(&self) -> Result<Vec<UserInfo>> {
+    async fn list_users(&self) -> Result<Vec<StoredUser>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare("SELECT id, email FROM users ORDER BY created_at")?;
         let users = stmt
             .query_map([], |row| {
-                Ok(UserInfo {
-                    id: row.get::<_, UserId>(0)?,
-                    email: row.get(1)?,
-                })
+                Ok(Keyed::new(
+                    row.get::<_, UserId>(0)?,
+                    User::new(row.get::<_, String>(1)?),
+                ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(users)

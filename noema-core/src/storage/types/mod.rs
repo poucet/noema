@@ -20,4 +20,4 @@ pub use conversation::{
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
-pub use user::UserInfo;
+pub use user::User;

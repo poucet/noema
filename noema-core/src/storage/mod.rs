@@ -59,7 +59,7 @@ pub mod document_resolver;
 // Traits
 pub use traits::{
     AssetStore, BlobStore, ConversationStore, DocumentStore, StorageTypes,
-    Stores, TextStore, TurnStore, UserStore,
+    StoredUser, Stores, TextStore, TurnStore, UserStore,
 };
 
 // Types
@@ -76,7 +76,7 @@ pub use types::{
     // Stored wrappers
     Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped,
     // User
-    UserInfo,
+    User,
 };
 
 // Session
