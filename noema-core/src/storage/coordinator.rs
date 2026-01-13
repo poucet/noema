@@ -19,12 +19,11 @@ use crate::storage::content::{ContentResolver, InputContent, StoredContent};
 use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
-    AssetStore, BlobStore, ConversationStore, DocumentStore, StorageTypes, TextStore, TurnStore,
-    UserStore,
+    AssetStore, BlobStore, ConversationStore, StorageTypes, TextStore, TurnStore, UserStore,
 };
 use crate::storage::types::{
-    Asset, ContentBlock as ContentBlockData, ContentOrigin, ConversationInfo, MessageInfo,
-    MessageRole, OriginKind, TurnWithContent, UserInfo,
+    Asset, ContentBlock as ContentBlockData, ContentOrigin, ConversationInfo, MessageRole,
+    OriginKind, TurnWithContent, UserInfo,
 };
 
 /// Coordinates storage across all store types.
@@ -36,6 +35,7 @@ pub struct StorageCoordinator<S: StorageTypes> {
     asset_store: Arc<S::Asset>,
     content_block_store: Arc<S::Text>,
     conversation_store: Arc<S::Conversation>,
+    turn_store: Arc<S::Turn>,
     user_store: Arc<S::User>,
     document_store: Arc<S::Document>,
     _marker: PhantomData<S>,
@@ -48,6 +48,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         asset_store: Arc<S::Asset>,
         content_block_store: Arc<S::Text>,
         conversation_store: Arc<S::Conversation>,
+        turn_store: Arc<S::Turn>,
         user_store: Arc<S::User>,
         document_store: Arc<S::Document>,
     ) -> Self {
@@ -56,6 +57,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             asset_store,
             content_block_store,
             conversation_store,
+            turn_store,
             user_store,
             document_store,
             _marker: PhantomData,
@@ -181,20 +183,11 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.blob_store.get(hash).await
     }
 
-    /// Get access to the content block store
-    pub fn content_block_store(&self) -> &Arc<S::Text> {
-        &self.content_block_store
+    /// Get access to the turn store
+    pub fn turn_store(&self) -> &Arc<S::Turn> {
+        &self.turn_store
     }
 
-    /// Get access to the conversation store (includes TurnStore methods)
-    pub fn conversation_store(&self) -> &Arc<S::Conversation> {
-        &self.conversation_store
-    }
-
-    /// Get access to the user store
-    pub fn user_store(&self) -> &Arc<S::User> {
-        &self.user_store
-    }
 
     /// Get access to the document store
     pub fn document_store(&self) -> &Arc<S::Document> {
@@ -245,12 +238,29 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.conversation_store.set_conversation_private(conversation_id, is_private).await
     }
 
+    /// Get the main view for a conversation
+    ///
+    /// Looks up the conversation and returns its main view info.
+    pub async fn get_main_view(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<crate::storage::types::ViewInfo> {
+        let conv = self.conversation_store
+            .get_conversation(conversation_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
+
+        self.turn_store
+            .get_view(&conv.main_view_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Main view not found: {}", conv.main_view_id))
+    }
+
     // ========== Turn/Span Methods ==========
 
     /// Start a new turn in a conversation view.
     ///
     /// Creates a turn, adds a span to it, and selects that span in the view.
-    /// Looks up the conversation_id from the view.
     /// Returns the span ID for adding messages.
     pub async fn start_turn(
         &self,
@@ -258,15 +268,9 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         role: crate::storage::types::SpanRole,
         model_id: Option<&str>,
     ) -> Result<SpanId> {
-        // Look up conversation_id from view
-        let view = self.conversation_store
-            .get_view(view_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("View not found: {}", view_id))?;
-
-        let turn = self.conversation_store.add_turn(&view.conversation_id, role).await?;
-        let span = self.conversation_store.add_span(&turn.id, model_id).await?;
-        self.conversation_store.select_span(view_id, &turn.id, &span.id).await?;
+        let turn = self.turn_store.create_turn(role).await?;
+        let span = self.turn_store.create_span(&turn.id, model_id).await?;
+        self.turn_store.select_span(view_id, &turn.id, &span.id).await?;
         Ok(span.id)
     }
 
@@ -299,19 +303,44 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         &self,
         conversation_id: &ConversationId,
     ) -> Result<(ViewId, Vec<ResolvedMessage>)> {
-        // Get or create main view
-        let view_id = match self.conversation_store.get_main_view(conversation_id).await? {
-            Some(v) => v.id,
-            None => {
-                self.conversation_store
-                    .create_view(conversation_id, Some("main"), true)
-                    .await?
-                    .id
-            }
-        };
+        // Get conversation to check for main_view_id
+        let conv = self.conversation_store
+            .get_conversation(conversation_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
 
-        self.open_session_with_view(&view_id).await
-            .map(|resolved| (view_id, resolved))
+        // Conversation has main_view_id - use it
+        self.open_session_with_view(&conv.main_view_id).await
+            .map(|resolved| (conv.main_view_id, resolved))
+    }
+
+    /// Create a new conversation with its main view.
+    ///
+    /// This method handles the multi-store coordination of:
+    /// 1. Creating the conversation record
+    /// 2. Creating the main view
+    /// 3. Setting the main_view_id on the conversation
+    ///
+    /// Returns the ConversationId for further operations.
+    pub async fn create_conversation_with_view(
+        &self,
+        user_id: &UserId,
+        name: Option<&str>,
+    ) -> Result<ConversationId> {
+        // Create conversation record
+        let conversation_id = self.conversation_store
+            .create_conversation(user_id, name)
+            .await?;
+
+        // Create main view
+        let view = self.turn_store.create_view().await?;
+
+        // Link them
+        self.conversation_store
+            .set_main_view_id(&conversation_id, &view.id)
+            .await?;
+
+        Ok(conversation_id)
     }
 
     /// Open a session for a specific view.
@@ -322,7 +351,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         &self,
         view_id: &ViewId,
     ) -> Result<Vec<ResolvedMessage>> {
-        let path = self.conversation_store.get_view_path(view_id).await?;
+        let path = self.turn_store.get_view_path(view_id).await?;
         self.resolve_path(&path).await
     }
 
@@ -332,10 +361,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
 
         for turn in path {
             for msg in &turn.messages {
-                let content_refs: Vec<StoredContent> =
-                    msg.content.iter().map(|c| c.content.clone()).collect();
-
-                let resolved = self.resolve_stored_content(&content_refs).await?;
+                let resolved = self.resolve_stored_content(&msg.content).await?;
                 messages.push(ResolvedMessage::new(msg.message.role, resolved));
             }
         }
@@ -421,7 +447,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         let stored = self.store_content(content, origin).await?;
 
         // Add message to turn store
-        self.conversation_store.add_message(span_id, role, &stored).await?;
+        self.turn_store.add_message(span_id, role, &stored).await?;
 
         // Resolve for caching
         let resolved = self.resolve_stored_content(&stored).await?;
@@ -489,38 +515,13 @@ mod tests {
         type Asset = MockAssetStore;
         type Text = MockTextStore;
         type Conversation = MockConversationStore;
+        type Turn = MockTurnStore;
         type User = MockUserStore;
         type Document = MockDocumentStore;
     }
 
-    // Mock conversation store (implements TurnStore + ConversationStore)
+    // Mock conversation store
     struct MockConversationStore;
-
-    #[async_trait]
-    impl TurnStore for MockConversationStore {
-        async fn add_turn(&self, _: &ConversationId, _: SpanRole) -> Result<TurnInfo> { unimplemented!() }
-        async fn get_turns(&self, _: &ConversationId) -> Result<Vec<TurnInfo>> { unimplemented!() }
-        async fn get_turn(&self, _: &TurnId) -> Result<Option<TurnInfo>> { unimplemented!() }
-        async fn add_span(&self, _: &TurnId, _: Option<&str>) -> Result<SpanInfo> { unimplemented!() }
-        async fn get_spans(&self, _: &TurnId) -> Result<Vec<SpanInfo>> { unimplemented!() }
-        async fn get_span(&self, _: &SpanId) -> Result<Option<SpanInfo>> { unimplemented!() }
-        async fn add_message(&self, _: &SpanId, _: MessageRole, _: &[StoredContent]) -> Result<MessageInfo> { unimplemented!() }
-        async fn get_messages(&self, _: &SpanId) -> Result<Vec<MessageInfo>> { unimplemented!() }
-        async fn get_messages_with_content(&self, _: &SpanId) -> Result<Vec<MessageWithContent>> { unimplemented!() }
-        async fn get_message(&self, _: &MessageId) -> Result<Option<MessageInfo>> { unimplemented!() }
-        async fn create_view(&self, _: &ConversationId, _: Option<&str>, _: bool) -> Result<ViewInfo> { unimplemented!() }
-        async fn get_main_view(&self, _: &ConversationId) -> Result<Option<ViewInfo>> { unimplemented!() }
-        async fn get_views(&self, _: &ConversationId) -> Result<Vec<ViewInfo>> { unimplemented!() }
-        async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> { unimplemented!() }
-        async fn get_selected_span(&self, _: &ViewId, _: &TurnId) -> Result<Option<SpanId>> { unimplemented!() }
-        async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
-        async fn fork_view(&self, _: &ViewId, _: &TurnId, _: Option<&str>) -> Result<ViewInfo> { unimplemented!() }
-        async fn fork_view_with_selections(&self, _: &ViewId, _: &TurnId, _: Option<&str>, _: &[(TurnId, SpanId)]) -> Result<ViewInfo> { unimplemented!() }
-        async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
-        async fn edit_turn(&self, _: &ViewId, _: &TurnId, _: Vec<(MessageRole, Vec<StoredContent>)>, _: Option<&str>, _: bool, _: Option<&str>) -> Result<(SpanInfo, Option<ViewInfo>)> { unimplemented!() }
-        async fn add_user_turn(&self, _: &ConversationId, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> { unimplemented!() }
-        async fn add_assistant_turn(&self, _: &ConversationId, _: &str, _: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> { unimplemented!() }
-    }
 
     #[async_trait]
     impl ConversationStore for MockConversationStore {
@@ -531,6 +532,30 @@ mod tests {
         async fn rename_conversation(&self, _: &ConversationId, _: Option<&str>) -> Result<()> { unimplemented!() }
         async fn is_conversation_private(&self, _: &ConversationId) -> Result<bool> { unimplemented!() }
         async fn set_conversation_private(&self, _: &ConversationId, _: bool) -> Result<()> { unimplemented!() }
+        async fn set_main_view_id(&self, _: &ConversationId, _: &ViewId) -> Result<()> { unimplemented!() }
+    }
+
+    // Mock turn store
+    struct MockTurnStore;
+
+    #[async_trait]
+    impl TurnStore for MockTurnStore {
+        async fn create_turn(&self, _: SpanRole) -> Result<TurnInfo> { unimplemented!() }
+        async fn get_turn(&self, _: &TurnId) -> Result<Option<TurnInfo>> { unimplemented!() }
+        async fn create_span(&self, _: &TurnId, _: Option<&str>) -> Result<SpanInfo> { unimplemented!() }
+        async fn get_spans(&self, _: &TurnId) -> Result<Vec<SpanInfo>> { unimplemented!() }
+        async fn get_span(&self, _: &SpanId) -> Result<Option<SpanInfo>> { unimplemented!() }
+        async fn add_message(&self, _: &SpanId, _: MessageRole, _: &[StoredContent]) -> Result<MessageInfo> { unimplemented!() }
+        async fn get_messages(&self, _: &SpanId) -> Result<Vec<MessageWithContent>> { unimplemented!() }
+        async fn get_message(&self, _: &MessageId) -> Result<Option<MessageInfo>> { unimplemented!() }
+        async fn create_view(&self) -> Result<ViewInfo> { unimplemented!() }
+        async fn get_view(&self, _: &ViewId) -> Result<Option<ViewInfo>> { unimplemented!() }
+        async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> { unimplemented!() }
+        async fn get_selected_span(&self, _: &ViewId, _: &TurnId) -> Result<Option<SpanId>> { unimplemented!() }
+        async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
+        async fn fork_view(&self, _: &ViewId, _: &TurnId) -> Result<ViewInfo> { unimplemented!() }
+        async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> { unimplemented!() }
+        async fn edit_turn(&self, _: &ViewId, _: &TurnId, _: Vec<(MessageRole, Vec<StoredContent>)>, _: Option<&str>, _: bool) -> Result<(SpanInfo, Option<ViewInfo>)> { unimplemented!() }
     }
 
     // Mock user store
@@ -724,6 +749,7 @@ mod tests {
             Arc::new(MockAssetStore::new()),
             content_block_store,
             Arc::new(MockConversationStore),
+            Arc::new(MockTurnStore),
             Arc::new(MockUserStore),
             Arc::new(MockDocumentStore),
         )
@@ -739,6 +765,7 @@ mod tests {
             asset_store,
             content_block_store,
             Arc::new(MockConversationStore),
+            Arc::new(MockTurnStore),
             Arc::new(MockUserStore),
             Arc::new(MockDocumentStore),
         )

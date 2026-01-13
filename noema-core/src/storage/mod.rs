@@ -71,7 +71,7 @@ pub use types::{
     // ContentBlock
     ContentBlock, ContentOrigin, ContentType, OriginKind, StoredContentBlock, StoreResult,
     // Conversation
-    ConversationInfo, MessageContentInfo, MessageInfo, MessageRole, MessageWithContent,
+    ConversationInfo, ForkInfo, MessageInfo, MessageRole, MessageWithContent,
     SpanInfo, SpanRole, SpanWithMessages, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
     // Document
     DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
