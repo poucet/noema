@@ -4,7 +4,7 @@
 
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
 use noema_core::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
-use noema_core::storage::{Document, DocumentSource, DocumentStore, DocumentTab, Editable, Stores, Stored, UserStore};
+use noema_core::storage::{Document, DocumentSource, DocumentStore, DocumentTab, StoredEditable, Stores, UserStore};
 use rmcp::model::RawContent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -31,16 +31,16 @@ pub struct DocumentInfoResponse {
     pub updated_at: i64,
 }
 
-impl From<Stored<DocumentId, Editable<Document>>> for DocumentInfoResponse {
-    fn from(info: Stored<DocumentId, Editable<Document>>) -> Self {
+impl From<StoredEditable<DocumentId, Document>> for DocumentInfoResponse {
+    fn from(info: StoredEditable<DocumentId, Document>) -> Self {
         DocumentInfoResponse {
             id: info.id.clone(),
             user_id: info.user_id.clone(),
             title: info.title.clone(),
             source: info.source.to_string(),
             source_id: info.source_id.clone(),
-            created_at: info.created_at,
-            updated_at: info.updated_at,
+            created_at: info.created_at(),
+            updated_at: info.updated_at(),
         }
     }
 }
@@ -70,8 +70,8 @@ pub struct DocumentTabResponse {
     pub updated_at: i64,
 }
 
-impl From<Stored<TabId, Editable<DocumentTab>>> for DocumentTabResponse {
-    fn from(tab: Stored<TabId, Editable<DocumentTab>>) -> Self {
+impl From<StoredEditable<TabId, DocumentTab>> for DocumentTabResponse {
+    fn from(tab: StoredEditable<TabId, DocumentTab>) -> Self {
         DocumentTabResponse {
             id: tab.id.clone(),
             document_id: tab.document_id.clone(),

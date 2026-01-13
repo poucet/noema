@@ -3,7 +3,6 @@
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
 use noema_core::storage::{ConversationStore, DocumentResolver, MessageRole, InputContent, Session, Stores, TurnStore};
-use crate::state::AppStorage;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
