@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{
-    ConversationInfo, DisplayMessage, ErrorEvent, HistoryClearedEvent, InputContentBlock,
+    ConversationInfo, DisplayMessage, ErrorEvent, HistoryClearedEvent, DisplayInputContent,
     MessageCompleteEvent, ModelChangedEvent, ModelInfo, ParallelCompleteEvent,
     ParallelModelCompleteEvent, ParallelModelErrorEvent, ParallelStreamingMessageEvent,
     StreamingMessageEvent, ToolConfig,
@@ -57,17 +57,17 @@ pub async fn send_message(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
-    content: Vec<InputContentBlock>,
+    content: Vec<DisplayInputContent>,
     tool_config: Option<ToolConfig>,
 ) -> Result<(), String> {
     if content.is_empty() {
         return Err("Message must have content".to_string());
     }
 
-    // Convert Tauri InputContentBlock to core InputContent, filtering empty text
+    // Convert Tauri DisplayInputContent to core InputContent, filtering empty text
     let input_content: Vec<InputContent> = content
         .into_iter()
-        .filter(|block| !matches!(block, InputContentBlock::Text { text } if text.is_empty()))
+        .filter(|block| !matches!(block, DisplayInputContent::Text { text } if text.is_empty()))
         .map(InputContent::from)
         .collect();
 

@@ -354,7 +354,7 @@ impl Into<noema_ext::Attachment> for Attachment {
     }
 }
 
-/// Referenced document for RAG context (legacy - use InputContentBlock::DocumentRef instead)
+/// Referenced document for RAG context (legacy - use DisplayInputContent::DocumentRef instead)
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
@@ -370,7 +370,7 @@ pub struct ReferencedDocument {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
-pub enum InputContentBlock {
+pub enum DisplayInputContent {
     /// Plain text segment
     Text {
         text: String
@@ -402,15 +402,15 @@ pub enum InputContentBlock {
     },
 }
 
-impl From<InputContentBlock> for noema_core::storage::InputContent {
-    fn from(block: InputContentBlock) -> Self {
+impl From<DisplayInputContent> for noema_core::storage::InputContent {
+    fn from(block: DisplayInputContent) -> Self {
         use noema_core::storage::InputContent;
         match block {
-            InputContentBlock::Text { text } => InputContent::Text { text },
-            InputContentBlock::DocumentRef { id } => InputContent::DocumentRef { id },
-            InputContentBlock::Image { data, mime_type } => InputContent::Image { data, mime_type },
-            InputContentBlock::Audio { data, mime_type } => InputContent::Audio { data, mime_type },
-            InputContentBlock::AssetRef { asset_id, mime_type } => {
+            DisplayInputContent::Text { text } => InputContent::Text { text },
+            DisplayInputContent::DocumentRef { id } => InputContent::DocumentRef { id },
+            DisplayInputContent::Image { data, mime_type } => InputContent::Image { data, mime_type },
+            DisplayInputContent::Audio { data, mime_type } => InputContent::Audio { data, mime_type },
+            DisplayInputContent::AssetRef { asset_id, mime_type } => {
                 InputContent::AssetRef { asset_id, mime_type }
             }
         }
@@ -667,7 +667,7 @@ mod ts_export {
         ParallelCompleteEvent::export_all().expect("Failed to export ParallelCompleteEvent");
         ParallelModelErrorEvent::export_all().expect("Failed to export ParallelModelErrorEvent");
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
-        InputContentBlock::export_all().expect("Failed to export InputContentBlock");
+        DisplayInputContent::export_all().expect("Failed to export DisplayInputContent");
         ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");
         ToolConfig::export_all().expect("Failed to export ToolConfig");
     }
