@@ -19,6 +19,7 @@ import type {
   ModelChangedEvent,
   HistoryClearedEvent,
 } from "./generated";
+import type { TruncatedEvent } from "./generated/TruncatedEvent";
 
 // Re-export event payload types for consumers
 export type { UserMessageEvent, StreamingMessageEvent, MessageCompleteEvent, ErrorEvent, ModelChangedEvent, HistoryClearedEvent } from "./generated";
@@ -146,6 +147,10 @@ export function onModelChanged(
 
 export function onHistoryCleared(callback: (payload: HistoryClearedEvent) => void): Promise<UnlistenFn> {
   return listen<HistoryClearedEvent>("history_cleared", (event) => callback(event.payload));
+}
+
+export function onTruncated(callback: (payload: TruncatedEvent) => void): Promise<UnlistenFn> {
+  return listen<TruncatedEvent>("truncated", (event) => callback(event.payload));
 }
 
 // Parallel execution events
@@ -436,13 +441,15 @@ export async function getSpanMessages(
 }
 
 // View management (replaces Thread/Fork management)
+// Matches the backend ThreadInfoResponse type
 export interface ViewInfo {
   id: string;
-  conversationId: string;
-  parentViewId: string | null;
-  name: string | null;
-  isMain: boolean;
+  forkedFromViewId: string | null;
+  forkedAtTurnId: string | null;
+  turnCount: number;
   createdAt: number;
+  isMain: boolean;
+  name?: string | null; // Optional for display purposes
 }
 
 export async function listConversationViews(
@@ -455,17 +462,6 @@ export async function getCurrentViewId(
   conversationId: string
 ): Promise<string | null> {
   return invoke<string | null>("get_current_view_id", { conversationId });
-}
-
-// View/Fork operations
-export interface ThreadInfoResponse {
-  id: string;
-  conversationId: string;
-  parentSpanId: string | null;
-  name: string | null;
-  status: string;
-  createdAt: number;
-  isMain: boolean;
 }
 
 /**
@@ -488,8 +484,8 @@ export async function forkConversation(
   conversationId: string,
   atTurnId: string,
   name?: string
-): Promise<ThreadInfoResponse> {
-  return invoke<ThreadInfoResponse>("fork_conversation", { conversationId, atTurnId, name });
+): Promise<ViewInfo> {
+  return invoke<ViewInfo>("fork_conversation", { conversationId, atTurnId, name });
 }
 
 /**

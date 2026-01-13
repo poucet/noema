@@ -230,6 +230,48 @@ impl TurnStore for MemoryTurnStore {
         }))
     }
 
+    async fn list_related_views(&self, main_view_id: &ViewId) -> Result<Vec<Stored<ViewId, View>>> {
+        let views = self.views.lock().unwrap();
+        let selections = self.view_selections.lock().unwrap();
+
+        // Collect all views that are part of the fork tree starting from main_view_id
+        let mut result = Vec::new();
+        let mut to_visit = vec![main_view_id.clone()];
+        let mut visited = std::collections::HashSet::new();
+
+        while let Some(vid) = to_visit.pop() {
+            if visited.contains(&vid) {
+                continue;
+            }
+            visited.insert(vid.clone());
+
+            if let Some(v) = views.get(&vid) {
+                let turn_count = selections
+                    .iter()
+                    .filter(|((view_id, _), _)| view_id == &vid)
+                    .count();
+                let view = View {
+                    turn_count,
+                    fork: v.fork.clone(),
+                };
+                result.push(stored(v.id.clone(), view, v.created_at));
+
+                // Find all views that were forked from this view
+                for (other_id, other_view) in views.iter() {
+                    if let Some(ref fork) = other_view.fork {
+                        if &fork.from_view_id == &vid {
+                            to_visit.push(other_id.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort by created_at
+        result.sort_by_key(|v| v.created_at);
+        Ok(result)
+    }
+
     async fn select_span(
         &self,
         view_id: &ViewId,

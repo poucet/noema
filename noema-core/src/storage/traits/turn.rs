@@ -85,6 +85,11 @@ pub trait TurnStore: Send + Sync {
     /// Get a view by its ID
     async fn get_view(&self, view_id: &ViewId) -> Result<Option<StoredView>>;
 
+    /// List all views related to a main view (main view + all forks)
+    ///
+    /// Returns the main view and all views that were forked from it (recursively).
+    async fn list_related_views(&self, main_view_id: &ViewId) -> Result<Vec<StoredView>>;
+
     /// Select a span for a turn within a view
     ///
     /// Updates which span is selected at the given turn for the given view.

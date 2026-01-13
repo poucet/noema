@@ -236,11 +236,14 @@ function App() {
       });
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onMessageComplete(({ conversationId, messages: msgs }) => {
+    tauri.onMessageComplete(({ conversationId }) => {
       // Only update if this event is for the current conversation
       setCurrentConversationId((currentId) => {
         if (currentId === conversationId) {
-          setMessages(Array.isArray(msgs) ? msgs : []);
+          // Reload messages from storage to get alternates info
+          tauri.loadConversation(conversationId).then((msgs) => {
+            setMessages(Array.isArray(msgs) ? msgs : []);
+          }).catch(console.error);
           setStreamingMessage(null);
           setIsLoading(false);
         }
@@ -275,6 +278,29 @@ function App() {
       setCurrentConversationId((currentId) => {
         if (currentId === conversationId) {
           setMessages([]);
+        }
+        return currentId;
+      });
+    }).then((unlisten) => unlisteners.push(unlisten));
+
+    // Handle truncation (used during regeneration)
+    tauri.onTruncated(({ conversationId, turnId }) => {
+      setCurrentConversationId((currentId) => {
+        if (currentId === conversationId) {
+          if (turnId === null) {
+            // Full clear
+            setMessages([]);
+          } else {
+            // Truncate to before the specified turn - remove messages with this turnId and after
+            setMessages((prev) => {
+              const turnIndex = prev.findIndex((msg) => msg.turnId === turnId);
+              if (turnIndex >= 0) {
+                return prev.slice(0, turnIndex);
+              }
+              return prev;
+            });
+          }
+          setIsLoading(true);
         }
         return currentId;
       });

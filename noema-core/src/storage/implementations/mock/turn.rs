@@ -51,6 +51,9 @@ impl TurnStore for MockTurnStore {
     async fn get_view(&self, _: &ViewId) -> Result<Option<Stored<ViewId, View>>> {
         unimplemented!()
     }
+    async fn list_related_views(&self, _: &ViewId) -> Result<Vec<Stored<ViewId, View>>> {
+        unimplemented!()
+    }
     async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> {
         unimplemented!()
     }

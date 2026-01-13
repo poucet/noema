@@ -406,6 +406,50 @@ impl TurnStore for SqliteStore {
         }
     }
 
+    async fn list_related_views(&self, main_view_id: &ViewId) -> Result<Vec<StoredView>> {
+        let conn = self.conn().lock().unwrap();
+
+        // Use recursive CTE to find all views in the fork tree
+        let mut stmt = conn.prepare(
+            "WITH RECURSIVE view_tree AS (
+                -- Base case: the main view
+                SELECT id, forked_from_view_id, forked_at_turn_id, created_at
+                FROM views WHERE id = ?1
+                UNION ALL
+                -- Recursive case: views forked from views in the tree
+                SELECT v.id, v.forked_from_view_id, v.forked_at_turn_id, v.created_at
+                FROM views v
+                INNER JOIN view_tree vt ON v.forked_from_view_id = vt.id
+            )
+            SELECT vt.id, vt.forked_from_view_id, vt.forked_at_turn_id, vt.created_at,
+                   (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = vt.id) as turn_count
+            FROM view_tree vt
+            ORDER BY vt.created_at ASC"
+        )?;
+
+        let rows = stmt.query_map(params![main_view_id], |row| {
+            let id: ViewId = row.get(0)?;
+            let forked_from: Option<ViewId> = row.get(1)?;
+            let forked_at: Option<TurnId> = row.get(2)?;
+            let created: i64 = row.get(3)?;
+            let turn_count: usize = row.get(4)?;
+            Ok((id, forked_from, forked_at, created, turn_count))
+        })?;
+
+        let mut views = Vec::new();
+        for row_result in rows {
+            let (id, forked_from, forked_at, created, turn_count) = row_result?;
+            let fork = match (forked_from, forked_at) {
+                (Some(from_view_id), Some(at_turn_id)) => Some(ForkInfo { from_view_id, at_turn_id }),
+                _ => None,
+            };
+            let view = View { fork, turn_count };
+            views.push(stored(id, view, created));
+        }
+
+        Ok(views)
+    }
+
     async fn select_span(
         &self,
         view_id: &ViewId,

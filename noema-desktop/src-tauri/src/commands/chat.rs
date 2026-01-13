@@ -4,17 +4,79 @@ use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
 use noema_core::storage::{ConversationStore, DocumentResolver, MessageRole, InputContent, Session, Stores, TurnStore};
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{
-    ConversationInfo, DisplayMessage, ErrorEvent, TruncatedEvent, DisplayInputContent,
+    AlternateInfo, ConversationInfo, DisplayMessage, ErrorEvent, TruncatedEvent, DisplayInputContent,
     MessageCompleteEvent, ModelChangedEvent, ModelInfo, StreamingMessageEvent, ToolConfig,
     UserMessageEvent,
 };
 
+/// Enrich messages with alternate span information for each turn
+async fn enrich_with_alternates<S: Stores>(
+    messages: Vec<DisplayMessage>,
+    stores: &S,
+    view_id: &ViewId,
+) -> Vec<DisplayMessage> {
+    // Collect unique turn IDs from messages
+    let turn_ids: Vec<TurnId> = messages
+        .iter()
+        .filter_map(|m| m.turn_id.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Build a map of turn_id -> Vec<AlternateInfo>
+    let mut alternates_map: HashMap<TurnId, Vec<AlternateInfo>> = HashMap::new();
+
+    for turn_id in turn_ids {
+        // Get all spans for this turn
+        if let Ok(spans) = stores.turn().get_spans(&turn_id).await {
+            if spans.len() > 1 {
+                // Get the selected span for this view
+                let selected_span = stores.turn()
+                    .get_selected_span(view_id, &turn_id)
+                    .await
+                    .ok()
+                    .flatten();
+
+                let alternates: Vec<AlternateInfo> = spans
+                    .into_iter()
+                    .map(|span| {
+                        let is_selected = selected_span.as_ref() == Some(&span.id);
+                        AlternateInfo {
+                            span_id: span.id.clone(),
+                            model_id: span.model_id.clone(),
+                            model_display_name: span.model_id.clone(), // Could be enhanced with display name lookup
+                            message_count: 0, // Not currently tracked
+                            is_selected,
+                        }
+                    })
+                    .collect();
+                alternates_map.insert(turn_id, alternates);
+            }
+        }
+    }
+
+    // Enrich messages with alternates
+    messages
+        .into_iter()
+        .map(|mut msg| {
+            if let Some(turn_id) = &msg.turn_id {
+                if let Some(alternates) = alternates_map.get(turn_id) {
+                    if alternates.len() > 1 {
+                        msg.alternates = Some(alternates.clone());
+                    }
+                }
+            }
+            msg
+        })
+        .collect()
+}
 
 /// Get current messages in the conversation (committed + pending)
 #[tauri::command]
@@ -262,28 +324,32 @@ pub async fn load_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
+    let stores = state.get_stores()?;
+    let coordinator = state.get_coordinator()?;
+
     // Check if already loaded
     {
         let managers = state.managers.lock().await;
         if let Some(manager) = managers.get(&conversation_id) {
+            let view_id = manager.view_id().await;
             let messages: Vec<DisplayMessage> = manager
                 .all_messages()
                 .await
                 .iter()
                 .map(DisplayMessage::from)
                 .collect();
+            // Enrich with alternates
+            let messages = enrich_with_alternates(messages, stores.as_ref(), &view_id).await;
             return Ok(messages);
         }
     }
 
     // Not loaded, create manager
-    let stores = state.get_stores()?;
-    let coordinator = state.get_coordinator()?;
-
     let session = Session::open(coordinator.clone(), conversation_id.clone())
         .await
         .map_err(|e| format!("Failed to open conversation: {}", e))?;
 
+    let view_id = session.view_id().clone();
     let messages: Vec<DisplayMessage> = session
         .messages_for_display()
         .iter()
@@ -301,6 +367,8 @@ pub async fn load_conversation(
     let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
     state.managers.lock().await.insert(conversation_id, manager);
 
+    // Enrich with alternates
+    let messages = enrich_with_alternates(messages, stores.as_ref(), &view_id).await;
     Ok(messages)
 }
 
@@ -505,13 +573,12 @@ pub async fn list_conversation_views(
         .map_err(|e| format!("Failed to get conversation: {}", e))?
         .ok_or_else(|| format!("Conversation not found: {}", conversation_id))?;
 
-    let main_view = stores.turn()
-        .get_view(&conv.main_view_id)
+    let views = stores.turn()
+        .list_related_views(&conv.main_view_id)
         .await
-        .map_err(|e| format!("Failed to get main view: {}", e))?
-        .ok_or_else(|| format!("View not found: {}", conv.main_view_id))?;
+        .map_err(|e| format!("Failed to list views: {}", e))?;
 
-    Ok(vec![ThreadInfoResponse::from(main_view)])
+    Ok(views.into_iter().map(ThreadInfoResponse::from).collect())
 }
 
 /// Get the current view ID for a conversation
