@@ -3,8 +3,20 @@
 /**
  * Information about a view/branch in a conversation (replaces legacy Thread concept)
  */
-export type ThreadInfoResponse = { id: string, conversationId: string, parentSpanId: string | null, name: string | null, status: string, createdAt: bigint, 
+export type ThreadInfoResponse = { id: string, 
 /**
- * Whether this is the main view
+ * The view this was forked from (None for main views)
+ */
+forkedFromViewId: string | null, 
+/**
+ * The turn at which this view forked (None for main views)
+ */
+forkedAtTurnId: string | null, 
+/**
+ * Number of turns in this view
+ */
+turnCount: number, createdAt: bigint, 
+/**
+ * Whether this is the main view (derived from fork being None)
  */
 isMain: boolean, };

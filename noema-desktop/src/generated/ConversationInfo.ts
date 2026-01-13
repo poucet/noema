@@ -4,4 +4,4 @@ export type ConversationInfo = { id: string, name: string | null, messageCount: 
 /**
  * Whether this conversation is marked as private (warns before using cloud models)
  */
-isPrivate: boolean, createdAt: bigint, updatedAt: bigint, };
+isPrivate: boolean, createdAt: bigint, };
