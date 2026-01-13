@@ -16,7 +16,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use llm::{ContentBlock, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 
-use crate::storage::ids::{AssetId, ContentBlockId};
+use crate::storage::ids::{AssetId, ContentBlockId, DocumentId};
 
 // ============================================================================
 // ContentResolver Trait
@@ -66,7 +66,7 @@ pub enum StoredContent {
     /// content injected to LLM separately via DocumentFormatter.
     /// Title is looked up from documents table during resolution.
     DocumentRef {
-        document_id: String,
+        document_id: DocumentId,
     },
 
     /// Tool call - stored as structured JSON
@@ -126,9 +126,9 @@ impl StoredContent {
     }
 
     /// Create a document reference
-    pub fn document_ref(document_id: impl Into<String>) -> Self {
+    pub fn document_ref(document_id: impl Into<DocumentId>) -> Self {
         StoredContent::DocumentRef {
-            document_id: document_id.into(),
+            document_id: document_id.into() ,
         }
     }
 
@@ -170,7 +170,7 @@ impl StoredContent {
             }
             StoredContent::DocumentRef { document_id } => {
                 Ok(ContentBlock::DocumentRef {
-                    id: document_id.clone(),
+                    id: document_id.to_string(),
                 })
             }
             StoredContent::ToolCall(call) => Ok(ContentBlock::ToolCall(call.clone())),
@@ -196,7 +196,7 @@ impl StoredContent {
                 mime_type,
                 filename,
             } => Ok(ResolvedContent::AssetRef {
-                asset_id: asset_id.to_string(),
+                asset_id: asset_id.clone(),
                 mime_type: mime_type.clone(),
                 filename: filename.clone(),
             }),
@@ -227,16 +227,55 @@ pub enum ResolvedContent {
         text: String,
     },
     AssetRef {
-        asset_id: String,
+        asset_id: AssetId,
         mime_type: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         filename: Option<String>,
     },
     DocumentRef {
-        document_id: String,
+        document_id: DocumentId,
     },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
+}
+
+// ============================================================================
+// InputContent - Raw input from UI before storage
+// ============================================================================
+
+/// Content as received from UI, before storage processing
+///
+/// This is what Tauri/UI sends when the user submits a message.
+/// Session converts this to `StoredContent` by:
+/// - Storing text in content_blocks → TextRef
+/// - Storing base64 image/audio in blob storage → AssetRef
+/// - Passing through document refs and existing asset refs
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum InputContent {
+    /// Plain text to be stored
+    Text { text: String },
+    /// Reference to an existing document
+    DocumentRef { id: DocumentId },
+    /// Base64-encoded image data to be stored
+    Image {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+    },
+    /// Base64-encoded audio data to be stored
+    Audio {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+    },
+    /// Reference to already-stored asset (no storage needed)
+    AssetRef {
+        #[serde(rename = "assetId")]
+        asset_id: AssetId,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+    },
 }
 
 // ============================================================================
