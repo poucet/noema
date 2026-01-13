@@ -74,7 +74,7 @@ impl ConversationStore for SqliteStore {
              FROM conversations c WHERE c.id = ?1",
             params![conversation_id.as_str()],
             |row| {
-                let id: String = row.get(0)?;
+                let id: ConversationId = row.get(0)?;
                 let name: Option<String> = row.get(1)?;
                 let is_private: i32 = row.get(2)?;
                 let created_at: i64 = row.get(3)?;
@@ -87,7 +87,7 @@ impl ConversationStore for SqliteStore {
         match result {
             Ok((id, name, is_private, created_at, updated_at, turn_count)) => {
                 Ok(Some(ConversationInfo {
-                    id: ConversationId::from_string(id),
+                    id: id,
                     name,
                     turn_count,
                     is_private: is_private != 0,
@@ -112,7 +112,7 @@ impl ConversationStore for SqliteStore {
 
         let conversations = stmt
             .query_map(params![user_id.as_str()], |row| {
-                let id: String = row.get(0)?;
+                let id: ConversationId = row.get(0)?;
                 let name: Option<String> = row.get(1)?;
                 let is_private: i32 = row.get(2)?;
                 let created_at: i64 = row.get(3)?;
@@ -123,7 +123,7 @@ impl ConversationStore for SqliteStore {
             .filter_map(|r| r.ok())
             .map(
                 |(id, name, is_private, created_at, updated_at, turn_count)| ConversationInfo {
-                    id: ConversationId::from_string(id),
+                    id: id,
                     name,
                     turn_count,
                     is_private: is_private != 0,

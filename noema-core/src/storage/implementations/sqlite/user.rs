@@ -46,7 +46,7 @@ impl UserStore for SqliteStore {
                 params![DEFAULT_USER_EMAIL],
                 |row| {
                     Ok(UserInfo {
-                        id: UserId::from_string(row.get::<_, String>(0)?),
+                        id: row.get::<_, UserId>(0)?,
                         email: row.get(1)?,
                     })
                 },
@@ -79,7 +79,7 @@ impl UserStore for SqliteStore {
                 params![email],
                 |row| {
                     Ok(UserInfo {
-                        id: UserId::from_string(row.get::<_, String>(0)?),
+                        id: row.get::<_, UserId>(0)?,
                         email: row.get(1)?,
                     })
                 },
@@ -116,7 +116,7 @@ impl UserStore for SqliteStore {
         let users = stmt
             .query_map([], |row| {
                 Ok(UserInfo {
-                    id: UserId::from_string(row.get::<_, String>(0)?),
+                    id: row.get::<_, UserId>(0)?,
                     email: row.get(1)?,
                 })
             })?

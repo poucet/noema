@@ -6,10 +6,11 @@ use rusqlite::{params, Connection};
 
 use super::text::store_content_sync;
 use super::SqliteStore;
+use crate::storage::Asset;
 use crate::storage::content::StoredContent;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{
-    AssetId, ContentBlockId, ConversationId, MessageContentId, MessageId, SpanId, TurnId, ViewId,
+    AssetId, ContentBlockId, ConversationId, DocumentId, MessageContentId, MessageId, SpanId, TurnId, ViewId
 };
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
@@ -117,11 +118,11 @@ fn load_message_content(
             let mid: String = row.get(1)?;
             let seq: i32 = row.get(2)?;
             let content_type: String = row.get(3)?;
-            let content_block_id: Option<String> = row.get(4)?;
-            let asset_id: Option<String> = row.get(5)?;
+            let content_block_id: Option<ContentBlockId> = row.get(4)?;
+            let asset_id: Option<AssetId> = row.get(5)?;
             let mime_type: Option<String> = row.get(6)?;
             let filename: Option<String> = row.get(7)?;
-            let document_id: Option<String> = row.get(8)?;
+            let document_id: Option<DocumentId> = row.get(8)?;
             let tool_data: Option<String> = row.get(9)?;
             Ok((
                 id,
@@ -152,13 +153,12 @@ fn load_message_content(
             )| {
                 let content = match content_type.as_str() {
                     "text" => {
-                        let cb_id = content_block_id?;
                         StoredContent::TextRef {
-                            content_block_id: ContentBlockId::from_string(cb_id),
+                            content_block_id: content_block_id?,
                         }
                     }
                     "asset_ref" => StoredContent::AssetRef {
-                        asset_id: AssetId::from(asset_id?),
+                        asset_id: asset_id?,
                         mime_type: mime_type?,
                         filename,
                     },
@@ -337,8 +337,8 @@ impl TurnStore for SqliteStore {
 
         let spans = stmt
             .query_map(params![turn_id.as_str()], |row| {
-                let id: String = row.get(0)?;
-                let tid: String = row.get(1)?;
+                let id: SpanId = row.get(0)?;
+                let tid: TurnId = row.get(1)?;
                 let model: Option<String> = row.get(2)?;
                 let created: i64 = row.get(3)?;
                 let msg_count: i32 = row.get(4)?;
@@ -346,8 +346,8 @@ impl TurnStore for SqliteStore {
             })?
             .filter_map(|r| r.ok())
             .map(|(id, tid, model, created, msg_count)| SpanInfo {
-                id: SpanId::from_string(id),
-                turn_id: TurnId::from_string(tid),
+                id: id,
+                turn_id: tid,
                 model_id: model,
                 message_count: msg_count,
                 created_at: created,

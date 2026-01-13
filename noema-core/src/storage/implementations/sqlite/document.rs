@@ -103,8 +103,8 @@ impl DocumentStore for SqliteStore {
                 |row| {
                     let source_str: String = row.get(3)?;
                     Ok(DocumentInfo {
-                        id: DocumentId::from_string(row.get::<_, String>(0)?),
-                        user_id: UserId::from_string(row.get::<_, String>(1)?),
+                        id: row.get::<_, DocumentId>(0)?,
+                        user_id: row.get::<_, UserId>(1)?,
                         title: row.get(2)?,
                         source: source_str
                             .parse::<DocumentSource>()
@@ -134,8 +134,8 @@ impl DocumentStore for SqliteStore {
                 |row| {
                     let source_str: String = row.get(3)?;
                     Ok(DocumentInfo {
-                        id: DocumentId::from_string(row.get::<_, String>(0)?),
-                        user_id: UserId::from_string(row.get::<_, String>(1)?),
+                        id: row.get::<_, DocumentId>(0)?,
+                        user_id: row.get::<_, UserId>(1)?,
                         title: row.get(2)?,
                         source: source_str
                             .parse::<DocumentSource>()
@@ -161,8 +161,8 @@ impl DocumentStore for SqliteStore {
             .query_map(params![user_id.as_str()], |row| {
                 let source_str: String = row.get(3)?;
                 Ok(DocumentInfo {
-                    id: DocumentId::from_string(row.get::<_, String>(0)?),
-                    user_id: UserId::from_string(row.get::<_, String>(1)?),
+                    id: row.get::<_, DocumentId>(0)?,
+                    user_id: row.get::<_, UserId>(1)?,
                     title: row.get(2)?,
                     source: source_str
                         .parse::<DocumentSource>()
@@ -198,8 +198,8 @@ impl DocumentStore for SqliteStore {
             .query_map(params![user_id.as_str(), &pattern, limit as i64], |row| {
                 let source_str: String = row.get(3)?;
                 Ok(DocumentInfo {
-                    id: DocumentId::from_string(row.get::<_, String>(0)?),
-                    user_id: UserId::from_string(row.get::<_, String>(1)?),
+                    id: row.get::<_, DocumentId>(0)?,
+                    user_id: row.get::<_, UserId>(1)?,
                     title: row.get(2)?,
                     source: source_str
                         .parse::<DocumentSource>()
@@ -289,16 +289,16 @@ impl DocumentStore for SqliteStore {
                         })
                         .unwrap_or_default();
                     Ok(DocumentTabInfo {
-                        id: TabId::from_string(row.get::<_, String>(0)?),
-                        document_id: DocumentId::from_string(row.get::<_, String>(1)?),
-                        parent_tab_id: row.get::<_, Option<String>>(2)?.map(TabId::from_string),
+                        id: row.get::<_, TabId>(0)?,
+                        document_id: row.get::<_, DocumentId>(1)?,
+                        parent_tab_id: row.get::<_, Option<TabId>>(2)?,
                         tab_index: row.get(3)?,
                         title: row.get(4)?,
                         icon: row.get(5)?,
                         content_markdown: row.get(6)?,
                         referenced_assets,
-                        source_tab_id: row.get::<_, Option<String>>(8)?.map(TabId::from_string),
-                        current_revision_id: row.get::<_, Option<String>>(9)?.map(RevisionId::from_string),
+                        source_tab_id: row.get::<_, Option<TabId>>(8)?,
+                        current_revision_id: row.get::<_, Option<RevisionId>>(9)?,
                         created_at: row.get(10)?,
                         updated_at: row.get(11)?,
                     })
@@ -325,16 +325,16 @@ impl DocumentStore for SqliteStore {
                     })
                     .unwrap_or_default();
                 Ok(DocumentTabInfo {
-                    id: TabId::from_string(row.get::<_, String>(0)?),
-                    document_id: DocumentId::from_string(row.get::<_, String>(1)?),
-                    parent_tab_id: row.get::<_, Option<String>>(2)?.map(TabId::from_string),
+                    id: row.get::<_, TabId>(0)?,
+                    document_id: row.get::<_, DocumentId>(1)?,
+                    parent_tab_id: row.get::<_, Option<TabId>>(2)?,
                     tab_index: row.get(3)?,
                     title: row.get(4)?,
                     icon: row.get(5)?,
                     content_markdown: row.get(6)?,
                     referenced_assets,
-                    source_tab_id: row.get::<_, Option<String>>(8)?.map(TabId::from_string),
-                    current_revision_id: row.get::<_, Option<String>>(9)?.map(RevisionId::from_string),
+                    source_tab_id: row.get::<_, Option<TabId>>(8)?,
+                    current_revision_id: row.get::<_, Option<RevisionId>>(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
@@ -454,15 +454,15 @@ impl DocumentStore for SqliteStore {
                         })
                         .unwrap_or_default();
                     Ok(DocumentRevisionInfo {
-                        id: RevisionId::from_string(row.get::<_, String>(0)?),
-                        tab_id: TabId::from_string(row.get::<_, String>(1)?),
+                        id: row.get::<_, RevisionId>(0)?,
+                        tab_id: row.get::<_, TabId>(1)?,
                         revision_number: row.get(2)?,
-                        parent_revision_id: row.get::<_, Option<String>>(3)?.map(RevisionId::from_string),
+                        parent_revision_id: row.get::<_, Option<RevisionId>>(3)?,
                         content_markdown: row.get(4)?,
                         content_hash: row.get(5)?,
                         referenced_assets,
                         created_at: row.get(7)?,
-                        created_by: UserId::from_string(row.get::<_, String>(8)?),
+                        created_by: row.get::<_, UserId>(8)?,
                     })
                 },
             )
@@ -487,15 +487,15 @@ impl DocumentStore for SqliteStore {
                     })
                     .unwrap_or_default();
                 Ok(DocumentRevisionInfo {
-                    id: RevisionId::from_string(row.get::<_, String>(0)?),
-                    tab_id: TabId::from_string(row.get::<_, String>(1)?),
+                    id: row.get::<_, RevisionId>(0)?,
+                    tab_id: row.get::<_, TabId>(1)?,
                     revision_number: row.get(2)?,
-                    parent_revision_id: row.get::<_, Option<String>>(3)?.map(RevisionId::from_string),
+                    parent_revision_id: row.get::<_, Option<RevisionId>>(3)?,
                     content_markdown: row.get(4)?,
                     content_hash: row.get(5)?,
                     referenced_assets,
                     created_at: row.get(7)?,
-                    created_by: UserId::from_string(row.get::<_, String>(8)?),
+                    created_by: row.get::<_, UserId>(8)?,
                 })
             })?
             .filter_map(|r| r.ok())
