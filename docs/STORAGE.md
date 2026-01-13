@@ -266,11 +266,11 @@ pub struct BlobStore {
 }
 
 impl BlobStore {
-    pub fn store(&self, data: &[u8]) -> io::Result<StoredBlob>;
-    pub fn get(&self, hash: &str) -> io::Result<Vec<u8>>;
-    pub fn exists(&self, hash: &str) -> bool;
-    pub fn delete(&self, hash: &str) -> io::Result<bool>;
-    pub fn verify(&self, hash: &str) -> io::Result<bool>;
+    pub fn store(&self, data: &[u8]) -> io::Result<BlobHash>;
+    pub fn get(&self, hash: &BlobHash) -> io::Result<Vec<u8>>;
+    pub fn exists(&self, hash: &BlobHash) -> bool;
+    pub fn delete(&self, hash: &BlobHash) -> io::Result<bool>;
+    pub fn verify(&self, hash: &BlobHash) -> io::Result<bool>;
     pub fn compute_hash(data: &[u8]) -> String;
 }
 ```
