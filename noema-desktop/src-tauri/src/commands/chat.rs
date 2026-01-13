@@ -251,7 +251,7 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
             .await
             .map_err(|e| format!("Failed to get view: {}", e))?
             .ok_or_else(|| format!("View not found: {}", conv.main_view_id))?;
-        result.push(ConversationInfo::from_parts(conv, &view));
+        result.push(ConversationInfo::from_parts(&conv, &view));
     }
 
     Ok(result)
@@ -454,7 +454,7 @@ pub async fn get_turn_alternates(
         .into_iter()
         .map(|s| SpanInfoResponse {
             id: s.id.as_str().to_string(),
-            model_id: s.model_id,
+            model_id: s.model_id.clone(),
             message_count: s.message_count as usize,
             is_selected: false,
             created_at: s.created_at,

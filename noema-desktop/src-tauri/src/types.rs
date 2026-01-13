@@ -30,14 +30,14 @@ pub struct ConversationInfo {
 }
 
 impl ConversationInfo {
-    /// Create from core ConversationInfo and ViewInfo (for turn_count)
+    /// Create from core Stored<ConversationId, Conversation> and Stored<ViewId, View> (for turn_count)
     pub fn from_parts(
-        conv: noema_core::storage::ConversationInfo,
-        view: &noema_core::storage::ViewInfo,
+        conv: &noema_core::storage::Stored<ConversationId, noema_core::storage::Conversation>,
+        view: &noema_core::storage::Stored<ViewId, noema_core::storage::View>,
     ) -> Self {
         Self {
-            id: conv.id,
-            name: conv.name,
+            id: conv.id.clone(),
+            name: conv.name.clone(),
             message_count: view.turn_count,
             is_private: conv.is_private,
             created_at: conv.created_at,
@@ -436,19 +436,19 @@ pub struct ThreadInfoResponse {
     pub is_main: bool,
 }
 
-impl From<noema_core::storage::ViewInfo> for ThreadInfoResponse {
-    fn from(info: noema_core::storage::ViewInfo) -> Self {
-        let is_main = info.fork.is_none();
-        let (forked_from_view_id, forked_at_turn_id) = match info.fork {
-            Some(fork) => (Some(fork.from_view_id), Some(fork.at_turn_id)),
+impl From<noema_core::storage::Stored<ViewId, noema_core::storage::View>> for ThreadInfoResponse {
+    fn from(stored: noema_core::storage::Stored<ViewId, noema_core::storage::View>) -> Self {
+        let is_main = stored.fork.is_none();
+        let (forked_from_view_id, forked_at_turn_id) = match &stored.fork {
+            Some(fork) => (Some(fork.from_view_id.clone()), Some(fork.at_turn_id.clone())),
             None => (None, None),
         };
         Self {
-            id: info.id,
+            id: stored.id.clone(),
             forked_from_view_id,
             forked_at_turn_id,
-            turn_count: info.turn_count,
-            created_at: info.created_at,
+            turn_count: stored.turn_count,
+            created_at: stored.created_at,
             is_main,
         }
     }

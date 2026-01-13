@@ -3,9 +3,8 @@
 //! Uses the episteme-compatible document model with documents, tabs, and revisions.
 
 use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
-use noema_core::storage::ids::{AssetId, DocumentId, TabId, UserId};
-use noema_core::storage::{DocumentInfo, DocumentSource, DocumentStore, DocumentTabInfo, Stores, UserStore};
-use crate::state::AppStorage;
+use noema_core::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
+use noema_core::storage::{Document, DocumentSource, DocumentStore, DocumentTab, Editable, Stores, Stored, UserStore};
 use rmcp::model::RawContent;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -32,14 +31,14 @@ pub struct DocumentInfoResponse {
     pub updated_at: i64,
 }
 
-impl From<DocumentInfo> for DocumentInfoResponse {
-    fn from(info: DocumentInfo) -> Self {
+impl From<Stored<DocumentId, Editable<Document>>> for DocumentInfoResponse {
+    fn from(info: Stored<DocumentId, Editable<Document>>) -> Self {
         DocumentInfoResponse {
-            id: info.id,
-            user_id: info.user_id,
-            title: info.title,
+            id: info.id.clone(),
+            user_id: info.user_id.clone(),
+            title: info.title.clone(),
             source: info.source.to_string(),
-            source_id: info.source_id,
+            source_id: info.source_id.clone(),
             created_at: info.created_at,
             updated_at: info.updated_at,
         }
@@ -66,24 +65,24 @@ pub struct DocumentTabResponse {
     #[ts(type = "string | null")]
     pub source_tab_id: Option<TabId>,
     #[ts(type = "string | null")]
-    pub current_revision_id: Option<String>, // RevisionId as string for simplicity
+    pub current_revision_id: Option<RevisionId>, // RevisionId as string for simplicity
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-impl From<DocumentTabInfo> for DocumentTabResponse {
-    fn from(tab: DocumentTabInfo) -> Self {
+impl From<Stored<TabId, Editable<DocumentTab>>> for DocumentTabResponse {
+    fn from(tab: Stored<TabId, Editable<DocumentTab>>) -> Self {
         DocumentTabResponse {
-            id: tab.id,
-            document_id: tab.document_id,
-            parent_tab_id: tab.parent_tab_id,
+            id: tab.id.clone(),
+            document_id: tab.document_id.clone(),
+            parent_tab_id: tab.parent_tab_id.clone(),
             tab_index: tab.tab_index,
-            title: tab.title,
-            icon: tab.icon,
-            content_markdown: tab.content_markdown,
-            referenced_assets: tab.referenced_assets,
-            source_tab_id: tab.source_tab_id,
-            current_revision_id: tab.current_revision_id.map(|r| r.as_str().to_string()),
+            title: tab.title.clone(),
+            icon: tab.icon.clone(),
+            content_markdown: tab.content_markdown.clone(),
+            referenced_assets: tab.referenced_assets.clone(),
+            source_tab_id: tab.source_tab_id.clone(),
+            current_revision_id: tab.current_revision_id.clone(),
             created_at: tab.created_at,
             updated_at: tab.updated_at,
         }
