@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::types::document::{
-    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
+    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
 };
 
 /// Trait for document storage operations
@@ -92,20 +92,6 @@ pub trait DocumentStore: Send + Sync {
 
     /// Delete a document tab
     async fn delete_document_tab(&self, id: &TabId) -> Result<bool>;
-
-    // ========== Full Document Fetch Method =========
-
-    /// Fetch the entire content of the document along with the tabs.
-    async fn fetch_full_document(&self, doc_id: &DocumentId) -> Result<Option<FullDocumentInfo>> {
-        let document = match self.get_document(doc_id).await? {
-            Some(doc) => doc,
-            None => return Ok(None),
-        };
-
-        let tabs = self.list_document_tabs(doc_id).await?;
-
-        Ok(Some(FullDocumentInfo { document, tabs }))
-    }
 
     // ========== Document Revision Methods ==========
 

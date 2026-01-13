@@ -74,7 +74,7 @@ pub use types::{
     ConversationInfo, ForkInfo, MessageInfo, MessageRole, MessageWithContent,
     SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
     // Document
-    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
+    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
     // User
     UserInfo,
 };
@@ -98,4 +98,4 @@ pub use implementations::memory::{
 };
 
 // Document resolution
-pub use document_resolver::{DocumentFormatter, DocumentResolver};
+pub use document_resolver::{DocumentFormatter, DocumentResolver, ResolvedDocument};

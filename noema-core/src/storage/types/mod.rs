@@ -19,7 +19,5 @@ pub use conversation::{
     ConversationInfo, ForkInfo, MessageInfo, MessageRole, MessageWithContent,
     SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
 };
-pub use document::{
-    DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
-};
+pub use document::{DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo};
 pub use user::UserInfo;

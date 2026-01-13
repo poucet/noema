@@ -83,9 +83,3 @@ pub struct DocumentRevisionInfo {
     pub created_at: i64,
     pub created_by: UserId,
 }
-
-#[derive(Debug, Clone)]
-pub struct FullDocumentInfo {
-    pub document: DocumentInfo,
-    pub tabs: Vec<DocumentTabInfo>,
-}

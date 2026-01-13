@@ -12,23 +12,32 @@ use llm::{ChatRequest, ContentBlock};
 
 use crate::storage::ids::DocumentId;
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::FullDocumentInfo;
+use crate::storage::types::{DocumentInfo, DocumentTabInfo};
+
+/// A resolved document with its content and tabs
+pub struct ResolvedDocument {
+    pub document: DocumentInfo,
+    pub tabs: Vec<DocumentTabInfo>,
+}
 
 /// Trait for resolving document references to their content
 #[async_trait]
 pub trait DocumentResolver: Send + Sync {
     /// Resolve all document IDs to their full content
-    async fn resolve_documents(&self, doc_ids: &[DocumentId]) -> HashMap<DocumentId, FullDocumentInfo>;
+    async fn resolve_documents(&self, doc_ids: &[DocumentId]) -> HashMap<DocumentId, ResolvedDocument>;
 }
 
 #[async_trait]
 impl<S: DocumentStore> DocumentResolver for S {
-    async fn resolve_documents(&self, doc_ids: &[DocumentId]) -> HashMap<DocumentId, FullDocumentInfo> {
+    async fn resolve_documents(&self, doc_ids: &[DocumentId]) -> HashMap<DocumentId, ResolvedDocument> {
         join_all(doc_ids.iter().map(|id| async move {
-            (
-                id.clone(),
-                self.fetch_full_document(id).await.ok().flatten(),
-            )
+            let result = async {
+                let document = self.get_document(id).await.ok()??;
+                let tabs = self.list_document_tabs(id).await.ok()?;
+                Some(ResolvedDocument { document, tabs })
+            }
+            .await;
+            (id.clone(), result)
         }))
         .await
         .into_iter()
@@ -70,7 +79,7 @@ impl DocumentFormatter {
     pub fn inject_documents(
         &self,
         request: &mut ChatRequest,
-        resolved_docs: &HashMap<DocumentId, FullDocumentInfo>,
+        resolved_docs: &HashMap<DocumentId, ResolvedDocument>,
     ) {
         // Track which documents have already been expanded (first reference gets full content)
         let mut expanded_docs: HashSet<String> = HashSet::new();
@@ -95,7 +104,7 @@ impl DocumentFormatter {
     }
 
     /// Format a single document as markdown with full content (for first reference)
-    pub fn format_document(&self, doc: &FullDocumentInfo) -> String {
+    pub fn format_document(&self, doc: &ResolvedDocument) -> String {
         let tabs: Vec<TabData> = doc
             .tabs
             .iter()
@@ -116,7 +125,7 @@ impl DocumentFormatter {
     }
 
     /// Format a shorthand reference (for subsequent mentions of the same document)
-    pub fn format_document_shorthand(&self, doc: &FullDocumentInfo) -> String {
+    pub fn format_document_shorthand(&self, doc: &ResolvedDocument) -> String {
         let template = DocumentShorthandTemplate {
             id: doc.document.id.as_str(),
             title: &doc.document.title,
