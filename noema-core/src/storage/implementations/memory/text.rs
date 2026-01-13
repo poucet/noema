@@ -146,18 +146,4 @@ mod tests {
         let not_found = store.find_by_hash("nonexistent").await.unwrap();
         assert!(not_found.is_none());
     }
-
-    #[tokio::test]
-    async fn test_require_text() {
-        let store = MemoryTextStore::new();
-        let content = ContentBlock::plain("required");
-
-        let result = store.store(content).await.unwrap();
-        let text = store.require_text(&result.id).await.unwrap();
-        assert_eq!(text, "required");
-
-        let missing_id = ContentBlockId::new();
-        let err = store.require_text(&missing_id).await;
-        assert!(err.is_err());
-    }
 }

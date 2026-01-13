@@ -7,7 +7,6 @@
 //! - `AssetResolver` - Resolution trait for assets and documents
 //!
 //! Session implements `ConversationContext` directly.
-//! Text resolution uses `TextStore::require_text()` directly.
 //!
 //! For SQLite storage, use `storage::SqliteStore`.
 

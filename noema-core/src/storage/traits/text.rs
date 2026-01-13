@@ -26,14 +26,4 @@ pub trait TextStore: Send + Sync {
 
     /// Find content block by hash (for deduplication checks)
     async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>>;
-
-    /// Get text content by ID, returning error if not found
-    ///
-    /// This is a convenience method for cases where the content block
-    /// must exist (e.g., resolving references during session loading).
-    async fn require_text(&self, id: &ContentBlockId) -> Result<String> {
-        self.get_text(id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Content block not found: {}", id.as_str()))
-    }
 }
