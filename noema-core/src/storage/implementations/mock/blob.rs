@@ -37,13 +37,11 @@ impl BlobStore for MockBlobStore {
         let hash = hex::encode(hasher.finalize());
 
         let mut blobs = self.blobs.lock().unwrap();
-        let is_new = !blobs.contains_key(&hash);
         blobs.insert(hash.clone(), data.to_vec());
 
         Ok(StoredBlob {
             hash,
             size: data.len(),
-            is_new,
         })
     }
 

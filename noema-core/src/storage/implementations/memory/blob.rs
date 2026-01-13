@@ -32,13 +32,11 @@ impl BlobStore for MemoryBlobStore {
     async fn store(&self, data: &[u8]) -> Result<StoredBlob> {
         let hash = Self::compute_hash(data);
         let mut blobs = self.blobs.lock().unwrap();
-        let is_new = !blobs.contains_key(&hash);
         blobs.insert(hash.clone(), data.to_vec());
 
         Ok(StoredBlob {
             hash,
             size: data.len(),
-            is_new,
         })
     }
 
@@ -73,7 +71,6 @@ mod tests {
         let data = b"hello world";
 
         let stored = store.store(data).await.unwrap();
-        assert!(stored.is_new);
         assert_eq!(stored.size, data.len());
 
         let retrieved = store.get(&stored.hash).await.unwrap();
@@ -86,10 +83,8 @@ mod tests {
         let data = b"duplicate";
 
         let first = store.store(data).await.unwrap();
-        assert!(first.is_new);
 
         let second = store.store(data).await.unwrap();
-        assert!(!second.is_new);
         assert_eq!(first.hash, second.hash);
     }
 

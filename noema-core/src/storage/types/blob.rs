@@ -7,6 +7,4 @@ pub struct StoredBlob {
     pub hash: String,
     /// Size in bytes
     pub size: usize,
-    /// Whether this was a new blob (false if already existed)
-    pub is_new: bool,
 }

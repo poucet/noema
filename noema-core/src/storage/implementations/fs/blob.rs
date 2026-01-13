@@ -114,7 +114,6 @@ impl BlobStore for FsBlobStore {
             return Ok(StoredBlob {
                 hash,
                 size: data.len(),
-                is_new: false,
             });
         }
 
@@ -133,7 +132,6 @@ impl BlobStore for FsBlobStore {
         Ok(StoredBlob {
             hash,
             size: data.len(),
-            is_new: true,
         })
     }
 
@@ -208,8 +206,7 @@ mod tests {
         let store = temp_blob_store();
         let data = b"Hello, World!".to_vec();
 
-        let stored = store.store(&data).await.unwrap();
-        assert!(stored.is_new);
+        let stored: StoredBlob = store.store(&data).await.unwrap();
         assert_eq!(stored.size, data.len());
 
         let retrieved = store.get(&stored.hash).await.unwrap();
@@ -225,10 +222,10 @@ mod tests {
         let data = b"Duplicate data".to_vec();
 
         let first = store.store(&data).await.unwrap();
-        assert!(first.is_new);
+        assert_eq!(first.size, data.len());
 
         let second = store.store(&data).await.unwrap();
-        assert!(!second.is_new);
+        assert_eq!(second.size, data.len());
         assert_eq!(first.hash, second.hash);
 
         // Clean up
