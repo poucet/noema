@@ -290,6 +290,49 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.create_and_select_span(view_id, &turn_id, model_id).await
     }
 
+    /// Get a view by ID
+    pub async fn get_view(
+        &self,
+        view_id: &ViewId,
+    ) -> Result<Option<crate::storage::types::ViewInfo>> {
+        self.turn_store.get_view(view_id).await
+    }
+
+    /// Get all spans for a turn
+    pub async fn get_spans(
+        &self,
+        turn_id: &TurnId,
+    ) -> Result<Vec<crate::storage::types::SpanInfo>> {
+        self.turn_store.get_spans(turn_id).await
+    }
+
+    /// Get messages from a span
+    pub async fn get_span_messages(
+        &self,
+        span_id: &SpanId,
+    ) -> Result<Vec<crate::storage::types::MessageWithContent>> {
+        self.turn_store.get_messages(span_id).await
+    }
+
+    /// Fork a view at a specific turn
+    pub async fn fork_view(
+        &self,
+        view_id: &ViewId,
+        at_turn_id: &TurnId,
+    ) -> Result<crate::storage::types::ViewInfo> {
+        self.turn_store.fork_view(view_id, at_turn_id).await
+    }
+
+    /// Select a span at a turn in a view
+    pub async fn select_span(
+        &self,
+        view_id: &ViewId,
+        turn_id: &TurnId,
+        span_id: &SpanId,
+    ) -> Result<()> {
+        self.turn_store.select_span(view_id, turn_id, span_id).await
+    }
+
     // ========== User Delegation Methods ==========
 
     /// Get or create the default user

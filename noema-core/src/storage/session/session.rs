@@ -12,7 +12,7 @@ use llm::{ChatMessage, ChatPayload, ContentBlock};
 use std::sync::Arc;
 
 use crate::context::{ConversationContext, MessagesGuard};
-use crate::engine::CommitMode;
+use crate::manager::CommitMode;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, SpanId, TurnId, ViewId};
