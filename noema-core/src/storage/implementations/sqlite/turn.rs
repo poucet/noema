@@ -12,8 +12,8 @@ use crate::storage::ids::{
 };
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    ForkInfo, MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole,
-    TurnInfo, TurnWithContent, ViewInfo,
+    ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole,
+    Stored, Turn, TurnWithContent, View,
 };
 
 /// Initialize turn-related schema (turns, spans, messages, views)
@@ -147,7 +147,7 @@ fn load_message_content(
 impl TurnStore for SqliteStore {
     // ========== Turn Management ==========
 
-    async fn create_turn(&self, role: SpanRole) -> Result<TurnInfo> {
+    async fn create_turn(&self, role: SpanRole) -> Result<Stored<TurnId, Turn>> {
         let conn = self.conn().lock().unwrap();
         let turn_id = TurnId::new();
         let now = unix_timestamp();
@@ -157,14 +157,10 @@ impl TurnStore for SqliteStore {
             params![turn_id.as_str(), role.as_str(), now],
         )?;
 
-        Ok(TurnInfo {
-            id: turn_id,
-            role,
-            created_at: now,
-        })
+        Ok(Stored::new(turn_id, Turn::new(role), now))
     }
 
-    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<TurnInfo>> {
+    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<Stored<TurnId, Turn>>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT id, role, created_at FROM turns WHERE id = ?1",
@@ -182,11 +178,7 @@ impl TurnStore for SqliteStore {
                 let role = role_str
                     .parse::<SpanRole>()
                     .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
-                Ok(Some(TurnInfo {
-                    id,
-                    role,
-                    created_at: created,
-                }))
+                Ok(Some(Stored::new(id, Turn::new(role), created)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -195,7 +187,7 @@ impl TurnStore for SqliteStore {
 
     // ========== Span Management ==========
 
-    async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<SpanInfo> {
+    async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<Stored<SpanId, Span>> {
         let conn = self.conn().lock().unwrap();
         let id = SpanId::new();
         let now = unix_timestamp();
@@ -206,15 +198,11 @@ impl TurnStore for SqliteStore {
             params![id, turn_id, model_id, now],
         )?;
 
-        Ok(SpanInfo {
-            id,
-            model_id: model_id.map(|s| s.to_string()),
-            message_count: 0,
-            created_at: now,
-        })
+        let span = Span::new(model_id.map(|s| s.to_string()), 0);
+        Ok(Stored::new(id, span, now))
     }
 
-    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<SpanInfo>> {
+    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<Stored<SpanId, Span>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT s.id, s.model_id, s.created_at,
@@ -232,18 +220,16 @@ impl TurnStore for SqliteStore {
                 Ok((id, model, created, msg_count))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, model, created, msg_count)| SpanInfo {
-                id,
-                model_id: model,
-                message_count: msg_count,
-                created_at: created,
+            .map(|(id, model, created, msg_count)| {
+                let span = Span::new(model, msg_count);
+                Stored::new(id, span, created)
             })
             .collect();
 
         Ok(spans)
     }
 
-    async fn get_span(&self, span_id: &SpanId) -> Result<Option<SpanInfo>> {
+    async fn get_span(&self, span_id: &SpanId) -> Result<Option<Stored<SpanId, Span>>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT s.id, s.model_id, s.created_at,
@@ -260,12 +246,10 @@ impl TurnStore for SqliteStore {
         );
 
         match result {
-            Ok((id, model, created, msg_count)) => Ok(Some(SpanInfo {
-                id,
-                model_id: model,
-                message_count: msg_count,
-                created_at: created,
-            })),
+            Ok((id, model, created, msg_count)) => {
+                let span = Span::new(model, msg_count);
+                Ok(Some(Stored::new(id, span, created)))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -278,7 +262,7 @@ impl TurnStore for SqliteStore {
         span_id: &SpanId,
         role: MessageRole,
         content: &[StoredContent],
-    ) -> Result<MessageInfo> {
+    ) -> Result<Stored<MessageId, Message>> {
         let conn = self.conn().lock().unwrap();
         let message_id = MessageId::new();
         let now = unix_timestamp();
@@ -308,13 +292,8 @@ impl TurnStore for SqliteStore {
         // Insert content items
         insert_message_content(&conn, &message_id, content)?;
 
-        Ok(MessageInfo {
-            id: message_id,
-            span_id: span_id.clone(),
-            sequence_number,
-            role,
-            created_at: now,
-        })
+        let message = Message::new(span_id.clone(), sequence_number, role);
+        Ok(Stored::new(message_id, message, now))
     }
 
     async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>> {
@@ -325,7 +304,7 @@ impl TurnStore for SqliteStore {
              ORDER BY sequence_number",
         )?;
 
-        let messages: Vec<MessageInfo> = stmt
+        let messages: Vec<Stored<MessageId, Message>> = stmt
             .query_map(params![span_id], |row| {
                 let id: MessageId = row.get(0)?;
                 let sid: SpanId = row.get(1)?;
@@ -337,13 +316,8 @@ impl TurnStore for SqliteStore {
             .filter_map(|r| r.ok())
             .filter_map(|(id, sid, seq, role_str, created)| {
                 let role = role_str.parse::<MessageRole>().ok()?;
-                Some(MessageInfo {
-                    id,
-                    span_id: sid,
-                    sequence_number: seq,
-                    role,
-                    created_at: created,
-                })
+                let message = Message::new(sid, seq, role);
+                Some(Stored::new(id, message, created))
             })
             .collect();
 
@@ -356,7 +330,7 @@ impl TurnStore for SqliteStore {
         Ok(result)
     }
 
-    async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>> {
+    async fn get_message(&self, message_id: &MessageId) -> Result<Option<Stored<MessageId, Message>>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT id, span_id, sequence_number, role, created_at
@@ -377,13 +351,8 @@ impl TurnStore for SqliteStore {
                 let role = role_str
                     .parse::<MessageRole>()
                     .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
-                Ok(Some(MessageInfo {
-                    id: MessageId::from_string(id),
-                    span_id: SpanId::from_string(sid),
-                    sequence_number: seq,
-                    role,
-                    created_at: created,
-                }))
+                let message = Message::new(sid, seq, role);
+                Ok(Some(Stored::new(id, message, created)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -392,7 +361,7 @@ impl TurnStore for SqliteStore {
 
     // ========== View Management ==========
 
-    async fn create_view(&self) -> Result<ViewInfo> {
+    async fn create_view(&self) -> Result<Stored<ViewId, View>> {
         let conn = self.conn().lock().unwrap();
         let id = ViewId::new();
         let now = unix_timestamp();
@@ -402,15 +371,10 @@ impl TurnStore for SqliteStore {
             params![id, now],
         )?;
 
-        Ok(ViewInfo {
-            id,
-            fork: None,
-            turn_count: 0,
-            created_at: now,
-        })
+        Ok(Stored::new(id, View::new(), now))
     }
 
-    async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
+    async fn get_view(&self, view_id: &ViewId) -> Result<Option<Stored<ViewId, View>>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT v.id, v.forked_from_view_id, v.forked_at_turn_id, v.created_at,
@@ -433,7 +397,8 @@ impl TurnStore for SqliteStore {
                     (Some(from_view_id), Some(at_turn_id)) => Some(ForkInfo { from_view_id, at_turn_id }),
                     _ => None,
                 };
-                Ok(Some(ViewInfo { id, fork, turn_count, created_at: created }))
+                let view = View { fork, turn_count };
+                Ok(Some(Stored::new(id, view, created)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -535,7 +500,7 @@ impl TurnStore for SqliteStore {
         &self,
         view_id: &ViewId,
         at_turn_id: &TurnId,
-    ) -> Result<ViewInfo> {
+    ) -> Result<Stored<ViewId, View>> {
         let new_id = ViewId::new();
         let now = unix_timestamp();
 
@@ -567,15 +532,8 @@ impl TurnStore for SqliteStore {
         // turn_count is the number of copied selections (fork_seq since sequence starts at 0)
         let turn_count = fork_seq as usize;
 
-        Ok(ViewInfo {
-            id: new_id,
-            fork: Some(ForkInfo {
-                from_view_id: view_id.clone(),
-                at_turn_id: at_turn_id.clone(),
-            }),
-            turn_count,
-            created_at: now,
-        })
+        let view = View::forked(view_id.clone(), at_turn_id.clone(), turn_count);
+        Ok(Stored::new(new_id, view, now))
     }
 
     async fn get_view_context_at(
@@ -638,7 +596,7 @@ impl TurnStore for SqliteStore {
         messages: Vec<(MessageRole, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
-    ) -> Result<(SpanInfo, Option<ViewInfo>)> {
+    ) -> Result<(Stored<SpanId, Span>, Option<Stored<ViewId, View>>)> {
         let span = self.create_span(turn_id, model_id).await?;
 
         for (role, content) in messages {

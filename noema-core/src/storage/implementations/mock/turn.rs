@@ -7,8 +7,7 @@ use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, TurnInfo, TurnWithContent,
-    ViewInfo,
+    Message, MessageRole, MessageWithContent, Span, SpanRole, Stored, Turn, TurnWithContent, View,
 };
 
 /// Mock turn store that returns unimplemented for all operations
@@ -16,19 +15,19 @@ pub struct MockTurnStore;
 
 #[async_trait]
 impl TurnStore for MockTurnStore {
-    async fn create_turn(&self, _: SpanRole) -> Result<TurnInfo> {
+    async fn create_turn(&self, _: SpanRole) -> Result<Stored<TurnId, Turn>> {
         unimplemented!()
     }
-    async fn get_turn(&self, _: &TurnId) -> Result<Option<TurnInfo>> {
+    async fn get_turn(&self, _: &TurnId) -> Result<Option<Stored<TurnId, Turn>>> {
         unimplemented!()
     }
-    async fn create_span(&self, _: &TurnId, _: Option<&str>) -> Result<SpanInfo> {
+    async fn create_span(&self, _: &TurnId, _: Option<&str>) -> Result<Stored<SpanId, Span>> {
         unimplemented!()
     }
-    async fn get_spans(&self, _: &TurnId) -> Result<Vec<SpanInfo>> {
+    async fn get_spans(&self, _: &TurnId) -> Result<Vec<Stored<SpanId, Span>>> {
         unimplemented!()
     }
-    async fn get_span(&self, _: &SpanId) -> Result<Option<SpanInfo>> {
+    async fn get_span(&self, _: &SpanId) -> Result<Option<Stored<SpanId, Span>>> {
         unimplemented!()
     }
     async fn add_message(
@@ -36,19 +35,19 @@ impl TurnStore for MockTurnStore {
         _: &SpanId,
         _: MessageRole,
         _: &[StoredContent],
-    ) -> Result<MessageInfo> {
+    ) -> Result<Stored<MessageId, Message>> {
         unimplemented!()
     }
     async fn get_messages(&self, _: &SpanId) -> Result<Vec<MessageWithContent>> {
         unimplemented!()
     }
-    async fn get_message(&self, _: &MessageId) -> Result<Option<MessageInfo>> {
+    async fn get_message(&self, _: &MessageId) -> Result<Option<Stored<MessageId, Message>>> {
         unimplemented!()
     }
-    async fn create_view(&self) -> Result<ViewInfo> {
+    async fn create_view(&self) -> Result<Stored<ViewId, View>> {
         unimplemented!()
     }
-    async fn get_view(&self, _: &ViewId) -> Result<Option<ViewInfo>> {
+    async fn get_view(&self, _: &ViewId) -> Result<Option<Stored<ViewId, View>>> {
         unimplemented!()
     }
     async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> {
@@ -60,7 +59,7 @@ impl TurnStore for MockTurnStore {
     async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> {
         unimplemented!()
     }
-    async fn fork_view(&self, _: &ViewId, _: &TurnId) -> Result<ViewInfo> {
+    async fn fork_view(&self, _: &ViewId, _: &TurnId) -> Result<Stored<ViewId, View>> {
         unimplemented!()
     }
     async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> {
@@ -73,7 +72,7 @@ impl TurnStore for MockTurnStore {
         _: Vec<(MessageRole, Vec<StoredContent>)>,
         _: Option<&str>,
         _: bool,
-    ) -> Result<(SpanInfo, Option<ViewInfo>)> {
+    ) -> Result<(Stored<SpanId, Span>, Option<Stored<ViewId, View>>)> {
         unimplemented!()
     }
 }

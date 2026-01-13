@@ -9,8 +9,8 @@ use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    ForkInfo, MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, TurnInfo,
-    TurnWithContent, ViewInfo,
+    ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole, Stored, Turn,
+    TurnWithContent, View,
 };
 
 fn now() -> i64 {
@@ -30,18 +30,18 @@ struct ViewSelection {
 /// Span with parent turn tracking (internal only)
 #[derive(Debug, Clone)]
 struct InternalSpan {
-    info: SpanInfo,
+    span: Stored<SpanId, Span>,
     turn_id: TurnId,
 }
 
 /// In-memory turn store for testing
 #[derive(Debug, Default)]
 pub struct MemoryTurnStore {
-    turns: Mutex<HashMap<TurnId, TurnInfo>>,
+    turns: Mutex<HashMap<TurnId, Stored<TurnId, Turn>>>,
     spans: Mutex<HashMap<SpanId, InternalSpan>>,
-    messages: Mutex<HashMap<MessageId, MessageInfo>>,
+    messages: Mutex<HashMap<MessageId, Stored<MessageId, Message>>>,
     message_content: Mutex<HashMap<MessageId, Vec<StoredContent>>>,
-    views: Mutex<HashMap<ViewId, ViewInfo>>,
+    views: Mutex<HashMap<ViewId, Stored<ViewId, View>>>,
     view_selections: Mutex<HashMap<(ViewId, TurnId), ViewSelection>>,
 }
 
@@ -55,44 +55,43 @@ impl MemoryTurnStore {
 impl TurnStore for MemoryTurnStore {
     // ========== Turn Management ==========
 
-    async fn create_turn(&self, role: SpanRole) -> Result<TurnInfo> {
+    async fn create_turn(&self, role: SpanRole) -> Result<Stored<TurnId, Turn>> {
         let mut turns = self.turns.lock().unwrap();
 
-        let turn = TurnInfo {
-            id: TurnId::new(),
-            role,
-            created_at: now(),
-        };
+        let id = TurnId::new();
+        let now = now();
+        let turn = Stored::new(id.clone(), Turn { role }, now);
 
-        turns.insert(turn.id.clone(), turn.clone());
+        turns.insert(id, turn.clone());
         Ok(turn)
     }
 
-    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<TurnInfo>> {
+    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<Stored<TurnId, Turn>>> {
         let turns = self.turns.lock().unwrap();
         Ok(turns.get(turn_id).cloned())
     }
 
     // ========== Span Management ==========
 
-    async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<SpanInfo> {
+    async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<Stored<SpanId, Span>> {
         let mut spans = self.spans.lock().unwrap();
 
-        let info = SpanInfo {
-            id: SpanId::new(),
+        let id = SpanId::new();
+        let now = now();
+        let span = Span {
             model_id: model_id.map(|s| s.to_string()),
             message_count: 0,
-            created_at: now(),
         };
+        let stored = Stored::new(id.clone(), span, now);
 
-        spans.insert(info.id.clone(), InternalSpan {
-            info: info.clone(),
+        spans.insert(id, InternalSpan {
+            span: stored.clone(),
             turn_id: turn_id.clone(),
         });
-        Ok(info)
+        Ok(stored)
     }
 
-    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<SpanInfo>> {
+    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<Stored<SpanId, Span>>> {
         let spans = self.spans.lock().unwrap();
         let messages = self.messages.lock().unwrap();
 
@@ -102,31 +101,33 @@ impl TurnStore for MemoryTurnStore {
             .map(|s| {
                 let message_count = messages
                     .values()
-                    .filter(|m| m.span_id == s.info.id)
+                    .filter(|m| m.span_id == s.span.id)
                     .count() as i32;
-                SpanInfo {
+                let span = Span {
                     message_count,
-                    ..s.info.clone()
-                }
+                    model_id: s.span.model_id.clone(),
+                };
+                Stored::new(s.span.id.clone(), span, s.span.created_at)
             })
             .collect();
         result.sort_by_key(|s| s.created_at);
         Ok(result)
     }
 
-    async fn get_span(&self, span_id: &SpanId) -> Result<Option<SpanInfo>> {
+    async fn get_span(&self, span_id: &SpanId) -> Result<Option<Stored<SpanId, Span>>> {
         let spans = self.spans.lock().unwrap();
         let messages = self.messages.lock().unwrap();
 
         Ok(spans.get(span_id).map(|s| {
             let message_count = messages
                 .values()
-                .filter(|m| m.span_id == s.info.id)
+                .filter(|m| m.span_id == s.span.id)
                 .count() as i32;
-            SpanInfo {
+            let span = Span {
                 message_count,
-                ..s.info.clone()
-            }
+                model_id: s.span.model_id.clone(),
+            };
+            Stored::new(s.span.id.clone(), span, s.span.created_at)
         }))
     }
 
@@ -137,7 +138,7 @@ impl TurnStore for MemoryTurnStore {
         span_id: &SpanId,
         role: MessageRole,
         content: &[StoredContent],
-    ) -> Result<MessageInfo> {
+    ) -> Result<Stored<MessageId, Message>> {
         let mut messages = self.messages.lock().unwrap();
         let mut message_content_map = self.message_content.lock().unwrap();
 
@@ -151,18 +152,18 @@ impl TurnStore for MemoryTurnStore {
             .unwrap_or(0);
 
         let message_id = MessageId::new();
-        let message = MessageInfo {
-            id: message_id.clone(),
+        let now = now();
+        let msg = Message {
             span_id: span_id.clone(),
             sequence_number,
             role,
-            created_at: now(),
         };
+        let stored = Stored::new(message_id.clone(), msg, now);
 
-        messages.insert(message_id.clone(), message.clone());
+        messages.insert(message_id.clone(), stored.clone());
         message_content_map.insert(message_id, content.to_vec());
 
-        Ok(message)
+        Ok(stored)
     }
 
     async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>> {
@@ -190,28 +191,29 @@ impl TurnStore for MemoryTurnStore {
         Ok(result)
     }
 
-    async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>> {
+    async fn get_message(&self, message_id: &MessageId) -> Result<Option<Stored<MessageId, Message>>> {
         let messages = self.messages.lock().unwrap();
         Ok(messages.get(message_id).cloned())
     }
 
     // ========== View Management ==========
 
-    async fn create_view(&self) -> Result<ViewInfo> {
+    async fn create_view(&self) -> Result<Stored<ViewId, View>> {
         let mut views = self.views.lock().unwrap();
 
-        let view = ViewInfo {
-            id: ViewId::new(),
+        let id = ViewId::new();
+        let now = now();
+        let view = View {
             fork: None,
             turn_count: 0,
-            created_at: now(),
         };
+        let stored = Stored::new(id.clone(), view, now);
 
-        views.insert(view.id.clone(), view.clone());
-        Ok(view)
+        views.insert(id, stored.clone());
+        Ok(stored)
     }
 
-    async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
+    async fn get_view(&self, view_id: &ViewId) -> Result<Option<Stored<ViewId, View>>> {
         let views = self.views.lock().unwrap();
         let selections = self.view_selections.lock().unwrap();
 
@@ -220,10 +222,11 @@ impl TurnStore for MemoryTurnStore {
                 .iter()
                 .filter(|((vid, _), _)| vid == view_id)
                 .count();
-            ViewInfo {
+            let view = View {
                 turn_count,
-                ..v.clone()
-            }
+                fork: v.fork.clone(),
+            };
+            Stored::new(v.id.clone(), view, v.created_at)
         }))
     }
 
@@ -300,7 +303,7 @@ impl TurnStore for MemoryTurnStore {
         Ok(result)
     }
 
-    async fn fork_view(&self, view_id: &ViewId, at_turn_id: &TurnId) -> Result<ViewInfo> {
+    async fn fork_view(&self, view_id: &ViewId, at_turn_id: &TurnId) -> Result<Stored<ViewId, View>> {
         // Find the sequence number of the fork point
         let at_turn_seq = {
             let selections = self.view_selections.lock().unwrap();
@@ -322,27 +325,28 @@ impl TurnStore for MemoryTurnStore {
 
         let turn_count = new_selections.len();
 
-        let new_view = ViewInfo {
-            id: ViewId::new(),
+        let id = ViewId::new();
+        let now = now();
+        let view = View {
             fork: Some(ForkInfo {
                 from_view_id: view_id.clone(),
                 at_turn_id: at_turn_id.clone(),
             }),
             turn_count,
-            created_at: now(),
         };
+        let stored = Stored::new(id.clone(), view, now);
 
         {
             let mut selections = self.view_selections.lock().unwrap();
             for (tid, sel) in new_selections {
-                selections.insert((new_view.id.clone(), tid), sel);
+                selections.insert((id.clone(), tid), sel);
             }
         }
 
         let mut views = self.views.lock().unwrap();
-        views.insert(new_view.id.clone(), new_view.clone());
+        views.insert(id, stored.clone());
 
-        Ok(new_view)
+        Ok(stored)
     }
 
     async fn get_view_context_at(
@@ -398,7 +402,7 @@ impl TurnStore for MemoryTurnStore {
         messages: Vec<(MessageRole, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
-    ) -> Result<(SpanInfo, Option<ViewInfo>)> {
+    ) -> Result<(Stored<SpanId, Span>, Option<Stored<ViewId, View>>)> {
         let span = self.create_span(turn_id, model_id).await?;
 
         for (role, content) in messages {
