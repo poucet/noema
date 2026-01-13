@@ -9,7 +9,7 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::AssetId;
 use crate::storage::traits::AssetStore;
-use crate::storage::types::{Asset, Stored};
+use crate::storage::types::{stored, Asset, Stored};
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -62,7 +62,7 @@ impl AssetStore for SqliteStore {
                  FROM assets WHERE id = ?1",
                 params![id.as_str()],
                 |row| {
-                    Ok(Stored::new(
+                    Ok(stored(
                         id.clone(),
                         Asset {
                             blob_hash: row.get(0)?,

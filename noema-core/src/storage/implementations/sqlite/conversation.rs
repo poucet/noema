@@ -8,7 +8,7 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{ConversationId, UserId, ViewId};
 use crate::storage::traits::ConversationStore;
-use crate::storage::types::{Conversation, Stored};
+use crate::storage::types::{stored, Conversation, Stored};
 
 /// Initialize conversation schema (conversations table)
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -84,7 +84,7 @@ impl ConversationStore for SqliteStore {
                     main_view_id,
                     is_private: is_private != 0,
                 };
-                Ok(Some(Stored::new(id, conversation, created_at)))
+                Ok(Some(stored(id, conversation, created_at)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -116,7 +116,7 @@ impl ConversationStore for SqliteStore {
                     main_view_id,
                     is_private: is_private != 0,
                 };
-                Stored::new(id, conversation, created_at)
+                stored(id, conversation, created_at)
             })
             .collect();
 

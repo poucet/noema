@@ -12,7 +12,7 @@ use crate::storage::ids::{
 };
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole,
+    stored, ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole,
     Stored, Turn, TurnWithContent, View,
 };
 
@@ -157,7 +157,7 @@ impl TurnStore for SqliteStore {
             params![turn_id.as_str(), role.as_str(), now],
         )?;
 
-        Ok(Stored::new(turn_id, Turn::new(role), now))
+        Ok(stored(turn_id, Turn::new(role), now))
     }
 
     async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<Stored<TurnId, Turn>>> {
@@ -178,7 +178,7 @@ impl TurnStore for SqliteStore {
                 let role = role_str
                     .parse::<SpanRole>()
                     .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
-                Ok(Some(Stored::new(id, Turn::new(role), created)))
+                Ok(Some(stored(id, Turn::new(role), created)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -199,7 +199,7 @@ impl TurnStore for SqliteStore {
         )?;
 
         let span = Span::new(model_id.map(|s| s.to_string()), 0);
-        Ok(Stored::new(id, span, now))
+        Ok(stored(id, span, now))
     }
 
     async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<Stored<SpanId, Span>>> {
@@ -222,7 +222,7 @@ impl TurnStore for SqliteStore {
             .filter_map(|r| r.ok())
             .map(|(id, model, created, msg_count)| {
                 let span = Span::new(model, msg_count);
-                Stored::new(id, span, created)
+                stored(id, span, created)
             })
             .collect();
 
@@ -248,7 +248,7 @@ impl TurnStore for SqliteStore {
         match result {
             Ok((id, model, created, msg_count)) => {
                 let span = Span::new(model, msg_count);
-                Ok(Some(Stored::new(id, span, created)))
+                Ok(Some(stored(id, span, created)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -293,7 +293,7 @@ impl TurnStore for SqliteStore {
         insert_message_content(&conn, &message_id, content)?;
 
         let message = Message::new(span_id.clone(), sequence_number, role);
-        Ok(Stored::new(message_id, message, now))
+        Ok(stored(message_id, message, now))
     }
 
     async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>> {
@@ -317,7 +317,7 @@ impl TurnStore for SqliteStore {
             .filter_map(|(id, sid, seq, role_str, created)| {
                 let role = role_str.parse::<MessageRole>().ok()?;
                 let message = Message::new(sid, seq, role);
-                Some(Stored::new(id, message, created))
+                Some(stored(id, message, created))
             })
             .collect();
 
@@ -352,7 +352,7 @@ impl TurnStore for SqliteStore {
                     .parse::<MessageRole>()
                     .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
                 let message = Message::new(sid, seq, role);
-                Ok(Some(Stored::new(id, message, created)))
+                Ok(Some(stored(id, message, created)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -371,7 +371,7 @@ impl TurnStore for SqliteStore {
             params![id, now],
         )?;
 
-        Ok(Stored::new(id, View::new(), now))
+        Ok(stored(id, View::new(), now))
     }
 
     async fn get_view(&self, view_id: &ViewId) -> Result<Option<Stored<ViewId, View>>> {
@@ -398,7 +398,7 @@ impl TurnStore for SqliteStore {
                     _ => None,
                 };
                 let view = View { fork, turn_count };
-                Ok(Some(Stored::new(id, view, created)))
+                Ok(Some(stored(id, view, created)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -533,7 +533,7 @@ impl TurnStore for SqliteStore {
         let turn_count = fork_seq as usize;
 
         let view = View::forked(view_id.clone(), at_turn_id.clone(), turn_count);
-        Ok(Stored::new(new_id, view, now))
+        Ok(stored(new_id, view, now))
     }
 
     async fn get_view_context_at(

@@ -8,10 +8,10 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::{Document, DocumentRevision, DocumentSource, DocumentTab, Editable, Stored};
+use crate::storage::types::{stored, stored_editable, Document, DocumentRevision, DocumentSource, DocumentTab, Stored, StoredEditable};
 
 /// Parse a document from a database row
-fn parse_document(row: &Row<'_>) -> rusqlite::Result<Stored<DocumentId, Editable<Document>>> {
+fn parse_document(row: &Row<'_>) -> rusqlite::Result<StoredEditable<DocumentId, Document>> {
     let source_str: String = row.get(3)?;
     let id: DocumentId = row.get(0)?;
     let created_at: i64 = row.get(5)?;
@@ -24,7 +24,7 @@ fn parse_document(row: &Row<'_>) -> rusqlite::Result<Stored<DocumentId, Editable
         source_id: row.get(4)?,
     };
 
-    Ok(Stored::new(id, Editable::new(doc, updated_at), created_at))
+    Ok(stored_editable(id, doc, created_at, updated_at))
 }
 
 /// Parse referenced assets from JSON
@@ -38,7 +38,7 @@ fn parse_assets(assets_json: Option<String>) -> Vec<AssetId> {
 }
 
 /// Parse a document tab from a database row
-fn parse_document_tab(row: &Row<'_>) -> rusqlite::Result<Stored<TabId, Editable<DocumentTab>>> {
+fn parse_document_tab(row: &Row<'_>) -> rusqlite::Result<StoredEditable<TabId, DocumentTab>> {
     let id: TabId = row.get(0)?;
     let created_at: i64 = row.get(10)?;
     let updated_at: i64 = row.get(11)?;
@@ -56,7 +56,7 @@ fn parse_document_tab(row: &Row<'_>) -> rusqlite::Result<Stored<TabId, Editable<
         current_revision_id: row.get(9)?,
     };
 
-    Ok(Stored::new(id, Editable::new(tab, updated_at), created_at))
+    Ok(stored_editable(id, tab, created_at, updated_at))
 }
 
 /// Parse a document revision from a database row
@@ -75,7 +75,7 @@ fn parse_document_revision(row: &Row<'_>) -> rusqlite::Result<Stored<RevisionId,
         created_by: row.get(8)?,
     };
 
-    Ok(Stored::new(id, revision, created_at))
+    Ok(stored(id, revision, created_at))
 }
 
 pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -161,7 +161,7 @@ impl DocumentStore for SqliteStore {
         Ok(id)
     }
 
-    async fn get_document(&self, id: &DocumentId) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
+    async fn get_document(&self, id: &DocumentId) -> Result<Option<StoredEditable<DocumentId, Document>>> {
         let conn = self.conn().lock().unwrap();
         let doc = conn
             .query_row(
@@ -179,7 +179,7 @@ impl DocumentStore for SqliteStore {
         user_id: &UserId,
         source: DocumentSource,
         source_id: &str,
-    ) -> Result<Option<Stored<DocumentId, Editable<Document>>>> {
+    ) -> Result<Option<StoredEditable<DocumentId, Document>>> {
         let conn = self.conn().lock().unwrap();
         let doc = conn
             .query_row(
@@ -192,7 +192,7 @@ impl DocumentStore for SqliteStore {
         Ok(doc)
     }
 
-    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
+    async fn list_documents(&self, user_id: &UserId) -> Result<Vec<StoredEditable<DocumentId, Document>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, user_id, title, source, source_id, created_at, updated_at
@@ -212,7 +212,7 @@ impl DocumentStore for SqliteStore {
         user_id: &UserId,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<Stored<DocumentId, Editable<Document>>>> {
+    ) -> Result<Vec<StoredEditable<DocumentId, Document>>> {
         let conn = self.conn().lock().unwrap();
         let pattern = format!("%{}%", query);
         let mut stmt = conn.prepare(
@@ -289,7 +289,7 @@ impl DocumentStore for SqliteStore {
         Ok(id)
     }
 
-    async fn get_document_tab(&self, id: &TabId) -> Result<Option<Stored<TabId, Editable<DocumentTab>>>> {
+    async fn get_document_tab(&self, id: &TabId) -> Result<Option<StoredEditable<TabId, DocumentTab>>> {
         let conn = self.conn().lock().unwrap();
         let tab = conn
             .query_row(
@@ -302,7 +302,7 @@ impl DocumentStore for SqliteStore {
         Ok(tab)
     }
 
-    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<Stored<TabId, Editable<DocumentTab>>>> {
+    async fn list_document_tabs(&self, document_id: &DocumentId) -> Result<Vec<StoredEditable<TabId, DocumentTab>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, document_id, parent_tab_id, tab_index, title, icon, content_markdown, referenced_assets, source_tab_id, current_revision_id, created_at, updated_at

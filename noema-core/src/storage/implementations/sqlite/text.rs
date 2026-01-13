@@ -8,7 +8,7 @@ use super::SqliteStore;
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
 use crate::storage::traits::TextStore;
-use crate::storage::types::{ContentBlock, ContentOrigin, ContentType, OriginKind, StoreResult, Stored, HashedContentBlock};
+use crate::storage::types::{stored, ContentBlock, ContentOrigin, ContentType, OriginKind, StoreResult, Stored, HashedContentBlock};
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -160,46 +160,6 @@ impl TextStore for SqliteStore {
     }
 }
 
-/// Store content block synchronously using a connection directly
-///
-/// This is used by session code that already holds the connection lock.
-/// Returns the content_id (existing or new).
-pub(crate) fn store_content_sync(
-    conn: &Connection,
-    text: &str,
-    origin_kind: Option<&str>,
-    origin_user_id: Option<&str>,
-    origin_model_id: Option<&str>,
-) -> Result<String> {
-    let hash = content_hash(text);
-
-    // Check for existing content with same hash (deduplication)
-    if let Some(existing_id) = find_by_hash_internal(conn, &hash)? {
-        return Ok(existing_id.into_string());
-    }
-
-    // Insert new content block
-    let id = ContentBlockId::new();
-    let now = unix_timestamp();
-
-    conn.execute(
-        "INSERT INTO content_blocks (id, content_hash, content_type, text, is_private, origin_kind, origin_user_id, origin_model_id, created_at)
-         VALUES (?1, ?2, 'plain', ?3, 0, ?4, ?5, ?6, ?7)",
-        params![
-            id.as_str(),
-            &hash,
-            text,
-            origin_kind,
-            origin_user_id,
-            origin_model_id,
-            now,
-        ],
-    )
-    .context("Failed to store content block")?;
-
-    Ok(id.into_string())
-}
-
 /// Internal helper for hash lookup (used by both store and find_by_hash)
 fn find_by_hash_internal(conn: &Connection, hash: &str) -> Result<Option<ContentBlockId>> {
     let result = conn.query_row(
@@ -256,7 +216,7 @@ impl RowData {
             self.origin_parent_id,
         );
 
-        Ok(Stored::new(
+        Ok(stored(
             ContentBlockId::from_string(self.id),
             HashedContentBlock {
                 content_hash: self.content_hash,
