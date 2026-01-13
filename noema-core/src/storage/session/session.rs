@@ -12,9 +12,10 @@ use llm::{ChatMessage, ChatPayload, ContentBlock};
 use std::sync::Arc;
 
 use crate::context::{ConversationContext, MessagesGuard};
+use crate::engine::CommitMode;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
-use crate::storage::ids::{ConversationId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, SpanId, TurnId, ViewId};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::{MessageRole, OriginKind, SpanRole};
 
@@ -61,8 +62,6 @@ pub struct Session<S: StorageTypes> {
     llm_cache_valid: bool,
     /// Pending messages (ChatMessage) not yet committed
     pending: Vec<ChatMessage>,
-    /// Target turn for next commit (None = create new turn, Some = add span at turn)
-    commit_target: Option<TurnId>,
 }
 
 impl<S: StorageTypes> Session<S> {
@@ -84,7 +83,6 @@ impl<S: StorageTypes> Session<S> {
             llm_cache: Vec::new(),
             llm_cache_valid: false,
             pending: Vec::new(),
-            commit_target: None,
         })
     }
 
@@ -102,7 +100,6 @@ impl<S: StorageTypes> Session<S> {
             llm_cache: Vec::new(),
             llm_cache_valid: false,
             pending: Vec::new(),
-            commit_target: None,
         }
     }
 
@@ -124,7 +121,6 @@ impl<S: StorageTypes> Session<S> {
             llm_cache: Vec::new(),
             llm_cache_valid: false,
             pending: Vec::new(),
-            commit_target: None,
         })
     }
 
@@ -160,21 +156,20 @@ impl<S: StorageTypes> Session<S> {
 
     /// Truncate session context to before a specific turn.
     ///
-    /// Sets the session cache to messages up to (but not including) the target turn,
-    /// and sets the commit target so the next `commit()` creates a new span at that turn.
+    /// Sets the session cache to messages up to (but not including) the target turn.
+    /// Use with `commit(model_id, Some(&turn_id))` to add a new span at that turn.
     ///
     /// # Arguments
-    /// * `turn_id` - The turn to truncate before (next commit adds span here)
-    pub async fn truncate_to_turn(&mut self, turn_id: TurnId) -> Result<()> {
+    /// * `turn_id` - The turn to truncate before
+    pub async fn truncate_to_turn(&mut self, turn_id: &TurnId) -> Result<()> {
         let context = self.coordinator
-            .get_context_before_turn(&self.view_id, &turn_id)
+            .get_context_before_turn(&self.view_id, turn_id)
             .await?;
 
         self.resolved_cache = context;
         self.llm_cache.clear();
         self.llm_cache_valid = false;
         self.pending.clear();
-        self.commit_target = Some(turn_id);
 
         Ok(())
     }
@@ -210,40 +205,21 @@ impl<S: StorageTypes> Session<S> {
         Ok(())
     }
 
-    /// Commit pending messages to storage
+    /// Commit pending messages to storage.
     ///
-    /// If `commit_target` is set (from `truncate_to_turn`), creates a new span at that turn.
-    /// Otherwise, creates new turns as needed based on message roles.
-    pub async fn commit(&mut self, model_id: Option<&str>) -> Result<()> {
+    /// # Arguments
+    /// * `model_id` - The model that generated assistant messages
+    /// * `commit_mode` - How to commit: NewTurns (create turns) or AtTurn (add span at wisting turn)
+    pub async fn commit(&mut self, model_id: Option<&str>, commit_mode: &CommitMode) -> Result<()> {
         if self.pending.is_empty() {
-            self.commit_target = None;
             return Ok(());
         }
 
         let messages = std::mem::take(&mut self.pending);
 
-        // Regeneration case: all messages go to a single new span at the target turn
-        if let Some(turn_id) = self.commit_target.take() {
-            let span_id = self.coordinator
-                .create_and_select_span(&self.view_id, &turn_id, model_id)
-                .await?;
-
-            for msg in messages {
-                let msg_role = llm_role_to_message_role(msg.role);
-                let origin = llm_role_to_origin(msg.role);
-                let resolved = self.coordinator
-                    .add_message(&span_id, msg_role, msg.payload.content, origin)
-                    .await?;
-                self.resolved_cache.push(resolved);
-            }
-
-            self.llm_cache_valid = false;
-            return Ok(());
-        }
-
-        // Normal case: create new turns when role changes
+        // Track current span for adding messages
+        let mut current_span: Option<SpanId> = None;
         let mut current_role: Option<SpanRole> = None;
-        let mut current_span: Option<crate::storage::ids::SpanId> = None;
 
         for msg in messages {
             let msg_role = llm_role_to_message_role(msg.role);
@@ -253,18 +229,34 @@ impl<S: StorageTypes> Session<S> {
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
             };
 
-            // Create new turn when role changes
-            if current_role != Some(span_role) {
-                let turn_id = self.coordinator.create_turn(span_role).await?;
-                let span_id = self.coordinator
-                    .create_and_select_span(&self.view_id, &turn_id, model_id)
-                    .await?;
-                current_span = Some(span_id);
-                current_role = Some(span_role);
-            }
+            // Get or create span based on commit mode and role changes
+            let span_id = match commit_mode {
+                CommitMode::AtTurn(turn_id) => {
+                    // Regeneration: create span at existing turn once, reuse for all messages
+                    if current_span.is_none() {
+                        let span = self.coordinator
+                            .create_and_select_span(&self.view_id, turn_id, model_id)
+                            .await?;
+                        current_span = Some(span);
+                    }
+                    current_span.as_ref().unwrap().clone()
+                }
+                CommitMode::NewTurns => {
+                    // Normal: create new turn when role changes
+                    if current_role != Some(span_role) {
+                        let turn_id = self.coordinator.create_turn(span_role).await?;
+                        let span = self.coordinator
+                            .create_and_select_span(&self.view_id, &turn_id, model_id)
+                            .await?;
+                        current_span = Some(span);
+                        current_role = Some(span_role);
+                    }
+                    current_span.as_ref().unwrap().clone()
+                }
+            };
 
             let resolved = self.coordinator
-                .add_message(current_span.as_ref().unwrap(), msg_role, msg.payload.content, origin)
+                .add_message(&span_id, msg_role, msg.payload.content, origin)
                 .await?;
             self.resolved_cache.push(resolved);
         }
@@ -320,8 +312,8 @@ impl<S: StorageTypes> ConversationContext for Session<S> {
     }
 
     async fn commit(&mut self) -> Result<()> {
-        // Delegate to the concrete commit method
-        Session::commit(self, None).await
+        // Delegate to the concrete commit method with default mode
+        Session::commit(self, None, &CommitMode::default()).await
     }
 }
 

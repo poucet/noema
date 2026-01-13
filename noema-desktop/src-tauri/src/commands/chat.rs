@@ -1,7 +1,7 @@
 //! Chat-related Tauri commands
 
 use llm::{Role, create_model, list_all_models};
-use noema_core::{ChatEngine, EngineEvent, ToolConfig as CoreToolConfig};
+use noema_core::{ChatEngine, CommitMode, EngineEvent, ToolConfig as CoreToolConfig};
 use noema_core::storage::{ConversationStore, TurnStore, Session, MessageRole, InputContent};
 use noema_core::storage::DocumentResolver;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
@@ -117,7 +117,7 @@ pub async fn send_message(
     {
         let engines = state.engines.lock().await;
         let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
-        engine.process_pending(core_tool_config);
+        engine.process_pending(core_tool_config, CommitMode::default());
     }
 
     Ok(())
@@ -694,15 +694,15 @@ pub async fn regenerate_response(
     let engines = state.engines.lock().await;
     let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
 
-    // Truncate session to before the turn (sets commit_target for next commit)
+    // Truncate session to before the turn
     {
         let session_arc = engine.get_session();
         let mut session = session_arc.lock().await;
-        session.truncate_to_turn(turn_id).await.map_err(|e| e.to_string())?;
+        session.truncate_to_turn(&turn_id).await.map_err(|e| e.to_string())?;
     }
 
-    // Process pending will run LLM and commit at the turn
-    engine.process_pending(core_tool_config);
+    // Process pending will run LLM and commit at the specified turn
+    engine.process_pending(core_tool_config, CommitMode::AtTurn(turn_id));
 
     Ok(())
 }

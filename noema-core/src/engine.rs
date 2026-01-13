@@ -34,11 +34,21 @@ impl ToolConfig {
     }
 }
 
+/// How to commit messages after LLM execution.
+#[derive(Debug, Clone, Default)]
+pub enum CommitMode {
+    /// Create new turns as needed based on message roles (normal flow)
+    #[default]
+    NewTurns,
+    /// Add a new span at an existing turn (regeneration flow)
+    AtTurn(TurnId),
+}
+
 pub enum EngineCommand {
-    /// Send a message and run the LLM
-    SendMessage(ChatPayload, ToolConfig),
-    /// Run LLM on current context (session already set up via truncate_to_turn, etc.)
-    ProcessPending(ToolConfig),
+    /// Add a message to pending (does not run LLM)
+    AddMessage(ChatMessage),
+    /// Run LLM on pending messages and commit with the specified mode
+    ProcessPending(ToolConfig, CommitMode),
     SetModel(Arc<dyn ChatModel + Send + Sync>),
     ClearHistory,
 }
@@ -163,65 +173,50 @@ impl<S: StorageTypes> ChatEngine<S> {
         let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
         let agent = McpAgent::new(Arc::new(tool_registry), 10, Arc::clone(&document_resolver));
 
-        // Helper to run LLM and commit
-        async fn execute_and_commit<S: StorageTypes>(
-            session: &Arc<Mutex<Session<S>>>,
-            model: &Arc<dyn ChatModel + Send + Sync>,
-            agent: &McpAgent,
-            tool_config: &ToolConfig,
-            event_tx: &mpsc::UnboundedSender<EngineEvent>,
-        ) {
-            // Run agent
-            let execute_result = {
-                let mut sess = session.lock().await;
-                if tool_config.enabled {
-                    agent.execute_stream(&mut *sess, model.clone()).await
-                } else {
-                    agent.execute_stream_no_tools(&mut *sess, model.clone()).await
-                }
-            };
-
-            match execute_result {
-                Ok(_) => {
-                    // Send pending messages to UI
-                    {
-                        let sess = session.lock().await;
-                        for msg in sess.pending() {
-                            let _ = event_tx.send(EngineEvent::Message(msg.clone()));
-                        }
-                    }
-
-                    // Commit (session knows whether to create new turn or add span)
-                    let model_id = model.id();
-                    let commit_result = {
-                        let mut sess = session.lock().await;
-                        sess.commit(Some(model_id)).await
-                    };
-
-                    if let Err(e) = commit_result {
-                        let _ = event_tx.send(EngineEvent::Error(format!("Failed to commit: {}", e)));
-                    }
-
-                    let _ = event_tx.send(EngineEvent::MessageComplete);
-                }
-                Err(e) => {
-                    let _ = event_tx.send(EngineEvent::Error(e.to_string()));
-                }
-            }
-        }
-
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
-                EngineCommand::SendMessage(payload, tool_config) => {
-                    // Add user message to session
-                    {
-                        let mut sess = session.lock().await;
-                        sess.add(ChatMessage::user(payload));
-                    }
-                    execute_and_commit(&session, &model, &agent, &tool_config, &event_tx).await;
+                EngineCommand::AddMessage(message) => {
+                    let mut sess = session.lock().await;
+                    sess.add(message);
                 }
-                EngineCommand::ProcessPending(tool_config) => {
-                    execute_and_commit(&session, &model, &agent, &tool_config, &event_tx).await;
+                EngineCommand::ProcessPending(tool_config, commit_mode) => {
+                    // Run agent
+                    let execute_result = {
+                        let mut sess = session.lock().await;
+                        if tool_config.enabled {
+                            agent.execute_stream(&mut *sess, model.clone()).await
+                        } else {
+                            agent.execute_stream_no_tools(&mut *sess, model.clone()).await
+                        }
+                    };
+
+                    match execute_result {
+                        Ok(_) => {
+                            // Send pending messages to UI
+                            {
+                                let sess = session.lock().await;
+                                for msg in sess.pending() {
+                                    let _ = event_tx.send(EngineEvent::Message(msg.clone()));
+                                }
+                            }
+
+                            // Commit with the specified mode
+                            let model_id = model.id();
+                            let commit_result = {
+                                let mut sess = session.lock().await;
+                                sess.commit(Some(model_id), &commit_mode).await
+                            };
+
+                            if let Err(e) = commit_result {
+                                let _ = event_tx.send(EngineEvent::Error(format!("Failed to commit: {}", e)));
+                            }
+
+                            let _ = event_tx.send(EngineEvent::MessageComplete);
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(EngineEvent::Error(e.to_string()));
+                        }
+                    }
                 }
                 EngineCommand::SetModel(new_model) => {
                     let name = new_model.name().to_string();
@@ -238,13 +233,20 @@ impl<S: StorageTypes> ChatEngine<S> {
         }
     }
 
-    pub fn send_message(&self, payload: impl Into<ChatPayload>, tool_config: ToolConfig) {
-        let _ = self.cmd_tx.send(EngineCommand::SendMessage(payload.into(), tool_config));
+    /// Add a message to pending (does not run LLM)
+    pub fn add_message(&self, message: ChatMessage) {
+        let _ = self.cmd_tx.send(EngineCommand::AddMessage(message));
     }
 
-    /// Process pending messages (session already set up via truncate_to_turn, etc.)
-    pub fn process_pending(&self, tool_config: ToolConfig) {
-        let _ = self.cmd_tx.send(EngineCommand::ProcessPending(tool_config));
+    /// Process pending messages with the specified commit mode
+    pub fn process_pending(&self, tool_config: ToolConfig, commit_mode: CommitMode) {
+        let _ = self.cmd_tx.send(EngineCommand::ProcessPending(tool_config, commit_mode));
+    }
+
+    /// Convenience: add user message and process with default commit mode
+    pub fn send_message(&self, payload: impl Into<ChatPayload>, tool_config: ToolConfig) {
+        let _ = self.cmd_tx.send(EngineCommand::AddMessage(ChatMessage::user(payload.into())));
+        let _ = self.cmd_tx.send(EngineCommand::ProcessPending(tool_config, CommitMode::default()));
     }
 
     pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>) {

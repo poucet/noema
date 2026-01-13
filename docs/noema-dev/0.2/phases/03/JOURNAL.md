@@ -265,41 +265,54 @@ Wire frontend regenerate button to call `regenerateResponse()`.
 
 ---
 
-## 2026-01-13: Engine Simplification
+## 2026-01-13: Engine Simplification with Explicit CommitMode
 
-Refactored `ChatEngine` to reduce code duplication and simplify the command set.
+Refactored `ChatEngine` to be agnostic of commit semantics. The engine just runs the LLM and passes through the commit mode.
 
-### Design: Session Owns Commit Mode
+### Design: Explicit CommitMode Parameter
 
-Instead of the engine needing different code paths for normal messages vs regeneration, the session now tracks how the next commit should behave:
+Instead of hidden state in Session, commit mode is an explicit parameter passed through:
 
 ```rust
-// In Session
-commit_target: Option<TurnId>,  // None = new turn, Some = add span at turn
+pub enum CommitMode {
+    NewTurns,           // Normal: create turns as role changes
+    AtTurn(TurnId),     // Regeneration: add span at existing turn
+}
 ```
 
-- `truncate_to_turn(turn_id)` sets `commit_target = Some(turn_id)`
-- `commit()` checks `commit_target` and delegates to `commit_at_turn()` if set
-- Engine just calls `commit()` - doesn't need to know about regeneration
+- `truncate_to_turn(turn_id)` just truncates context (no hidden state)
+- `commit(model_id, commit_mode)` takes explicit mode parameter
+- Engine passes `CommitMode` through without interpreting it
 
-### Simplified Engine Commands
+### Engine Commands
 
-Before:
-- `SendMessage` - add message, run LLM, commit
-- `ProcessPending` - run LLM, commit
-- `Regenerate` - truncate, run LLM, commit at turn (duplicate logic)
+```rust
+pub enum EngineCommand {
+    AddMessage(ChatMessage),                    // Add to pending
+    ProcessPending(ToolConfig, CommitMode),     // Run LLM, commit with mode
+    SetModel(...),
+    ClearHistory,
+}
+```
 
-After:
-- `SendMessage` - add message, then shared execute_and_commit
-- `ProcessPending` - shared execute_and_commit
+Convenience method `send_message()` combines AddMessage + ProcessPending with default mode.
 
-The shared `execute_and_commit` helper handles LLM execution and commit for both cases.
+### Commit Logic (Unified)
 
-### Tauri Layer Handles Truncation
+Single loop handles both modes:
+- `CommitMode::AtTurn(turn_id)`: Create span at turn once, reuse for all messages
+- `CommitMode::NewTurns`: Create new turn when role changes
 
-The `regenerate_response` Tauri command now:
-1. Calls `session.truncate_to_turn(turn_id)` directly
-2. Calls `engine.process_pending()`
+### Tauri Layer Decides Mode
 
-This keeps the engine simple while still supporting regeneration.
+```rust
+// Normal message
+engine.process_pending(tool_config, CommitMode::default());
+
+// Regeneration
+session.truncate_to_turn(&turn_id).await?;
+engine.process_pending(tool_config, CommitMode::AtTurn(turn_id));
+```
+
+This keeps the engine simple - it's just a pass-through for LLM execution.
 
