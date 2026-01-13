@@ -1,42 +1,111 @@
 //! Generic stored wrapper types
 //!
-//! Provides common patterns for database-stored entities:
-//! - `Stored<Id, T>` - Immutable entities with ID, content, and created_at
-//! - `Editable<T>` - Wrapper that adds updated_at to mutable entities
+//! Provides composable patterns for database-stored entities:
 //!
-//! Use `Stored<Id, Editable<T>>` for entities that can be modified after creation.
+//! - `Keyed<Id, T>` - Adds an ID to any type
+//! - `Timestamped<T>` - Adds created_at timestamp to any type
+//! - `Editable<T>` - Adds updated_at timestamp for mutable entities
+//!
+//! These can be composed:
+//! - `Keyed<Id, Timestamped<T>>` - Entity with ID and creation timestamp
+//! - `Keyed<Id, Timestamped<Editable<T>>>` - Entity that can be modified after creation
 
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
-/// A stored entity wrapper that adds ID and timestamp to any content type.
-///
-/// This generic wrapper captures the common pattern where stored entities
-/// consist of an ID, the actual data, and a creation timestamp.
+// ============================================================================
+// Keyed - adds an ID to any type
+// ============================================================================
+
+/// A wrapper that adds an ID to any type.
 ///
 /// Implements `Deref` to allow transparent access to the inner content.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Basic usage
+/// let keyed = Keyed::new(UserId::new(), user_data);
+/// println!("User: {}", keyed.name); // Deref to inner
+///
+/// // With Stored for timestamped data
+/// type StoredUser = Keyed<UserId, Stored<User>>;
+/// ```
 #[derive(Clone, Debug)]
-pub struct Stored<Id, T> {
+pub struct Keyed<Id, T> {
     /// Unique identifier
     pub id: Id,
-    /// The stored content
+    /// The content
     pub content: T,
-    /// Unix timestamp (milliseconds) when created
-    pub created_at: i64,
 }
 
-impl<Id, T> Stored<Id, T> {
-    /// Create a new stored entity
-    pub fn new(id: Id, content: T, created_at: i64) -> Self {
-        Self {
-            id,
-            content,
-            created_at,
-        }
+impl<Id, T> Keyed<Id, T> {
+    /// Create a new keyed entity
+    pub fn new(id: Id, content: T) -> Self {
+        Self { id, content }
     }
 
     /// Get a reference to the ID
     pub fn id(&self) -> &Id {
         &self.id
+    }
+
+    /// Consume and return the inner content
+    pub fn into_content(self) -> T {
+        self.content
+    }
+
+    /// Map the content to a new type
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Keyed<Id, U> {
+        Keyed {
+            id: self.id,
+            content: f(self.content),
+        }
+    }
+}
+
+impl<Id, T> Deref for Keyed<Id, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.content
+    }
+}
+
+impl<Id, T> DerefMut for Keyed<Id, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.content
+    }
+}
+
+// ============================================================================
+// Timestamped - adds created_at timestamp
+// ============================================================================
+
+/// A wrapper that adds a creation timestamp to any type.
+///
+/// Implements `Deref` to allow transparent access to the inner content.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Basic usage
+/// let timestamped = Timestamped::new(data, unix_timestamp());
+///
+/// // Commonly composed with Keyed
+/// type StoredMessage = Keyed<MessageId, Timestamped<Message>>;
+/// ```
+#[derive(Clone, Debug)]
+pub struct Timestamped<T> {
+    /// The content
+    pub content: T,
+    /// Unix timestamp (milliseconds) when created
+    pub created_at: i64,
+}
+
+impl<T> Timestamped<T> {
+    /// Create a new timestamped entity
+    pub fn new(content: T, created_at: i64) -> Self {
+        Self { content, created_at }
     }
 
     /// Get the creation timestamp
@@ -50,16 +119,15 @@ impl<Id, T> Stored<Id, T> {
     }
 
     /// Map the content to a new type
-    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Stored<Id, U> {
-        Stored {
-            id: self.id,
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Timestamped<U> {
+        Timestamped {
             content: f(self.content),
             created_at: self.created_at,
         }
     }
 }
 
-impl<Id, T> Deref for Stored<Id, T> {
+impl<T> Deref for Timestamped<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -67,23 +135,30 @@ impl<Id, T> Deref for Stored<Id, T> {
     }
 }
 
+impl<T> DerefMut for Timestamped<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.content
+    }
+}
+
 // ============================================================================
-// Editable wrapper
+// Editable - adds updated_at timestamp for mutable entities
 // ============================================================================
 
 /// Wrapper for entities that can be modified after creation.
 ///
-/// Adds `updated_at` timestamp tracking. Use with `Stored<Id, Editable<T>>`
-/// for the full pattern:
+/// Adds `updated_at` timestamp tracking.
+///
+/// # Examples
 ///
 /// ```ignore
-/// // A document that can be edited
-/// type StoredDocument = Stored<DocumentId, Editable<Document>>;
+/// // For documents that can be edited
+/// type StoredDocument = Keyed<DocumentId, Stored<Editable<Document>>>;
 /// ```
 #[derive(Clone, Debug)]
 pub struct Editable<T> {
     /// The content
-    pub content: T,
+    content: T,
     /// Unix timestamp (milliseconds) when last updated
     pub updated_at: i64,
 }
@@ -121,6 +196,46 @@ impl<T> Deref for Editable<T> {
     }
 }
 
+impl<T> DerefMut for Editable<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.content
+    }
+}
+
+// ============================================================================
+// Convenience type aliases
+// ============================================================================
+
+/// Type alias for immutable stored entities: ID + creation timestamp + content.
+///
+/// Internal structure: `Keyed<Id, Timestamped<T>>`
+pub type Stored<Id, T> = Keyed<Id, Timestamped<T>>;
+
+/// Type alias for mutable stored entities: ID + creation timestamp + content + updated_at.
+///
+/// Internal structure: `Keyed<Id, Editable<Timestamped<T>>>`
+/// The Editable wrapper is outermost so updated_at tracks when the timestamped content changed.
+pub type StoredEditable<Id, T> = Keyed<Id, Editable<Timestamped<T>>>;
+
+/// Convenience constructor for Stored<Id, T>
+///
+/// This is the most common pattern: an entity with ID and creation timestamp.
+pub fn stored<Id, T>(id: Id, content: T, created_at: i64) -> Stored<Id, T> {
+    Keyed::new(id, Timestamped::new(content, created_at))
+}
+
+/// Convenience constructor for StoredEditable<Id, T>
+///
+/// For entities that can be modified after creation.
+pub fn stored_editable<Id, T>(
+    id: Id,
+    content: T,
+    created_at: i64,
+    updated_at: i64,
+) -> StoredEditable<Id, T> {
+    Keyed::new(id, Editable::new(Timestamped::new(content, created_at), updated_at))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,25 +250,23 @@ mod tests {
     }
 
     #[test]
-    fn test_stored_deref() {
-        let stored = Stored::new(
+    fn test_keyed_deref() {
+        let keyed = Keyed::new(
             TestId("test-1".to_string()),
             TestContent {
                 name: "foo".to_string(),
                 value: 42,
             },
-            1000,
         );
 
         // Deref allows direct access to content fields
-        assert_eq!(stored.name, "foo");
-        assert_eq!(stored.value, 42);
+        assert_eq!(keyed.name, "foo");
+        assert_eq!(keyed.value, 42);
     }
 
     #[test]
-    fn test_stored_accessors() {
-        let stored = Stored::new(
-            TestId("test-2".to_string()),
+    fn test_timestamped() {
+        let timestamped = Timestamped::new(
             TestContent {
                 name: "bar".to_string(),
                 value: 100,
@@ -161,14 +274,16 @@ mod tests {
             2000,
         );
 
-        assert_eq!(stored.id().0, "test-2");
-        assert_eq!(stored.created_at(), 2000);
+        assert_eq!(timestamped.created_at(), 2000);
+        assert_eq!(timestamped.name, "bar");
+        assert_eq!(timestamped.value, 100);
     }
 
     #[test]
-    fn test_into_content() {
-        let stored = Stored::new(
-            TestId("test-3".to_string()),
+    fn test_stored_composition() {
+        // Stored<Id, T> = Keyed<Id, Timestamped<T>>
+        let entity = stored(
+            TestId("test-2".to_string()),
             TestContent {
                 name: "baz".to_string(),
                 value: 200,
@@ -176,17 +291,55 @@ mod tests {
             3000,
         );
 
-        let content = stored.into_content();
-        assert_eq!(content.name, "baz");
-        assert_eq!(content.value, 200);
+        // Access ID
+        assert_eq!(entity.id().0, "test-2");
+
+        // Access created_at (through first Deref to Timestamped)
+        assert_eq!(entity.created_at, 3000);
+
+        // Access content fields (through double Deref: Keyed -> Timestamped -> T)
+        assert_eq!(entity.name, "baz");
+        assert_eq!(entity.value, 200);
     }
 
     #[test]
-    fn test_map() {
-        let stored = Stored::new(TestId("test-4".to_string()), 10i32, 4000);
+    fn test_keyed_map() {
+        let keyed = Keyed::new(TestId("test-4".to_string()), 10i32);
 
-        let mapped = stored.map(|v| v * 2);
+        let mapped = keyed.map(|v| v * 2);
         assert_eq!(*mapped, 20);
         assert_eq!(mapped.id().0, "test-4");
+    }
+
+    #[test]
+    fn test_editable() {
+        let editable = Editable::new(
+            TestContent {
+                name: "edit".to_string(),
+                value: 50,
+            },
+            5000,
+        );
+
+        assert_eq!(editable.updated_at(), 5000);
+        assert_eq!(editable.name, "edit");
+    }
+
+    #[test]
+    fn test_stored_editable() {
+        let entity = stored_editable(
+            TestId("doc-1".to_string()),
+            TestContent {
+                name: "document".to_string(),
+                value: 1,
+            },
+            1000, // created_at
+            2000, // updated_at
+        );
+
+        assert_eq!(entity.id().0, "doc-1");
+        assert_eq!(entity.created_at, 1000);
+        assert_eq!(entity.updated_at, 2000);
+        assert_eq!(entity.name, "document");
     }
 }
