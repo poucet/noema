@@ -304,11 +304,20 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             }
         };
 
-        // Load view path and resolve content
-        let path = self.conversation_store.get_view_path(&view_id).await?;
-        let resolved_cache = self.resolve_path(&path).await?;
+        self.open_session_with_view(&view_id).await
+            .map(|resolved| (view_id, resolved))
+    }
 
-        Ok((view_id, resolved_cache))
+    /// Open a session for a specific view.
+    ///
+    /// Loads the view path and resolves all content for Session construction.
+    /// Returns resolved messages for the view.
+    pub async fn open_session_with_view(
+        &self,
+        view_id: &ViewId,
+    ) -> Result<Vec<ResolvedMessage>> {
+        let path = self.conversation_store.get_view_path(view_id).await?;
+        self.resolve_path(&path).await
     }
 
     /// Resolve a view path (turns with content) to resolved messages.

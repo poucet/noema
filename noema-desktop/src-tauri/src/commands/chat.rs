@@ -4,7 +4,7 @@ use llm::{ChatMessage, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
 use noema_core::storage::{TurnStore, Session, MessageRole, InputContent};
 use noema_core::storage::DocumentResolver;
-use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
+use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -650,4 +650,137 @@ pub async fn get_current_view_id(
     let session_arc = engine.get_session();
     let session = session_arc.lock().await;
     Ok(Some(session.view_id().to_string()))
+}
+
+// ============================================================================
+// View/Fork Operations (Phase 3 UCM - Part D User Journeys)
+// ============================================================================
+
+/// Fork a conversation at a specific turn
+///
+/// Creates a new view (branch) that shares history up to but not including the
+/// specified turn. The forked view can then diverge with different responses.
+///
+/// # Arguments
+/// * `conversation_id` - The conversation to fork
+/// * `at_turn_id` - The turn to fork at (new view diverges from here)
+/// * `name` - Optional name for the new view/branch
+///
+/// # Returns
+/// The newly created view info
+#[tauri::command]
+pub async fn fork_conversation(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+    at_turn_id: TurnId,
+    name: Option<String>,
+) -> Result<ThreadInfoResponse, String> {
+    // Get current view ID from loaded engine
+    let current_view_id = {
+        let engines = state.engines.lock().await;
+        let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
+        let session_arc = engine.get_session();
+        let session = session_arc.lock().await;
+        session.view_id().clone()
+    };
+
+    let coordinator = state.get_coordinator()?;
+
+    let new_view = coordinator
+        .conversation_store()
+        .fork_view(&current_view_id, &at_turn_id, name.as_deref())
+        .await
+        .map_err(|e| format!("Failed to fork conversation: {}", e))?;
+
+    Ok(ThreadInfoResponse::from(new_view))
+}
+
+/// Switch to a different view in a conversation
+///
+/// Creates a new session for the specified view and updates the loaded engine.
+/// The UI should reload messages after this call.
+///
+/// # Arguments
+/// * `conversation_id` - The conversation containing the view
+/// * `view_id` - The view to switch to
+#[tauri::command]
+pub async fn switch_view(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+    view_id: ViewId,
+) -> Result<Vec<DisplayMessage>, String> {
+    let coordinator = state.get_coordinator()?;
+
+    // Open a new session for the target view
+    let session = Session::open_view(coordinator.clone(), conversation_id.clone(), view_id)
+        .await
+        .map_err(|e| format!("Failed to open view: {}", e))?;
+
+    // Get messages before swapping
+    let messages: Vec<DisplayMessage> = session
+        .messages_for_display()
+        .iter()
+        .map(DisplayMessage::from)
+        .collect();
+
+    // Create new engine with the new session
+    let model_id_str = state.model_id.lock().await.clone();
+    let mcp_registry =
+        McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
+    let model = create_model(&model_id_str)
+        .map_err(|e| format!("Failed to create model: {}", e))?;
+    let document_resolver: Arc<dyn DocumentResolver> = coordinator;
+
+    let engine = ChatEngine::new(session, model, mcp_registry, document_resolver);
+
+    // Replace the engine for this conversation
+    state.engines.lock().await.insert(conversation_id, engine);
+
+    Ok(messages)
+}
+
+/// Select a specific span at a turn
+///
+/// Updates the view selection to use the specified span at the given turn.
+/// This is used when comparing alternates and picking one.
+///
+/// # Arguments
+/// * `conversation_id` - The conversation containing the view
+/// * `turn_id` - The turn to update selection for
+/// * `span_id` - The span to select at that turn
+#[tauri::command]
+pub async fn select_span(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+    turn_id: TurnId,
+    span_id: SpanId,
+) -> Result<(), String> {
+    // Get current view ID from loaded engine
+    let current_view_id = {
+        let engines = state.engines.lock().await;
+        let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
+        let session_arc = engine.get_session();
+        let session = session_arc.lock().await;
+        session.view_id().clone()
+    };
+
+    let coordinator = state.get_coordinator()?;
+
+    coordinator
+        .conversation_store()
+        .select_span(&current_view_id, &turn_id, &span_id)
+        .await
+        .map_err(|e| format!("Failed to select span: {}", e))?;
+
+    // Clear the session cache so next get_messages returns updated path
+    {
+        let engines = state.engines.lock().await;
+        if let Some(engine) = engines.get(&conversation_id) {
+            let session_arc = engine.get_session();
+            let mut session = session_arc.lock().await;
+            session.clear_cache();
+        }
+    }
+
+    Ok(())
 }

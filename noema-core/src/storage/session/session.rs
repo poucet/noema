@@ -100,6 +100,27 @@ impl<S: StorageTypes> Session<S> {
         }
     }
 
+    /// Open a session for a specific view
+    ///
+    /// Use this when switching to a non-main view (e.g., after forking).
+    pub async fn open_view(
+        coordinator: Arc<StorageCoordinator<S>>,
+        conversation_id: ConversationId,
+        view_id: ViewId,
+    ) -> Result<Self> {
+        let resolved_cache = coordinator.open_session_with_view(&view_id).await?;
+
+        Ok(Self {
+            coordinator,
+            conversation_id,
+            view_id,
+            resolved_cache,
+            llm_cache: Vec::new(),
+            llm_cache_valid: false,
+            pending: Vec::new(),
+        })
+    }
+
     pub fn conversation_id(&self) -> &ConversationId {
         &self.conversation_id
     }

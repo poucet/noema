@@ -190,6 +190,9 @@ pub fn run() {
             commands::chat::get_span_messages,
             commands::chat::list_conversation_views,
             commands::chat::get_current_view_id,
+            commands::chat::fork_conversation,
+            commands::chat::switch_view,
+            commands::chat::select_span,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,

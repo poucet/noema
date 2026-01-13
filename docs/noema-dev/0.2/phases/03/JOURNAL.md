@@ -151,12 +151,37 @@ Extended 3.3 scope to include user journeys that verify UCM operations work end-
 
 ---
 
-## Next Steps
+## 2026-01-13: Part D Backend Commands Implemented
 
-Starting Part D user journeys. First journey: **Regenerate Response**.
+Implemented three core view/fork commands:
 
-Backend already has `add_span()` - need to:
-1. Create Tauri command that adds span to existing turn
-2. Wire frontend regenerate button
-3. Verify span selection updates view
+### New Commands (chat.rs)
+
+| Command | Purpose | Parameters |
+|---------|---------|------------|
+| `fork_conversation` | Fork view at turn | conversation_id, at_turn_id, name? |
+| `switch_view` | Switch to different view | conversation_id, view_id |
+| `select_span` | Select alternate at turn | conversation_id, turn_id, span_id |
+
+### New Core Methods
+
+**StorageCoordinator:**
+- `open_session_with_view(view_id)` - Open session for specific view (not just main)
+
+**Session:**
+- `open_view(coordinator, conversation_id, view_id)` - Construct session for non-main view
+
+### Frontend Bindings (tauri.ts)
+
+Added TypeScript wrappers:
+- `forkConversation(conversationId, atTurnId, name?)`
+- `switchView(conversationId, viewId)`
+- `selectSpan(conversationId, turnId, spanId)`
+
+### Next Steps
+
+Wire these to the frontend UI:
+1. Fork button on turns/messages
+2. View list in sidebar or dropdown
+3. Span selection in alternates panel
 

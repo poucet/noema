@@ -146,7 +146,7 @@ User views parallel responses → selects one to use → view updates selection.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.D2a | ⚡ Backend: `select_span` command - calls TurnStore::select_span |
+| ✅ | 3.3.D2a | ⚡ Backend: `select_span` command - calls TurnStore::select_span |
 | ⬜ | 3.3.D2b | 🔧 Frontend: Wire "Use this" button to select_span command |
 | ⬜ | 3.3.D2c | ✅ User: Verify span selection persists, affects subsequent context |
 
@@ -167,7 +167,7 @@ User forks from any turn → new view sharing history up to fork point.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.D4a | ⚡ Backend: `fork_conversation` command - fork_view at turn |
+| ✅ | 3.3.D4a | ⚡ Backend: `fork_conversation` command - fork_view at turn |
 | ⬜ | 3.3.D4b | 🔧 Frontend: Add fork button/menu to turns |
 | ⬜ | 3.3.D4c | 🔧 Frontend: Show view list, allow switching |
 | ⬜ | 3.3.D4d | ✅ User: Verify fork shares history, diverges after fork point |
@@ -178,7 +178,7 @@ User has multiple views → switches between them → conversation display updat
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.D5a | ⚡ Backend: `switch_view` command - Session opens with different view_id |
+| ✅ | 3.3.D5a | ⚡ Backend: `switch_view` command - Session opens with different view_id |
 | ⬜ | 3.3.D5b | 🔧 Frontend: View selector UI (sidebar or dropdown) |
 | ⬜ | 3.3.D5c | ✅ User: Verify switching views shows different conversation paths |
 
@@ -188,7 +188,7 @@ User inspects a turn → sees all spans (alternatives) → can compare and selec
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.D6a | ⚡ Backend: `get_turn_alternates` returns all spans with content |
+| ✅ | 3.3.D6a | ⚡ Backend: `get_turn_alternates` returns all spans with content |
 | ⬜ | 3.3.D6b | 🔧 Frontend: Alternates panel/popover for turns with multiple spans |
 | ⬜ | 3.3.D6c | 🔧 Frontend: Display span metadata (model, timestamp) |
 | ⬜ | 3.3.D6d | ✅ User: Verify can see all alternatives, select any one |

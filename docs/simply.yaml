@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.D1a"
-task_name: "Journey 1: Regenerate Response - Backend"
+task: "3.3.D4a"
+task_name: "Journey 4: Fork Conversation - Backend"
 
 # Completed
 completed_features:

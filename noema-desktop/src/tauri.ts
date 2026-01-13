@@ -458,12 +458,54 @@ export async function listConversationViews(
   return invoke<ViewInfo[]>("list_conversation_views", { conversationId });
 }
 
-export async function getCurrentViewId(): Promise<string | null> {
-  return invoke<string | null>("get_current_view_id");
+export async function getCurrentViewId(
+  conversationId: string
+): Promise<string | null> {
+  return invoke<string | null>("get_current_view_id", { conversationId });
 }
 
-// Note: The following view-related commands are pending implementation:
-// - selectSpan(viewId, turnId, spanId) - Select a specific span at a turn in a view
-// - forkView(viewId, atTurnId, name) - Fork a view at a specific turn
-// - switchView(viewId) - Switch to a different view
-// - editTurn(viewId, turnId, newContent) - Edit content at a turn (creates new span)
+// View/Fork operations
+export interface ThreadInfoResponse {
+  id: string;
+  conversationId: string;
+  parentSpanId: string | null;
+  name: string | null;
+  status: string;
+  createdAt: number;
+  isMain: boolean;
+}
+
+/**
+ * Fork a conversation at a specific turn
+ * Creates a new view (branch) that shares history up to but not including the specified turn.
+ */
+export async function forkConversation(
+  conversationId: string,
+  atTurnId: string,
+  name?: string
+): Promise<ThreadInfoResponse> {
+  return invoke<ThreadInfoResponse>("fork_conversation", { conversationId, atTurnId, name });
+}
+
+/**
+ * Switch to a different view in a conversation
+ * Creates a new session for the specified view and updates the loaded engine.
+ */
+export async function switchView(
+  conversationId: string,
+  viewId: string
+): Promise<DisplayMessage[]> {
+  return invoke<DisplayMessage[]>("switch_view", { conversationId, viewId });
+}
+
+/**
+ * Select a specific span at a turn
+ * Updates the view selection to use the specified span at the given turn.
+ */
+export async function selectSpan(
+  conversationId: string,
+  turnId: string,
+  spanId: string
+): Promise<void> {
+  return invoke<void>("select_span", { conversationId, turnId, spanId });
+}
