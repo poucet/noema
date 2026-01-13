@@ -16,7 +16,7 @@ use crate::context::ConversationContext;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, TurnId, ViewId};
-use crate::storage::session::{Session};
+use crate::storage::session::{ResolvedMessage, Session};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::{MessageRole, OriginKind};
 use crate::storage::DocumentResolver;
@@ -82,8 +82,8 @@ pub enum ManagerEvent {
     UserMessageAdded(ChatMessage),
     /// Streaming message from agent
     StreamingMessage(ChatMessage),
-    /// Agent execution and commit completed - includes all committed messages
-    Complete(Vec<ChatMessage>),
+    /// Agent execution and commit completed - includes all committed messages with turn_ids
+    Complete(Vec<ResolvedMessage>),
     /// Error occurred
     Error(String),
     /// Model was changed
@@ -311,13 +311,10 @@ impl<S: StorageTypes> ConversationManager<S> {
 
                 match commit_result {
                     Ok(_) => {
-                        // Get all messages for complete event
+                        // Get all resolved messages for complete event (includes turn_ids)
                         let messages = {
-                            let mut sess = session.lock().await;
-                            match sess.messages().await {
-                                Ok(guard) => guard.to_vec(),
-                                Err(_) => vec![],
-                            }
+                            let sess = session.lock().await;
+                            sess.messages_for_display().to_vec()
                         };
                         let _ = event_tx.send((conversation_id.clone(), ManagerEvent::Complete(messages)));
                     }

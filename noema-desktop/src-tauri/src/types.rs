@@ -265,7 +265,7 @@ impl From<&noema_core::storage::ResolvedMessage> for DisplayMessage {
         Self {
             role: Role::from(msg.role),
             content: msg.content.iter().map(DisplayContent::from).collect(),
-            turn_id: None,
+            turn_id: Some(msg.turn_id.clone()),
             span_id: None,
             alternates: None,
         }

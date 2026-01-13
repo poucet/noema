@@ -110,8 +110,8 @@ pub async fn start_event_receiver_loop(app: AppHandle, state: Arc<AppState>) {
                         message: DisplayMessage::from(&msg),
                     });
                 }
-                ManagerEvent::Complete(chat_messages) => {
-                    let messages: Vec<DisplayMessage> = chat_messages
+                ManagerEvent::Complete(resolved_messages) => {
+                    let messages: Vec<DisplayMessage> = resolved_messages
                         .iter()
                         .map(DisplayMessage::from)
                         .collect();

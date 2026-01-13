@@ -109,14 +109,6 @@ export async function toggleFavoriteModel(modelId: string): Promise<string[]> {
   return invoke<string[]>("toggle_favorite_model", { modelId });
 }
 
-// Parallel model execution
-export async function sendParallelMessage(
-  message: string,
-  modelIds: string[]
-): Promise<void> {
-  return invoke<void>("send_parallel_message", { message, modelIds });
-}
-
 // Event listeners
 export function onUserMessage(
   callback: (payload: UserMessageEvent) => void
