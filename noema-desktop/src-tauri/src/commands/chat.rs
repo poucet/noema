@@ -1,10 +1,10 @@
 //! Chat-related Tauri commands
 
-use llm::{ChatMessage, ChatPayload, ContentBlock, Role, create_model, list_all_models};
+use llm::{ChatMessage, Role, create_model, list_all_models};
 use noema_core::{ChatEngine, EngineEvent, McpRegistry, ToolConfig as CoreToolConfig};
-use noema_core::storage::{TurnStore, Session, MessageRole};
+use noema_core::storage::{TurnStore, Session, MessageRole, InputContent};
 use noema_core::storage::DocumentResolver;
-use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
+use noema_core::storage::ids::{AssetId, ConversationId, TurnId, SpanId};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -64,41 +64,33 @@ pub async fn send_message(
         return Err("Message must have content".to_string());
     }
 
-    // Convert InputContentBlock to ContentBlock, preserving order
-    let mut llm_content = Vec::new();
-    for block in content {
-        match block {
-            InputContentBlock::Text { text } => {
-                if !text.is_empty() {
-                    llm_content.push(ContentBlock::Text { text });
-                }
+    // Convert Tauri InputContentBlock to core InputContent
+    let input_content: Vec<InputContent> = content
+        .into_iter()
+        .filter_map(|block| match block {
+            InputContentBlock::Text { text } if !text.is_empty() => {
+                Some(InputContent::Text { text })
             }
-            InputContentBlock::DocumentRef { id } => {
-                llm_content.push(ContentBlock::DocumentRef { id });
-            }
+            InputContentBlock::Text { .. } => None,
+            InputContentBlock::DocumentRef { id } => Some(InputContent::DocumentRef { id }),
             InputContentBlock::Image { data, mime_type } => {
-                llm_content.push(ContentBlock::Image { data, mime_type });
+                Some(InputContent::Image { data, mime_type })
             }
             InputContentBlock::Audio { data, mime_type } => {
-                llm_content.push(ContentBlock::Audio { data, mime_type });
+                Some(InputContent::Audio { data, mime_type })
             }
             InputContentBlock::AssetRef { asset_id, mime_type } => {
-                // For AssetRef, we need to load the data from blob storage
-                // For now, store as-is and resolve later (similar to DocumentRef)
-                // TODO: Resolve asset refs before sending to LLM
-                llm_content.push(ContentBlock::Image {
-                    data: format!("asset://{}", asset_id),
+                Some(InputContent::AssetRef {
+                    asset_id: AssetId::from_string(asset_id),
                     mime_type,
-                });
+                })
             }
-        }
-    }
+        })
+        .collect();
 
-    if llm_content.is_empty() {
+    if input_content.is_empty() {
         return Err("Message must have text, documents, or attachments".to_string());
     }
-
-    let payload = ChatPayload { content: llm_content };
 
     // Convert ToolConfig from Tauri types to core types
     let core_tool_config = match tool_config {
@@ -107,30 +99,43 @@ pub async fn send_message(
             server_ids: tc.server_ids,
             tool_names: tc.tool_names,
         },
-        None => CoreToolConfig::all_enabled(), // Default: all tools enabled
+        None => CoreToolConfig::all_enabled(),
     };
 
-    send_message_internal(app, state, conversation_id, payload, core_tool_config).await
-}
+    // Add message to session (handles storage) and trigger engine
+    {
+        let engines = state.engines.lock().await;
+        let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
 
-/// Internal helper for sending messages
-async fn send_message_internal(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
-    payload: ChatPayload,
-    tool_config: CoreToolConfig,
-) -> Result<(), String> {
-    let message = ChatMessage::user(payload);
-    // Emit user message immediately
-    let user_msg = DisplayMessage::from(&message);
-    app.emit("user_message", &user_msg)
-        .map_err(|e| e.to_string())?;
+        let session_arc = engine.get_session();
+        let mut session = session_arc.lock().await;
 
-    // Send to engine with tool config - the event loop (started at init) will handle the response
-    let engines = state.engines.lock().await;
-    let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
-    engine.send_message(message, tool_config);
+        session.add_user_message(input_content)
+            .await
+            .map_err(|e| format!("Failed to add message: {}", e))?;
+    }
+
+    // Emit user message for UI
+    {
+        let engines = state.engines.lock().await;
+        let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
+
+        let session_arc = engine.get_session();
+        let session = session_arc.lock().await;
+
+        if let Some(pending) = session.pending_messages().last() {
+            let user_msg = DisplayMessage::from(pending);
+            app.emit("user_message", &user_msg)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Trigger engine to process the message
+    {
+        let engines = state.engines.lock().await;
+        let engine = engines.get(&conversation_id).ok_or("Conversation not loaded")?;
+        engine.process_pending(core_tool_config);
+    }
 
     Ok(())
 }

@@ -12,6 +12,7 @@ use llm::{ChatMessage, ChatPayload, ContentBlock};
 use std::sync::Arc;
 
 use crate::context::{ConversationContext, MessagesGuard};
+use crate::storage::content::{ContentResolver, InputContent};
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, ViewId};
 use crate::storage::traits::StorageTypes;
@@ -132,6 +133,37 @@ impl<S: StorageTypes> Session<S> {
     /// Clear pending messages without committing
     pub fn clear_pending(&mut self) {
         self.pending.clear();
+    }
+
+    /// Add a user message from UI input
+    ///
+    /// Stores content (text, images, audio) and adds to pending queue.
+    /// The message will be sent to the LLM and committed on success.
+    pub async fn add_user_message(&mut self, content: Vec<InputContent>) -> Result<()> {
+        if content.is_empty() {
+            return Ok(());
+        }
+
+        // Store content and get refs
+        let stored = self.coordinator
+            .store_input_content(content, OriginKind::User)
+            .await?;
+
+        // Resolve refs back to ContentBlocks for the pending ChatMessage
+        // (We just stored them, so resolution will succeed)
+        let mut blocks = Vec::with_capacity(stored.len());
+        for item in stored {
+            let block = item.resolve(self.coordinator.as_ref()).await?;
+            blocks.push(block);
+        }
+
+        if !blocks.is_empty() {
+            let message = ChatMessage::user(ChatPayload::new(blocks));
+            self.pending.push(message);
+            self.llm_cache_valid = false;
+        }
+
+        Ok(())
     }
 
     /// Commit pending messages to storage

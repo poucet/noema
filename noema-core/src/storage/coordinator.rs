@@ -15,7 +15,7 @@ use llm::ContentBlock;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use crate::storage::content::{ContentResolver, StoredContent};
+use crate::storage::content::{ContentResolver, InputContent, StoredContent};
 use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
@@ -107,6 +107,46 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             ContentBlock::ToolCall(call) => Ok(StoredContent::ToolCall(call)),
             ContentBlock::ToolResult(result) => Ok(StoredContent::ToolResult(result)),
         }
+    }
+
+    /// Convert InputContent from UI to StoredContent refs
+    ///
+    /// - Text is stored in content_blocks → TextRef
+    /// - Image/Audio base64 data is stored in blob/assets → AssetRef
+    /// - DocumentRef passes through
+    /// - AssetRef passes through (already stored)
+    pub async fn store_input_content(
+        &self,
+        content: Vec<InputContent>,
+        origin: OriginKind,
+    ) -> Result<Vec<StoredContent>> {
+        let mut stored = Vec::with_capacity(content.len());
+
+        for item in content {
+            let stored_item = match item {
+                InputContent::Text { text } => {
+                    let content_origin = ContentOrigin { kind: Some(origin), ..Default::default() };
+                    let content_block = ContentBlockData::plain(&text).with_origin(content_origin);
+                    let result = self.content_block_store.store(content_block).await?;
+                    StoredContent::text_ref(result.id)
+                }
+                InputContent::Image { data, mime_type } => {
+                    let asset_id = self.store_base64_asset(&data, &mime_type).await?;
+                    StoredContent::asset_ref(asset_id, mime_type, None)
+                }
+                InputContent::Audio { data, mime_type } => {
+                    let asset_id = self.store_base64_asset(&data, &mime_type).await?;
+                    StoredContent::asset_ref(asset_id, mime_type, None)
+                }
+                InputContent::DocumentRef { id } => StoredContent::document_ref(id),
+                InputContent::AssetRef { asset_id, mime_type } => {
+                    StoredContent::asset_ref(asset_id, mime_type, None)
+                }
+            };
+            stored.push(stored_item);
+        }
+
+        Ok(stored)
     }
 
     /// Decode base64 data, store in blob storage, register in asset storage,
@@ -340,7 +380,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     }
                 }
                 StoredContent::DocumentRef { document_id } => {
-                    ResolvedContent::document(document_id)
+                    ResolvedContent::document(document_id.clone())
                 }
                 StoredContent::ToolCall(call) => ResolvedContent::tool_call(call.clone()),
                 StoredContent::ToolResult(result) => ResolvedContent::tool_result(result.clone()),

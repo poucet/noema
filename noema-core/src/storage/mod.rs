@@ -82,6 +82,9 @@ pub use types::{
 // Session
 pub use session::{AssetResolver, ResolvedContent, ResolvedMessage, Session};
 
+// Input content (for UI → Session API)
+pub use content::InputContent;
+
 // Implementations (feature-gated)
 #[cfg(feature = "sqlite")]
 pub use implementations::sqlite::SqliteStore;

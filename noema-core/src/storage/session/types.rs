@@ -8,7 +8,7 @@
 use llm::{ContentBlock, ToolCall, ToolResult};
 
 use crate::storage::content::StoredContent;
-use crate::storage::ids::AssetId;
+use crate::storage::ids::{AssetId, DocumentId};
 use crate::storage::types::MessageRole;
 
 // ============================================================================
@@ -72,7 +72,7 @@ pub enum ResolvedContent {
 
     /// Document reference with lazy LLM resolution
     Document {
-        document_id: String,
+        document_id: DocumentId,
         /// Cached formatted ContentBlock for LLM - populated on first use
         resolved: Option<ContentBlock>,
     },
@@ -107,7 +107,7 @@ impl ResolvedContent {
     }
 
     /// Create a document reference (unresolved)
-    pub fn document(document_id: impl Into<String>) -> Self {
+    pub fn document(document_id: impl Into<DocumentId>) -> Self {
         Self::Document {
             document_id: document_id.into(),
             resolved: None,

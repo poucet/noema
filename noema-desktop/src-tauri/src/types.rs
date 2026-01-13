@@ -1,7 +1,7 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
-use noema_core::storage::ids::{ConversationId, DocumentId, SpanId, TurnId, ViewId};
+use noema_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId, ViewId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -376,7 +376,8 @@ pub enum InputContentBlock {
     },
     /// Reference to a document (inline position preserved)
     DocumentRef {
-        id: String,
+        #[ts(type = "string")]
+        id: DocumentId,
     },
     /// Inline base64 image (for new uploads)
     Image { 
@@ -393,7 +394,8 @@ pub enum InputContentBlock {
     /// Reference to already-stored asset in blob storage
     AssetRef { 
         #[serde(rename = "assetId")]
-        asset_id: String, 
+        #[ts(type = "string")]
+        asset_id: AssetId, 
         #[serde(rename = "mimeType")] 
         mime_type: String 
     },

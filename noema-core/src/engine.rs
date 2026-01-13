@@ -35,6 +35,8 @@ impl ToolConfig {
 
 pub enum EngineCommand {
     SendMessage(ChatPayload, ToolConfig),
+    /// Process pending messages (already added to session via add_user_message)
+    ProcessPending(ToolConfig),
     SetModel(Arc<dyn ChatModel + Send + Sync>),
     ClearHistory,
 }
@@ -189,6 +191,45 @@ impl<S: StorageTypes> ChatEngine<S> {
                         }
                     }
                 }
+                EngineCommand::ProcessPending(tool_config) => {
+                    // Run agent with pending messages (already added to session)
+                    let execute_result = {
+                        let mut sess = session.lock().await;
+                        if tool_config.enabled {
+                            agent.execute_stream(&mut *sess, model.clone()).await
+                        } else {
+                            agent.execute_stream_no_tools(&mut *sess, model.clone()).await
+                        }
+                    };
+
+                    match execute_result {
+                        Ok(_) => {
+                            // Send pending messages to UI before committing
+                            {
+                                let sess = session.lock().await;
+                                for msg in sess.pending() {
+                                    let _ = event_tx.send(EngineEvent::Message(msg.clone()));
+                                }
+                            }
+
+                            // Commit pending messages to storage
+                            let model_id = model.id();
+                            let commit_result = {
+                                let mut sess = session.lock().await;
+                                sess.commit(Some(model_id)).await
+                            };
+
+                            if let Err(e) = commit_result {
+                                let _ = event_tx.send(EngineEvent::Error(format!("Failed to commit: {}", e)));
+                            }
+
+                            let _ = event_tx.send(EngineEvent::MessageComplete);
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(EngineEvent::Error(e.to_string()));
+                        }
+                    }
+                }
                 EngineCommand::SetModel(new_model) => {
                     let name = new_model.name().to_string();
                     model = new_model;
@@ -206,6 +247,11 @@ impl<S: StorageTypes> ChatEngine<S> {
 
     pub fn send_message(&self, payload: impl Into<ChatPayload>, tool_config: ToolConfig) {
         let _ = self.cmd_tx.send(EngineCommand::SendMessage(payload.into(), tool_config));
+    }
+
+    /// Process pending messages that were added via session.add_user_message()
+    pub fn process_pending(&self, tool_config: ToolConfig) {
+        let _ = self.cmd_tx.send(EngineCommand::ProcessPending(tool_config));
     }
 
     pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>) {
