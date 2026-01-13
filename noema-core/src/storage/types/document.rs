@@ -2,7 +2,7 @@
 //!
 //! Types for the Episteme-compatible document model.
 //!
-//! Documents and tabs are editable, so they use `Stored<Id, Editable<T>>`.
+//! Documents and tabs are editable, so they use `StoredEditable<Id, T>`.
 //! Revisions are immutable, so they use `Stored<Id, T>`.
 
 use std::str::FromStr;
@@ -49,7 +49,7 @@ impl FromStr for DocumentSource {
 
 /// Core document data
 ///
-/// Use with `Stored<DocumentId, Editable<Document>>` for the full stored representation.
+/// Use with `StoredEditable<DocumentId, Document>` for the full stored representation.
 #[derive(Debug, Clone)]
 pub struct Document {
     pub user_id: UserId,
@@ -78,7 +78,7 @@ impl Document {
 
 /// Core document tab data
 ///
-/// Use with `Stored<TabId, Editable<DocumentTab>>` for the full stored representation.
+/// Use with `StoredEditable<TabId, DocumentTab>` for the full stored representation.
 #[derive(Debug, Clone)]
 pub struct DocumentTab {
     pub document_id: DocumentId,
