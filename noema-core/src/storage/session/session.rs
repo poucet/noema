@@ -221,9 +221,27 @@ impl<S: StorageTypes> Session<S> {
         }
 
         let messages = std::mem::take(&mut self.pending);
-        let commit_at_turn = self.commit_target.take();
 
-        // Track current span for adding messages
+        // Regeneration case: all messages go to a single new span at the target turn
+        if let Some(turn_id) = self.commit_target.take() {
+            let span_id = self.coordinator
+                .create_and_select_span(&self.view_id, &turn_id, model_id)
+                .await?;
+
+            for msg in messages {
+                let msg_role = llm_role_to_message_role(msg.role);
+                let origin = llm_role_to_origin(msg.role);
+                let resolved = self.coordinator
+                    .add_message(&span_id, msg_role, msg.payload.content, origin)
+                    .await?;
+                self.resolved_cache.push(resolved);
+            }
+
+            self.llm_cache_valid = false;
+            return Ok(());
+        }
+
+        // Normal case: create new turns when role changes
         let mut current_role: Option<SpanRole> = None;
         let mut current_span: Option<crate::storage::ids::SpanId> = None;
 
@@ -235,26 +253,19 @@ impl<S: StorageTypes> Session<S> {
                 MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
             };
 
-            // Get or create span for this message
+            // Create new turn when role changes
             if current_role != Some(span_role) {
-                // Get turn_id: either from commit_target or create a new turn
-                let turn_id = if let Some(ref id) = commit_at_turn {
-                    id.clone()
-                } else {
-                    self.coordinator.create_turn(span_role).await?
-                };
-
-                // Create span at turn and select it
-                let span_id = self.coordinator.create_and_select_span(&self.view_id, &turn_id, model_id).await?;
+                let turn_id = self.coordinator.create_turn(span_role).await?;
+                let span_id = self.coordinator
+                    .create_and_select_span(&self.view_id, &turn_id, model_id)
+                    .await?;
                 current_span = Some(span_id);
                 current_role = Some(span_role);
             }
 
-            // Add message to span
             let resolved = self.coordinator
                 .add_message(current_span.as_ref().unwrap(), msg_role, msg.payload.content, origin)
                 .await?;
-
             self.resolved_cache.push(resolved);
         }
 
