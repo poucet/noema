@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::storage::ids::{ConversationId, UserId, ViewId};
 use crate::storage::traits::ConversationStore;
-use crate::storage::types::ConversationInfo;
+use crate::storage::types::{Conversation, Stored};
 
 /// Mock conversation store that returns unimplemented for all operations
 pub struct MockConversationStore;
@@ -15,10 +15,10 @@ impl ConversationStore for MockConversationStore {
     async fn create_conversation(&self, _: &UserId, _: Option<&str>) -> Result<ConversationId> {
         unimplemented!()
     }
-    async fn get_conversation(&self, _: &ConversationId) -> Result<Option<ConversationInfo>> {
+    async fn get_conversation(&self, _: &ConversationId) -> Result<Option<Stored<ConversationId, Conversation>>> {
         unimplemented!()
     }
-    async fn list_conversations(&self, _: &UserId) -> Result<Vec<ConversationInfo>> {
+    async fn list_conversations(&self, _: &UserId) -> Result<Vec<Stored<ConversationId, Conversation>>> {
         unimplemented!()
     }
     async fn delete_conversation(&self, _: &ConversationId) -> Result<()> {

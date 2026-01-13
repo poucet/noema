@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::storage::ids::{ConversationId, UserId, ViewId};
 use crate::storage::traits::ConversationStore;
-use crate::storage::types::ConversationInfo;
+use crate::storage::types::{Conversation, Stored};
 
 use super::turn::MemoryTurnStore;
 
@@ -21,33 +21,26 @@ fn now() -> i64 {
         .as_millis() as i64
 }
 
-/// Storage entry with user_id (not in ConversationInfo) and optional main_view_id
-/// (main_view_id is required in ConversationInfo but set after creation)
+/// Storage entry with user_id (not in Conversation) and optional main_view_id
+/// (main_view_id is required in Conversation but set after creation)
 #[derive(Clone, Debug)]
 struct ConversationEntry {
+    id: ConversationId,
     user_id: UserId,
     main_view_id: Option<ViewId>,
-    info: ConversationInfoPartial,
-}
-
-/// Partial info (everything except main_view_id which is stored separately)
-#[derive(Clone, Debug)]
-struct ConversationInfoPartial {
-    id: ConversationId,
     name: Option<String>,
     is_private: bool,
     created_at: i64,
 }
 
 impl ConversationEntry {
-    fn to_info(&self) -> Option<ConversationInfo> {
-        Some(ConversationInfo {
-            id: self.info.id.clone(),
-            name: self.info.name.clone(),
+    fn to_stored(&self) -> Option<Stored<ConversationId, Conversation>> {
+        let conversation = Conversation {
+            name: self.name.clone(),
             main_view_id: self.main_view_id.clone()?,
-            is_private: self.info.is_private,
-            created_at: self.info.created_at,
-        })
+            is_private: self.is_private,
+        };
+        Some(Stored::new(self.id.clone(), conversation, self.created_at))
     }
 }
 
@@ -87,14 +80,12 @@ impl MemoryConversationStore {
         let id = ConversationId::new();
         let now = now();
         let entry = ConversationEntry {
+            id: id.clone(),
             user_id: user_id.clone(),
             main_view_id: None, // Coordinator sets this after creating view
-            info: ConversationInfoPartial {
-                id: id.clone(),
-                name: name.map(|s| s.to_string()),
-                is_private: false,
-                created_at: now,
-            },
+            name: name.map(|s| s.to_string()),
+            is_private: false,
+            created_at: now,
         };
         self.conversations
             .lock()
@@ -122,19 +113,19 @@ impl ConversationStore for MemoryConversationStore {
     async fn get_conversation(
         &self,
         conversation_id: &ConversationId,
-    ) -> Result<Option<ConversationInfo>> {
+    ) -> Result<Option<Stored<ConversationId, Conversation>>> {
         let conversations = self.conversations.lock().unwrap();
         Ok(conversations
             .get(conversation_id.as_str())
-            .and_then(|e| e.to_info()))
+            .and_then(|e| e.to_stored()))
     }
 
-    async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
+    async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<Stored<ConversationId, Conversation>>> {
         let conversations = self.conversations.lock().unwrap();
         let mut result: Vec<_> = conversations
             .values()
             .filter(|e| e.user_id == *user_id)
-            .filter_map(|e| e.to_info())
+            .filter_map(|e| e.to_stored())
             .collect();
         result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(result)
@@ -159,7 +150,7 @@ impl ConversationStore for MemoryConversationStore {
             .unwrap()
             .get_mut(conversation_id.as_str())
         {
-            entry.info.name = name.map(|s| s.to_string());
+            entry.name = name.map(|s| s.to_string());
         }
         Ok(())
     }
@@ -168,7 +159,7 @@ impl ConversationStore for MemoryConversationStore {
         let conversations = self.conversations.lock().unwrap();
         Ok(conversations
             .get(conversation_id.as_str())
-            .map(|e| e.info.is_private)
+            .map(|e| e.is_private)
             .unwrap_or(false))
     }
 
@@ -183,7 +174,7 @@ impl ConversationStore for MemoryConversationStore {
             .unwrap()
             .get_mut(conversation_id.as_str())
         {
-            entry.info.is_private = is_private;
+            entry.is_private = is_private;
         }
         Ok(())
     }

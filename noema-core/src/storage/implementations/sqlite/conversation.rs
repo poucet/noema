@@ -8,7 +8,7 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{ConversationId, UserId, ViewId};
 use crate::storage::traits::ConversationStore;
-use crate::storage::types::ConversationInfo;
+use crate::storage::types::{Conversation, Stored};
 
 /// Initialize conversation schema (conversations table)
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -61,7 +61,7 @@ impl ConversationStore for SqliteStore {
     async fn get_conversation(
         &self,
         conversation_id: &ConversationId,
-    ) -> Result<Option<ConversationInfo>> {
+    ) -> Result<Option<Stored<ConversationId, Conversation>>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT id, title, main_view_id, is_private, created_at
@@ -79,20 +79,19 @@ impl ConversationStore for SqliteStore {
 
         match result {
             Ok((id, name, main_view_id, is_private, created_at)) => {
-                Ok(Some(ConversationInfo {
-                    id,
+                let conversation = Conversation {
                     name,
                     main_view_id,
                     is_private: is_private != 0,
-                    created_at,
-                }))
+                };
+                Ok(Some(Stored::new(id, conversation, created_at)))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
 
-    async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
+    async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<Stored<ConversationId, Conversation>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, main_view_id, is_private, created_at
@@ -111,12 +110,13 @@ impl ConversationStore for SqliteStore {
                 Ok((id, name, main_view_id, is_private, created_at))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, name, main_view_id, is_private, created_at)| ConversationInfo {
-                id,
-                name,
-                main_view_id,
-                is_private: is_private != 0,
-                created_at,
+            .map(|(id, name, main_view_id, is_private, created_at)| {
+                let conversation = Conversation {
+                    name,
+                    main_view_id,
+                    is_private: is_private != 0,
+                };
+                Stored::new(id, conversation, created_at)
             })
             .collect();
 
