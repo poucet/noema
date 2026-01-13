@@ -76,7 +76,7 @@ pub use types::{
     // Document
     Document, DocumentRevision, DocumentSource, DocumentTab,
     // Stored wrappers
-    Editable, Stored,
+    Editable, Keyed, Stored, StoredEditable, Timestamped,
     // User
     UserInfo,
 };

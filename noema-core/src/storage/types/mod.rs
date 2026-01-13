@@ -21,5 +21,5 @@ pub use conversation::{
     Span, SpanRole, Turn, TurnWithContent, View, ViewSelection,
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
-pub use stored::{Editable, Stored};
+pub use stored::{stored, stored_editable, Editable, Keyed, Stored, StoredEditable, Timestamped};
 pub use user::UserInfo;
