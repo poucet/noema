@@ -503,6 +503,19 @@ function App() {
     setPrefilledInput("");
   };
 
+  // Regenerate response at a specific turn
+  const handleRegenerate = async (turnId: string) => {
+    try {
+      setError(null);
+      setIsLoading(true);
+      await tauri.regenerateResponse(currentConversationId, turnId);
+    } catch (err) {
+      appLog.error("Regenerate error", String(err));
+      setError(String(err));
+      setIsLoading(false);
+    }
+  };
+
   // Retry initialization after setup
   const retryInit = async () => {
     setError(null);
@@ -756,6 +769,7 @@ function App() {
                         onDocumentClick={setActiveDocumentId}
                         onSwitchAlternate={handleSwitchAlternate}
                         onFork={handleFork}
+                        onRegenerate={handleRegenerate}
                       />
                     ))}
                     {streamingMessage && !isParallelMode && (

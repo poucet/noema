@@ -3,6 +3,7 @@ import type { DisplayMessage, DisplayContent } from "../types";
 import { AlternatesSelector } from "./message/AlternatesSelector";
 import { ContentBlock } from "./message/ContentBlock";
 import { ForkIcon } from "./message/ForkIcon";
+import { RegenerateIcon } from "./message/RegenerateIcon";
 
 // Extract raw markdown text from content blocks
 function extractRawMarkdown(content: DisplayContent[]): string {
@@ -48,9 +49,11 @@ interface MessageBubbleProps {
   onSwitchAlternate?: (spanSetId: string, spanId: string) => void;
   // Fork handler: spanId, role, and optionally the user's text (for user messages)
   onFork?: (spanId: string, role: "user" | "assistant", userText?: string) => void;
+  // Regenerate handler: creates new span at turn with fresh LLM response
+  onRegenerate?: (turnId: string) => void;
 }
 
-export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onFork }: MessageBubbleProps) {
+export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onFork, onRegenerate }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const hasAlternates = message.alternates && message.alternates.length > 1;
@@ -135,6 +138,9 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
   // Can fork if we have a spanId and fork handler
   const canFork = onFork && message.spanId && !isSystem;
 
+  // Can regenerate if we have a turnId and regenerate handler (assistant messages only)
+  const canRegenerate = onRegenerate && message.turnId && !isUser && !isSystem;
+
   return (
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4 group`}
@@ -190,6 +196,15 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
           >
             {justCopied ? <CheckIcon /> : <CopyIcon />}
           </button>
+          {canRegenerate && (
+            <button
+              onClick={() => onRegenerate!(message.turnId!)}
+              className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-700/50 transition-colors"
+              title="Regenerate response"
+            >
+              <RegenerateIcon className="w-4 h-4" />
+            </button>
+          )}
           {canFork && (
             <button
               onClick={handleForkClick}

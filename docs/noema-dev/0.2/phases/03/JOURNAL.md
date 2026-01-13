@@ -352,3 +352,27 @@ Used as: `StoredTextBlock = Stored<ContentBlockId, Hashed<ContentBlock>>`
 
 ---
 
+## 2026-01-13: Regenerate Button Frontend (3.3.D1b)
+
+Wired regenerate button to frontend for assistant messages.
+
+### Changes
+
+**New file: `components/message/RegenerateIcon.tsx`**
+- Circular refresh arrow SVG icon
+
+**MessageBubble.tsx:**
+- Added `onRegenerate?: (turnId: string) => void` prop
+- Added regenerate button for assistant messages (appears on hover)
+- Button calls `onRegenerate(turnId)` when clicked
+
+**App.tsx:**
+- Added `handleRegenerate(turnId)` handler that calls `tauri.regenerateResponse()`
+- Wired to main message list `MessageBubble` components
+
+### UI Behavior
+
+Hover over assistant message → see action buttons (copy, regenerate, fork) to the right of the bubble.
+
+---
+
