@@ -7,17 +7,19 @@ pub mod blob;
 pub mod content_block;
 pub mod conversation;
 pub mod document;
+pub mod stored;
 pub mod user;
 
 // Re-exports for convenience
-pub use asset::{Asset, StoredAsset};
+pub use asset::Asset;
 pub use blob::StoredBlob;
 pub use content_block::{
-    ContentBlock, ContentOrigin, ContentType, OriginKind, StoredContentBlock, StoreResult,
+    ContentBlock, ContentOrigin, ContentType, HashedContentBlock, OriginKind, StoreResult,
 };
 pub use conversation::{
-    ConversationInfo, ForkInfo, MessageInfo, MessageRole, MessageWithContent,
-    SpanInfo, SpanRole, TurnInfo, TurnWithContent, ViewInfo, ViewSelection,
+    Conversation, ForkInfo, Message, MessageRole, MessageWithContent,
+    Span, SpanRole, Turn, TurnWithContent, View, ViewSelection,
 };
-pub use document::{DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo};
+pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
+pub use stored::{Editable, Stored};
 pub use user::UserInfo;
