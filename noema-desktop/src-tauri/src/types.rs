@@ -262,16 +262,8 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
 
 impl From<&noema_core::storage::ResolvedMessage> for DisplayMessage {
     fn from(msg: &noema_core::storage::ResolvedMessage) -> Self {
-        use noema_core::storage::MessageRole;
-        // Map MessageRole to llm::Role (Tool messages displayed as Assistant)
-        let role = match msg.role {
-            MessageRole::User => Role::User,
-            MessageRole::Assistant => Role::Assistant,
-            MessageRole::System => Role::System,
-            MessageRole::Tool => Role::Assistant, // Tool results rendered like assistant
-        };
         Self {
-            role,
+            role: Role::from(msg.role),
             content: msg.content.iter().map(DisplayContent::from).collect(),
             turn_id: None,
             span_id: None,

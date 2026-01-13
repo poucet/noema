@@ -9,7 +9,7 @@ use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    stored, ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole, Stored, Turn,
+    stored, ForkInfo, Message, MessageRole, MessageWithContent, Span, Stored, Turn,
     TurnWithContent, View,
 };
 
@@ -55,7 +55,7 @@ impl MemoryTurnStore {
 impl TurnStore for MemoryTurnStore {
     // ========== Turn Management ==========
 
-    async fn create_turn(&self, role: SpanRole) -> Result<Stored<TurnId, Turn>> {
+    async fn create_turn(&self, role: llm::Role) -> Result<Stored<TurnId, Turn>> {
         let mut turns = self.turns.lock().unwrap();
 
         let id = TurnId::new();
@@ -433,12 +433,12 @@ mod tests {
         let store = MemoryTurnStore::new();
 
         // Create user turn
-        let turn1 = store.create_turn(SpanRole::User).await.unwrap();
-        assert_eq!(turn1.role, SpanRole::User);
+        let turn1 = store.create_turn(llm::Role::User).await.unwrap();
+        assert_eq!(turn1.role(), llm::Role::User);
 
         // Create assistant turn
-        let turn2 = store.create_turn(SpanRole::Assistant).await.unwrap();
-        assert_eq!(turn2.role, SpanRole::Assistant);
+        let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
+        assert_eq!(turn2.role(), llm::Role::Assistant);
 
         // Get turns individually
         let fetched = store.get_turn(&turn1.id).await.unwrap();
@@ -451,7 +451,7 @@ mod tests {
         let store = MemoryTurnStore::new();
 
         // Create turn
-        let turn = store.create_turn(SpanRole::User).await.unwrap();
+        let turn = store.create_turn(llm::Role::User).await.unwrap();
 
         // Create span
         let span = store.create_span(&turn.id, None).await.unwrap();
@@ -484,7 +484,7 @@ mod tests {
         let view = store.create_view().await.unwrap();
 
         // Create user turn with span and message, select in view
-        let turn1 = store.create_turn(SpanRole::User).await.unwrap();
+        let turn1 = store.create_turn(llm::Role::User).await.unwrap();
         let span1 = store.create_span(&turn1.id, None).await.unwrap();
         let content_block_id = crate::storage::ids::ContentBlockId::new();
         let content = vec![StoredContent::text_ref(content_block_id)];
@@ -492,7 +492,7 @@ mod tests {
         store.select_span(&view.id, &turn1.id, &span1.id).await.unwrap();
 
         // Create assistant turn with span and message, select in view
-        let turn2 = store.create_turn(SpanRole::Assistant).await.unwrap();
+        let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
         let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
         let content_block_id2 = crate::storage::ids::ContentBlockId::new();
         let content2 = vec![StoredContent::text_ref(content_block_id2)];
@@ -502,7 +502,7 @@ mod tests {
         // Get view path
         let path = store.get_view_path(&view.id).await.unwrap();
         assert_eq!(path.len(), 2);
-        assert_eq!(path[0].turn.role, SpanRole::User);
-        assert_eq!(path[1].turn.role, SpanRole::Assistant);
+        assert_eq!(path[0].turn.role(), llm::Role::User);
+        assert_eq!(path[1].turn.role(), llm::Role::Assistant);
     }
 }

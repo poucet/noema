@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use llm::{ChatMessage, ChatPayload, ContentBlock};
+use llm::{ChatMessage, ChatPayload, ContentBlock, Role};
 use std::sync::Arc;
 
 use crate::context::{ConversationContext, MessagesGuard};
@@ -17,7 +17,7 @@ use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, SpanId, TurnId, ViewId};
 use crate::storage::traits::StorageTypes;
-use crate::storage::types::{MessageRole, OriginKind, SpanRole};
+use crate::storage::types::{MessageRole, OriginKind};
 
 use super::types::{ResolvedContent, ResolvedMessage};
 
@@ -250,16 +250,12 @@ impl<S: StorageTypes> Session<S> {
         // Track current turn and span for adding messages
         let mut current_turn: Option<TurnId> = None;
         let mut current_span: Option<SpanId> = None;
-        let mut current_role: Option<SpanRole> = None;
+        let mut current_role: Option<Role> = None;
 
         for msg in messages {
             let msg_role = llm_role_to_message_role(msg.role);
             let origin = llm_role_to_origin(msg.role);
-            let span_role = match msg_role {
-                MessageRole::User | MessageRole::System => SpanRole::User,
-                MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
-            };
-
+            let span_role = Role::from(msg_role);
 
             // Get or create turn and span based on commit mode and role changes
             match commit_mode {
@@ -405,13 +401,4 @@ fn llm_role_to_origin(role: llm::Role) -> OriginKind {
 // MessageRole -> llm::Role conversion
 // ============================================================================
 
-impl From<MessageRole> for llm::Role {
-    fn from(role: MessageRole) -> Self {
-        match role {
-            MessageRole::User => llm::Role::User,
-            MessageRole::Assistant => llm::Role::Assistant,
-            MessageRole::System => llm::Role::System,
-            MessageRole::Tool => llm::Role::User,
-        }
-    }
-}
+

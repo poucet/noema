@@ -158,7 +158,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     // ========== Turn/Span Methods ==========
 
     /// Create a new turn (without span or selection).
-    pub async fn create_turn(&self, role: crate::storage::types::SpanRole) -> Result<TurnId> {
+    pub async fn create_turn(&self, role: llm::Role) -> Result<TurnId> {
         let turn = self.turn_store.create_turn(role).await?;
         Ok(turn.id)
     }

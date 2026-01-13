@@ -3,11 +3,12 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+use llm::Role;
 use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    Message, MessageRole, MessageWithContent, Span, SpanRole, Stored, Turn, TurnWithContent, View,
+    Message, MessageRole, MessageWithContent, Span, Stored, Turn, TurnWithContent, View,
 };
 
 /// Mock turn store that returns unimplemented for all operations
@@ -15,7 +16,7 @@ pub struct MockTurnStore;
 
 #[async_trait]
 impl TurnStore for MockTurnStore {
-    async fn create_turn(&self, _: SpanRole) -> Result<Stored<TurnId, Turn>> {
+    async fn create_turn(&self, _: llm::Role) -> Result<Stored<TurnId, Turn>> {
         unimplemented!()
     }
     async fn get_turn(&self, _: &TurnId) -> Result<Option<Stored<TurnId, Turn>>> {

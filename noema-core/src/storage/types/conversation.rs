@@ -7,6 +7,7 @@
 //! - `Message` - Individual message within a span, stored as `Stored<MessageId, Message>`
 //! - `View` - A path through turns/spans (defines order), stored as `Stored<ViewId, View>`
 
+use llm::Role;
 use serde::{Deserialize, Serialize};
 
 use crate::storage::content::StoredContent;
@@ -14,57 +15,12 @@ use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::types::Stored;
 
 // ============================================================================
-// Span Role
-// ============================================================================
-
-/// Role identifying who owns a span (user or assistant)
-///
-/// Each turn can have multiple spans, but all spans at a turn share the same role.
-/// The role indicates who is "speaking" at that position in the conversation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SpanRole {
-    /// User input span
-    User,
-    /// Assistant response span
-    Assistant,
-}
-
-impl SpanRole {
-    /// Get static string representation (zero allocation)
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            SpanRole::User => "user",
-            SpanRole::Assistant => "assistant",
-        }
-    }
-}
-
-impl std::fmt::Display for SpanRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for SpanRole {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "user" => Ok(SpanRole::User),
-            "assistant" => Ok(SpanRole::Assistant),
-            _ => Err(()),
-        }
-    }
-}
-
-// ============================================================================
 // Message Role
 // ============================================================================
 
 /// Role for individual messages within a span
 ///
-/// While spans have a SpanRole (user/assistant), individual messages can have
+/// While spans have a Role (system/user/assistant), individual messages can have
 /// more specific roles for multi-step flows (e.g., tool calls within an assistant span).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -122,6 +78,17 @@ impl From<llm::api::Role> for MessageRole {
     }
 }
 
+impl From<MessageRole> for llm::Role {
+    fn from(role: MessageRole) -> Self {
+        match role {
+            MessageRole::User => llm::Role::User,
+            MessageRole::Assistant => llm::Role::Assistant,
+            MessageRole::System => llm::Role::System,
+            MessageRole::Tool => llm::Role::User,
+        }
+    }
+}
+
 // ============================================================================
 // Turn
 // ============================================================================
@@ -136,23 +103,18 @@ impl From<llm::api::Role> for MessageRole {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Turn {
     /// Role for all spans at this turn (user or assistant)
-    pub role: SpanRole,
+    role: Role,
 }
 
 impl Turn {
     /// Create a new turn with the given role
-    pub fn new(role: SpanRole) -> Self {
+    pub fn new(role: Role) -> Self {
         Self { role }
     }
 
-    /// Create a user turn
-    pub fn user() -> Self {
-        Self::new(SpanRole::User)
-    }
-
-    /// Create an assistant turn
-    pub fn assistant() -> Self {
-        Self::new(SpanRole::Assistant)
+    /// Accessor for role
+    pub fn role(&self) -> Role {
+        self.role
     }
 }
 
@@ -369,15 +331,6 @@ impl Conversation {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_span_role_roundtrip() {
-        for role in [SpanRole::User, SpanRole::Assistant] {
-            let s = role.as_str();
-            let parsed: SpanRole = s.parse().unwrap();
-            assert_eq!(parsed, role);
-        }
-    }
 
     #[test]
     fn test_message_role_roundtrip() {

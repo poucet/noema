@@ -7,10 +7,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+use llm::Role;
 use crate::storage::content::StoredContent;
 use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
 use crate::storage::types::{
-    Message, MessageRole, MessageWithContent, Span, SpanRole,
+    Message, MessageRole, MessageWithContent, Span,
     Stored, Turn, TurnWithContent, View,
 };
 
@@ -34,7 +35,7 @@ pub trait TurnStore: Send + Sync {
     /// Create a new turn
     ///
     /// Creates a turn with the given role. Use select_span to add it to a view.
-    async fn create_turn(&self, role: SpanRole) -> Result<StoredTurn>;
+    async fn create_turn(&self, role: Role) -> Result<StoredTurn>;
 
     /// Get a specific turn by ID
     async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<StoredTurn>>;

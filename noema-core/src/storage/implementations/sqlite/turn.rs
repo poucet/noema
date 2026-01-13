@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use llm::Role;
 use rusqlite::{params, Connection};
 
 use super::SqliteStore;
@@ -12,7 +13,7 @@ use crate::storage::ids::{
 };
 use crate::storage::traits::TurnStore;
 use crate::storage::types::{
-    stored, ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole,
+    stored, ForkInfo, Message, MessageRole, MessageWithContent, Span,
     Stored, Turn, TurnWithContent, View,
 };
 
@@ -147,7 +148,7 @@ fn load_message_content(
 impl TurnStore for SqliteStore {
     // ========== Turn Management ==========
 
-    async fn create_turn(&self, role: SpanRole) -> Result<Stored<TurnId, Turn>> {
+    async fn create_turn(&self, role: Role) -> Result<Stored<TurnId, Turn>> {
         let conn = self.conn().lock().unwrap();
         let turn_id = TurnId::new();
         let now = unix_timestamp();
@@ -176,7 +177,7 @@ impl TurnStore for SqliteStore {
         match result {
             Ok((id, role_str, created)) => {
                 let role = role_str
-                    .parse::<SpanRole>()
+                    .parse::<Role>()
                     .map_err(|_| anyhow::anyhow!("Invalid role: {}", role_str))?;
                 Ok(Some(stored(id, Turn::new(role), created)))
             }
@@ -708,6 +709,8 @@ fn insert_message_content(
 
 #[cfg(test)]
 mod tests {
+    use llm::Role;
+
     use super::*;
 
     fn create_test_store() -> SqliteStore {
@@ -719,13 +722,12 @@ mod tests {
         let store = create_test_store();
 
         // Create user turn
-        let turn1 = store.create_turn(SpanRole::User).await.unwrap();
-        assert_eq!(turn1.role, SpanRole::User);
+        let turn1 = store.create_turn(llm::Role::User).await.unwrap();
+        assert_eq!(turn1.role(), Role::User);
 
         // Create assistant turn
-        let turn2 = store.create_turn(SpanRole::Assistant).await.unwrap();
-        assert_eq!(turn2.role, SpanRole::Assistant);
-
+        let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
+        assert_eq!(turn2.role(), Role::Assistant);
         // Get turns individually
         let fetched = store.get_turn(&turn1.id).await.unwrap();
         assert!(fetched.is_some());
@@ -737,7 +739,7 @@ mod tests {
         let store = create_test_store();
 
         // Create turn
-        let turn = store.create_turn(SpanRole::User).await.unwrap();
+        let turn = store.create_turn(llm::Role::User).await.unwrap();
 
         // Create span
         let span = store.create_span(&turn.id, None).await.unwrap();
@@ -770,7 +772,7 @@ mod tests {
         let view = store.create_view().await.unwrap();
 
         // Create user turn with span and message, select in view
-        let turn1 = store.create_turn(SpanRole::User).await.unwrap();
+        let turn1 = store.create_turn(llm::Role::User).await.unwrap();
         let span1 = store.create_span(&turn1.id, None).await.unwrap();
         let content_block_id = ContentBlockId::new();
         let content = vec![StoredContent::text_ref(content_block_id)];
@@ -778,7 +780,7 @@ mod tests {
         store.select_span(&view.id, &turn1.id, &span1.id).await.unwrap();
 
         // Create assistant turn with span and message, select in view
-        let turn2 = store.create_turn(SpanRole::Assistant).await.unwrap();
+        let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
         let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
         let content_block_id2 = ContentBlockId::new();
         let content2 = vec![StoredContent::text_ref(content_block_id2)];
@@ -788,7 +790,7 @@ mod tests {
         // Get view path
         let path = store.get_view_path(&view.id).await.unwrap();
         assert_eq!(path.len(), 2);
-        assert_eq!(path[0].turn.role, SpanRole::User);
-        assert_eq!(path[1].turn.role, SpanRole::Assistant);
+        assert_eq!(path[0].turn.role(), llm::Role::User);
+        assert_eq!(path[1].turn.role(), llm::Role::Assistant);
     }
 }

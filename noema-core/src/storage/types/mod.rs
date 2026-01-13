@@ -16,7 +16,7 @@ pub use blob::BlobHash;
 pub use content_block::{ContentBlock, ContentOrigin, ContentType, OriginKind};
 pub use conversation::{
     Conversation, ForkInfo, Message, MessageRole, MessageWithContent,
-    Span, SpanRole, Turn, TurnWithContent, View, ViewSelection,
+    Span, Turn, TurnWithContent, View, ViewSelection,
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};

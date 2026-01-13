@@ -7,7 +7,7 @@
 //! - Event streaming to UI
 
 use anyhow::Result;
-use llm::{ChatMessage, ChatModel, ChatPayload};
+use llm::{ChatMessage, ChatModel, ChatPayload, Role};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
@@ -18,7 +18,7 @@ use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, TurnId, ViewId};
 use crate::storage::session::{Session};
 use crate::storage::traits::StorageTypes;
-use crate::storage::types::{MessageRole, OriginKind, SpanRole};
+use crate::storage::types::{MessageRole, OriginKind};
 use crate::storage::DocumentResolver;
 use crate::{Agent, McpAgent, McpRegistry, McpToolRegistry};
 
@@ -356,10 +356,7 @@ impl<S: StorageTypes> ConversationManager<S> {
         for msg in pending {
             let msg_role = llm_role_to_message_role(msg.role);
             let origin = llm_role_to_origin(msg.role);
-            let span_role = match msg_role {
-                MessageRole::User | MessageRole::System => SpanRole::User,
-                MessageRole::Assistant | MessageRole::Tool => SpanRole::Assistant,
-            };
+            let span_role = Role::from(msg_role);
 
             // Get or create turn and span based on commit mode
             let (turn_id, span_id) = match commit_mode {
