@@ -1,20 +1,16 @@
 //! In-memory ConversationStore implementation
 //!
-//! Since ConversationStore extends TurnStore, this implementation wraps
-//! MemoryTurnStore and adds conversation lifecycle methods.
+//! Handles conversation lifecycle (create, list, delete, rename, privacy).
+//! TurnStore is separate - use MemoryTurnStore for turn/span/message/view operations.
 
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::storage::content::StoredContent;
-use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId, UserId, ViewId};
-use crate::storage::traits::{ConversationStore, TurnStore};
-use crate::storage::types::{
-    ConversationInfo, MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, TurnInfo,
-    TurnWithContent, ViewInfo,
-};
+use crate::storage::ids::{ConversationId, UserId, ViewId};
+use crate::storage::traits::ConversationStore;
+use crate::storage::types::ConversationInfo;
 
 use super::turn::MemoryTurnStore;
 
@@ -25,16 +21,38 @@ fn now() -> i64 {
         .as_millis() as i64
 }
 
-/// Stored conversation data
+/// Storage entry with user_id (not in ConversationInfo) and optional main_view_id
+/// (main_view_id is required in ConversationInfo but set after creation)
 #[derive(Clone, Debug)]
-struct StoredConversation {
-    id: ConversationId,
+struct ConversationEntry {
     user_id: UserId,
+    main_view_id: Option<ViewId>,
+    info: ConversationInfoPartial,
+}
+
+/// Partial info (everything except main_view_id which is stored separately)
+#[derive(Clone, Debug)]
+struct ConversationInfoPartial {
+    id: ConversationId,
     name: Option<String>,
-    is_private: bool,
     turn_count: usize,
+    is_private: bool,
     created_at: i64,
     updated_at: i64,
+}
+
+impl ConversationEntry {
+    fn to_info(&self) -> Option<ConversationInfo> {
+        Some(ConversationInfo {
+            id: self.info.id.clone(),
+            name: self.info.name.clone(),
+            main_view_id: self.main_view_id.clone()?,
+            turn_count: self.info.turn_count,
+            is_private: self.info.is_private,
+            created_at: self.info.created_at,
+            updated_at: self.info.updated_at,
+        })
+    }
 }
 
 /// In-memory conversation store for testing
@@ -42,7 +60,7 @@ struct StoredConversation {
 /// Wraps MemoryTurnStore and adds conversation lifecycle methods.
 #[derive(Debug)]
 pub struct MemoryConversationStore {
-    conversations: Mutex<HashMap<String, StoredConversation>>,
+    conversations: Mutex<HashMap<String, ConversationEntry>>,
     turn_store: Arc<MemoryTurnStore>,
 }
 
@@ -72,107 +90,41 @@ impl MemoryConversationStore {
     fn create_conversation_sync(&self, user_id: &UserId, name: Option<&str>) -> ConversationId {
         let id = ConversationId::new();
         let now = now();
-        let conv = StoredConversation {
-            id: id.clone(),
+        let entry = ConversationEntry {
             user_id: user_id.clone(),
-            name: name.map(|s| s.to_string()),
-            is_private: false,
-            turn_count: 0,
-            created_at: now,
-            updated_at: now,
+            main_view_id: None, // Coordinator sets this after creating view
+            info: ConversationInfoPartial {
+                id: id.clone(),
+                name: name.map(|s| s.to_string()),
+                turn_count: 0,
+                is_private: false,
+                created_at: now,
+                updated_at: now,
+            },
         };
         self.conversations
             .lock()
             .unwrap()
-            .insert(id.as_str().to_string(), conv);
+            .insert(id.as_str().to_string(), entry);
         id
     }
 
     /// Increment turn count for a conversation (for testing)
     pub fn increment_turn_count(&self, conversation_id: &ConversationId) {
-        if let Some(conv) = self
+        if let Some(entry) = self
             .conversations
             .lock()
             .unwrap()
             .get_mut(conversation_id.as_str())
         {
-            conv.turn_count += 1;
-            conv.updated_at = now();
+            entry.info.turn_count += 1;
+            entry.info.updated_at = now();
         }
     }
-}
 
-// TurnStore implementation - delegates to inner turn_store
-#[async_trait]
-impl TurnStore for MemoryConversationStore {
-    async fn add_turn(&self, conversation_id: &ConversationId, role: SpanRole) -> Result<TurnInfo> {
-        self.turn_store.add_turn(conversation_id, role).await
-    }
-    async fn get_turns(&self, conversation_id: &ConversationId) -> Result<Vec<TurnInfo>> {
-        self.turn_store.get_turns(conversation_id).await
-    }
-    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<TurnInfo>> {
-        self.turn_store.get_turn(turn_id).await
-    }
-    async fn add_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<SpanInfo> {
-        self.turn_store.add_span(turn_id, model_id).await
-    }
-    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<SpanInfo>> {
-        self.turn_store.get_spans(turn_id).await
-    }
-    async fn get_span(&self, span_id: &SpanId) -> Result<Option<SpanInfo>> {
-        self.turn_store.get_span(span_id).await
-    }
-    async fn add_message(&self, span_id: &SpanId, role: MessageRole, content: &[StoredContent]) -> Result<MessageInfo> {
-        self.turn_store.add_message(span_id, role, content).await
-    }
-    async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageInfo>> {
-        self.turn_store.get_messages(span_id).await
-    }
-    async fn get_messages_with_content(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>> {
-        self.turn_store.get_messages_with_content(span_id).await
-    }
-    async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>> {
-        self.turn_store.get_message(message_id).await
-    }
-    async fn create_view(&self, conversation_id: &ConversationId, name: Option<&str>, is_main: bool) -> Result<ViewInfo> {
-        self.turn_store.create_view(conversation_id, name, is_main).await
-    }
-    async fn get_main_view(&self, conversation_id: &ConversationId) -> Result<Option<ViewInfo>> {
-        self.turn_store.get_main_view(conversation_id).await
-    }
-    async fn get_view(&self, view_id: &ViewId) -> Result<Option<ViewInfo>> {
-        self.turn_store.get_view(view_id).await
-    }
-    async fn get_views(&self, conversation_id: &ConversationId) -> Result<Vec<ViewInfo>> {
-        self.turn_store.get_views(conversation_id).await
-    }
-    async fn select_span(&self, view_id: &ViewId, turn_id: &TurnId, span_id: &SpanId) -> Result<()> {
-        self.turn_store.select_span(view_id, turn_id, span_id).await
-    }
-    async fn get_selected_span(&self, view_id: &ViewId, turn_id: &TurnId) -> Result<Option<SpanId>> {
-        self.turn_store.get_selected_span(view_id, turn_id).await
-    }
-    async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>> {
-        self.turn_store.get_view_path(view_id).await
-    }
-    async fn fork_view(&self, view_id: &ViewId, at_turn_id: &TurnId, name: Option<&str>) -> Result<ViewInfo> {
-        self.turn_store.fork_view(view_id, at_turn_id, name).await
-    }
-    async fn fork_view_with_selections(&self, view_id: &ViewId, at_turn_id: &TurnId, name: Option<&str>, selections: &[(TurnId, SpanId)]) -> Result<ViewInfo> {
-        self.turn_store.fork_view_with_selections(view_id, at_turn_id, name, selections).await
-    }
-    async fn get_view_context_at(&self, view_id: &ViewId, turn_id: &TurnId) -> Result<Vec<TurnWithContent>> {
-        self.turn_store.get_view_context_at(view_id, turn_id).await
-    }
-    async fn edit_turn(&self, view_id: &ViewId, turn_id: &TurnId, messages: Vec<(MessageRole, Vec<StoredContent>)>, model_id: Option<&str>, fork_if_not_tip: bool, fork_name: Option<&str>) -> Result<(SpanInfo, Option<ViewInfo>)> {
-        self.turn_store.edit_turn(view_id, turn_id, messages, model_id, fork_if_not_tip, fork_name).await
-    }
-    async fn add_user_turn(&self, conversation_id: &ConversationId, text: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
-        self.turn_store.add_user_turn(conversation_id, text).await
-    }
-    async fn add_assistant_turn(&self, conversation_id: &ConversationId, text: &str, model_id: &str) -> Result<(TurnInfo, SpanInfo, MessageInfo)> {
-        self.turn_store.add_assistant_turn(conversation_id, text, model_id).await
+    /// Get the inner turn store for direct TurnStore access
+    pub fn turn_store(&self) -> &Arc<MemoryTurnStore> {
+        &self.turn_store
     }
 }
 
@@ -191,31 +143,17 @@ impl ConversationStore for MemoryConversationStore {
         conversation_id: &ConversationId,
     ) -> Result<Option<ConversationInfo>> {
         let conversations = self.conversations.lock().unwrap();
-        Ok(conversations.get(conversation_id.as_str()).map(|c| {
-            ConversationInfo {
-                id: c.id.clone(),
-                name: c.name.clone(),
-                turn_count: c.turn_count,
-                is_private: c.is_private,
-                created_at: c.created_at,
-                updated_at: c.updated_at,
-            }
-        }))
+        Ok(conversations
+            .get(conversation_id.as_str())
+            .and_then(|e| e.to_info()))
     }
 
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
         let conversations = self.conversations.lock().unwrap();
         let mut result: Vec<_> = conversations
             .values()
-            .filter(|c| c.user_id == *user_id)
-            .map(|c| ConversationInfo {
-                id: c.id.clone(),
-                name: c.name.clone(),
-                turn_count: c.turn_count,
-                is_private: c.is_private,
-                created_at: c.created_at,
-                updated_at: c.updated_at,
-            })
+            .filter(|e| e.user_id == *user_id)
+            .filter_map(|e| e.to_info())
             .collect();
         result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(result)
@@ -234,14 +172,14 @@ impl ConversationStore for MemoryConversationStore {
         conversation_id: &ConversationId,
         name: Option<&str>,
     ) -> Result<()> {
-        if let Some(conv) = self
+        if let Some(entry) = self
             .conversations
             .lock()
             .unwrap()
             .get_mut(conversation_id.as_str())
         {
-            conv.name = name.map(|s| s.to_string());
-            conv.updated_at = now();
+            entry.info.name = name.map(|s| s.to_string());
+            entry.info.updated_at = now();
         }
         Ok(())
     }
@@ -250,7 +188,7 @@ impl ConversationStore for MemoryConversationStore {
         let conversations = self.conversations.lock().unwrap();
         Ok(conversations
             .get(conversation_id.as_str())
-            .map(|c| c.is_private)
+            .map(|e| e.info.is_private)
             .unwrap_or(false))
     }
 
@@ -259,14 +197,31 @@ impl ConversationStore for MemoryConversationStore {
         conversation_id: &ConversationId,
         is_private: bool,
     ) -> Result<()> {
-        if let Some(conv) = self
+        if let Some(entry) = self
             .conversations
             .lock()
             .unwrap()
             .get_mut(conversation_id.as_str())
         {
-            conv.is_private = is_private;
-            conv.updated_at = now();
+            entry.info.is_private = is_private;
+            entry.info.updated_at = now();
+        }
+        Ok(())
+    }
+
+    async fn set_main_view_id(
+        &self,
+        conversation_id: &ConversationId,
+        view_id: &ViewId,
+    ) -> Result<()> {
+        if let Some(entry) = self
+            .conversations
+            .lock()
+            .unwrap()
+            .get_mut(conversation_id.as_str())
+        {
+            entry.main_view_id = Some(view_id.clone());
+            entry.info.updated_at = now();
         }
         Ok(())
     }
@@ -275,15 +230,21 @@ impl ConversationStore for MemoryConversationStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::traits::TurnStore;
 
     #[tokio::test]
     async fn test_list_conversations() {
         let store = MemoryConversationStore::new();
         let user_id = UserId::new();
 
-        // Create some conversations
-        let _conv1 = store.create_conversation_sync(&user_id, Some("First"));
-        let _conv2 = store.create_conversation_sync(&user_id, Some("Second"));
+        // Create some conversations and set their main views
+        let conv1 = store.create_conversation_sync(&user_id, Some("First"));
+        let view1 = store.turn_store.create_view().await.unwrap();
+        store.set_main_view_id(&conv1, &view1.id).await.unwrap();
+
+        let conv2 = store.create_conversation_sync(&user_id, Some("Second"));
+        let view2 = store.turn_store.create_view().await.unwrap();
+        store.set_main_view_id(&conv2, &view2.id).await.unwrap();
 
         let convs = store.list_conversations(&user_id).await.unwrap();
         assert_eq!(convs.len(), 2);
@@ -295,6 +256,8 @@ mod tests {
         let user_id = UserId::new();
 
         let conv_id = store.create_conversation_sync(&user_id, Some("Test"));
+        let view = store.turn_store.create_view().await.unwrap();
+        store.set_main_view_id(&conv_id, &view.id).await.unwrap();
 
         let convs = store.list_conversations(&user_id).await.unwrap();
         assert_eq!(convs.len(), 1);
@@ -311,6 +274,8 @@ mod tests {
         let user_id = UserId::new();
 
         let conv_id = store.create_conversation_sync(&user_id, Some("Original"));
+        let view = store.turn_store.create_view().await.unwrap();
+        store.set_main_view_id(&conv_id, &view.id).await.unwrap();
 
         let convs = store.list_conversations(&user_id).await.unwrap();
         assert_eq!(convs[0].name, Some("Original".to_string()));
