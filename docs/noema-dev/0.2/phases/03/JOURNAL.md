@@ -303,3 +303,52 @@ The `regenerate_response` Tauri command now:
 
 This keeps the engine simple while still supporting regeneration.
 
+---
+
+## 2026-01-13: Storage Types Cleanup
+
+Major simplification of storage types, removing redundant wrapper types and streamlining APIs.
+
+### Hashed<T> Wrapper
+
+Introduced `Hashed<T>` as a composable wrapper for content-addressed storage, replacing the single-purpose `HashedContentBlock` struct:
+
+```rust
+pub struct Hashed<T> {
+    pub content_hash: String,
+    pub content: T,
+}
+```
+
+Used as: `StoredTextBlock = Stored<ContentBlockId, Hashed<ContentBlock>>`
+
+### TextStore Simplification
+
+1. **Removed deduplication**: `store()` no longer deduplicates by hash. Each `ContentBlock` may have different metadata (origin, content_type, is_private) even with identical text, so each gets its own ID.
+
+2. **Removed `find_by_hash()`**: No longer needed without deduplication.
+
+3. **Simplified return type**: `store()` now returns `ContentBlockId` instead of `Keyed<ContentBlockId, ContentHash>`. The hash is still computed and stored internally, but callers don't need it.
+
+4. **Removed `ContentHash` type**: Was only used internally. The `content_hash()` helper function in `storage/helper.rs` computes hashes as plain strings.
+
+### SpanRole Removal
+
+`SpanRole` was a redundant type with only `{User, Assistant}` variants, duplicating what `llm::Role` already provides. Changes:
+
+- `Turn.role` is now `llm::Role` instead of `SpanRole`
+- `TurnStore::create_turn()` takes `llm::Role`
+- Removed `SpanRole` enum and all `From` implementations
+- Updated all turn store implementations (memory, sqlite, mock)
+
+### Summary of Removed Types
+
+| Type | Reason |
+|------|--------|
+| `HashedContentBlock` | Replaced by `Hashed<ContentBlock>` |
+| `ContentHash` | Simplified to plain string |
+| `StoreResult` / `StoredContentRef` | `store()` now returns just `ContentBlockId` |
+| `SpanRole` | Replaced by `llm::Role` |
+
+---
+

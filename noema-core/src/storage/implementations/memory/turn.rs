@@ -60,7 +60,7 @@ impl TurnStore for MemoryTurnStore {
 
         let id = TurnId::new();
         let now = now();
-        let turn = stored(id.clone(), Turn { role }, now);
+        let turn = stored(id.clone(), Turn::new(role) { role }, now);
 
         turns.insert(id, turn.clone());
         Ok(turn)

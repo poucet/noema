@@ -282,22 +282,21 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 
 ### Feature 3.1: Content Block Storage
 
-**Problem**: Text content duplicated across messages, documents, revisions. No unified search or cross-referencing.
+**Problem**: No unified text storage. No way to track content provenance or enable cross-referencing.
 
-**Solution**: Content-addressed storage where all text lives in a single table, referenced by ID.
+**Solution**: Content block storage where all text lives in a single table, referenced by ID.
 
 **Functional Requirements**:
 - Store text content with type (plain, markdown, typst) and origin metadata
 - Track who created content (user, assistant, system, import)
 - Track provenance (which model, derived from which parent)
-- Same text produces same hash (deduplication)
+- Each store creates new entry (no deduplication - metadata may differ)
 - Privacy flag marks content as local-only (never sent to cloud models)
 
 **Acceptance Criteria**:
-- [ ] Store text → get UUID back
-- [ ] Retrieve text by ID
-- [ ] Same text → same hash (deduplicated)
-- [ ] Origin metadata preserved (user/assistant, model ID, parent ID)
+- [x] Store text → get UUID back
+- [x] Retrieve text by ID
+- [x] Origin metadata preserved (user/assistant, model ID, parent ID)
 - [ ] Full-text search across all content blocks
 
 **Microtask Details**:
@@ -605,15 +604,17 @@ A single assistant span can contain: thinking → tool_call → tool_result → 
 
 This enables parallel model comparison where different models produce different numbers of messages.
 
-### Content Deduplication
+### Content Storage (No Deduplication)
 
-All text goes through content blocks. Same text = same hash = stored once.
+All text goes through content blocks with SHA-256 hashing for integrity.
+
+**Design Decision**: We do NOT deduplicate text content by hash. Each `ContentBlock` may have different metadata (origin, content_type, is_private) even with identical text, so each store creates a new entry.
 
 Benefits:
-- Deduplication across messages, documents, revisions
 - Unified full-text search
-- Cross-referencing ("as I said in message X")
-- Origin tracking (who created, derived from what)
+- Origin tracking per-block (who created, derived from what)
+- Each block has its own provenance chain
+- Simpler API (no collision handling for different metadata)
 
 ### Collections as Meta-Structure
 
