@@ -64,28 +64,12 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         }
     }
 
-    /// Convert LLM ContentBlocks to StoredContent refs
+    /// Store a single ContentBlock and return its StoredContent reference
     ///
     /// - Text is stored in content_blocks and converted to TextRef
     /// - Inline images/audio are stored in blob/assets and converted to AssetRef
     /// - DocumentRef, ToolCall, ToolResult pass through
-    pub async fn store_content(
-        &self,
-        blocks: Vec<ContentBlock>,
-        origin: OriginKind,
-    ) -> Result<Vec<StoredContent>> {
-        let mut stored = Vec::with_capacity(blocks.len());
-
-        for block in blocks {
-            let content = self.store_content_block(block, origin).await?;
-            stored.push(content);
-        }
-
-        Ok(stored)
-    }
-
-    /// Store a single ContentBlock and return its StoredContent reference
-    async fn store_content_block(
+    pub async fn store_content_block(
         &self,
         block: ContentBlock,
         origin: OriginKind,
@@ -499,7 +483,10 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         origin: OriginKind,
     ) -> Result<ResolvedMessage> {
         // Store content blocks
-        let stored = self.store_content(content, origin).await?;
+        let mut stored = Vec::with_capacity(content.len());
+        for block in content {
+            stored.push(self.store_content_block(block, origin).await?);
+        }
 
         // Add message to turn store
         self.turn_store.add_message(span_id, role, &stored).await?;
@@ -859,17 +846,16 @@ mod tests {
         let content_block_store = Arc::new(MockTextStore::new());
         let coordinator = make_coordinator(content_block_store.clone());
 
-        let blocks = vec![ContentBlock::Text {
+        let block = ContentBlock::Text {
             text: "Hello world".to_string(),
-        }];
+        };
 
         let result = coordinator
-            .store_content(blocks, OriginKind::User)
+            .store_content_block(block, OriginKind::User)
             .await
             .unwrap();
 
-        assert_eq!(result.len(), 1);
-        match &result[0] {
+        match &result {
             StoredContent::TextRef { content_block_id } => {
                 // Verify the text was stored
                 let stored_text = content_block_store.get_text(content_block_id).await.unwrap();
@@ -891,18 +877,17 @@ mod tests {
         );
 
         let image_data = STANDARD.encode(b"fake image bytes");
-        let blocks = vec![ContentBlock::Image {
+        let block = ContentBlock::Image {
             data: image_data,
             mime_type: "image/png".to_string(),
-        }];
+        };
 
         let result = coordinator
-            .store_content(blocks, OriginKind::User)
+            .store_content_block(block, OriginKind::User)
             .await
             .unwrap();
 
-        assert_eq!(result.len(), 1);
-        match &result[0] {
+        match &result {
             StoredContent::AssetRef {
                 asset_id,
                 mime_type,
@@ -922,16 +907,16 @@ mod tests {
         let coordinator = make_coordinator(content_block_store.clone());
 
         // Store some text
-        let blocks = vec![ContentBlock::Text {
+        let block = ContentBlock::Text {
             text: "Test text".to_string(),
-        }];
+        };
         let stored = coordinator
-            .store_content(blocks, OriginKind::User)
+            .store_content_block(block, OriginKind::User)
             .await
             .unwrap();
 
         // Resolve it back
-        let resolved = stored[0].resolve(&coordinator).await.unwrap();
+        let resolved = stored.resolve(&coordinator).await.unwrap();
 
         match resolved {
             ContentBlock::Text { text } => {
@@ -954,18 +939,18 @@ mod tests {
 
         let original_data = b"fake image bytes";
         let image_data = STANDARD.encode(original_data);
-        let blocks = vec![ContentBlock::Image {
+        let block = ContentBlock::Image {
             data: image_data,
             mime_type: "image/png".to_string(),
-        }];
+        };
 
         let stored = coordinator
-            .store_content(blocks, OriginKind::User)
+            .store_content_block(block, OriginKind::User)
             .await
             .unwrap();
 
         // Resolve it back
-        let resolved = stored[0].resolve(&coordinator).await.unwrap();
+        let resolved = stored.resolve(&coordinator).await.unwrap();
 
         match resolved {
             ContentBlock::Image { data, mime_type } => {
@@ -987,14 +972,14 @@ mod tests {
             name: "test_tool".to_string(),
             arguments: serde_json::json!({"key": "value"}),
         };
-        let blocks = vec![ContentBlock::ToolCall(tool_call.clone())];
+        let block = ContentBlock::ToolCall(tool_call.clone());
 
         let result = coordinator
-            .store_content(blocks, OriginKind::Assistant)
+            .store_content_block(block, OriginKind::Assistant)
             .await
             .unwrap();
 
-        match &result[0] {
+        match &result {
             StoredContent::ToolCall(stored_call) => {
                 assert_eq!(stored_call.name, "test_tool");
             }
