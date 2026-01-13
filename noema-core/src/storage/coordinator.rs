@@ -36,7 +36,6 @@ pub struct StorageCoordinator<S: StorageTypes> {
     content_block_store: Arc<S::Text>,
     conversation_store: Arc<S::Conversation>,
     turn_store: Arc<S::Turn>,
-    document_store: Arc<S::Document>,
     _marker: PhantomData<S>,
 }
 
@@ -49,7 +48,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             content_block_store: stores.text(),
             conversation_store: stores.conversation(),
             turn_store: stores.turn(),
-            document_store: stores.document(),
             _marker: PhantomData,
         }
     }
@@ -61,7 +59,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         content_block_store: Arc<S::Text>,
         conversation_store: Arc<S::Conversation>,
         turn_store: Arc<S::Turn>,
-        document_store: Arc<S::Document>,
     ) -> Self {
         Self {
             blob_store,
@@ -69,7 +66,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             content_block_store,
             conversation_store,
             turn_store,
-            document_store,
             _marker: PhantomData,
         }
     }
@@ -402,17 +398,6 @@ impl<S: StorageTypes> ContentResolver for StorageCoordinator<S> {
     }
 }
 
-/// Implement DocumentResolver by delegating to the document store
-#[async_trait]
-impl<S: StorageTypes> crate::storage::DocumentResolver for StorageCoordinator<S> {
-    async fn resolve_documents(
-        &self,
-        doc_ids: &[crate::storage::ids::DocumentId],
-    ) -> std::collections::HashMap<crate::storage::ids::DocumentId, crate::storage::types::FullDocumentInfo> {
-        self.document_store.resolve_documents(doc_ids).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,7 +657,6 @@ mod tests {
             content_block_store,
             Arc::new(MockConversationStore),
             Arc::new(MockTurnStore),
-            Arc::new(MockDocumentStore),
         )
     }
 
@@ -687,7 +671,6 @@ mod tests {
             content_block_store,
             Arc::new(MockConversationStore),
             Arc::new(MockTurnStore),
-            Arc::new(MockDocumentStore),
         )
     }
 

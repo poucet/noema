@@ -122,6 +122,7 @@ impl<S: StorageTypes> ConversationManager<S> {
         coordinator: Arc<StorageCoordinator<S>>,
         model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
+        document_resolver: Arc<dyn DocumentResolver>,
         event_tx: SharedEventSender,
     ) -> Self {
         let conversation_id = session.conversation_id().clone();
@@ -141,6 +142,7 @@ impl<S: StorageTypes> ConversationManager<S> {
                 coordinator_clone,
                 initial_model,
                 mcp_registry_clone,
+                document_resolver,
                 cmd_rx,
                 event_tx,
             )
@@ -164,14 +166,13 @@ impl<S: StorageTypes> ConversationManager<S> {
         coordinator: Arc<StorageCoordinator<S>>,
         mut model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
+        document_resolver: Arc<dyn DocumentResolver>,
         mut cmd_rx: mpsc::UnboundedReceiver<ManagerCommand>,
         event_tx: SharedEventSender,
     ) {
         // Create agent with MCP tool registry
         let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
-        // Coordinator implements DocumentResolver
-        let document_resolver: Arc<dyn DocumentResolver> = coordinator.clone();
-        let agent = McpAgent::new(Arc::new(tool_registry), 10, document_resolver.clone());
+        let agent = McpAgent::new(Arc::new(tool_registry), 10, document_resolver);
 
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {

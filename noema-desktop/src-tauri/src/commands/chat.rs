@@ -2,7 +2,7 @@
 
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{ConversationStore, MessageRole, InputContent, Session, Stores, TurnStore};
+use noema_core::storage::{ConversationStore, DocumentResolver, MessageRole, InputContent, Session, Stores, TurnStore};
 use crate::state::AppStorage;
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::sync::Arc;
@@ -278,6 +278,7 @@ pub async fn load_conversation(
     }
 
     // Not loaded, create manager
+    let stores = state.get_stores()?;
     let coordinator = state.get_coordinator()?;
 
     let session = Session::open(coordinator.clone(), conversation_id.clone())
@@ -296,8 +297,9 @@ pub async fn load_conversation(
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
+    let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, event_tx);
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
     state.managers.lock().await.insert(conversation_id, manager);
 
     Ok(messages)
@@ -306,6 +308,7 @@ pub async fn load_conversation(
 /// Create a new conversation and load its manager
 #[tauri::command]
 pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    let stores = state.get_stores()?;
     let coordinator = state.get_coordinator()?;
     let user_id = state.user_id.lock().await.clone();
 
@@ -324,8 +327,9 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
+    let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, event_tx);
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
     state.managers.lock().await.insert(conv_id.clone(), manager);
 
     Ok(conv_id.as_str().to_string())
@@ -576,6 +580,7 @@ pub async fn switch_view(
     conversation_id: ConversationId,
     view_id: ViewId,
 ) -> Result<Vec<DisplayMessage>, String> {
+    let stores = state.get_stores()?;
     let coordinator = state.get_coordinator()?;
 
     let session = Session::open_view(coordinator.clone(), conversation_id.clone(), view_id)
@@ -593,8 +598,9 @@ pub async fn switch_view(
     let model = create_model(&model_id_str)
         .map_err(|e| format!("Failed to create model: {}", e))?;
 
+    let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, event_tx);
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
     state.managers.lock().await.insert(conversation_id, manager);
 
     Ok(messages)
