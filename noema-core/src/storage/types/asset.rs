@@ -14,9 +14,6 @@ pub struct Asset {
     /// Size in bytes
     pub size_bytes: i64,
 
-    /// Path on local filesystem (for locally-stored assets)
-    pub local_path: Option<String>,
-
     /// Whether this asset should only be used locally (not sent to cloud models)
     pub is_private: bool,
 }
@@ -28,15 +25,8 @@ impl Asset {
             blob_hash: blob_hash.into(),
             mime_type: mime_type.into(),
             size_bytes,
-            local_path: None,
             is_private: false,
         }
-    }
-
-    /// Set the local path
-    pub fn with_local_path(mut self, path: impl Into<String>) -> Self {
-        self.local_path = Some(path.into());
-        self
     }
 
     /// Mark as private (local-only)
@@ -73,11 +63,6 @@ impl StoredAsset {
     /// Get the size in bytes
     pub fn size_bytes(&self) -> i64 {
         self.asset.size_bytes
-    }
-
-    /// Get the local path
-    pub fn local_path(&self) -> Option<&str> {
-        self.asset.local_path.as_deref()
     }
 
     /// Check if private

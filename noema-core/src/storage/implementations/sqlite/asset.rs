@@ -19,7 +19,6 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
             blob_hash TEXT NOT NULL,
             mime_type TEXT NOT NULL,
             size_bytes INTEGER NOT NULL,
-            local_path TEXT,
             is_private INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
         );
@@ -40,14 +39,13 @@ impl AssetStore for SqliteStore {
         let id = AssetId::from_string(Uuid::new_v4().to_string());
 
         conn.execute(
-            "INSERT INTO assets (id, blob_hash, mime_type, size_bytes, local_path, is_private, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO assets (id, blob_hash, mime_type, size_bytes, is_private, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 id.as_str(),
                 asset.blob_hash,
                 asset.mime_type,
                 asset.size_bytes,
-                asset.local_path,
                 asset.is_private as i32,
                 now
             ],
@@ -60,7 +58,7 @@ impl AssetStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let asset = conn
             .query_row(
-                "SELECT blob_hash, mime_type, size_bytes, local_path, is_private, created_at
+                "SELECT blob_hash, mime_type, size_bytes, is_private, created_at
                  FROM assets WHERE id = ?1",
                 params![id.as_str()],
                 |row| {
@@ -70,10 +68,9 @@ impl AssetStore for SqliteStore {
                             blob_hash: row.get(0)?,
                             mime_type: row.get(1)?,
                             size_bytes: row.get(2)?,
-                            local_path: row.get(3)?,
-                            is_private: row.get::<_, i32>(4)? != 0,
+                            is_private: row.get::<_, i32>(3)? != 0,
                         },
-                        created_at: row.get(5)?,
+                        created_at: row.get(4)?,
                     })
                 },
             )
@@ -201,18 +198,5 @@ mod tests {
 
         let stored = store.get(&id).await.unwrap().unwrap();
         assert!(stored.is_private());
-    }
-
-    #[tokio::test]
-    async fn test_local_path() {
-        let store = SqliteStore::in_memory().unwrap();
-
-        let asset = Asset::new("local_path_hash", "image/png", 256)
-            .with_local_path("/home/user/photos/photo.png");
-
-        let id = store.create_asset(asset).await.unwrap();
-
-        let stored = store.get(&id).await.unwrap().unwrap();
-        assert_eq!(stored.local_path(), Some("/home/user/photos/photo.png"));
     }
 }
