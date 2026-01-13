@@ -14,12 +14,12 @@ pub mod user;
 pub use asset::Asset;
 pub use blob::BlobHash;
 pub use content_block::{
-    ContentBlock, ContentOrigin, ContentType, HashedContentBlock, OriginKind, StoreResult,
+    ContentBlock, ContentOrigin, ContentType, OriginKind, StoreResult,
 };
 pub use conversation::{
     Conversation, ForkInfo, Message, MessageRole, MessageWithContent,
     Span, SpanRole, Turn, TurnWithContent, View, ViewSelection,
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
-pub use stored::{stored, stored_editable, Editable, Keyed, Stored, StoredEditable, Timestamped};
+pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
 pub use user::UserInfo;

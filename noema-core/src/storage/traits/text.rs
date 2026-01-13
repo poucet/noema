@@ -3,12 +3,12 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::storage::{HashedContentBlock, Stored};
+use crate::storage::{Hashed, Stored};
 use crate::storage::ids::ContentBlockId;
 use crate::storage::types::{ContentBlock, StoreResult};
 
 /// Stored representation of a content block (immutable, content-addressed)
-pub type StoredTextBlock = Stored<ContentBlockId, HashedContentBlock>;
+pub type StoredTextBlock = Stored<ContentBlockId, Hashed<ContentBlock>>;
 
 /// Trait for content block storage operations
 #[async_trait]

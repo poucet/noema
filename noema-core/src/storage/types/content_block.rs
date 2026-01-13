@@ -281,48 +281,25 @@ impl ContentBlock {
         self.is_private = true;
         self
     }
-}
-
-/// A hashed content block (content block with its computed hash)
-///
-/// This extends ContentBlock with its SHA-256 hash for content-addressed storage.
-/// Use with `Stored<ContentBlockId, HashedContentBlock>` for the full stored representation.
-#[derive(Clone, Debug)]
-pub struct HashedContentBlock {
-    /// SHA-256 hash of the text content
-    pub content_hash: String,
-
-    /// The content block data
-    pub content: ContentBlock,
-}
-
-impl HashedContentBlock {
-    /// Create a new hashed content block
-    pub fn new(content_hash: String, content: ContentBlock) -> Self {
-        Self {
-            content_hash,
-            content,
-        }
-    }
 
     /// Get the text content
     pub fn text(&self) -> &str {
-        &self.content.text
+        &self.text
     }
 
     /// Get the content type
     pub fn content_type(&self) -> &ContentType {
-        &self.content.content_type
+        &self.content_type
     }
 
     /// Check if private
     pub fn is_private(&self) -> bool {
-        self.content.is_private
+        self.is_private
     }
 
     /// Get the origin
     pub fn origin(&self) -> &ContentOrigin {
-        &self.content.origin
+        &self.origin
     }
 }
 

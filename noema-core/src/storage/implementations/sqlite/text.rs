@@ -7,8 +7,8 @@ use rusqlite::{params, Connection};
 use super::SqliteStore;
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
-use crate::storage::traits::TextStore;
-use crate::storage::types::{stored, ContentBlock, ContentOrigin, ContentType, OriginKind, StoreResult, Stored, HashedContentBlock};
+use crate::storage::traits::{StoredTextBlock, TextStore};
+use crate::storage::types::{stored, ContentBlock, ContentOrigin, ContentType, Hashed, OriginKind, StoreResult};
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -93,7 +93,7 @@ impl TextStore for SqliteStore {
         })
     }
 
-    async fn get(&self, id: &ContentBlockId) -> Result<Option<Stored<ContentBlockId, HashedContentBlock>>> {
+    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>> {
         let conn = self.conn().lock().unwrap();
 
         let result = conn.query_row(
@@ -194,7 +194,7 @@ struct RowData {
 }
 
 impl RowData {
-    fn into_stored_content_block(self) -> Result<Stored<ContentBlockId, HashedContentBlock> > {
+    fn into_stored_content_block(self) -> Result<StoredTextBlock> {
         let content_type = ContentType::from_str(&self.content_type)
             .ok_or_else(|| anyhow::anyhow!("Invalid content type: {}", self.content_type))?;
 
@@ -218,15 +218,15 @@ impl RowData {
 
         Ok(stored(
             ContentBlockId::from_string(self.id),
-            HashedContentBlock {
-                content_hash: self.content_hash,
-                content: ContentBlock {
+            Hashed::new(
+                self.content_hash,
+                ContentBlock {
                     text: self.text,
                     content_type,
                     is_private: self.is_private != 0,
                     origin,
                 },
-            },
+            ),
             self.created_at,
         ))
     }
@@ -356,7 +356,7 @@ mod tests {
 
         assert_eq!(stored.origin().kind(), OriginKind::User);
         assert_eq!(
-            stored.origin().user_id().as_ref().map(|id| id.as_str()),
+            stored.origin().user_id().map(|id| id.as_str()),
             Some("user-123")
         );
     }

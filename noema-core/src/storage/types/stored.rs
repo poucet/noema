@@ -5,10 +5,12 @@
 //! - `Keyed<Id, T>` - Adds an ID to any type
 //! - `Timestamped<T>` - Adds created_at timestamp to any type
 //! - `Editable<T>` - Adds updated_at timestamp for mutable entities
+//! - `Hashed<T>` - Adds a content hash for content-addressed storage
 //!
 //! These can be composed:
 //! - `Keyed<Id, Timestamped<T>>` - Entity with ID and creation timestamp
 //! - `Keyed<Id, Timestamped<Editable<T>>>` - Entity that can be modified after creation
+//! - `Stored<Id, Hashed<T>>` - Content-addressed entity with ID and timestamp
 
 use std::ops::{Deref, DerefMut};
 
@@ -203,6 +205,74 @@ impl<T> DerefMut for Editable<T> {
 }
 
 // ============================================================================
+// Hashed - adds content hash for content-addressed storage
+// ============================================================================
+
+/// A wrapper that adds a content hash to any type.
+///
+/// Used for content-addressed storage where the hash uniquely identifies the content.
+/// Implements `Deref` to allow transparent access to the inner content.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Basic usage
+/// let hashed = Hashed::new("sha256:abc123...", content);
+///
+/// // Commonly composed with Stored for content blocks
+/// type StoredContentBlock = Stored<ContentBlockId, Hashed<ContentBlock>>;
+/// ```
+#[derive(Clone, Debug)]
+pub struct Hashed<T> {
+    /// SHA-256 hash of the content
+    pub content_hash: String,
+    /// The content
+    pub content: T,
+}
+
+impl<T> Hashed<T> {
+    /// Create a new hashed wrapper
+    pub fn new(content_hash: impl Into<String>, content: T) -> Self {
+        Self {
+            content_hash: content_hash.into(),
+            content,
+        }
+    }
+
+    /// Get the content hash
+    pub fn hash(&self) -> &str {
+        &self.content_hash
+    }
+
+    /// Consume and return the inner content
+    pub fn into_content(self) -> T {
+        self.content
+    }
+
+    /// Map the content to a new type, preserving the hash
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Hashed<U> {
+        Hashed {
+            content_hash: self.content_hash,
+            content: f(self.content),
+        }
+    }
+}
+
+impl<T> Deref for Hashed<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.content
+    }
+}
+
+impl<T> DerefMut for Hashed<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.content
+    }
+}
+
+// ============================================================================
 // Convenience type aliases
 // ============================================================================
 
@@ -341,5 +411,42 @@ mod tests {
         assert_eq!(entity.created_at, 1000);
         assert_eq!(entity.updated_at, 2000);
         assert_eq!(entity.name, "document");
+    }
+
+    #[test]
+    fn test_hashed() {
+        let hashed = Hashed::new(
+            "sha256:abc123",
+            TestContent {
+                name: "hashed".to_string(),
+                value: 42,
+            },
+        );
+
+        assert_eq!(hashed.hash(), "sha256:abc123");
+        assert_eq!(hashed.name, "hashed");
+        assert_eq!(hashed.value, 42);
+    }
+
+    #[test]
+    fn test_stored_hashed() {
+        // Stored<Id, Hashed<T>> for content-addressed storage
+        let entity = stored(
+            TestId("block-1".to_string()),
+            Hashed::new(
+                "sha256:def456",
+                TestContent {
+                    name: "content".to_string(),
+                    value: 100,
+                },
+            ),
+            4000,
+        );
+
+        assert_eq!(entity.id().0, "block-1");
+        assert_eq!(entity.created_at, 4000);
+        assert_eq!(entity.content_hash, "sha256:def456");
+        assert_eq!(entity.name, "content");
+        assert_eq!(entity.value, 100);
     }
 }

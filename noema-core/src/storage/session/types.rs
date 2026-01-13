@@ -3,30 +3,11 @@
 //! Key types:
 //! - `ResolvedContent` - Content with text resolved, assets/docs cached lazily
 //! - `ResolvedMessage` - A message with resolved content
-//! - `PendingMessage` - A message waiting to be committed
 
 use llm::{ContentBlock, ToolCall, ToolResult};
 
-use crate::storage::content::StoredContent;
 use crate::storage::ids::{AssetId, DocumentId, TurnId};
 use crate::storage::types::{BlobHash, MessageRole};
-
-// ============================================================================
-// PendingMessage - not yet committed
-// ============================================================================
-
-/// A message pending commit (uses StoredContent refs)
-#[derive(Clone, Debug)]
-pub struct PendingMessage {
-    pub role: MessageRole,
-    pub content: Vec<StoredContent>,
-}
-
-impl PendingMessage {
-    pub fn new(role: MessageRole, content: Vec<StoredContent>) -> Self {
-        Self { role, content }
-    }
-}
 
 // ============================================================================
 // ResolvedMessage - cached for display and LLM
@@ -156,7 +137,8 @@ mod tests {
 
     #[test]
     fn test_resolved_content_asset_unresolved() {
-        let content = ResolvedContent::asset("asset-123", "abc123hash", "image/png", None);
+        let blob_hash: BlobHash = "abc123hash".parse().unwrap();
+        let content = ResolvedContent::asset("asset-123", blob_hash, "image/png", None);
         assert!(content.needs_resolution());
         assert!(content.cached_block().is_none());
     }

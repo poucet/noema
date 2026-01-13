@@ -67,14 +67,14 @@ pub use types::{
     // Asset
     Asset,
     // ContentBlock
-    ContentBlock, ContentOrigin, ContentType, HashedContentBlock, OriginKind, StoreResult,
+    ContentBlock, ContentOrigin, ContentType, OriginKind, StoreResult,
     // Conversation
     Conversation, ForkInfo, Message, MessageRole, MessageWithContent, Span, SpanRole,
     Turn, TurnWithContent, View, ViewSelection,
     // Document
     Document, DocumentRevision, DocumentSource, DocumentTab,
     // Stored wrappers
-    Editable, Keyed, Stored, StoredEditable, Timestamped,
+    Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped,
     // User
     UserInfo,
 };

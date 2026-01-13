@@ -7,13 +7,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::storage::ids::ContentBlockId;
-use crate::storage::traits::TextStore;
-use crate::storage::types::{stored, ContentBlock, HashedContentBlock, StoreResult, Stored};
+use crate::storage::traits::{StoredTextBlock, TextStore};
+use crate::storage::types::{stored, ContentBlock, Hashed, StoreResult, Stored};
 
 /// In-memory content block store for testing
 #[derive(Debug, Default)]
 pub struct MemoryTextStore {
-    blocks: Mutex<HashMap<ContentBlockId, Stored<ContentBlockId, HashedContentBlock>>>,
+    blocks: Mutex<HashMap<ContentBlockId, StoredTextBlock>>,
     hash_index: Mutex<HashMap<String, ContentBlockId>>,
 }
 
@@ -56,7 +56,7 @@ impl TextStore for MemoryTextStore {
         let id = ContentBlockId::new();
         let stored_block = stored(
             id.clone(),
-            HashedContentBlock { content_hash: hash.clone(), content },
+            Hashed::new(hash.clone(), content),
             Self::now(),
         );
 
@@ -73,14 +73,14 @@ impl TextStore for MemoryTextStore {
         })
     }
 
-    async fn get(&self, id: &ContentBlockId) -> Result<Option<Stored<ContentBlockId, HashedContentBlock>>> {
+    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>> {
         let blocks = self.blocks.lock().unwrap();
         Ok(blocks.get(id).cloned())
     }
 
     async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>> {
         let blocks = self.blocks.lock().unwrap();
-        Ok(blocks.get(id).map(|b| b.content.text().to_string()))
+        Ok(blocks.get(id).map(|b| b.text().to_string()))
     }
 
     async fn exists(&self, id: &ContentBlockId) -> Result<bool> {

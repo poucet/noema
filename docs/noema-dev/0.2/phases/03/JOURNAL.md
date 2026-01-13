@@ -230,6 +230,7 @@ This ensures no orphan spans are created if the LLM call fails.
 
 **StorageCoordinator:**
 - `get_context_before_turn(view_id, turn_id)` - Returns resolved messages up to (not including) the turn
+- `add_span_at_turn(view_id, turn_id, model_id)` - Creates span at turn, selects it in view, returns SpanId
 
 **Session:**
 - `truncate_to_turn(turn_id)` - Sets session cache to context before the turn
@@ -297,87 +298,8 @@ The shared `execute_and_commit` helper handles LLM execution and commit for both
 ### Tauri Layer Handles Truncation
 
 The `regenerate_response` Tauri command now:
-1. Calls `engine.truncate_to_turn(turn_id)`
+1. Calls `session.truncate_to_turn(turn_id)` directly
 2. Calls `engine.process_pending()`
 
 This keeps the engine simple while still supporting regeneration.
-
----
-
-## Refactor: Engine Truncation and Events
-
-### Changes Made
-
-1. **Unified truncation command**: Replaced `ClearHistory` with `TruncateToTurn(Option<TurnId>)`
-   - `None` = clear all history
-   - `Some(turn_id)` = truncate to before that turn
-
-2. **In-memory truncation**: Session's `truncate()` now works entirely in-memory
-   - Added `turn_id` field to `ResolvedMessage` to track turn boundaries
-   - Coordinator's `resolve_path()` now passes turn_id when building messages
-   - `truncate()` finds first message with target turn_id and truncates there
-
-3. **Renamed event**: `HistoryCleared` → `Truncated(Option<TurnId>)`
-   - UI now knows whether it was a full clear or truncate to specific turn
-
-4. **chat.rs updated**: `regenerate_response` now uses `engine.truncate_to_turn()` instead of reaching into session directly
-
----
-
-## Next: Architecture Refactor - ConversationManager
-
-### Problem Identified
-
-Boundaries between Engine, Session, and Storage are blurred:
-- Engine knows about Session
-- Session knows about Coordinator (storage)
-- chat.rs reaches through Engine to get Session to call storage operations
-
-### Proposed Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    ConversationManager                       │
-│  - Owns Engine, Session, has Coordinator                    │
-│  - API: send_message(InputContent), regenerate(turn_id)     │
-│  - Handles: store input → session.add → engine.run → commit │
-└─────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│     Engine      │  │    Session      │  │   Coordinator   │
-│  - Background   │  │  - Cache        │  │  - Storage ops  │
-│    thread       │  │  - Pending      │  │  - Turn/Span    │
-│  - Agent exec   │  │  - ChatMessage  │  │  - Content      │
-│  - Model        │  │    queue        │  │                 │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-```
-
-### New Responsibilities
-
-**Engine** (simplified):
-- `RunAgent(ToolConfig)` - runs agent on session's pending, adds response to pending
-- `SetModel` - change model
-- No commit, no storage awareness
-- Pure ChatMessage API
-
-**Session** (simplified):
-- `add(ChatMessage)` - add to pending
-- `pending()` / `messages()` - access state
-- `truncate(Option<TurnId>)` - in-memory truncation
-- No storage calls
-
-**ConversationManager** (new):
-- `send_message(InputContent)` → store via coordinator → session.add → engine.run → commit via coordinator
-- `regenerate(turn_id)` → truncate → engine.run → commit at turn
-- Owns the event channel to UI
-- Single API that chat.rs talks to
-
-### Implementation Plan
-
-1. Create ConversationManager struct that owns Engine, Session, Coordinator
-2. Simplify Engine - remove commit, just RunAgent command
-3. Simplify Session - remove storage calls, just runtime state
-4. Move orchestration logic from chat.rs to ConversationManager
-5. Update chat.rs to use ConversationManager instead of Engine directly
 
