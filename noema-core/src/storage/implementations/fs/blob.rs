@@ -47,7 +47,7 @@ impl FsBlobStore {
     /// Verify that a blob's content matches its hash
     pub async fn verify(&self, hash: &BlobHash) -> anyhow::Result<bool> {
         let data = self.get(hash).await?;
-        let computed = BlobHash::hash(&data);
+        let computed = BlobHash::from_data(&data);
         Ok(computed == *hash)
     }
 
@@ -87,7 +87,7 @@ impl FsBlobStore {
 #[async_trait]
 impl BlobStore for FsBlobStore {
     async fn store(&self, data: &[u8]) -> anyhow::Result<BlobHash> {
-        let hash = BlobHash::hash(data);
+        let hash = BlobHash::from_data(data);
         let path = self.path_for(&hash);
 
         // Check if already exists (deduplication)

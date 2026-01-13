@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use crate::storage::ids::ContentBlockId;
 use crate::storage::traits::{TextStore, StoredTextBlock};
-use crate::storage::types::{stored, ContentBlock, Hashed, StoreResult, Stored};
+use crate::storage::types::{stored, ContentBlock, ContentHash, Hashed, Keyed, StoreResult};
 
 /// Mock text store with in-memory storage
 pub struct MockTextStore {
@@ -42,10 +42,7 @@ impl TextStore for MockTextStore {
         let mut blocks = self.blocks.lock().unwrap();
         blocks.insert(id.as_str().to_string(), block.text);
 
-        Ok(StoreResult {
-            id,
-            hash,
-        })
+        Ok(Keyed::new(id, ContentHash::from_string(hash)))
     }
 
     async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>> {

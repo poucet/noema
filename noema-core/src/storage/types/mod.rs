@@ -14,7 +14,7 @@ pub mod user;
 pub use asset::Asset;
 pub use blob::BlobHash;
 pub use content_block::{
-    ContentBlock, ContentOrigin, ContentType, OriginKind, StoreResult,
+    ContentBlock, ContentHash, ContentOrigin, ContentType, OriginKind, StoreResult,
 };
 pub use conversation::{
     Conversation, ForkInfo, Message, MessageRole, MessageWithContent,

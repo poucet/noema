@@ -19,9 +19,14 @@ impl FromStr for BlobHash {
 }
 
 impl BlobHash {
+    /// Create a BlobHash from a pre-computed hash string
+    pub fn from_string(hash: impl Into<String>) -> Self {
+        Self(hash.into())
+    }
+
     /// Create a BlobHash from raw data by computing its SHA-256 hash
-    pub fn hash(data: &[u8]) -> Self {
-        let mut hasher = sha2::Sha256::new();
+    pub fn from_data(data: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
         hasher.update(data);
         let hash = hex::encode(hasher.finalize());
         Self(hash)

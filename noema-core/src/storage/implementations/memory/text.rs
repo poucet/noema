@@ -2,30 +2,23 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::storage::ids::ContentBlockId;
 use crate::storage::traits::{StoredTextBlock, TextStore};
-use crate::storage::types::{stored, ContentBlock, Hashed, StoreResult, Stored};
+use crate::storage::types::{stored, ContentBlock, ContentHash, Hashed, Keyed, StoreResult};
 
 /// In-memory content block store for testing
 #[derive(Debug, Default)]
 pub struct MemoryTextStore {
     blocks: Mutex<HashMap<ContentBlockId, StoredTextBlock>>,
-    hash_index: Mutex<HashMap<String, ContentBlockId>>,
+    hash_index: Mutex<HashMap<ContentHash, ContentBlockId>>,
 }
 
 impl MemoryTextStore {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    fn compute_hash(text: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(text.as_bytes());
-        hex::encode(hasher.finalize())
     }
 
     fn now() -> i64 {
@@ -39,16 +32,13 @@ impl MemoryTextStore {
 #[async_trait]
 impl TextStore for MemoryTextStore {
     async fn store(&self, content: ContentBlock) -> Result<StoreResult> {
-        let hash = Self::compute_hash(&content.text);
+        let hash = ContentHash::from_text(&content.text);
 
         // Check for existing by hash
         {
             let hash_index = self.hash_index.lock().unwrap();
             if let Some(existing_id) = hash_index.get(&hash) {
-                return Ok(StoreResult {
-                    id: existing_id.clone(),
-                    hash,
-                });
+                return Ok(Keyed::new(existing_id.clone(), hash));
             }
         }
 
@@ -56,7 +46,7 @@ impl TextStore for MemoryTextStore {
         let id = ContentBlockId::new();
         let stored_block = stored(
             id.clone(),
-            Hashed::new(hash.clone(), content),
+            Hashed::new(hash.as_str(), content),
             Self::now(),
         );
 
@@ -67,10 +57,7 @@ impl TextStore for MemoryTextStore {
             hash_index.insert(hash.clone(), id.clone());
         }
 
-        Ok(StoreResult {
-            id,
-            hash,
-        })
+        Ok(Keyed::new(id, hash))
     }
 
     async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>> {
@@ -89,7 +76,7 @@ impl TextStore for MemoryTextStore {
 
     async fn find_by_hash(&self, hash: &str) -> Result<Option<ContentBlockId>> {
         let hash_index = self.hash_index.lock().unwrap();
-        Ok(hash_index.get(hash).cloned())
+        Ok(hash_index.get(&ContentHash::from_string(hash)).cloned())
     }
 }
 
@@ -134,7 +121,7 @@ mod tests {
         let content = ContentBlock::plain("findme");
 
         let result = store.store(content).await.unwrap();
-        let found = store.find_by_hash(&result.hash).await.unwrap();
+        let found = store.find_by_hash(result.content.as_str()).await.unwrap();
         assert_eq!(found.map(|id| id.as_str().to_string()), Some(result.id.as_str().to_string()));
 
         let not_found = store.find_by_hash("nonexistent").await.unwrap();

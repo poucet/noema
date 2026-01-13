@@ -31,7 +31,7 @@ impl Default for MockBlobStore {
 impl BlobStore for MockBlobStore {
     async fn store(&self, data: &[u8]) -> Result<BlobHash> {
         let mut blobs = self.blobs.lock().unwrap();
-        let hash = BlobHash::hash(data);
+        let hash = BlobHash::from_data(data);
         blobs.insert(hash.clone(), data.to_vec());
 
         Ok(hash)

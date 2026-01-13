@@ -3,8 +3,41 @@
 //! Content blocks are immutable text content with origin metadata.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::storage::ids::{ContentBlockId, UserId};
+use super::Keyed;
+
+// ============================================================================
+// ContentHash - SHA-256 hash for text content
+// ============================================================================
+
+/// SHA-256 hash of text content for content-addressed storage
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ContentHash(String);
+
+impl ContentHash {
+    /// Create a ContentHash from a pre-computed hash string
+    pub fn from_string(hash: impl Into<String>) -> Self {
+        Self(hash.into())
+    }
+
+    /// Create a ContentHash by computing SHA-256 of text
+    pub fn from_text(text: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(text.as_bytes());
+        Self(hex::encode(hasher.finalize()))
+    }
+
+    /// Get the inner hash string
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Result of storing content (may be existing or new)
+pub type StoreResult = Keyed<ContentBlockId, ContentHash>;
 
 // ============================================================================
 // Origin types
@@ -301,16 +334,6 @@ impl ContentBlock {
     pub fn origin(&self) -> &ContentOrigin {
         &self.origin
     }
-}
-
-/// Result of storing content (may be existing or new)
-#[derive(Clone, Debug)]
-pub struct StoreResult {
-    /// The content block ID
-    pub id: ContentBlockId,
-
-    /// The content hash
-    pub hash: String,
 }
 
 #[cfg(test)]

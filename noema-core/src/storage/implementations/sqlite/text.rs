@@ -8,7 +8,7 @@ use super::SqliteStore;
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
 use crate::storage::traits::{StoredTextBlock, TextStore};
-use crate::storage::types::{stored, ContentBlock, ContentOrigin, ContentType, Hashed, OriginKind, StoreResult};
+use crate::storage::types::{stored, ContentBlock, ContentHash, ContentOrigin, ContentType, Hashed, Keyed, OriginKind, StoreResult};
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -58,10 +58,7 @@ impl TextStore for SqliteStore {
 
         // Check for existing content with same hash (deduplication)
         if let Some(existing_id) = find_by_hash_internal(&conn, &hash)? {
-            return Ok(StoreResult {
-                id: existing_id,
-                hash,
-            });
+            return Ok(Keyed::new(existing_id, ContentHash::from_string(hash)));
         }
 
         // Insert new content block
@@ -87,10 +84,7 @@ impl TextStore for SqliteStore {
         )
         .context("Failed to insert content block")?;
 
-        Ok(StoreResult {
-            id,
-            hash,
-        })
+        Ok(Keyed::new(id, ContentHash::from_string(hash)))
     }
 
     async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>> {
