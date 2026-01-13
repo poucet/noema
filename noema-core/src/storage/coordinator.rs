@@ -1,12 +1,12 @@
-//! Storage coordinator - orchestrates all storage operations
+//! Storage coordinator - orchestrates multi-store operations
 //!
-//! The coordinator provides a unified interface for:
+//! The coordinator handles operations that require multiple stores working together:
 //! - Converting LLM content to stored references (text, assets, documents)
-//! - Conversation lifecycle and structure (via ConversationStore)
-//! - User management (via UserStore)
-//! - Document management (via DocumentStore)
+//! - Session management (conversation + turn stores)
+//! - Content resolution (text + asset + blob stores)
 //!
-//! It also implements `ContentResolver` and `DocumentResolver` for resolving refs.
+//! For single-store operations, access stores directly via `Stores` trait.
+//! Implements `ContentResolver` and `DocumentResolver` for resolving refs.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -19,11 +19,11 @@ use crate::storage::content::{ContentResolver, InputContent, StoredContent};
 use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, TurnId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
-    AssetStore, BlobStore, ConversationStore, StorageTypes, Stores, TextStore, TurnStore, UserStore,
+    AssetStore, BlobStore, ConversationStore, StorageTypes, Stores, TextStore, TurnStore,
 };
 use crate::storage::types::{
-    Asset, ContentBlock as ContentBlockData, ContentOrigin, ConversationInfo, MessageRole,
-    OriginKind, TurnWithContent, UserInfo,
+    Asset, ContentBlock as ContentBlockData, ContentOrigin, MessageRole, OriginKind,
+    TurnWithContent,
 };
 
 /// Coordinates storage across all store types.
@@ -36,7 +36,6 @@ pub struct StorageCoordinator<S: StorageTypes> {
     content_block_store: Arc<S::Text>,
     conversation_store: Arc<S::Conversation>,
     turn_store: Arc<S::Turn>,
-    user_store: Arc<S::User>,
     document_store: Arc<S::Document>,
     _marker: PhantomData<S>,
 }
@@ -50,21 +49,18 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             content_block_store: stores.text(),
             conversation_store: stores.conversation(),
             turn_store: stores.turn(),
-            user_store: stores.user(),
             document_store: stores.document(),
             _marker: PhantomData,
         }
     }
 
     /// Create a new storage coordinator from individual store instances
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blob_store: Arc<S::Blob>,
         asset_store: Arc<S::Asset>,
         content_block_store: Arc<S::Text>,
         conversation_store: Arc<S::Conversation>,
         turn_store: Arc<S::Turn>,
-        user_store: Arc<S::User>,
         document_store: Arc<S::Document>,
     ) -> Self {
         Self {
@@ -73,7 +69,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             content_block_store,
             conversation_store,
             turn_store,
-            user_store,
             document_store,
             _marker: PhantomData,
         }
@@ -164,73 +159,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.blob_store.get(hash).await
     }
 
-    /// Get access to the document store
-    pub fn document_store(&self) -> &Arc<S::Document> {
-        &self.document_store
-    }
-
-    // ========== Conversation Delegation Methods ==========
-
-    /// Create a new conversation for a user
-    pub async fn create_conversation(
-        &self,
-        user_id: &UserId,
-        name: Option<&str>,
-    ) -> Result<ConversationId> {
-        self.conversation_store.create_conversation(user_id, name).await
-    }
-
-    /// List all conversations for a user
-    pub async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
-        self.conversation_store.list_conversations(user_id).await
-    }
-
-    /// Delete a conversation and all its data
-    pub async fn delete_conversation(&self, conversation_id: &ConversationId) -> Result<()> {
-        self.conversation_store.delete_conversation(conversation_id).await
-    }
-
-    /// Rename a conversation
-    pub async fn rename_conversation(
-        &self,
-        conversation_id: &ConversationId,
-        name: Option<&str>,
-    ) -> Result<()> {
-        self.conversation_store.rename_conversation(conversation_id, name).await
-    }
-
-    /// Get privacy setting for a conversation
-    pub async fn is_conversation_private(&self, conversation_id: &ConversationId) -> Result<bool> {
-        self.conversation_store.is_conversation_private(conversation_id).await
-    }
-
-    /// Set privacy setting for a conversation
-    pub async fn set_conversation_private(
-        &self,
-        conversation_id: &ConversationId,
-        is_private: bool,
-    ) -> Result<()> {
-        self.conversation_store.set_conversation_private(conversation_id, is_private).await
-    }
-
-    /// Get the main view for a conversation
-    ///
-    /// Looks up the conversation and returns its main view info.
-    pub async fn get_main_view(
-        &self,
-        conversation_id: &ConversationId,
-    ) -> Result<crate::storage::types::ViewInfo> {
-        let conv = self.conversation_store
-            .get_conversation(conversation_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
-
-        self.turn_store
-            .get_view(&conv.main_view_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Main view not found: {}", conv.main_view_id))
-    }
-
     // ========== Turn/Span Methods ==========
 
     /// Create a new turn (without span or selection).
@@ -251,79 +179,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         Ok(span.id)
     }
 
-    /// Start a new turn in a conversation view.
-    ///
-    /// Creates a turn, adds a span to it, and selects that span in the view.
-    /// Returns the span ID for adding messages.
-    pub async fn start_turn(
-        &self,
-        view_id: &ViewId,
-        role: crate::storage::types::SpanRole,
-        model_id: Option<&str>,
-    ) -> Result<SpanId> {
-        let turn_id = self.create_turn(role).await?;
-        self.create_and_select_span(view_id, &turn_id, model_id).await
-    }
-
-    /// Get a view by ID
-    pub async fn get_view(
-        &self,
-        view_id: &ViewId,
-    ) -> Result<Option<crate::storage::types::ViewInfo>> {
-        self.turn_store.get_view(view_id).await
-    }
-
-    /// Get all spans for a turn
-    pub async fn get_spans(
-        &self,
-        turn_id: &TurnId,
-    ) -> Result<Vec<crate::storage::types::SpanInfo>> {
-        self.turn_store.get_spans(turn_id).await
-    }
-
-    /// Get messages from a span
-    pub async fn get_span_messages(
-        &self,
-        span_id: &SpanId,
-    ) -> Result<Vec<crate::storage::types::MessageWithContent>> {
-        self.turn_store.get_messages(span_id).await
-    }
-
-    /// Fork a view at a specific turn
-    pub async fn fork_view(
-        &self,
-        view_id: &ViewId,
-        at_turn_id: &TurnId,
-    ) -> Result<crate::storage::types::ViewInfo> {
-        self.turn_store.fork_view(view_id, at_turn_id).await
-    }
-
-    /// Select a span at a turn in a view
-    pub async fn select_span(
-        &self,
-        view_id: &ViewId,
-        turn_id: &TurnId,
-        span_id: &SpanId,
-    ) -> Result<()> {
-        self.turn_store.select_span(view_id, turn_id, span_id).await
-    }
-
-    // ========== User Delegation Methods ==========
-
-    /// Get or create the default user
-    pub async fn get_or_create_default_user(&self) -> Result<UserInfo> {
-        self.user_store.get_or_create_default_user().await
-    }
-
-    /// Get or create a user by email
-    pub async fn get_or_create_user_by_email(&self, email: &str) -> Result<UserInfo> {
-        self.user_store.get_or_create_user_by_email(email).await
-    }
-
-    /// List all users
-    pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
-        self.user_store.list_users().await
-    }
+    // ========== Session Methods ==========
 
     /// Open a session for a conversation, resolving or creating the main view.
     ///
@@ -564,9 +420,10 @@ mod tests {
     use crate::storage::ids::{ConversationId, DocumentId, MessageId, RevisionId, SpanId, TabId, TurnId, ViewId};
     use crate::storage::traits::{AssetStore, BlobStore, ConversationStore, DocumentStore, TextStore, TurnStore, UserStore};
     use crate::storage::types::{
-        DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo, FullDocumentInfo,
-        MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole, StoredAsset,
-        StoredBlob, StoreResult, StoredContentBlock, TurnInfo, TurnWithContent, ViewInfo,
+        ConversationInfo, DocumentInfo, DocumentRevisionInfo, DocumentSource, DocumentTabInfo,
+        FullDocumentInfo, MessageInfo, MessageRole, MessageWithContent, SpanInfo, SpanRole,
+        StoredAsset, StoredBlob, StoreResult, StoredContentBlock, TurnInfo, TurnWithContent,
+        UserInfo, ViewInfo,
     };
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -815,7 +672,6 @@ mod tests {
             content_block_store,
             Arc::new(MockConversationStore),
             Arc::new(MockTurnStore),
-            Arc::new(MockUserStore),
             Arc::new(MockDocumentStore),
         )
     }
@@ -831,7 +687,6 @@ mod tests {
             content_block_store,
             Arc::new(MockConversationStore),
             Arc::new(MockTurnStore),
-            Arc::new(MockUserStore),
             Arc::new(MockDocumentStore),
         )
     }
