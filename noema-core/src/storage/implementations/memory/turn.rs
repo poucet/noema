@@ -25,12 +25,12 @@ fn now() -> i64 {
 /// In-memory turn store for testing
 #[derive(Debug, Default)]
 pub struct MemoryTurnStore {
-    turns: Mutex<HashMap<String, TurnInfo>>,
-    spans: Mutex<HashMap<String, SpanInfo>>,
-    messages: Mutex<HashMap<String, MessageInfo>>,
-    message_content: Mutex<HashMap<String, Vec<MessageContentInfo>>>,
-    views: Mutex<HashMap<String, ViewInfo>>,
-    view_selections: Mutex<HashMap<(String, String), String>>, // (view_id, turn_id) -> span_id
+    turns: Mutex<HashMap<TurnId, TurnInfo>>,
+    spans: Mutex<HashMap<SpanId, SpanInfo>>,
+    messages: Mutex<HashMap<MessageId, MessageInfo>>,
+    message_content: Mutex<HashMap<MessageId, Vec<MessageContentInfo>>>,
+    views: Mutex<HashMap<ViewId, ViewInfo>>,
+    view_selections: Mutex<HashMap<(ViewId, TurnId), SpanId>>,
 }
 
 impl MemoryTurnStore {
@@ -67,7 +67,7 @@ impl TurnStore for MemoryTurnStore {
             created_at: now(),
         };
 
-        turns.insert(turn.id.as_str().to_string(), turn.clone());
+        turns.insert(turn.id.clone(), turn.clone());
         Ok(turn)
     }
 
@@ -84,7 +84,7 @@ impl TurnStore for MemoryTurnStore {
 
     async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<TurnInfo>> {
         let turns = self.turns.lock().unwrap();
-        Ok(turns.get(turn_id.as_str()).cloned())
+        Ok(turns.get(turn_id).cloned())
     }
 
     // ========== Span Management ==========
@@ -100,7 +100,7 @@ impl TurnStore for MemoryTurnStore {
             created_at: now(),
         };
 
-        spans.insert(span.id.as_str().to_string(), span.clone());
+        spans.insert(span.id.clone(), span.clone());
         Ok(span)
     }
 
@@ -130,7 +130,7 @@ impl TurnStore for MemoryTurnStore {
         let spans = self.spans.lock().unwrap();
         let messages = self.messages.lock().unwrap();
 
-        Ok(spans.get(span_id.as_str()).map(|s| {
+        Ok(spans.get(span_id).map(|s| {
             let message_count = messages
                 .values()
                 .filter(|m| m.span_id == s.id)
@@ -183,8 +183,8 @@ impl TurnStore for MemoryTurnStore {
             })
             .collect();
 
-        messages.insert(message_id.as_str().to_string(), message.clone());
-        message_content_map.insert(message_id.as_str().to_string(), content_items);
+        messages.insert(message_id.clone(), message.clone());
+        message_content_map.insert(message_id, content_items);
 
         Ok(message)
     }
@@ -211,7 +211,7 @@ impl TurnStore for MemoryTurnStore {
             .into_iter()
             .map(|message| {
                 let content = message_content_map
-                    .get(message.id.as_str())
+                    .get(&message.id)
                     .cloned()
                     .unwrap_or_default();
                 MessageWithContent { message, content }
@@ -223,7 +223,7 @@ impl TurnStore for MemoryTurnStore {
 
     async fn get_message(&self, message_id: &MessageId) -> Result<Option<MessageInfo>> {
         let messages = self.messages.lock().unwrap();
-        Ok(messages.get(message_id.as_str()).cloned())
+        Ok(messages.get(message_id).cloned())
     }
 
     // ========== View Management ==========
@@ -246,7 +246,7 @@ impl TurnStore for MemoryTurnStore {
             created_at: now(),
         };
 
-        views.insert(view.id.as_str().to_string(), view.clone());
+        views.insert(view.id.clone(), view.clone());
         Ok(view)
     }
 
@@ -276,10 +276,7 @@ impl TurnStore for MemoryTurnStore {
         span_id: &SpanId,
     ) -> Result<()> {
         let mut selections = self.view_selections.lock().unwrap();
-        selections.insert(
-            (view_id.as_str().to_string(), turn_id.as_str().to_string()),
-            span_id.as_str().to_string(),
-        );
+        selections.insert((view_id.clone(), turn_id.clone()), span_id.clone());
         Ok(())
     }
 
@@ -290,15 +287,15 @@ impl TurnStore for MemoryTurnStore {
     ) -> Result<Option<SpanId>> {
         let selections = self.view_selections.lock().unwrap();
         Ok(selections
-            .get(&(view_id.as_str().to_string(), turn_id.as_str().to_string()))
-            .map(|s| SpanId::from_string(s.clone())))
+            .get(&(view_id.clone(), turn_id.clone()))
+            .cloned())
     }
 
     async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>> {
         let conversation_id = {
             let views = self.views.lock().unwrap();
             views
-                .get(view_id.as_str())
+                .get(view_id)
                 .map(|v| v.conversation_id.clone())
                 .ok_or_else(|| anyhow::anyhow!("View not found"))?
         };
@@ -339,10 +336,10 @@ impl TurnStore for MemoryTurnStore {
             let views = self.views.lock().unwrap();
             let turns = self.turns.lock().unwrap();
             let view = views
-                .get(view_id.as_str())
+                .get(view_id)
                 .ok_or_else(|| anyhow::anyhow!("View not found"))?;
             let turn = turns
-                .get(at_turn_id.as_str())
+                .get(at_turn_id)
                 .ok_or_else(|| anyhow::anyhow!("Turn not found"))?;
             (view.conversation_id.clone(), turn.sequence_number)
         };
@@ -364,7 +361,7 @@ impl TurnStore for MemoryTurnStore {
             let mut new_selections = Vec::new();
 
             for ((vid, tid), sid) in selections.iter() {
-                if vid == view_id.as_str() {
+                if vid == view_id {
                     if let Some(turn) = turns.get(tid) {
                         if turn.sequence_number < at_turn_seq {
                             new_selections.push((tid.clone(), sid.clone()));
@@ -376,15 +373,12 @@ impl TurnStore for MemoryTurnStore {
             drop(selections);
             let mut selections = self.view_selections.lock().unwrap();
             for (tid, sid) in new_selections {
-                selections.insert(
-                    (new_view.id.as_str().to_string(), tid),
-                    sid,
-                );
+                selections.insert((new_view.id.clone(), tid), sid);
             }
         }
 
         let mut views = self.views.lock().unwrap();
-        views.insert(new_view.id.as_str().to_string(), new_view.clone());
+        views.insert(new_view.id.clone(), new_view.clone());
 
         Ok(new_view)
     }
@@ -415,10 +409,10 @@ impl TurnStore for MemoryTurnStore {
             let views = self.views.lock().unwrap();
             let turns = self.turns.lock().unwrap();
             let view = views
-                .get(view_id.as_str())
+                .get(view_id)
                 .ok_or_else(|| anyhow::anyhow!("View not found"))?;
             let turn = turns
-                .get(up_to_turn_id.as_str())
+                .get(up_to_turn_id)
                 .ok_or_else(|| anyhow::anyhow!("Turn not found"))?;
             (view.conversation_id.clone(), turn.sequence_number)
         };
