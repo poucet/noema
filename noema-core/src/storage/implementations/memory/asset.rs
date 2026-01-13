@@ -71,9 +71,9 @@ mod tests {
         let id = store.create_asset(asset.clone()).await.unwrap();
 
         let stored = store.get(&id).await.unwrap().unwrap();
-        assert_eq!(stored.asset.mime_type, "image/png");
-        assert_eq!(stored.asset.size_bytes, 1024);
-        assert_eq!(stored.asset.blob_hash, "test-blob-hash");
+        assert_eq!(stored.mime_type, "image/png");
+        assert_eq!(stored.size_bytes, 1024);
+        assert_eq!(stored.blob_hash, "test-blob-hash");
     }
 
     #[tokio::test]

@@ -13,7 +13,7 @@ use crate::storage::types::{Asset, Stored, stored};
 
 /// Mock asset store with in-memory storage
 pub struct MockAssetStore {
-    assets: Mutex<HashMap<String, Asset>>,
+    assets: Mutex<HashMap<AssetId, Asset>>,
 }
 
 impl MockAssetStore {
@@ -35,13 +35,13 @@ impl AssetStore for MockAssetStore {
     async fn create_asset(&self, asset: Asset) -> Result<AssetId> {
         let mut assets = self.assets.lock().unwrap();
         let id = AssetId::from_string(Uuid::new_v4().to_string());
-        assets.insert(id.as_str().to_string(), asset);
+        assets.insert(id.clone(), asset);
         Ok(id)
     }
 
     async fn get(&self, id: &AssetId) -> Result<Option<Stored<AssetId, Asset>>> {
         let assets = self.assets.lock().unwrap();
-        Ok(assets.get(id.as_str()).map(|asset| stored(
+        Ok(assets.get(id).map(|asset| stored(
             id.clone(),
             asset.clone(),
             0,
@@ -49,10 +49,10 @@ impl AssetStore for MockAssetStore {
     }
 
     async fn exists(&self, id: &AssetId) -> Result<bool> {
-        Ok(self.assets.lock().unwrap().contains_key(id.as_str()))
+        Ok(self.assets.lock().unwrap().contains_key(id))
     }
 
     async fn delete(&self, id: &AssetId) -> Result<bool> {
-        Ok(self.assets.lock().unwrap().remove(id.as_str()).is_some())
+        Ok(self.assets.lock().unwrap().remove(id).is_some())
     }
 }
