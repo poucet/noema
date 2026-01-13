@@ -67,7 +67,6 @@ pub enum ResolvedContent {
         /// Blob hash for serving via asset protocol
         blob_hash: String,
         mime_type: String,
-        filename: Option<String>,
         /// Cached base64-encoded ContentBlock for LLM - populated on first use
         resolved: Option<ContentBlock>,
     },
@@ -97,14 +96,27 @@ impl ResolvedContent {
         asset_id: impl Into<AssetId>,
         blob_hash: impl Into<String>,
         mime_type: impl Into<String>,
-        filename: Option<String>,
     ) -> Self {
         Self::Asset {
             asset_id: asset_id.into(),
             blob_hash: blob_hash.into(),
             mime_type: mime_type.into(),
-            filename,
             resolved: None,
+        }
+    }
+
+    /// Create an asset reference with pre-resolved content block
+    pub fn asset_resolved(
+        asset_id: impl Into<AssetId>,
+        blob_hash: impl Into<String>,
+        mime_type: impl Into<String>,
+        resolved: Option<ContentBlock>,
+    ) -> Self {
+        Self::Asset {
+            asset_id: asset_id.into(),
+            blob_hash: blob_hash.into(),
+            mime_type: mime_type.into(),
+            resolved,
         }
     }
 
@@ -158,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_resolved_content_asset_unresolved() {
-        let content = ResolvedContent::asset("asset-123", "abc123hash", "image/png", Some("photo.png".into()));
+        let content = ResolvedContent::asset("asset-123", "abc123hash", "image/png");
         assert!(content.needs_resolution());
         assert!(content.cached_block().is_none());
     }

@@ -68,7 +68,6 @@ pub enum DisplayContent {
         url: String,
         #[serde(rename = "mimeType")]
         mime_type: String,
-        filename: Option<String>
     },
     /// Reference to a document (shown as chip in UI, content injected to LLM separately)
     DocumentRef {
@@ -232,7 +231,6 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
             ResolvedContent::Asset {
                 blob_hash,
                 mime_type,
-                filename,
                 ..
             } => DisplayContent::AssetRef {
                 url: format!(
@@ -241,7 +239,6 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
                     urlencoding::encode(mime_type)
                 ),
                 mime_type: mime_type.clone(),
-                filename: filename.clone(),
             },
             ResolvedContent::Document { document_id, .. } => DisplayContent::DocumentRef {
                 id: DocumentId::from(document_id.clone()),
