@@ -189,8 +189,8 @@ User inspects a turn → sees all spans (alternatives) → can compare and selec
 | Status | # | Task |
 |--------|---|------|
 | ✅ | 3.3.D6a | ⚡ Backend: `get_turn_alternates` returns all spans with content |
-| ⬜ | 3.3.D6b | 🔧 Frontend: Alternates panel/popover for turns with multiple spans |
-| ⬜ | 3.3.D6c | 🔧 Frontend: Display span metadata (model, timestamp) |
+| ✅ | 3.3.D6b | 🔧 Frontend: Alternates panel/popover for turns with multiple spans |
+| ✅ | 3.3.D6c | 🔧 Frontend: Display span metadata (model, timestamp) |
 | ⬜ | 3.3.D6d | ✅ User: Verify can see all alternatives, select any one |
 
 #### Part E: Final Verification (3 tasks)
