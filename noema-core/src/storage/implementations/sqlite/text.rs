@@ -354,9 +354,9 @@ mod tests {
         let result = store.store(content).await.unwrap();
         let stored = store.get(&result.id).await.unwrap().unwrap();
 
-        assert_eq!(stored.origin().kind, Some(OriginKind::User));
+        assert_eq!(stored.origin().kind(), OriginKind::User);
         assert_eq!(
-            stored.origin().user_id.as_ref().map(|id| id.as_str()),
+            stored.origin().user_id().as_ref().map(|id| id.as_str()),
             Some("user-123")
         );
     }

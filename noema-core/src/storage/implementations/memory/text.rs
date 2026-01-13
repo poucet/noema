@@ -105,7 +105,7 @@ mod tests {
         let result = store.store(content).await.unwrap();
 
         let stored = store.get(&result.id).await.unwrap().unwrap();
-        assert_eq!(stored.content.content().text(), "Hello, world!");
+        assert_eq!(stored.text(), "Hello, world!");
     }
 
     #[tokio::test]
