@@ -33,10 +33,6 @@ pub(crate) use text::init_schema as init_text_schema;
 pub(crate) use turn::init_schema as init_turn_schema;
 pub(crate) use user::init_schema as init_user_schema;
 
-// Re-export sync helpers from turn module
-pub use turn::sync_helpers;
-pub(crate) use text::store_content_sync;
-
 /// Shared SQLite connection pool
 ///
 /// This is the main entry point for SQLite storage. Create one store

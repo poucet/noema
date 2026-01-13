@@ -19,6 +19,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
             title TEXT,
+            main_view_id TEXT REFERENCES views(id),
             system_prompt TEXT,
             summary_text TEXT,
             summary_embedding BLOB,
@@ -48,16 +49,10 @@ impl ConversationStore for SqliteStore {
         let now = unix_timestamp();
         let conv_id = ConversationId::new();
 
+        // Create conversation record (coordinator will create view and set main_view_id)
         conn.execute(
             "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![conv_id.as_str(), user_id.as_str(), name, now, now],
-        )?;
-
-        // Create main view for the conversation
-        let view_id = ViewId::new();
-        conn.execute(
-            "INSERT INTO views (id, conversation_id, name, is_main, created_at) VALUES (?1, ?2, 'main', 1, ?3)",
-            params![view_id.as_str(), conv_id.as_str(), now],
         )?;
 
         Ok(conv_id)
@@ -69,26 +64,28 @@ impl ConversationStore for SqliteStore {
     ) -> Result<Option<ConversationInfo>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT c.id, c.title, c.is_private, c.created_at, c.updated_at,
-                    (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) as turn_count
+            "SELECT c.id, c.title, c.main_view_id, c.is_private, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = c.main_view_id) as turn_count
              FROM conversations c WHERE c.id = ?1",
             params![conversation_id.as_str()],
             |row| {
                 let id: ConversationId = row.get(0)?;
                 let name: Option<String> = row.get(1)?;
-                let is_private: i32 = row.get(2)?;
-                let created_at: i64 = row.get(3)?;
-                let updated_at: i64 = row.get(4)?;
-                let turn_count: usize = row.get(5)?;
-                Ok((id, name, is_private, created_at, updated_at, turn_count))
+                let main_view_id: ViewId = row.get(2)?;
+                let is_private: i32 = row.get(3)?;
+                let created_at: i64 = row.get(4)?;
+                let updated_at: i64 = row.get(5)?;
+                let turn_count: usize = row.get(6)?;
+                Ok((id, name, main_view_id, is_private, created_at, updated_at, turn_count))
             },
         );
 
         match result {
-            Ok((id, name, is_private, created_at, updated_at, turn_count)) => {
+            Ok((id, name, main_view_id, is_private, created_at, updated_at, turn_count)) => {
                 Ok(Some(ConversationInfo {
-                    id: id,
+                    id,
                     name,
+                    main_view_id,
                     turn_count,
                     is_private: is_private != 0,
                     created_at,
@@ -103,10 +100,10 @@ impl ConversationStore for SqliteStore {
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<ConversationInfo>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.title, c.is_private, c.created_at, c.updated_at,
-                    (SELECT COUNT(*) FROM turns t WHERE t.conversation_id = c.id) as turn_count
+            "SELECT c.id, c.title, c.main_view_id, c.is_private, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = c.main_view_id) as turn_count
              FROM conversations c
-             WHERE c.user_id = ?1
+             WHERE c.user_id = ?1 AND c.main_view_id IS NOT NULL
              ORDER BY c.updated_at DESC",
         )?;
 
@@ -114,17 +111,19 @@ impl ConversationStore for SqliteStore {
             .query_map(params![user_id.as_str()], |row| {
                 let id: ConversationId = row.get(0)?;
                 let name: Option<String> = row.get(1)?;
-                let is_private: i32 = row.get(2)?;
-                let created_at: i64 = row.get(3)?;
-                let updated_at: i64 = row.get(4)?;
-                let turn_count: usize = row.get(5)?;
-                Ok((id, name, is_private, created_at, updated_at, turn_count))
+                let main_view_id: ViewId = row.get(2)?;
+                let is_private: i32 = row.get(3)?;
+                let created_at: i64 = row.get(4)?;
+                let updated_at: i64 = row.get(5)?;
+                let turn_count: usize = row.get(6)?;
+                Ok((id, name, main_view_id, is_private, created_at, updated_at, turn_count))
             })?
             .filter_map(|r| r.ok())
             .map(
-                |(id, name, is_private, created_at, updated_at, turn_count)| ConversationInfo {
-                    id: id,
+                |(id, name, main_view_id, is_private, created_at, updated_at, turn_count)| ConversationInfo {
+                    id,
                     name,
+                    main_view_id,
                     turn_count,
                     is_private: is_private != 0,
                     created_at,
@@ -178,6 +177,19 @@ impl ConversationStore for SqliteStore {
         conn.execute(
             "UPDATE conversations SET is_private = ?1, updated_at = ?2 WHERE id = ?3",
             params![is_private as i32, unix_timestamp(), conversation_id.as_str()],
+        )?;
+        Ok(())
+    }
+
+    async fn set_main_view_id(
+        &self,
+        conversation_id: &ConversationId,
+        view_id: &ViewId,
+    ) -> Result<()> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET main_view_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![view_id.as_str(), unix_timestamp(), conversation_id.as_str()],
         )?;
         Ok(())
     }
