@@ -43,13 +43,7 @@ function App() {
   // Document selected in the documents activity (shown in main panel)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   // Current view ID (null = main view) - value may be needed later for view switching
-  // Disabled until view switching is implemented in the backend
-  // const [_currentViewId, setCurrentViewId] = useState<string | null>(null);
-  // Pending fork: when set, the next message will create a fork from this span
-  // Unlike episteme's complex approach, we keep it simple: just store the spanId,
-  // and when user sends a message, backend creates a new conversation
-  const [pendingForkSpanId, setPendingForkSpanId] = useState<string | null>(null);
-  // Prefilled input text (used when forking from a user message)
+  // Prefilled input text (used when forking from a user message to let them edit and resend)
   const [prefilledInput, setPrefilledInput] = useState<string>("");
   // Tools enabled state - controls whether MCP tools are sent to the model
   const [toolsEnabled, setToolsEnabled] = useState<boolean>(true);
@@ -345,11 +339,8 @@ function App() {
         return;
       }
 
-      // If we have a pending fork, create the fork first, then send
-      // NOTE: Fork functionality is pending re-implementation in the new UCM model
-      if (pendingForkSpanId) {
-        appLog.warn(`Fork from span not yet implemented in new UCM model, clearing pending fork`);
-        setPendingForkSpanId(null);
+      // Clear any prefilled text after sending
+      if (prefilledInput) {
         setPrefilledInput("");
       }
 
@@ -480,26 +471,39 @@ function App() {
 
   const handleSwitchAlternate = async (turnId: string, spanId: string) => {
     appLog.info(`handleSwitchAlternate called: turnId=${turnId}, spanId=${spanId}`);
-    // NOTE: Span selection is pending re-implementation in the new UCM model
-    // For now, just log a warning
-    appLog.warn("Span selection (setSelectedSpan) not yet implemented in new UCM model");
-    setError("Switching alternates is not yet available in this version");
-  };
-
-  // Fork handler - simple approach: just store the spanId, no UI changes until send
-  // When user sends a message, backend creates a new conversation forked from this point
-  const handleFork = (spanId: string, role: "user" | "assistant", userText?: string) => {
-    appLog.info(`Setting fork point: spanId=${spanId}, role=${role}`);
-    setPendingForkSpanId(spanId);
-    // For user messages, prefill the input with their original text so they can edit it
-    if (role === "user" && userText) {
-      setPrefilledInput(userText);
+    try {
+      await tauri.selectSpan(currentConversationId, turnId, spanId);
+      // Reload messages to reflect the new selection
+      const msgs = await tauri.getMessages();
+      setMessages(msgs);
+    } catch (err) {
+      appLog.error("Select span error", String(err));
+      setError(String(err));
     }
   };
 
-  // Cancel pending fork
-  const handleCancelFork = () => {
-    setPendingForkSpanId(null);
+  // Fork handler - creates a new view forked at the given turn
+  const handleFork = async (turnId: string, role: "user" | "assistant", userText?: string) => {
+    appLog.info(`Forking at turn: turnId=${turnId}, role=${role}`);
+    try {
+      setError(null);
+      const newView = await tauri.forkConversation(currentConversationId, turnId);
+      appLog.info(`Created fork: viewId=${newView.id}`);
+      // Switch to the new forked view
+      const msgs = await tauri.switchView(currentConversationId, newView.id);
+      setMessages(msgs);
+      // For user messages, prefill the input with their original text so they can edit and resend
+      if (role === "user" && userText) {
+        setPrefilledInput(userText);
+      }
+    } catch (err) {
+      appLog.error("Fork error", String(err));
+      setError(String(err));
+    }
+  };
+
+  // Clear prefilled input (used after forking when user wants to cancel the edit)
+  const handleClearPrefill = () => {
     setPrefilledInput("");
   };
 
@@ -625,7 +629,6 @@ function App() {
         onRenameConversation={handleRenameConversation}
         selectedDocumentId={selectedDocumentId}
         onSelectDocument={setSelectedDocumentId}
-        pendingFork={!!pendingForkSpanId}
       />
 
       {/* Settings Modal */}
@@ -906,9 +909,8 @@ function App() {
               voiceStatus={voice.status}
               voiceBufferedCount={voice.bufferedCount}
               onToggleVoice={voice.toggle}
-              pendingFork={!!pendingForkSpanId}
               prefilledText={prefilledInput}
-              onCancelFork={handleCancelFork}
+              onClearPrefill={handleClearPrefill}
               toolsEnabled={toolsEnabled}
               onToggleTools={handleToggleTools}
               modelHasVision={currentModelHasVision()}

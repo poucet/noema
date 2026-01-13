@@ -4,16 +4,16 @@ import type { AlternateInfo } from "../../generated";
 // Separates "viewing" (preview) from "selecting" (committing to database)
 export function AlternatesSelector({
   alternates,
-  spanSetId,
+  turnId,
   previewSpanId,
   onPreview,
   onConfirmSelection,
 }: {
   alternates: AlternateInfo[];
-  spanSetId: string;
+  turnId: string;
   previewSpanId: string | null;
   onPreview: (spanId: string) => void;
-  onConfirmSelection?: (spanSetId: string, spanId: string) => void;
+  onConfirmSelection?: (turnId: string, spanId: string) => void;
 }) {
   // Find which is the saved selection and which is being previewed
   const savedSelection = alternates.find(a => a.isSelected);
@@ -50,7 +50,7 @@ export function AlternatesSelector({
       {/* Confirm selection icon button - only show when previewing a different response */}
       {isPreviewingDifferent && onConfirmSelection && (
         <button
-          onClick={() => onConfirmSelection(spanSetId, previewSpanId!)}
+          onClick={() => onConfirmSelection(turnId, previewSpanId!)}
           className="p-1.5 bg-teal-600 text-white rounded hover:bg-teal-500 transition-colors"
           title="Use this response"
         >

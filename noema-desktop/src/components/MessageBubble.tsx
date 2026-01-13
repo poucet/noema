@@ -46,9 +46,9 @@ const CheckIcon = () => (
 interface MessageBubbleProps {
   message: DisplayMessage;
   onDocumentClick?: (docId: string) => void;
-  onSwitchAlternate?: (spanSetId: string, spanId: string) => void;
-  // Fork handler: spanId, role, and optionally the user's text (for user messages)
-  onFork?: (spanId: string, role: "user" | "assistant", userText?: string) => void;
+  onSwitchAlternate?: (turnId: string, spanId: string) => void;
+  // Fork handler: turnId, role, and optionally the user's text (for user messages)
+  onFork?: (turnId: string, role: "user" | "assistant", userText?: string) => void;
   // Regenerate handler: creates new span at turn with fresh LLM response
   onRegenerate?: (turnId: string) => void;
 }
@@ -94,9 +94,9 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
   };
 
   // Handle confirm - commit the selection to database
-  const handleConfirmSelection = async (spanSetId: string, spanId: string) => {
+  const handleConfirmSelection = async (turnId: string, spanId: string) => {
     if (onSwitchAlternate) {
-      await onSwitchAlternate(spanSetId, spanId);
+      await onSwitchAlternate(turnId, spanId);
     }
     // Clear preview state after confirming
     setPreviewSpanId(null);
@@ -105,7 +105,7 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
 
   // Handle fork click
   const handleForkClick = () => {
-    if (!onFork || !message.spanId) return;
+    if (!onFork || !message.turnId) return;
 
     if (isUser) {
       // For user messages: extract text and pass to fork handler
@@ -113,10 +113,10 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
         .filter((c): c is { text: string } => "text" in c)
         .map((c) => c.text)
         .join("\n");
-      onFork(message.spanId, "user", userText);
+      onFork(message.turnId, "user", userText);
     } else {
-      // For assistant messages: just pass the spanId
-      onFork(message.spanId, "assistant");
+      // For assistant messages: just pass the turnId
+      onFork(message.turnId, "assistant");
     }
   };
 
@@ -135,8 +135,8 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
   // Determine which content to show
   const contentToShow = previewContent || message.content || [];
 
-  // Can fork if we have a spanId and fork handler
-  const canFork = onFork && message.spanId && !isSystem;
+  // Can fork if we have a turnId and fork handler
+  const canFork = onFork && message.turnId && !isSystem;
 
   // Can regenerate if we have a turnId and regenerate handler (assistant messages only)
   const canRegenerate = onRegenerate && message.turnId && !isUser && !isSystem;
@@ -149,10 +149,10 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
         className={`max-w-[85%] px-4 py-3 rounded-2xl relative ${isUser ? "bg-teal-600 text-white" : isSystem ? "bg-amber-500/20 text-amber-100" : "bg-surface text-foreground"}`}
       >
         {/* Show alternates selector for assistant messages with multiple responses */}
-        {hasAlternates && message.spanSetId && (
+        {hasAlternates && message.turnId && (
           <AlternatesSelector
             alternates={message.alternates!}
-            spanSetId={message.spanSetId}
+            turnId={message.turnId}
             previewSpanId={previewSpanId}
             onPreview={handlePreview}
             onConfirmSelection={handleConfirmSelection}

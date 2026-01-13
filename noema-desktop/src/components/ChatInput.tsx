@@ -27,9 +27,10 @@ interface ChatInputProps {
   voiceStatus?: VoiceStatus;
   voiceBufferedCount?: number;
   onToggleVoice?: () => void;
-  pendingFork?: boolean;
+  /** Prefilled text (e.g., when forking from a user message to let them edit) */
   prefilledText?: string;
-  onCancelFork?: () => void;
+  /** Callback to clear prefilled text */
+  onClearPrefill?: () => void;
   /** Whether tools are enabled (controlled by parent) */
   toolsEnabled?: boolean;
   /** Callback when tools toggle is clicked */
@@ -123,9 +124,8 @@ export function ChatInput({
   voiceStatus = "disabled",
   voiceBufferedCount = 0,
   onToggleVoice,
-  pendingFork = false,
   prefilledText = "",
-  onCancelFork,
+  onClearPrefill,
   toolsEnabled = true,
   onToggleTools,
   modelHasVision = true,
@@ -802,13 +802,13 @@ export function ChatInput({
         )}
 
         <div className="flex gap-3 items-end max-w-4xl mx-auto">
-          {/* Cancel fork button */}
-          {pendingFork && onCancelFork && (
+          {/* Clear prefilled text button - shown when editing after fork */}
+          {prefilledText && onClearPrefill && (
             <button
               type="button"
-              onClick={onCancelFork}
+              onClick={onClearPrefill}
               className="px-4 py-3 bg-gray-600 hover:bg-gray-500 text-white rounded-2xl transition-colors"
-              title="Cancel fork"
+              title="Clear text"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
