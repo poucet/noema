@@ -10,6 +10,9 @@ use crate::storage::ids::ConversationId;
 use crate::storage::ids::UserId;
 use crate::storage::types::{Conversation, Stored};
 
+/// Stored representation of a Conversation (immutable after creation)
+pub type StoredConversation = Stored<ConversationId, Conversation>;
+
 /// Trait for conversation lifecycle operations
 ///
 /// Handles conversation metadata and lifecycle:
@@ -32,10 +35,10 @@ pub trait ConversationStore: Send + Sync {
     async fn get_conversation(
         &self,
         conversation_id: &ConversationId,
-    ) -> Result<Option<Stored<ConversationId, Conversation>>>;
+    ) -> Result<Option<StoredConversation>>;
 
     /// List all conversations for a user
-    async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<Stored<ConversationId, Conversation>>>;
+    async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<StoredConversation>>;
 
     /// Delete a conversation and all its data
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> Result<()>;

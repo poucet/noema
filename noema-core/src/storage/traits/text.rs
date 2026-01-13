@@ -7,6 +7,9 @@ use crate::storage::{HashedContentBlock, Stored};
 use crate::storage::ids::ContentBlockId;
 use crate::storage::types::{ContentBlock, StoreResult};
 
+/// Stored representation of a content block (immutable, content-addressed)
+pub type StoredTextBlock = Stored<ContentBlockId, HashedContentBlock>;
+
 /// Trait for content block storage operations
 #[async_trait]
 pub trait TextStore: Send + Sync {
@@ -17,7 +20,7 @@ pub trait TextStore: Send + Sync {
     async fn store(&self, content: ContentBlock) -> Result<StoreResult>;
 
     /// Get a content block by ID
-    async fn get(&self, id: &ContentBlockId) -> Result<Option<Stored<ContentBlockId, HashedContentBlock>>>;
+    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>>;
 
     /// Get just the text content by ID (lightweight)
     async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>>;

@@ -14,6 +14,18 @@ use crate::storage::types::{
     Stored, Turn, TurnWithContent, View,
 };
 
+/// Stored representation of a Turn (immutable)
+pub type StoredTurn = Stored<TurnId, Turn>;
+
+/// Stored representation of a Span (immutable)
+pub type StoredSpan = Stored<SpanId, Span>;
+
+/// Stored representation of a Message (immutable)
+pub type StoredMessage = Stored<MessageId, Message>;
+
+/// Stored representation of a View (immutable)
+pub type StoredView = Stored<ViewId, View>;
+
 /// Trait for Turn/Span/Message storage operations
 #[async_trait]
 pub trait TurnStore: Send + Sync {
@@ -22,23 +34,23 @@ pub trait TurnStore: Send + Sync {
     /// Create a new turn
     ///
     /// Creates a turn with the given role. Use select_span to add it to a view.
-    async fn create_turn(&self, role: SpanRole) -> Result<Stored<TurnId, Turn>>;
+    async fn create_turn(&self, role: SpanRole) -> Result<StoredTurn>;
 
     /// Get a specific turn by ID
-    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<Stored<TurnId, Turn>>>;
+    async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<StoredTurn>>;
 
     // ========== Span Management ==========
 
     /// Create a new span for a turn
     ///
     /// Creates a span at the given turn (for parallel responses or regenerations).
-    async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<Stored<SpanId, Span>>;
+    async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<StoredSpan>;
 
     /// Get all spans for a turn
-    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<Stored<SpanId, Span>>>;
+    async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<StoredSpan>>;
 
     /// Get a specific span by ID
-    async fn get_span(&self, span_id: &SpanId) -> Result<Option<Stored<SpanId, Span>>>;
+    async fn get_span(&self, span_id: &SpanId) -> Result<Option<StoredSpan>>;
 
     // ========== Message Management ==========
 
@@ -54,23 +66,23 @@ pub trait TurnStore: Send + Sync {
         span_id: &SpanId,
         role: MessageRole,
         content: &[StoredContent],
-    ) -> Result<Stored<MessageId, Message>>;
+    ) -> Result<StoredMessage>;
 
     /// Get all messages for a span with content loaded
     async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>>;
 
     /// Get a specific message by ID
-    async fn get_message(&self, message_id: &MessageId) -> Result<Option<Stored<MessageId, Message>>>;
+    async fn get_message(&self, message_id: &MessageId) -> Result<Option<StoredMessage>>;
 
     // ========== View Management ==========
 
     /// Create a new view
     ///
     /// Views are linked to conversations via Conversation.main_view_id.
-    async fn create_view(&self) -> Result<Stored<ViewId, View>>;
+    async fn create_view(&self) -> Result<StoredView>;
 
     /// Get a view by its ID
-    async fn get_view(&self, view_id: &ViewId) -> Result<Option<Stored<ViewId, View>>>;
+    async fn get_view(&self, view_id: &ViewId) -> Result<Option<StoredView>>;
 
     /// Select a span for a turn within a view
     ///
@@ -97,7 +109,7 @@ pub trait TurnStore: Send + Sync {
         &self,
         view_id: &ViewId,
         at_turn_id: &TurnId,
-    ) -> Result<Stored<ViewId, View>>;
+    ) -> Result<StoredView>;
 
     /// Get the view path up to (but not including) a specific turn
     ///
@@ -125,6 +137,6 @@ pub trait TurnStore: Send + Sync {
         messages: Vec<(MessageRole, Vec<StoredContent>)>,
         model_id: Option<&str>,
         create_fork: bool,
-    ) -> Result<(Stored<SpanId, Span>, Option<Stored<ViewId, View>>)>;
+    ) -> Result<(StoredSpan, Option<StoredView>)>;
 
 }

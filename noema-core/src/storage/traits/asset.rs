@@ -6,6 +6,9 @@ use async_trait::async_trait;
 use crate::storage::ids::AssetId;
 use crate::storage::types::{Asset, Stored};
 
+/// Stored representation of an Asset (immutable after creation)
+pub type StoredAsset = Stored<AssetId, Asset>;
+
 /// Trait for asset storage operations
 ///
 /// Assets have a unique ID (UUID) and reference blob content via blob_hash.
@@ -20,7 +23,7 @@ pub trait AssetStore: Send + Sync {
     async fn create_asset(&self, asset: Asset) -> Result<AssetId>;
 
     /// Get an asset by ID
-    async fn get(&self, id: &AssetId) -> Result<Option<Stored<AssetId, Asset>>>;
+    async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>>;
 
     /// Check if an asset exists
     async fn exists(&self, id: &AssetId) -> Result<bool>;
