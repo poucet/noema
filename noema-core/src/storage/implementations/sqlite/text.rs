@@ -8,7 +8,7 @@ use super::SqliteStore;
 use crate::storage::helper::{content_hash, unix_timestamp};
 use crate::storage::ids::ContentBlockId;
 use crate::storage::traits::TextStore;
-use crate::storage::types::{ContentBlock, ContentOrigin, ContentType, OriginKind, StoredContentBlock, StoreResult};
+use crate::storage::types::{ContentBlock, ContentOrigin, ContentType, OriginKind, StoreResult, Stored, HashedContentBlock};
 
 /// Initialize the content_blocks schema
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
@@ -61,7 +61,6 @@ impl TextStore for SqliteStore {
             return Ok(StoreResult {
                 id: existing_id,
                 hash,
-                is_new: false,
             });
         }
 
@@ -91,11 +90,10 @@ impl TextStore for SqliteStore {
         Ok(StoreResult {
             id,
             hash,
-            is_new: true,
         })
     }
 
-    async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredContentBlock>> {
+    async fn get(&self, id: &ContentBlockId) -> Result<Option<Stored<ContentBlockId, HashedContentBlock>>> {
         let conn = self.conn().lock().unwrap();
 
         let result = conn.query_row(
@@ -236,7 +234,7 @@ struct RowData {
 }
 
 impl RowData {
-    fn into_stored_content_block(self) -> Result<StoredContentBlock> {
+    fn into_stored_content_block(self) -> Result<Stored<ContentBlockId, HashedContentBlock> > {
         let content_type = ContentType::from_str(&self.content_type)
             .ok_or_else(|| anyhow::anyhow!("Invalid content type: {}", self.content_type))?;
 
@@ -258,17 +256,19 @@ impl RowData {
             self.origin_parent_id,
         );
 
-        Ok(StoredContentBlock {
-            id: ContentBlockId::from_string(self.id),
-            content_hash: self.content_hash,
-            content: ContentBlock {
-                text: self.text,
-                content_type,
-                is_private: self.is_private != 0,
-                origin,
+        Ok(Stored::new(
+            ContentBlockId::from_string(self.id),
+            HashedContentBlock {
+                content_hash: self.content_hash,
+                content: ContentBlock {
+                    text: self.text,
+                    content_type,
+                    is_private: self.is_private != 0,
+                    origin,
+                },
             },
-            created_at: self.created_at,
-        })
+            self.created_at,
+        ))
     }
 }
 
@@ -321,7 +321,6 @@ mod tests {
         let content = ContentBlock::plain("Test content");
         let result = store.store(content).await.unwrap();
 
-        assert!(result.is_new);
         assert!(!result.hash.is_empty());
 
         // Retrieve and verify
@@ -337,13 +336,11 @@ mod tests {
 
         let content1 = ContentBlock::plain("Duplicate me");
         let result1 = store.store(content1).await.unwrap();
-        assert!(result1.is_new);
 
         // Store same content again
         let content2 = ContentBlock::plain("Duplicate me");
         let result2 = store.store(content2).await.unwrap();
 
-        assert!(!result2.is_new, "Second store should be deduplicated");
         assert_eq!(result1.id, result2.id, "IDs should match for deduplicated content");
         assert_eq!(result1.hash, result2.hash);
     }

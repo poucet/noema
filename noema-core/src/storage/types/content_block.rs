@@ -283,23 +283,28 @@ impl ContentBlock {
     }
 }
 
-/// A stored content block with metadata from the database
+/// A hashed content block (content block with its computed hash)
+///
+/// This extends ContentBlock with its SHA-256 hash for content-addressed storage.
+/// Use with `Stored<ContentBlockId, HashedContentBlock>` for the full stored representation.
 #[derive(Clone, Debug)]
-pub struct StoredContentBlock {
-    /// Unique identifier
-    pub id: ContentBlockId,
-
-    /// SHA-256 hash of the content
+pub struct HashedContentBlock {
+    /// SHA-256 hash of the text content
     pub content_hash: String,
 
     /// The content block data
     pub content: ContentBlock,
-
-    /// When this content was created (unix timestamp ms)
-    pub created_at: i64,
 }
 
-impl StoredContentBlock {
+impl HashedContentBlock {
+    /// Create a new hashed content block
+    pub fn new(content_hash: String, content: ContentBlock) -> Self {
+        Self {
+            content_hash,
+            content,
+        }
+    }
+
     /// Get the text content
     pub fn text(&self) -> &str {
         &self.content.text
@@ -329,9 +334,6 @@ pub struct StoreResult {
 
     /// The content hash
     pub hash: String,
-
-    /// Whether this was a new insertion (false = deduplicated)
-    pub is_new: bool,
 }
 
 #[cfg(test)]
