@@ -557,6 +557,50 @@ Need to implement the edit modal/inline editor and wire `onEdit` handler in App.
 
 ---
 
+## 2026-01-15: Edit Message Modal (3.3.E3c)
+
+Implemented the edit message modal and wired it to the App.tsx handlers.
+
+### New Component: EditMessageModal.tsx
+
+Modal dialog for editing user messages:
+- Text area with auto-resize
+- Pre-populated with current message text (selected on mount)
+- Submit creates a fork with edited content
+- Keyboard shortcuts: Cmd+Enter to submit, Esc to cancel
+- Submit button disabled if text unchanged
+
+### App.tsx Integration
+
+**New state:**
+- `editingMessage: { turnId: string; text: string } | null`
+
+**New handlers:**
+- `handleEdit(turnId, currentText)` - Opens the edit modal
+- `handleEditSubmit(newText)` - Calls `tauri.editMessage()`, updates state with new view/messages
+
+**Wiring:**
+- `onEdit={handleEdit}` prop passed to MessageBubble
+- EditMessageModal rendered when `editingMessage` is set
+
+### Complete Flow
+
+1. User hovers over their message → sees edit button (pencil icon)
+2. Click edit → modal opens with message text selected
+3. User edits text → clicks "Submit Edit" (or Cmd+Enter)
+4. Backend creates fork with new content at that turn
+5. UI updates to show the new forked view with edited message
+6. View selector shows the new fork
+
+### Journey 3: Edit User Message - Complete
+
+All three tasks complete:
+- 3.3.E3a: Backend `edit_message` command
+- 3.3.E3b: Frontend edit button on user messages
+- 3.3.E3c: Edit modal with submit action
+
+---
+
 ## 2026-01-15: Session Integration Tests (3.3.14)
 
 Added comprehensive integration tests for the Session API with memory-based storage.

@@ -8,6 +8,7 @@ import { FavoriteModelChips } from "./components/FavoriteModelChips";
 import { Settings } from "./components/Settings";
 import { DocumentPanel } from "./components/DocumentPanel";
 import { ViewSelector } from "./components/ViewSelector";
+import { EditMessageModal } from "./components/EditMessageModal";
 import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock, ToolConfig } from "./generated";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
@@ -58,6 +59,11 @@ function App() {
     pendingContent: InputContentBlock[];
     pendingToolConfig?: ToolConfig;
   }>({ show: false, pendingContent: [] });
+  // Edit message modal state
+  const [editingMessage, setEditingMessage] = useState<{
+    turnId: string;
+    text: string;
+  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -575,6 +581,36 @@ function App() {
     }
   };
 
+  // Open edit modal for a user message
+  const handleEdit = (turnId: string, currentText: string) => {
+    setEditingMessage({ turnId, text: currentText });
+  };
+
+  // Submit edited message - creates a fork with new content
+  const handleEditSubmit = async (newText: string) => {
+    if (!editingMessage) return;
+
+    try {
+      setError(null);
+      const content: InputContentBlock[] = [{ type: "text", text: newText }];
+      const result = await tauri.editMessage(currentConversationId, editingMessage.turnId, content);
+
+      // Update state with the new view and messages
+      setMessages(result.messages);
+      setCurrentViewId(result.view.id);
+
+      // Refresh views list to include the new fork
+      const convViews = await tauri.listConversationViews(currentConversationId);
+      setViews(convViews);
+
+      // Close the modal
+      setEditingMessage(null);
+    } catch (err) {
+      appLog.error("Edit message error", String(err));
+      setError(String(err));
+    }
+  };
+
   // Retry initialization after setup
   const retryInit = async () => {
     setError(null);
@@ -731,6 +767,15 @@ function App() {
         </div>
       )}
 
+      {/* Edit Message Modal */}
+      {editingMessage && (
+        <EditMessageModal
+          initialText={editingMessage.text}
+          onSubmit={handleEditSubmit}
+          onCancel={() => setEditingMessage(null)}
+        />
+      )}
+
       {/* Document Panel */}
       {activeDocumentId && (
         <DocumentPanel
@@ -836,6 +881,7 @@ function App() {
                         onSwitchAlternate={handleSwitchAlternate}
                         onFork={handleFork}
                         onRegenerate={handleRegenerate}
+                        onEdit={handleEdit}
                       />
                     ))}
                     {streamingMessage && !isParallelMode && (
