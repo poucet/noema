@@ -432,6 +432,7 @@ mod tests {
             id: "call-1".to_string(),
             name: "test_tool".to_string(),
             arguments: serde_json::json!({}),
+            extra: serde_json::Value::Null,
         };
         let payload = StoredPayload::new(vec![StoredContent::ToolCall(call)]);
 
