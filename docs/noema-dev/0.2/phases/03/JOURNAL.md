@@ -465,3 +465,24 @@ Dropdown in top bar showing all views for current conversation:
 
 ---
 
+## 2026-01-15: Entity Layer Design
+
+Discussed and documented a major architectural refactor: the **Entity Layer**.
+
+**Key insight:** Views ARE the conversation structure. "Conversations" are just organizational metadata that can be attached/detached from views.
+
+**Summary:**
+- Views become first-class addressable entities (can be @mentioned)
+- `conversations` table eliminated - metadata moves to `entities` table
+- Fork ancestry moves from `views.forked_from_view_id` to `entity_relations`
+- Deleting a view doesn't affect its forks (independent entities)
+- Documents and assets also become entities (unified addressing)
+
+**Canonical design:** See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md)
+- Updated three-layer architecture (Addressable → Structure → Content)
+- Added FR-0: Addressable Layer requirements
+- Added Phase 4: Entity Layer migration plan
+- Fixed incorrect claim about ContentBlock deduplication (NOT deduplicated)
+
+---
+

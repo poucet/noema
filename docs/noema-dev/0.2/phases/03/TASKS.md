@@ -13,7 +13,8 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ✅ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
-| 🔄 | P0 | 3.3 | Views, forking, and migration | Complete conversation model with user journeys |
+| 🔄 | P0 | 3.3 | Views and forking | Views, forking operations, user journeys |
+| ⬜ | P0 | 3.3.E | Entity layer | Unified addressable layer - completes conversation model |
 | ⬜ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
 | ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
@@ -275,6 +276,23 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ⬜ | 3.7.4 | ⚡ Implement get_activity_summary |
 | ⬜ | 3.7.5 | ⚡ Implement LLM context rendering |
 | ⬜ | 3.7.6 | ✅ Unit tests for temporal queries |
+
+#### Part E: Entity Layer (8 tasks)
+
+**Goal**: Unified addressable layer. Views become first-class entities. Conversations table replaced by entities.
+
+See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - FR-0 and Phase 4.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.E1 | 🏗️ Define Entity, EntityRelation types and EntityStore trait |
+| ⬜ | 3.3.E2 | 📦 Add entities table |
+| ⬜ | 3.3.E3 | 📦 Add entity_relations table |
+| ⬜ | 3.3.E4 | ⚡ Implement SqliteEntityStore CRUD |
+| ⬜ | 3.3.E5 | ⚡ Implement entity relations (add, get, remove) |
+| ⬜ | 3.3.E6 | 🔧 Replace ConversationStore with EntityStore in coordinator |
+| ⬜ | 3.3.E7 | 🧹 Remove conversations table and ConversationStore trait |
+| ⬜ | 3.3.E8 | ✅ E2E verification - conversations work via entity layer |
 
 ---
 
@@ -624,8 +642,41 @@ For document items, frontmatter is the source of truth for fields. `item_fields`
 
 ---
 
+### Feature 3.3.E: Entity Layer (Completes Conversation Model)
+
+**Problem**: Conversations are tightly coupled to views. Can't promote a fork to standalone conversation. Deleting a conversation loses its forks. No unified way to address different content types.
+
+**Solution**: Unified addressable layer where views, documents, and assets are all entities with consistent identity, naming, and relationships.
+
+**Key Insight**: Views ARE the conversation structure. "Conversations" are just organizational metadata that can be attached/detached from views.
+
+**Functional Requirements**:
+- All addressable things (views, documents, assets) are entities
+- Entities have: id, type, name, slug (@mention), user, privacy, archive status
+- Fork ancestry stored in entity_relations, not on views
+- Deleting one entity doesn't affect related entities
+- Views replace conversations - view ID IS entity ID
+
+**Use Cases Enabled**:
+- @mention any view/document/asset
+- Promote fork to standalone "conversation" (just rename)
+- Delete conversation without losing forks
+- Unified search/organization across entity types
+
+**Acceptance Criteria**:
+- [ ] Create view → entity created automatically
+- [ ] Set slug, lookup by @slug
+- [ ] Fork creates entity_relation, not forked_from_view_id column
+- [ ] Delete view → other views unaffected
+- [ ] List conversations = list entities where type='view'
+- [ ] conversations table removed
+
+**Canonical Design**: See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - FR-0 and Phase 4
+
+---
+
 ## Related Documents
 
 - [PLAN.md](PLAN.md) - Detailed implementation plan with schema and API
-- [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - Design document
+- [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - Design document (canonical for Entity Layer)
 - [HOOK_SYSTEM.md](../../design/HOOK_SYSTEM.md) - Future extension points

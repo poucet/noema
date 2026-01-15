@@ -1,8 +1,49 @@
 # Unified Content Model
 
-**Status:** Draft
+**Status:** Draft → Revised
 **Created:** 2026-01-10
+**Updated:** 2026-01-15
 **Related:** IDEAS #1, #2, #3
+
+---
+
+## Three-Layer Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ADDRESSABLE LAYER                        │
+│  Unified identity, naming, and relationships                │
+│  - entities (id, type, name, slug, user, privacy, archive) │
+│  - entity_relations (from, to, relation, metadata)          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    STRUCTURE LAYER                          │
+│  Domain-specific internal organization                      │
+│  - views → view_selections → turns → spans → messages      │
+│  - documents → tabs → tab_content                          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     CONTENT LAYER                           │
+│  Shared content storage (NOT deduplicated by hash)         │
+│  - content_blocks (text with origin tracking)              │
+│  - assets + blobs (binary files)                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Insight: Views Are Conversations
+
+**Views ARE the conversation structure.** What we call "conversations" in the UI are really views with metadata. The `Conversation` concept is just organizational metadata attached to a view.
+
+This means:
+- **Views are first-class addressable entities** (can be @mentioned)
+- **"Conversation" is UI terminology** for a view entity
+- **Forking creates a new view entity** with a 'forked_from' relation
+- **Views can be promoted** to standalone "conversations" by renaming
+- **Deleting a view** doesn't affect its forks (they're independent entities)
 
 ---
 
@@ -23,29 +64,34 @@
 
 ## Core Principle
 
-**Separate content (heavy, immutable) from structure (lightweight, mutable).**
+**Separate content (heavy, immutable) from structure (lightweight, mutable) from identity (addressable, organizational).**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     CONTENT LAYER                           │
-│  Immutable blobs with origin (who/what/when/derived-from)   │
+│                   ADDRESSABLE LAYER                         │
+│  Unified identity: name, slug (@mention), tags, privacy    │
+│  Relationships: forked_from, references, grouped_with      │
 └─────────────────────────────────────────────────────────────┘
-                              ▲
                               │
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    STRUCTURE LAYER                          │
 │                                                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │ Sequence +  │  │  Version    │  │   Tree +    │         │
+│  │   Views +   │  │  Version    │  │   Tree +    │         │
 │  │   Spans     │  │   Chain     │  │  Ordering   │         │
 │  │             │  │             │  │             │         │
-│  │ Conversation│  │  Document   │  │ Collection  │         │
+│  │Conversations│  │  Documents  │  │ Collections │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
-│         │                │                │                 │
-│         └────────────────┼────────────────┘                 │
-│                          ▼                                  │
-│                   Cross-References                          │
-│              (links between any entities)                   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     CONTENT LAYER                           │
+│  Immutable content with origin tracking                     │
+│  - ContentBlocks: text (NOT deduplicated - each has unique │
+│    origin metadata even if text is identical)              │
+│  - Assets/Blobs: binary (content-addressed, deduplicated)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,7 +107,8 @@ All textual content: messages, documents, structured text.
 
 ```
 ContentBlock {
-    id: ContentHash           // SHA-256 of text
+    id: ContentBlockId        // UUID (unique per block)
+    content_hash: String      // SHA-256 of text (for integrity, not dedup)
     content_type: String      // "text/plain", "text/markdown", "text/typst"
     text: String              // the actual text content
     origin: ContentOrigin
@@ -73,9 +120,17 @@ ContentOrigin {
     user_id: Option<UserId>                    // which user (multi-user)
     model_id: Option<ModelId>                  // which model (if AI)
     source_id: Option<String>                  // external ID (google doc, url)
-    parent_content_id: Option<ContentHash>     // if edited/derived
+    parent_content_id: Option<ContentBlockId>  // if edited/derived
 }
 ```
+
+**Important:** ContentBlocks are NOT deduplicated by hash. Each block gets a unique ID even if the text is identical, because:
+- Different origin metadata (user vs assistant, different models)
+- Different timestamps
+- Different privacy settings
+- Need to track provenance separately
+
+The hash is computed and stored for integrity checking, not for deduplication.
 
 **What goes in ContentBlock:**
 - User messages (text)
@@ -126,6 +181,81 @@ Message {
 
 ---
 
+## Addressable Layer
+
+The addressable layer provides unified identity, naming, and relationships for all entity types.
+
+### Entity Table
+
+Every addressable thing (view, document, asset) is an entity:
+
+```sql
+CREATE TABLE entities (
+    id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,  -- 'view', 'document', 'asset'
+    user_id TEXT REFERENCES users(id),
+    name TEXT,                  -- display name
+    slug TEXT UNIQUE,           -- for @mentions (user-assigned)
+    is_private INTEGER DEFAULT 0,
+    is_archived INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_entities_user ON entities(user_id);
+CREATE INDEX idx_entities_type ON entities(entity_type, user_id);
+CREATE INDEX idx_entities_slug ON entities(slug) WHERE slug IS NOT NULL;
+```
+
+### Entity Relations
+
+Relationships between entities (fork ancestry, references, grouping):
+
+```sql
+CREATE TABLE entity_relations (
+    from_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    to_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    relation TEXT NOT NULL,     -- 'forked_from', 'references', 'grouped_with'
+    metadata TEXT,              -- JSON (e.g., {at_turn_id: "..."} for forks)
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (from_id, to_id, relation)
+);
+
+CREATE INDEX idx_entity_relations_to ON entity_relations(to_id, relation);
+```
+
+### Relation Types
+
+| Relation | From | To | Metadata | Use Case |
+|----------|------|-----|----------|----------|
+| `forked_from` | View | View | `{at_turn_id}` | Fork ancestry |
+| `references` | Any | Any | `{context}` | Cross-references, citations |
+| `derived_from` | Document | Document | `{revision_id}` | Document lineage |
+| `grouped_with` | Any | Any | - | Manual grouping |
+
+### Key Benefits
+
+1. **Unified @mentions**: All entities addressable by slug
+2. **Decoupled relationships**: Fork ancestry stored in relations, not on views
+3. **Independent lifecycle**: Deleting one view doesn't affect its forks
+4. **Flexible organization**: Tags, grouping without rigid hierarchy
+5. **Consistent metadata**: name, privacy, archive across all types
+
+### Views Replace Conversations
+
+The old `conversations` table is eliminated. Its responsibilities move to:
+
+| Old (conversations) | New Location |
+|---------------------|--------------|
+| `id` | `entities.id` (view id IS entity id) |
+| `name` | `entities.name` |
+| `user_id` | `entities.user_id` |
+| `is_private` | `entities.is_private` |
+| `main_view_id` | N/A - view IS the entity |
+| Fork tracking | `entity_relations` with `relation='forked_from'` |
+
+---
+
 ## Structure Layer
 
 ### Three Structure Types
@@ -140,21 +270,21 @@ All three reference the same content layer. Cross-references link between any en
 
 ---
 
-## Structure Type 1: Turn Sequences (Conversations)
+## Structure Type 1: Turn Sequences (Views/Conversations)
 
 ### Model
 
-A conversation is a sequence of **turns**. Each turn has a role (user/assistant) and one or more **spans**. A span is a sequence of messages (not a single message).
+A **view** is a sequence of **turns**. Each turn has a role (user/assistant) and one or more **spans**. A span is a sequence of messages (not a single message).
 
 ```
-Conversation
-  └── Turn (user or assistant turn)
-        └── Span (one possible response - a sequence of messages)
-              └── [Message, Message, ...] → each Message has ContentBlockRef
-
-View (named path through conversation)
-  └── selects one span at each turn
+View (addressable entity - what UI calls a "conversation")
+  └── view_selections (ordered list of turn+span pairs)
+        └── Turn (user or assistant turn, shared across views)
+              └── Span (one possible response - a sequence of messages)
+                    └── [Message, Message, ...] → each Message has ContentBlockRef
 ```
+
+**Key:** Views are entities. The view's ID is its entity ID. Turns and spans are shared structural components that views reference.
 
 ### Why Spans Contain Multiple Messages
 
@@ -544,24 +674,100 @@ Detailed implementation requirements derived from use cases and ROADMAP features
 
 ---
 
+### FR-0: Addressable Layer (Entity System)
+
+**Use Cases:** All - provides unified identity and relationships
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-0.1 | All addressable things (views, documents, assets) are entities | P0 |
+| FR-0.2 | Entities have: id, type, name, slug, user, privacy, archive status | P0 |
+| FR-0.3 | Slug enables @mentions (`@project-planning`) | P1 |
+| FR-0.4 | Entity relations track: forked_from, references, derived_from | P0 |
+| FR-0.5 | Deleting entity doesn't cascade to related entities | P0 |
+| FR-0.6 | Views replace conversations - view IS the conversation | P0 |
+
+**Schema:**
+
+```sql
+CREATE TABLE entities (
+    id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,     -- 'view', 'document', 'asset'
+    user_id TEXT REFERENCES users(id),
+    name TEXT,
+    slug TEXT UNIQUE,              -- for @mentions
+    is_private INTEGER DEFAULT 0,
+    is_archived INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX idx_entities_user ON entities(user_id);
+CREATE INDEX idx_entities_type ON entities(entity_type, user_id);
+CREATE INDEX idx_entities_slug ON entities(slug) WHERE slug IS NOT NULL;
+
+CREATE TABLE entity_relations (
+    from_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    to_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    relation TEXT NOT NULL,        -- 'forked_from', 'references', 'derived_from'
+    metadata TEXT,                 -- JSON (e.g., {at_turn_id: "..."})
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (from_id, to_id, relation)
+);
+
+CREATE INDEX idx_entity_relations_to ON entity_relations(to_id, relation);
+```
+
+**Operations:**
+
+```rust
+trait EntityStore {
+    // CRUD
+    async fn create_entity(&self, entity_type: &str, user_id: &UserId) -> Result<EntityId>;
+    async fn get_entity(&self, id: &EntityId) -> Result<Option<StoredEntity>>;
+    async fn list_entities(&self, user_id: &UserId, entity_type: Option<&str>) -> Result<Vec<StoredEntity>>;
+    async fn update_entity(&self, id: &EntityId, updates: EntityUpdate) -> Result<()>;
+    async fn archive_entity(&self, id: &EntityId) -> Result<()>;
+    async fn delete_entity(&self, id: &EntityId) -> Result<()>;
+
+    // Relations
+    async fn add_relation(&self, from: &EntityId, to: &EntityId, relation: &str, metadata: Option<Value>) -> Result<()>;
+    async fn get_relations_from(&self, id: &EntityId, relation: Option<&str>) -> Result<Vec<EntityRelation>>;
+    async fn get_relations_to(&self, id: &EntityId, relation: Option<&str>) -> Result<Vec<EntityRelation>>;
+    async fn remove_relation(&self, from: &EntityId, to: &EntityId, relation: &str) -> Result<()>;
+}
+```
+
+**Acceptance Criteria:**
+- [ ] Create entity, get back ID
+- [ ] Set slug, lookup by @slug
+- [ ] Add forked_from relation between views
+- [ ] Delete view without affecting forked views
+- [ ] List all views for user (replaces list_conversations)
+
+---
+
 ### FR-1: Content Storage
 
 **Use Cases:** All
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-1.1 | ContentBlocks are content-addressed (SHA-256 of text) | P0 |
+| FR-1.1 | ContentBlocks have unique IDs (UUID), hash stored for integrity | P0 |
 | FR-1.2 | Store content_type, text, origin metadata | P0 |
 | FR-1.3 | Origin tracks: kind, user_id, model_id, source_id, parent_content_id | P0 |
-| FR-1.4 | Deduplication: same text = same hash = stored once | P1 |
-| FR-1.5 | Assets stored separately in BlobStore (content-addressed) | P0 |
+| FR-1.4 | ContentBlocks NOT deduplicated - each block unique for provenance | P0 |
+| FR-1.5 | Assets stored separately in BlobStore (content-addressed, deduplicated) | P0 |
 | FR-1.6 | Full-text search across ContentBlocks | P1 |
+
+**Note:** ContentBlocks are NOT deduplicated because identical text may have different origins, timestamps, and privacy settings. The hash is computed for integrity checking only.
 
 **Schema:**
 
 ```sql
 CREATE TABLE content_blocks (
-    id TEXT PRIMARY KEY,           -- SHA-256 of text
+    id TEXT PRIMARY KEY,           -- UUID (unique per block)
+    content_hash TEXT NOT NULL,    -- SHA-256 of text (for integrity)
     content_type TEXT NOT NULL,    -- text/plain, text/markdown, text/typst
     text TEXT NOT NULL,
     origin_kind TEXT NOT NULL,     -- user, assistant, system, import
@@ -569,122 +775,106 @@ CREATE TABLE content_blocks (
     origin_model_id TEXT,
     origin_source_id TEXT,
     origin_parent_id TEXT,
+    is_private INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL
 );
 
 CREATE TABLE assets (
-    id TEXT PRIMARY KEY,           -- SHA-256 of bytes
+    id TEXT PRIMARY KEY,           -- UUID
+    blob_hash TEXT NOT NULL,       -- SHA-256 of bytes (for dedup in blob store)
     mime_type TEXT NOT NULL,
     filename TEXT,
     size_bytes INTEGER NOT NULL,
     created_at INTEGER NOT NULL
 );
--- Actual bytes stored in filesystem: data/{id[0:2]}/{id}
+-- Actual bytes stored in BlobStore (content-addressed)
 ```
 
 **Acceptance Criteria:**
-- [ ] Create ContentBlock, get back content hash
-- [ ] Same text returns same hash
-- [ ] Store and retrieve assets by hash
-- [ ] Full-text search returns matching ContentBlocks
+- Create ContentBlock, get back unique ID
+- Hash computed and stored for integrity
+- Store and retrieve assets
+- Full-text search returns matching ContentBlocks
 
 ---
 
-### FR-2: Conversation Structure
+### FR-2: View/Conversation Structure
 
 **Use Cases:** 1, 2, 3, 4, 5 (subagent, agent↔agent, parallel, fork, splice)
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-2.1 | Conversations contain ordered turns | P0 |
-| FR-2.2 | Each turn has role (user/assistant) and one or more spans | P0 |
-| FR-2.3 | Each span contains a sequence of messages (not single message) | P0 |
-| FR-2.4 | Messages reference ContentBlock for text, have inline tool_calls/tool_results | P0 |
-| FR-2.5 | Views select one span per turn | P0 |
-| FR-2.6 | Spans are shared across views | P0 |
-| FR-2.7 | Fork creates new view sharing selections up to fork point | P0 |
-| FR-2.8 | Spawn child creates new conversation inheriting parent context | P1 |
-| FR-2.9 | Child conversations tracked within parent's span | P1 |
+| FR-2.1 | Views are entities (addressable, named) | P0 |
+| FR-2.2 | Views contain ordered turns via view_selections | P0 |
+| FR-2.3 | Each turn has role (user/assistant) and one or more spans | P0 |
+| FR-2.4 | Each span contains a sequence of messages | P0 |
+| FR-2.5 | Messages reference ContentBlock for text | P0 |
+| FR-2.6 | Views select one span per turn | P0 |
+| FR-2.7 | Spans are shared across views | P0 |
+| FR-2.8 | Fork creates new view entity with 'forked_from' relation | P0 |
+| FR-2.9 | Views replace conversations - no separate conversations table | P0 |
+| FR-2.10 | Spawn child creates new view inheriting parent context | P1 |
 
 **Schema:**
 
 ```sql
-CREATE TABLE conversations (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+-- Addressable layer (see FR-0)
+-- entities table provides: id, name, user_id, slug, is_private, is_archived
+-- entity_relations provides: forked_from relationships
+
+-- Views reference entities (view.id = entity.id)
+CREATE TABLE views (
+    id TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE
+    -- All metadata (name, user, privacy) lives in entities table
 );
 
+-- Turns are standalone (not owned by conversations)
 CREATE TABLE turns (
     id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
     role TEXT NOT NULL,            -- user, assistant
-    sequence_number INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
-    UNIQUE (conversation_id, sequence_number)
+    created_at INTEGER NOT NULL
 );
 
 CREATE TABLE spans (
     id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL REFERENCES turns(id),
     model_id TEXT,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (turn_id) REFERENCES turns(id)
+    created_at INTEGER NOT NULL
 );
 
 CREATE TABLE messages (
     id TEXT PRIMARY KEY,
-    span_id TEXT NOT NULL,
-    sequence_number INTEGER NOT NULL,  -- order within span
-    role TEXT NOT NULL,                -- user, assistant, system, tool
-    content_id TEXT,                   -- FK to content_blocks (text)
-    tool_calls TEXT,                   -- JSON array
-    tool_results TEXT,                 -- JSON array
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (span_id) REFERENCES spans(id),
-    FOREIGN KEY (content_id) REFERENCES content_blocks(id)
+    span_id TEXT NOT NULL REFERENCES spans(id),
+    sequence_number INTEGER NOT NULL,
+    role TEXT NOT NULL,            -- user, assistant, system, tool
+    created_at INTEGER NOT NULL
 );
 
-CREATE TABLE message_assets (
-    message_id TEXT NOT NULL,
-    asset_id TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    PRIMARY KEY (message_id, asset_id),
-    FOREIGN KEY (message_id) REFERENCES messages(id),
-    FOREIGN KEY (asset_id) REFERENCES assets(id)
-);
-
-CREATE TABLE views (
+CREATE TABLE message_content (
     id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    name TEXT,
-    is_main BOOLEAN DEFAULT FALSE,
-    forked_from_view_id TEXT,
-    forked_at_turn_id TEXT,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+    message_id TEXT NOT NULL REFERENCES messages(id),
+    sequence_number INTEGER NOT NULL,
+    content_type TEXT NOT NULL,    -- text, asset_ref, document_ref, tool_call, tool_result
+    content_block_id TEXT,         -- for text
+    asset_id TEXT,                 -- for asset_ref
+    document_id TEXT,              -- for document_ref
+    tool_data TEXT                 -- JSON for tool_call/tool_result
 );
 
 CREATE TABLE view_selections (
-    view_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    span_id TEXT NOT NULL,
-    PRIMARY KEY (view_id, turn_id),
-    FOREIGN KEY (view_id) REFERENCES views(id),
-    FOREIGN KEY (turn_id) REFERENCES turns(id),
-    FOREIGN KEY (span_id) REFERENCES spans(id)
+    view_id TEXT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
+    turn_id TEXT NOT NULL REFERENCES turns(id),
+    span_id TEXT NOT NULL REFERENCES spans(id),
+    sequence_number INTEGER NOT NULL,  -- order of turns in this view
+    PRIMARY KEY (view_id, turn_id)
 );
 
--- Parent-child for subagent spawning
-CREATE TABLE conversation_children (
-    parent_span_id TEXT NOT NULL,
-    child_conversation_id TEXT NOT NULL,
-    spawn_position INTEGER NOT NULL,  -- where in parent's span
-    PRIMARY KEY (parent_span_id, child_conversation_id),
-    FOREIGN KEY (parent_span_id) REFERENCES spans(id),
-    FOREIGN KEY (child_conversation_id) REFERENCES conversations(id)
+-- Subagent spawning (future)
+CREATE TABLE view_children (
+    parent_span_id TEXT NOT NULL REFERENCES spans(id),
+    child_view_id TEXT NOT NULL REFERENCES views(id),
+    spawn_position INTEGER NOT NULL,
+    PRIMARY KEY (parent_span_id, child_view_id)
 );
 ```
 
@@ -1019,201 +1209,15 @@ ALTER TABLE views ADD COLUMN context_strategy_id TEXT;
 
 ---
 
-## Implementation & Migration Plan
+## Concept Summary
 
-We adopt a **Strangler Fig** pattern with incremental steps. Each step is end-to-end testable: storage → protocol → backend → frontend.
-
-### Principles
-
-1. **Vertical slices**: Each step delivers working functionality across all layers
-2. **Feature flags**: New behavior behind flags, old behavior remains default
-3. **Dual-read**: Read from new + old, compare, log discrepancies
-4. **Incremental migration**: Backfill in background, no big-bang cutover
-
----
-
-### Phase 1: Content Layer Foundation
-
-**Goal:** ContentBlock storage working end-to-end without changing existing behavior.
-
-#### Step 1.1: ContentBlock Table + Store
-
-| Layer | Change |
-|-------|--------|
-| Storage | Create `content_blocks` table |
-| Backend | Implement `ContentStore` trait |
-| Protocol | No change (internal only) |
-| Frontend | No change |
-
-**Test:** Unit tests for ContentStore CRUD, hash deduplication.
-
-#### Step 1.2: Documents Use ContentBlocks
-
-| Layer | Change |
-|-------|--------|
-| Storage | Add `content_id` column to `document_revisions` |
-| Backend | `create_revision()` stores to ContentBlock, saves `content_id` |
-| Backend | `get_revision()` reads from ContentBlock (fallback to `content_markdown`) |
-| Protocol | No change (content returned same as before) |
-| Frontend | No change |
-
-**Test:** Create document, verify content in `content_blocks`. Edit document, verify dedup if same content. Load old documents (fallback works).
-
-**Backfill:** Background job migrates existing `content_markdown` → ContentBlock.
-
-#### Step 1.3: Messages Use ContentBlocks
-
-| Layer | Change |
-|-------|--------|
-| Storage | Add `content_id` column to `span_messages` |
-| Backend | `add_span_message()` extracts text, stores ContentBlock |
-| Backend | `get_messages()` resolves `content_id` |
-| Protocol | No change |
-| Frontend | No change |
-
-**Test:** Send message, verify content in `content_blocks`. Load conversation, verify content resolves.
-
-**Backfill:** Background job migrates existing message payloads.
-
-#### Step 1.4: Events Table + Emission
-
-| Layer | Change |
-|-------|--------|
-| Storage | Create `events` table |
-| Backend | `emit_event()` called after ContentBlock/Document/Message mutations |
-| Protocol | New endpoint: `GET /events?after=<timestamp>` (optional, for debugging) |
-| Frontend | No change (or debug panel showing events) |
-
-**Test:** Create document → event logged. Create message → event logged. Query events by time range.
-
----
-
-### Phase 2: Conversation Structure
-
-**Goal:** New Turn/Span/View model working alongside old SpanSet/Span/Thread model.
-
-#### Step 2.1: New Tables (Shadow Mode)
-
-| Layer | Change |
-|-------|--------|
-| Storage | Create `turns`, `spans`, `messages_v2`, `views`, `view_selections` |
-| Backend | No change to existing code paths |
-| Protocol | No change |
-| Frontend | No change |
-
-**Test:** Tables exist, can insert/query directly.
-
-#### Step 2.2: Dual-Write to New Structure
-
-| Layer | Change |
-|-------|--------|
-| Storage | Both old and new tables written |
-| Backend | `add_span_message()` also writes to new `messages_v2` via Turn/Span |
-| Backend | Feature flag `ucm_dual_write=true` |
-| Protocol | No change |
-| Frontend | No change |
-
-**Test:** Send messages with flag on. Verify both old and new tables populated correctly. Query both, compare.
-
-#### Step 2.3: Dual-Read with Comparison
-
-| Layer | Change |
-|-------|--------|
-| Backend | `get_messages()` reads from both, logs discrepancies |
-| Backend | Feature flag `ucm_dual_read=true` |
-| Protocol | No change |
-| Frontend | No change |
-
-**Test:** Load conversations. Check logs for any mismatches between old/new reads.
-
-#### Step 2.4: New Read Path (Feature Flagged)
-
-| Layer | Change |
-|-------|--------|
-| Backend | `get_messages()` reads from new tables when `ucm_new_read=true` |
-| Protocol | New types for Turn/Span/View (versioned or feature-flagged) |
-| Frontend | Feature flag to use new protocol types |
-
-**Test:** Toggle flag, verify UI works with new data path. Compare behavior with old path.
-
-#### Step 2.5: Views and Forking
-
-| Layer | Change |
-|-------|--------|
-| Backend | Implement `create_view()`, `fork_view()`, `select_span()` |
-| Protocol | Endpoints for view operations |
-| Frontend | UI for viewing spans, forking |
-
-**Test:** Create conversation, generate spans at a turn. Fork view. UI shows spans and allows selection.
-
-#### Step 2.6: Migration Script
-
-| Layer | Change |
-|-------|--------|
-| Backend | Script converts old data to new structure |
-| | SpanSet → Turn, old Span → new Span, Thread → View |
-
-**Test:** Run migration. Verify all conversations accessible via new path. Dual-read shows no discrepancies.
-
----
-
-### Phase 3: Cutover and Extension Points
-
-**Goal:** New structure is primary. Extension points enabled.
-
-#### Step 3.1: New Path Default
-
-| Layer | Change |
-|-------|--------|
-| Backend | `ucm_new_read=true` becomes default |
-| Backend | Old read path deprecated (logged if used) |
-| Protocol | Old types deprecated |
-| Frontend | Old UI paths removed |
-
-**Test:** Full regression. All features work with new path.
-
-#### Step 3.2: Hook Registry
-
-| Layer | Change |
-|-------|--------|
-| Storage | Create `hooks` table |
-| Backend | Hook engine: on event, match patterns, execute actions |
-| Backend | Basic actions: log, enqueue |
-| Protocol | CRUD for hooks (admin only initially) |
-| Frontend | Hook management UI (optional) |
-
-**Test:** Create hook matching `entity.created.message`. Send message. Verify hook fired.
-
-#### Step 3.3: Temporal Triggers
-
-| Layer | Change |
-|-------|--------|
-| Storage | Create `temporal_triggers` table |
-| Backend | Scheduler reads triggers, emits events |
-| Protocol | CRUD for temporal triggers |
-| Frontend | UI for scheduling (optional) |
-
-**Test:** Create idle trigger (1 minute for testing). Wait. Verify event emitted.
-
-#### Step 3.4: Cleanup
-
-| Layer | Change |
-|-------|--------|
-| Storage | Drop `threads`, `span_sets`, `spans`, `span_messages` |
-| Storage | Drop `content_markdown` from `document_revisions` |
-| Backend | Remove old read/write paths |
-| Protocol | Remove deprecated types |
-
-**Test:** Full regression. Database smaller. No references to old tables.
-
----
-
-## Migration Mapping
-
-| Old Concept | New Concept | Notes |
-|-------------|-------------|-------|
-| `SpanSet` | `Turn` | A point in the conversation sequence. |
-| `Span` (old) | `Span` (new) | One possible generation/response at that turn. Now a sequence of messages. |
-| `SpanMessage` | `Message` | Now explicitly ordered within a Span. |
-| `Thread` | `View` | A linear path (selections) through the graph. |
-| `Forked Thread` | `View` (Forked) | A view sharing a prefix with another view. |
+| Structure | Core Abstraction | Key Operation |
+|-----------|------------------|---------------|
+| Entity | Addressable identity with relations | @mention, fork ancestry |
+| View | Path through turns/spans | Select span at turn |
+| Turn | Position in conversation | Add span alternatives |
+| Span | One response (sequence of messages) | Compare, select |
+| Document | Revision chain | Commit, checkout |
+| Collection | Tree of references | Organize anything |
+| ContentBlock | Immutable text with origin | Store once, reference many |
+| Asset | Binary blob (deduplicated) | Content-addressed storage |
