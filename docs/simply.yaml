@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.E3b"
-task_name: "Frontend: Add edit button to user messages"
+task: "3.3.E3c"
+task_name: "Frontend: Edit modal/inline with submit action"
 
 # Completed
 completed_features:

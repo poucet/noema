@@ -510,3 +510,23 @@ export async function selectSpan(
 ): Promise<void> {
   return invoke<void>("select_span", { conversationId, turnId, spanId });
 }
+
+/**
+ * Response from editing a message
+ */
+export interface EditMessageResponse {
+  view: ViewInfo;
+  messages: DisplayMessage[];
+}
+
+/**
+ * Edit a user message, creating a fork with the new content
+ * Creates a new view forked at the specified turn with the edited content.
+ */
+export async function editMessage(
+  conversationId: string,
+  turnId: string,
+  content: InputContentBlock[]
+): Promise<EditMessageResponse> {
+  return invoke<EditMessageResponse>("edit_message", { conversationId, turnId, content });
+}

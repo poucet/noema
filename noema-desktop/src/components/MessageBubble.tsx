@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { DisplayMessage, DisplayContent } from "../types";
 import { AlternatesSelector } from "./message/AlternatesSelector";
 import { ContentBlock } from "./message/ContentBlock";
+import { EditIcon } from "./message/EditIcon";
 import { ForkIcon } from "./message/ForkIcon";
 import { RegenerateIcon } from "./message/RegenerateIcon";
 
@@ -51,9 +52,11 @@ interface MessageBubbleProps {
   onFork?: (turnId: string, role: "user" | "assistant", userText?: string) => void;
   // Regenerate handler: creates new span at turn with fresh LLM response
   onRegenerate?: (turnId: string) => void;
+  // Edit handler: opens edit modal with current message text
+  onEdit?: (turnId: string, currentText: string) => void;
 }
 
-export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onFork, onRegenerate }: MessageBubbleProps) {
+export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onFork, onRegenerate, onEdit }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const hasAlternates = message.alternates && message.alternates.length > 1;
@@ -120,6 +123,16 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
     }
   };
 
+  // Handle edit click (user messages only)
+  const handleEditClick = () => {
+    if (!onEdit || !message.turnId || !isUser) return;
+    const currentText = message.content
+      .filter((c): c is { text: string } => "text" in c)
+      .map((c) => c.text)
+      .join("\n");
+    onEdit(message.turnId, currentText);
+  };
+
   // Handle copy raw markdown
   const handleCopyRawMarkdown = async () => {
     const markdown = extractRawMarkdown(contentToShow);
@@ -140,6 +153,9 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
 
   // Can regenerate if we have a turnId and regenerate handler (assistant messages only)
   const canRegenerate = onRegenerate && message.turnId && !isUser && !isSystem;
+
+  // Can edit if we have a turnId and edit handler (user messages only)
+  const canEdit = onEdit && message.turnId && isUser;
 
   return (
     <div
@@ -171,15 +187,28 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
             ))
           )}
         </div>
-        {/* Fork button for user messages - inside bubble */}
-        {isUser && canFork && (
-          <button
-            onClick={handleForkClick}
-            className="absolute bottom-1 right-1 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-teal-200 hover:text-white hover:bg-teal-500"
-            title="Fork with this message"
-          >
-            <ForkIcon />
-          </button>
+        {/* Action buttons for user messages - inside bubble */}
+        {isUser && (canFork || canEdit) && (
+          <div className="absolute bottom-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {canEdit && (
+              <button
+                onClick={handleEditClick}
+                className="p-1 rounded text-teal-200 hover:text-white hover:bg-teal-500"
+                title="Edit message"
+              >
+                <EditIcon />
+              </button>
+            )}
+            {canFork && (
+              <button
+                onClick={handleForkClick}
+                className="p-1 rounded text-teal-200 hover:text-white hover:bg-teal-500"
+                title="Fork with this message"
+              >
+                <ForkIcon />
+              </button>
+            )}
+          </div>
         )}
       </div>
       {/* Action buttons for assistant messages - positioned outside bubble on right */}

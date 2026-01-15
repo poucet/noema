@@ -172,7 +172,7 @@ User edits previous message → creates fork from that turn → new span with ed
 | Status | # | Task |
 |--------|---|------|
 | ✅ | 3.3.E3a | ⚡ Backend: `edit_message` command - fork_view + edit_turn |
-| ⬜ | 3.3.E3b | 🔧 Frontend: Add edit button to user messages |
+| ✅ | 3.3.E3b | 🔧 Frontend: Add edit button to user messages |
 | ⬜ | 3.3.E3c | 🔧 Frontend: Edit modal/inline with submit action |
 
 ##### Journey 4: Fork Conversation

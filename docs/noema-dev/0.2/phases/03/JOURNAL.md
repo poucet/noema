@@ -528,6 +528,35 @@ Need to add edit button to user messages and wire to `edit_message` command.
 
 ---
 
+## 2026-01-15: Edit Button for User Messages (3.3.E3b)
+
+Added edit button and TypeScript binding for editing user messages.
+
+### Changes
+
+**New file: `components/message/EditIcon.tsx`**
+- Pencil icon SVG for edit button
+
+**tauri.ts:**
+- Added `EditMessageResponse` interface
+- Added `editMessage()` function binding
+
+**MessageBubble.tsx:**
+- Added `onEdit?: (turnId: string, currentText: string) => void` prop
+- Added `handleEditClick()` handler that extracts text content and calls `onEdit`
+- Added edit button (pencil icon) next to fork button for user messages
+- Both buttons now appear in a flex container on hover
+
+### UI Behavior
+
+Hover over user message → see edit (pencil) and fork buttons inside the bubble.
+
+### Next: Edit Modal (3.3.E3c)
+
+Need to implement the edit modal/inline editor and wire `onEdit` handler in App.tsx.
+
+---
+
 ## 2026-01-15: Session Integration Tests (3.3.14)
 
 Added comprehensive integration tests for the Session API with memory-based storage.
