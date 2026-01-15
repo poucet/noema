@@ -486,6 +486,48 @@ Discussed and documented a major architectural refactor: the **Entity Layer**.
 
 ---
 
+## 2026-01-15: Edit Message Backend (3.3.E3a)
+
+Implemented `edit_message` Tauri command for Journey 3: Edit User Message.
+
+### New Command
+
+```rust
+edit_message(conversation_id, turn_id, content: Vec<DisplayInputContent>)
+  -> EditMessageResponse { view, messages }
+```
+
+### Design
+
+The command follows this flow:
+1. Get current view_id from the loaded manager
+2. Convert `DisplayInputContent` → `InputContent` → `StoredContent` via coordinator
+3. Call `TurnStore::edit_turn()` with `create_fork=true`:
+   - Creates new span with edited content at the target turn
+   - Creates forked view that selects the new span
+4. Open session for the new view
+5. Replace the conversation's manager with one using the new view
+6. Return `EditMessageResponse` with the new view info and resolved messages
+
+### Response Type
+
+```rust
+pub struct EditMessageResponse {
+    pub view: ThreadInfoResponse,  // New forked view info
+    pub messages: Vec<DisplayMessage>,  // Messages in the new view
+}
+```
+
+The frontend can use the response to:
+- Update the view selector with the new fork
+- Display the edited conversation
+
+### Next: Frontend (3.3.E3b)
+
+Need to add edit button to user messages and wire to `edit_message` command.
+
+---
+
 ## 2026-01-15: Session Integration Tests (3.3.14)
 
 Added comprehensive integration tests for the Session API with memory-based storage.

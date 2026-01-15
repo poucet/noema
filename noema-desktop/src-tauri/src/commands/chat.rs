@@ -708,3 +708,100 @@ pub async fn select_span(
 
     Ok(())
 }
+
+/// Response from edit_message command
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditMessageResponse {
+    pub view: ThreadInfoResponse,
+    pub messages: Vec<DisplayMessage>,
+}
+
+/// Edit a user message, creating a fork with the new content
+///
+/// This creates a new view forked from the current view at the specified turn,
+/// with a new span containing the edited message content. The manager is
+/// switched to use the new view.
+#[tauri::command]
+pub async fn edit_message(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+    turn_id: TurnId,
+    content: Vec<DisplayInputContent>,
+) -> Result<EditMessageResponse, String> {
+    use noema_core::storage::OriginKind;
+
+    if content.is_empty() {
+        return Err("Message must have content".to_string());
+    }
+
+    // Convert DisplayInputContent to InputContent, filtering empty text
+    let input_content: Vec<InputContent> = content
+        .into_iter()
+        .filter(|block| !matches!(block, DisplayInputContent::Text { text } if text.is_empty()))
+        .map(InputContent::from)
+        .collect();
+
+    if input_content.is_empty() {
+        return Err("Message must have text, documents, or attachments".to_string());
+    }
+
+    let current_view_id = {
+        let managers = state.managers.lock().await;
+        let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
+        manager.view_id().await
+    };
+
+    let stores = state.get_stores()?;
+    let coordinator = state.get_coordinator()?;
+
+    // Store input content as StoredContent refs
+    let stored_content = coordinator
+        .store_input_content(input_content, OriginKind::User)
+        .await
+        .map_err(|e| format!("Failed to store content: {}", e))?;
+
+    // Edit turn: creates new span with content and forks the view
+    let (_span, new_view) = stores.turn()
+        .edit_turn(
+            &current_view_id,
+            &turn_id,
+            vec![(Role::User, stored_content)],
+            None, // No model_id for user messages
+            true, // Create fork
+        )
+        .await
+        .map_err(|e| format!("Failed to edit message: {}", e))?;
+
+    let new_view = new_view.ok_or("Expected new view from edit_turn with create_fork=true")?;
+    let new_view_id = new_view.id.clone();
+
+    // Switch to the new view (creates new session and manager)
+    let session = Session::open_view(coordinator.clone(), conversation_id.clone(), new_view_id.clone())
+        .await
+        .map_err(|e| format!("Failed to open new view: {}", e))?;
+
+    let messages: Vec<DisplayMessage> = session
+        .messages_for_display()
+        .iter()
+        .map(DisplayMessage::from)
+        .collect();
+
+    let model_id_str = state.model_id.lock().await.clone();
+    let mcp_registry = state.get_mcp_registry()?;
+    let model = create_model(&model_id_str)
+        .map_err(|e| format!("Failed to create model: {}", e))?;
+
+    let document_resolver: Arc<dyn DocumentResolver> = stores.document();
+    let event_tx = state.event_sender();
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
+    state.managers.lock().await.insert(conversation_id, manager);
+
+    // Enrich with alternates
+    let messages = enrich_with_alternates(messages, stores, &new_view_id).await;
+
+    Ok(EditMessageResponse {
+        view: ThreadInfoResponse::from(new_view),
+        messages,
+    })
+}
