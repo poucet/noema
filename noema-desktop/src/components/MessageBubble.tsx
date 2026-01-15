@@ -165,7 +165,7 @@ export function MessageBubble({ message, onDocumentClick, onSwitchAlternate, onF
         className={`max-w-[85%] px-4 py-3 rounded-2xl relative ${isUser ? "bg-teal-600 text-white" : isSystem ? "bg-amber-500/20 text-amber-100" : "bg-surface text-foreground"}`}
       >
         {/* Show alternates selector for assistant messages with multiple responses */}
-        {hasAlternates && message.turnId && (
+        {hasAlternates && message.turnId && !isUser && (
           <AlternatesSelector
             alternates={message.alternates!}
             turnId={message.turnId}
