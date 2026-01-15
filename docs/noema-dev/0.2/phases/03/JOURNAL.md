@@ -640,3 +640,35 @@ Added comprehensive integration tests for the Session API with memory-based stor
 
 ---
 
+## 2026-01-15: Bug Fixes for Edit Message Flow
+
+### Bug 1: Edit Doesn't Trigger AI Response
+
+After editing a user message and creating a fork, the AI wasn't responding - user had to send another message. This was because `edit_message` created the fork but didn't trigger the LLM.
+
+**Fix:**
+1. Added `run_agent()` method to `ConversationManager` that sends `RunAgent` command without truncating first
+2. `edit_message` now calls `manager.run_agent(tool_config)` after creating the new manager
+
+The difference from `regenerate()`:
+- `regenerate()` truncates context first (to regenerate at a specific turn)
+- `run_agent()` just starts the agent on current pending (for edit flow where fork already has content)
+
+### Bug 2: Gemini thought_signature Error
+
+Forked conversations with Gemini tool calls were failing with:
+```
+Function call is missing a thought_signature...
+```
+
+**Fix:**
+Extended `ToolCall` struct with `extra: serde_json::Value` field to preserve provider-specific metadata. For Gemini, `thought_signature` is captured when receiving tool calls and echoed back when sending tool results.
+
+**Changes:**
+- `llm::api::ToolCall` - Added `extra` field
+- `providers/gemini/chat/api.rs` - Added `thought_signature` field to `Part` struct
+- All providers updated to initialize `extra` (null for non-Gemini)
+- Gemini conversion functions preserve/restore `thought_signature` via `extra`
+
+---
+
