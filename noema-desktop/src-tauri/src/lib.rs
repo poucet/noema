@@ -195,6 +195,7 @@ pub fn run() {
             commands::chat::fork_conversation,
             commands::chat::switch_view,
             commands::chat::select_span,
+            commands::chat::edit_message,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,
