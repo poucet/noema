@@ -194,13 +194,30 @@ User inspects a turn → sees all spans (alternatives) → can compare and selec
 | ✅ | 3.3.D6c | 🔧 Frontend: Display span metadata (model, timestamp) |
 | ⬜ | 3.3.D6d | ✅ User: Verify can see all alternatives, select any one |
 
-#### Part E: Final Verification (3 tasks)
+#### Part E: Entity Layer (8 tasks)
+
+**Goal**: Unified addressable layer. Views become first-class entities. Conversations table replaced by entities.
+
+See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - FR-0.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.19 | 🔧 User: E2E verification - all journeys work end-to-end |
-| ⬜ | 3.3.20 | 🔧 User: SQL verify views and view_selections have correct data |
-| ⬜ | 3.3.21 | ✅ Final E2E: fresh install, all conversation features work
+| ⬜ | 3.3.E1 | 🏗️ Define Entity, EntityRelation types and EntityStore trait |
+| ⬜ | 3.3.E2 | 📦 Add entities table |
+| ⬜ | 3.3.E3 | 📦 Add entity_relations table |
+| ⬜ | 3.3.E4 | ⚡ Implement SqliteEntityStore CRUD |
+| ⬜ | 3.3.E5 | ⚡ Implement entity relations (add, get, remove) |
+| ⬜ | 3.3.E6 | 🔧 Replace ConversationStore with EntityStore in coordinator |
+| ⬜ | 3.3.E7 | 🧹 Remove conversations table and ConversationStore trait |
+| ⬜ | 3.3.E8 | ✅ Unit tests for entity layer |
+
+#### Part F: Final Verification (3 tasks)
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.F1 | 🔧 User: E2E verification - all journeys work end-to-end |
+| ⬜ | 3.3.F2 | 🔧 User: SQL verify views, view_selections, entities have correct data |
+| ⬜ | 3.3.F3 | ✅ Final E2E: fresh install, all conversation features work
 
 ### 3.3b Subconversations (5 tasks)
 
@@ -276,23 +293,6 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ⬜ | 3.7.4 | ⚡ Implement get_activity_summary |
 | ⬜ | 3.7.5 | ⚡ Implement LLM context rendering |
 | ⬜ | 3.7.6 | ✅ Unit tests for temporal queries |
-
-#### Part E: Entity Layer (8 tasks)
-
-**Goal**: Unified addressable layer. Views become first-class entities. Conversations table replaced by entities.
-
-See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - FR-0 and Phase 4.
-
-| Status | # | Task |
-|--------|---|------|
-| ⬜ | 3.3.E1 | 🏗️ Define Entity, EntityRelation types and EntityStore trait |
-| ⬜ | 3.3.E2 | 📦 Add entities table |
-| ⬜ | 3.3.E3 | 📦 Add entity_relations table |
-| ⬜ | 3.3.E4 | ⚡ Implement SqliteEntityStore CRUD |
-| ⬜ | 3.3.E5 | ⚡ Implement entity relations (add, get, remove) |
-| ⬜ | 3.3.E6 | 🔧 Replace ConversationStore with EntityStore in coordinator |
-| ⬜ | 3.3.E7 | 🧹 Remove conversations table and ConversationStore trait |
-| ⬜ | 3.3.E8 | ✅ E2E verification - conversations work via entity layer |
 
 ---
 
