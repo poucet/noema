@@ -94,7 +94,7 @@ pub use implementations::fs::FsBlobStore;
 // Memory implementations (for testing)
 pub use implementations::memory::{
     MemoryAssetStore, MemoryBlobStore, MemoryTextStore, MemoryConversationStore,
-    MemoryDocumentStore, MemoryTurnStore,
+    MemoryDocumentStore, MemoryTurnStore, MemoryUserStore, MemoryStorage,
 };
 
 // Document resolution

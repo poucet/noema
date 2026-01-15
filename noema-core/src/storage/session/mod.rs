@@ -14,6 +14,9 @@ mod resolver;
 mod session;
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 // Re-export session types
 pub use resolver::AssetResolver;
 pub use session::Session;

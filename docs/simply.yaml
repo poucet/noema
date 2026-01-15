@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.D1b"
-task_name: "Journey 1: Regenerate Response - Frontend"
+task: "3.3.E3a"
+task_name: "Backend: edit_message command"
 
 # Completed
 completed_features:

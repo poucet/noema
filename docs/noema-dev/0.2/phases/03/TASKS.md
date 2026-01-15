@@ -104,7 +104,7 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.11 | ⚡ Implement `Session::open()`, `commit()`, `commit_parallel()` |
 | ✅ | 3.3.12 | ⚡ Implement `messages_for_display()` and `messages_for_llm()` with lazy caching |
 | ✅ | 3.3.13 | 🔧 Update `ChatEngine` to use new `Session<S>` API |
-| ⬜ | 3.3.14 | ✅ Integration tests with engine |
+| ✅ | 3.3.14 | ✅ Integration tests with engine |
 
 #### Part C: Legacy Cleanup (4 tasks)
 

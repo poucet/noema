@@ -486,3 +486,42 @@ Discussed and documented a major architectural refactor: the **Entity Layer**.
 
 ---
 
+## 2026-01-15: Session Integration Tests (3.3.14)
+
+Added comprehensive integration tests for the Session API with memory-based storage.
+
+### New Files
+
+**`storage/implementations/memory/user.rs`**
+- In-memory `MemoryUserStore` implementation for testing
+- Implements `UserStore` trait with user CRUD operations
+
+**`storage/implementations/memory/mod.rs`**
+- Added `MemoryUserStore` export
+- Added `MemoryStorage` type bundle (implements `StorageTypes`)
+
+**`storage/session/tests.rs`**
+- 15 integration tests covering Session API with StorageCoordinator
+
+### Test Coverage
+
+| Category | Tests |
+|----------|-------|
+| Session Creation | `test_session_new_creates_empty_session`, `test_session_open_loads_existing_messages` |
+| Message Management | `test_session_add_to_pending`, `test_session_commit_moves_to_resolved`, `test_session_all_messages_combines_resolved_and_pending` |
+| Context Interface | `test_session_as_conversation_context`, `test_session_context_commit` |
+| Truncation | `test_session_truncate_clears_all`, `test_session_truncate_at_turn` |
+| Cache Management | `test_session_clear_cache`, `test_session_clear_pending` |
+| View Management | `test_session_open_view` |
+| CommitMode | `test_session_commit_at_turn_regeneration` |
+| Content | `test_session_preserves_message_content`, `test_session_multi_content_message` |
+
+### Key Test Scenarios
+
+1. **Full lifecycle**: Create session → add messages → commit → open new session → verify messages loaded
+2. **Regeneration flow**: Commit messages → truncate at turn → add new response → commit at same turn
+3. **Fork/view**: Create messages in main view → fork → open forked view → verify isolation
+4. **ConversationContext trait**: Verify Session implements trait correctly for agent compatibility
+
+---
+
