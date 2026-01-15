@@ -521,12 +521,14 @@ export interface EditMessageResponse {
 
 /**
  * Edit a user message, creating a fork with the new content
- * Creates a new view forked at the specified turn with the edited content.
+ * Creates a new view forked at the specified turn with the edited content,
+ * then triggers the AI to respond to the edited message.
  */
 export async function editMessage(
   conversationId: string,
   turnId: string,
-  content: InputContentBlock[]
+  content: InputContentBlock[],
+  toolConfig?: ToolConfig
 ): Promise<EditMessageResponse> {
-  return invoke<EditMessageResponse>("edit_message", { conversationId, turnId, content });
+  return invoke<EditMessageResponse>("edit_message", { conversationId, turnId, content, toolConfig });
 }

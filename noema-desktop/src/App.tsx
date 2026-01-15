@@ -586,14 +586,17 @@ function App() {
     setEditingMessage({ turnId, text: currentText });
   };
 
-  // Submit edited message - creates a fork with new content
+  // Submit edited message - creates a fork with new content and triggers AI response
   const handleEditSubmit = async (newText: string) => {
     if (!editingMessage) return;
 
     try {
       setError(null);
+      setIsLoading(true);
+
       const content: InputContentBlock[] = [{ type: "text", text: newText }];
-      const result = await tauri.editMessage(currentConversationId, editingMessage.turnId, content);
+      const toolConfig: ToolConfig = { enabled: toolsEnabled, serverIds: null, toolNames: null };
+      const result = await tauri.editMessage(currentConversationId, editingMessage.turnId, content, toolConfig);
 
       // Update state with the new view and messages
       setMessages(result.messages);
@@ -603,10 +606,11 @@ function App() {
       const convViews = await tauri.listConversationViews(currentConversationId);
       setViews(convViews);
 
-      // Close the modal
+      // Close the modal (AI response will stream in via events)
       setEditingMessage(null);
     } catch (err) {
       appLog.error("Edit message error", String(err));
+      setIsLoading(false);
       setError(String(err));
     }
   };

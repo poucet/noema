@@ -717,17 +717,18 @@ pub struct EditMessageResponse {
     pub messages: Vec<DisplayMessage>,
 }
 
-/// Edit a user message, creating a fork with the new content
+/// Edit a user message, creating a fork with the new content and triggering AI response
 ///
 /// This creates a new view forked from the current view at the specified turn,
 /// with a new span containing the edited message content. The manager is
-/// switched to use the new view.
+/// switched to use the new view and the AI is triggered to respond.
 #[tauri::command]
 pub async fn edit_message(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
     turn_id: TurnId,
     content: Vec<DisplayInputContent>,
+    tool_config: Option<ToolConfig>,
 ) -> Result<EditMessageResponse, String> {
     use noema_core::storage::OriginKind;
 
@@ -795,6 +796,18 @@ pub async fn edit_message(
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
     let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
+
+    // Trigger AI to respond to the edited message
+    let core_tool_config = match tool_config {
+        Some(tc) => CoreToolConfig {
+            enabled: tc.enabled,
+            server_ids: tc.server_ids,
+            tool_names: tc.tool_names,
+        },
+        None => CoreToolConfig::all_enabled(),
+    };
+    manager.process_pending(core_tool_config);
+
     state.managers.lock().await.insert(conversation_id, manager);
 
     // Enrich with alternates
