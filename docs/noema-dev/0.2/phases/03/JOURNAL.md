@@ -403,6 +403,46 @@ Wired span selection and fork functionality to frontend.
 
 ---
 
+## 2026-01-15: Design Notes - Unified Branch Model
+
+Current UCM model has some conceptual friction when thinking about forking and regeneration:
+
+### Current Model Issues
+
+1. **Regenerate creates span, fork creates view** - But conceptually both are branch points. The difference is UI semantics:
+   - Regenerate: "Give me a different response at this exact point"
+   - Fork: "Let me take the conversation in a different direction"
+
+2. **Spans are flat** - All spans at a turn are peers, but if a span's response triggers follow-up turns, those are "children" of that span. Current model doesn't capture parent-child relationship.
+
+3. **View selections disconnected from tree** - Views maintain selection state via `view_selections` table, separate from the natural tree structure.
+
+### Proposed: Hierarchical Branches
+
+Each branch could own its downstream turns:
+
+```
+Turn 1 (User: "Hello")
+├── Branch A (Assistant: "Hi!")
+│   └── Turn 2 (User: "How are you?")
+│       ├── Branch A1 (Assistant: "Good!")
+│       └── Branch A2 (Assistant: "Great!") ← regeneration
+└── Branch B (Assistant: "Hey there!") ← also regeneration of Turn 1
+    └── Turn 3 (User: "Different question...")
+```
+
+**Key insight**: Branches should own their downstream turns, not just be alternatives at a single point.
+
+### Questions to Resolve
+
+- Does this simplify or complicate sub-conversations (MCP agent spawns)?
+- How do we handle "splicing" - inserting content mid-conversation?
+- Should views be derived from branch selections, or is explicit selection still needed?
+
+**Status**: Captured for future discussion. Continuing with current model for now.
+
+---
+
 ## 2026-01-13: View Selector UI (3.3.D4c, 3.3.D5b)
 
 Added ViewSelector component for switching between conversation views (forks).

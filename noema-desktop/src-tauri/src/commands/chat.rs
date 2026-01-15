@@ -537,22 +537,33 @@ pub async fn get_span_messages(
     span_id: SpanId,
 ) -> Result<Vec<DisplayMessage>, String> {
     let stores = state.get_stores()?;
+    let coordinator = state.get_coordinator()?;
 
     let messages = stores.turn()
         .get_messages(&span_id)
         .await
         .map_err(|e| format!("Failed to get span messages: {}", e))?;
 
-    Ok(messages
-        .into_iter()
-        .map(|m| DisplayMessage {
+    let mut result = Vec::with_capacity(messages.len());
+    for m in messages {
+        // Resolve stored content to display content
+        let resolved = coordinator
+            .resolve_stored_content(&m.content)
+            .await
+            .map_err(|e| format!("Failed to resolve content: {}", e))?;
+
+        let content = resolved.iter().map(crate::types::DisplayContent::from).collect();
+
+        result.push(DisplayMessage {
             role: llm::Role::from(m.message.role),
-            content: vec![],
+            content,
             turn_id: None,
             span_id: Some(span_id.clone()),
             alternates: None,
-        })
-        .collect())
+        });
+    }
+
+    Ok(result)
 }
 
 /// List all views (branches) for a conversation
