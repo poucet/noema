@@ -19,8 +19,6 @@
 
 ## Documentation
 
-**See `simply/simply.md` for the development workflow.**
-
 - Update phase docs before each commit (DEVLOG, OBSERVATIONS, etc.)
 
 ## Self-Improvement
