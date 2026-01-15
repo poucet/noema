@@ -13,8 +13,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ✅ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
-| 🔄 | P0 | 3.3 | Views and forking | Views, forking operations, user journeys |
-| ⬜ | P0 | 3.3.E | Entity layer | Unified addressable layer - completes conversation model |
+| 🔄 | P0 | 3.3 | Views and forking | Views, forking operations, entity layer, user journeys |
 | ⬜ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
 | ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
@@ -127,74 +126,7 @@ Each microtask is a single atomic commit. Complete in order within each feature.
 | ✅ | 3.3.18e | 🧹 Split sqlite/conversation.rs into turn.rs and conversation.rs to match traits layout |
 | ✅ | 3.3.18f | ⚡ Add MemoryTurnStore, MemoryConversationStore, MemoryDocumentStore implementations |
 
-#### Part D: User Journeys - UCM Verification (6 journeys, ~21 tasks)
-
-**Goal**: Implement and verify all user-facing UCM operations. Each journey is a complete user workflow that exercises the underlying TurnStore/View operations.
-
-##### Journey 1: Regenerate Response (3 tasks)
-
-User clicks "regenerate" on assistant message → creates new span at same turn, selects it.
-
-| Status | # | Task |
-|--------|---|------|
-| ✅ | 3.3.D1a | ⚡ Backend: `regenerate_response` command - add_span at turn, select in view |
-| ✅ | 3.3.D1b | 🔧 Frontend: Wire regenerate button to new command |
-| ⬜ | 3.3.D1c | ✅ User: Verify regenerate creates alternate, can switch between |
-
-##### Journey 2: Select Alternate Span (3 tasks)
-
-User views parallel responses → selects one to use → view updates selection.
-
-| Status | # | Task |
-|--------|---|------|
-| ✅ | 3.3.D2a | ⚡ Backend: `select_span` command - calls TurnStore::select_span |
-| ✅ | 3.3.D2b | 🔧 Frontend: Wire "Use this" button to select_span command |
-| ⬜ | 3.3.D2c | ✅ User: Verify span selection persists, affects subsequent context |
-
-##### Journey 3: Edit User Message (4 tasks)
-
-User edits previous message → creates fork from that turn → new span with edited content.
-
-| Status | # | Task |
-|--------|---|------|
-| ⬜ | 3.3.D3a | ⚡ Backend: `edit_message` command - fork_view + edit_turn |
-| ⬜ | 3.3.D3b | 🔧 Frontend: Add edit button to user messages |
-| ⬜ | 3.3.D3c | 🔧 Frontend: Edit modal/inline with submit action |
-| ⬜ | 3.3.D3d | ✅ User: Verify edit creates fork, original unchanged |
-
-##### Journey 4: Fork Conversation (4 tasks)
-
-User forks from any turn → new view sharing history up to fork point.
-
-| Status | # | Task |
-|--------|---|------|
-| ✅ | 3.3.D4a | ⚡ Backend: `fork_conversation` command - fork_view at turn |
-| ✅ | 3.3.D4b | 🔧 Frontend: Add fork button/menu to turns |
-| ✅ | 3.3.D4c | 🔧 Frontend: Show view list, allow switching |
-| ⬜ | 3.3.D4d | ✅ User: Verify fork shares history, diverges after fork point |
-
-##### Journey 5: Switch View (3 tasks)
-
-User has multiple views → switches between them → conversation display updates.
-
-| Status | # | Task |
-|--------|---|------|
-| ✅ | 3.3.D5a | ⚡ Backend: `switch_view` command - Session opens with different view_id |
-| ✅ | 3.3.D5b | 🔧 Frontend: View selector UI (sidebar or dropdown) |
-| ⬜ | 3.3.D5c | ✅ User: Verify switching views shows different conversation paths |
-
-##### Journey 6: View Alternates at Turn (4 tasks)
-
-User inspects a turn → sees all spans (alternatives) → can compare and select.
-
-| Status | # | Task |
-|--------|---|------|
-| ✅ | 3.3.D6a | ⚡ Backend: `get_turn_alternates` returns all spans with content |
-| ✅ | 3.3.D6b | 🔧 Frontend: Alternates panel/popover for turns with multiple spans |
-| ✅ | 3.3.D6c | 🔧 Frontend: Display span metadata (model, timestamp) |
-| ⬜ | 3.3.D6d | ✅ User: Verify can see all alternatives, select any one |
-
-#### Part E: Entity Layer (8 tasks)
+#### Part D: Entity Layer (8 tasks)
 
 **Goal**: Unified addressable layer. Views become first-class entities. Conversations table replaced by entities.
 
@@ -202,22 +134,91 @@ See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - FR-0.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.E1 | 🏗️ Define Entity, EntityRelation types and EntityStore trait |
-| ⬜ | 3.3.E2 | 📦 Add entities table |
-| ⬜ | 3.3.E3 | 📦 Add entity_relations table |
-| ⬜ | 3.3.E4 | ⚡ Implement SqliteEntityStore CRUD |
-| ⬜ | 3.3.E5 | ⚡ Implement entity relations (add, get, remove) |
-| ⬜ | 3.3.E6 | 🔧 Replace ConversationStore with EntityStore in coordinator |
-| ⬜ | 3.3.E7 | 🧹 Remove conversations table and ConversationStore trait |
-| ⬜ | 3.3.E8 | ✅ Unit tests for entity layer |
+| ⬜ | 3.3.D1 | 🏗️ Define Entity, EntityRelation types and EntityStore trait |
+| ⬜ | 3.3.D2 | 📦 Add entities table |
+| ⬜ | 3.3.D3 | 📦 Add entity_relations table |
+| ⬜ | 3.3.D4 | ⚡ Implement SqliteEntityStore CRUD |
+| ⬜ | 3.3.D5 | ⚡ Implement entity relations (add, get, remove) |
+| ⬜ | 3.3.D6 | 🔧 Replace ConversationStore with EntityStore in coordinator |
+| ⬜ | 3.3.D7 | 🧹 Remove conversations table and ConversationStore trait |
+| ⬜ | 3.3.D8 | ✅ Unit tests for entity layer |
 
-#### Part F: Final Verification (3 tasks)
+#### Part E: User Journeys - Implementation (6 journeys)
+
+**Goal**: Implement all user-facing UCM operations with Entity Layer schema. User verification happens in Part F.
+
+##### Journey 1: Regenerate Response
+
+User clicks "regenerate" on assistant message → creates new span at same turn, selects it.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.F1 | 🔧 User: E2E verification - all journeys work end-to-end |
-| ⬜ | 3.3.F2 | 🔧 User: SQL verify views, view_selections, entities have correct data |
-| ⬜ | 3.3.F3 | ✅ Final E2E: fresh install, all conversation features work
+| ✅ | 3.3.E1a | ⚡ Backend: `regenerate_response` command - add_span at turn, select in view |
+| ✅ | 3.3.E1b | 🔧 Frontend: Wire regenerate button to new command |
+
+##### Journey 2: Select Alternate Span
+
+User views parallel responses → selects one to use → view updates selection.
+
+| Status | # | Task |
+|--------|---|------|
+| ✅ | 3.3.E2a | ⚡ Backend: `select_span` command - calls TurnStore::select_span |
+| ✅ | 3.3.E2b | 🔧 Frontend: Wire "Use this" button to select_span command |
+
+##### Journey 3: Edit User Message
+
+User edits previous message → creates fork from that turn → new span with edited content.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.E3a | ⚡ Backend: `edit_message` command - fork_view + edit_turn |
+| ⬜ | 3.3.E3b | 🔧 Frontend: Add edit button to user messages |
+| ⬜ | 3.3.E3c | 🔧 Frontend: Edit modal/inline with submit action |
+
+##### Journey 4: Fork Conversation
+
+User forks from any turn → new view sharing history up to fork point.
+
+| Status | # | Task |
+|--------|---|------|
+| ✅ | 3.3.E4a | ⚡ Backend: `fork_conversation` command - fork_view at turn |
+| ✅ | 3.3.E4b | 🔧 Frontend: Add fork button/menu to turns |
+| ✅ | 3.3.E4c | 🔧 Frontend: Show view list, allow switching |
+
+##### Journey 5: Switch View
+
+User has multiple views → switches between them → conversation display updates.
+
+| Status | # | Task |
+|--------|---|------|
+| ✅ | 3.3.E5a | ⚡ Backend: `switch_view` command - Session opens with different view_id |
+| ✅ | 3.3.E5b | 🔧 Frontend: View selector UI (sidebar or dropdown) |
+
+##### Journey 6: View Alternates at Turn
+
+User inspects a turn → sees all spans (alternatives) → can compare and select.
+
+| Status | # | Task |
+|--------|---|------|
+| ✅ | 3.3.E6a | ⚡ Backend: `get_turn_alternates` returns all spans with content |
+| ✅ | 3.3.E6b | 🔧 Frontend: Alternates panel/popover for turns with multiple spans |
+| ✅ | 3.3.E6c | 🔧 Frontend: Display span metadata (model, timestamp) |
+
+#### Part F: User Verification (9 tasks)
+
+**Goal**: Verify all journeys work end-to-end after Entity Layer is complete.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.3.F1 | ✅ User: Verify regenerate creates alternate, can switch between |
+| ⬜ | 3.3.F2 | ✅ User: Verify span selection persists, affects subsequent context |
+| ⬜ | 3.3.F3 | ✅ User: Verify edit creates fork, original unchanged |
+| ⬜ | 3.3.F4 | ✅ User: Verify fork shares history, diverges after fork point |
+| ⬜ | 3.3.F5 | ✅ User: Verify switching views shows different conversation paths |
+| ⬜ | 3.3.F6 | ✅ User: Verify can see all alternatives, select any one |
+| ⬜ | 3.3.F7 | 🔧 User: SQL verify views, view_selections, entities have correct data |
+| ⬜ | 3.3.F8 | ✅ Final E2E: fresh install, all conversation features work |
+| ⬜ | 3.3.F9 | ✅ Final: Entity layer working - views are entities, forks use relations
 
 ### 3.3b Subconversations (5 tasks)
 
