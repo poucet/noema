@@ -257,6 +257,7 @@ impl From<ChatCompletionResponse> for ChatMessage {
                     id: tc.id.clone(),
                     name: tc.function.name.clone(),
                     arguments,
+                    extra: serde_json::Value::Null,
                 }));
             }
         }

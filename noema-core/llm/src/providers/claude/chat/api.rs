@@ -116,6 +116,7 @@ impl TryFrom<&Content> for crate::api::ContentBlock {
                     id: id.clone(),
                     name: name.clone(),
                     arguments: input.clone(),
+                    extra: serde_json::Value::Null,
                 }))
             }
             Content::ToolResult {

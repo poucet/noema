@@ -138,8 +138,15 @@ pub(crate) enum PartType {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Part {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) thought: Option<bool>,
+
+    /// Required by Gemini for function calls in conversation history.
+    /// Must be preserved from the original response and echoed back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) thought_signature: Option<String>,
 
     #[serde(flatten)]
     pub(crate) data: PartType,
@@ -152,6 +159,7 @@ impl Part {
     pub fn new_text(text: String) -> Self {
         Part {
             thought: None,
+            thought_signature: None,
             data: PartType::Text(text),
             extra: None,
         }
@@ -179,13 +187,22 @@ impl From<&Part> for Option<crate::api::ContentBlock> {
                     None
                 }
             }
-            PartType::FunctionCall(fc) => Some(crate::api::ContentBlock::ToolCall(
-                crate::api::ToolCall {
-                    id: format!("gemini_{}", fc.name), // Gemini doesn't provide IDs
-                    name: fc.name.clone(),
-                    arguments: fc.args.clone(),
-                },
-            )),
+            PartType::FunctionCall(fc) => {
+                // Preserve thought_signature in extra for round-tripping to Gemini
+                let extra = if let Some(sig) = &part.thought_signature {
+                    serde_json::json!({ "thought_signature": sig })
+                } else {
+                    serde_json::Value::Null
+                };
+                Some(crate::api::ContentBlock::ToolCall(
+                    crate::api::ToolCall {
+                        id: format!("gemini_{}", fc.name), // Gemini doesn't provide IDs
+                        name: fc.name.clone(),
+                        arguments: fc.args.clone(),
+                        extra,
+                    },
+                ))
+            }
             PartType::FunctionResponse(fr) => Some(crate::api::ContentBlock::ToolResult(
                 crate::api::ToolResult {
                     tool_call_id: format!("gemini_{}", fr.name),
@@ -207,6 +224,7 @@ fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
         crate::api::ContentBlock::Text { text } => vec![Part::new_text(text.clone())],
         crate::api::ContentBlock::ToolCall(call) => vec![Part {
             thought: None,
+            thought_signature: call.extra.get("thought_signature").and_then(|v| v.as_str()).map(|s| s.to_string()),
             data: PartType::FunctionCall(GeminiFunctionCall {
                 name: call.name.clone(),
                 args: call.arguments.clone(),
@@ -227,6 +245,7 @@ fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
             };
             parts.push(Part {
                 thought: None,
+                thought_signature: None,
                 data: PartType::FunctionResponse(GeminiFunctionResponse {
                     name: result.tool_call_id.clone(),
                     response,
@@ -240,6 +259,7 @@ fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
                     crate::api::ToolResultContent::Image { data, mime_type } => {
                         parts.push(Part {
                             thought: None,
+                            thought_signature: None,
                             data: PartType::InlineData(InlineData {
                                 mime_type: mime_type.clone(),
                                 data: data.clone(),
@@ -250,6 +270,7 @@ fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
                     crate::api::ToolResultContent::Audio { data, mime_type } => {
                         parts.push(Part {
                             thought: None,
+                            thought_signature: None,
                             data: PartType::InlineData(InlineData {
                                 mime_type: mime_type.clone(),
                                 data: data.clone(),
@@ -267,6 +288,7 @@ fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
         }
         crate::api::ContentBlock::Image { data, mime_type } => vec![Part {
             thought: None,
+            thought_signature: None,
             data: PartType::InlineData(InlineData {
                 mime_type: mime_type.clone(),
                 data: data.clone(),
@@ -275,6 +297,7 @@ fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
         }],
         crate::api::ContentBlock::Audio { data, mime_type } => vec![Part {
             thought: None,
+            thought_signature: None,
             data: PartType::InlineData(InlineData {
                 mime_type: mime_type.clone(),
                 data: data.clone(),
@@ -607,6 +630,7 @@ mod tests {
             role: Role::User,
             parts: vec![Part {
                 thought: Some(true),
+                thought_signature: None,
                 data: PartType::Text("Hello, world!".to_string()),
                 extra: Some(serde_json::json!({"foo": "bar"})),
             }],

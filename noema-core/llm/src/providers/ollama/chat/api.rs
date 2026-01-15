@@ -112,6 +112,7 @@ impl From<Message> for crate::ChatMessage {
                     id: format!("call_{}", i),
                     name: tc.function.name,
                     arguments: tc.function.arguments,
+                    extra: serde_json::Value::Null,
                 }));
             }
         }
@@ -164,6 +165,7 @@ impl From<Message> for crate::ChatChunk {
                     id: format!("call_{}", i),
                     name: tc.function.name,
                     arguments: tc.function.arguments,
+                    extra: serde_json::Value::Null,
                 }));
             }
         }

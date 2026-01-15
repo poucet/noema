@@ -51,6 +51,9 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
+    /// Provider-specific metadata (e.g., Gemini's thought_signature)
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub extra: serde_json::Value,
 }
 
 /// Content within a tool result - can be text, images, audio, etc.

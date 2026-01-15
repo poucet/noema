@@ -110,6 +110,7 @@ impl ChatModel for ClaudeChatModel {
                                 id,
                                 name,
                                 arguments,
+                                extra: serde_json::Value::Null,
                             };
                             return Some(crate::ChatChunk::assistant(crate::ChatPayload::tool_call(
                                 tool_call,
