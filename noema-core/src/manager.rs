@@ -408,6 +408,14 @@ impl<S: StorageTypes> ConversationManager<S> {
         });
     }
 
+    /// Run agent on current pending messages (for edit flow where session already has pending)
+    pub fn run_agent(&self, tool_config: ToolConfig) {
+        let _ = self.cmd_tx.send(ManagerCommand::RunAgent {
+            tool_config,
+            commit_mode: CommitMode::NewTurns,
+        });
+    }
+
     /// Clear all history
     pub fn clear_history(&self) {
         let _ = self.cmd_tx.send(ManagerCommand::Truncate(None));

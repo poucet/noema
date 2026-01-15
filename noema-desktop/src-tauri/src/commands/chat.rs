@@ -806,7 +806,9 @@ pub async fn edit_message(
         },
         None => CoreToolConfig::all_enabled(),
     };
-    manager.process_pending(core_tool_config);
+
+    // Trigger agent before inserting (background task will start processing)
+    manager.run_agent(core_tool_config);
 
     state.managers.lock().await.insert(conversation_id, manager);
 
