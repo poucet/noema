@@ -28,7 +28,6 @@ export function ContentBlock({ block, onDocumentClick }: ContentBlockProps) {
       <AssetBlock
         url={block.assetRef.url}
         mimeType={block.assetRef.mimeType}
-        filename={block.assetRef.filename}
       />
     );
   }

@@ -384,12 +384,9 @@ function App() {
         // Clear any previous comparison results
         setCompletedParallelResponses(new Map());
         parallelResponsesRef.current = new Map();
-        // Extract text for parallel send (parallel mode doesn't support full content blocks yet)
-        const textContent = content
-          .filter((block): block is { type: "text"; text: string } => block.type === "text")
-          .map(block => block.text)
-          .join("");
-        await tauri.sendParallelMessage(textContent, selectedModelsForComparison);
+        // TODO: Parallel comparison mode - spawn multiple engines with different models
+        // For now, just send to primary model
+        await tauri.sendMessage(currentConversationId, content, toolConfig);
         // Clear selection after sending
         setSelectedModelsForComparison([]);
       } else {
