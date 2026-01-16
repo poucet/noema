@@ -2,7 +2,7 @@
 
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{ConversationStore, DocumentResolver, InputContent, Session, StorageTypes, Stores, TurnStore};
+use noema_core::storage::{DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -298,21 +298,30 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
     let stores = state.get_stores()?;
     let user_id = state.user_id.lock().await.clone();
 
-    let convos = stores
-        .conversation()
-        .list_conversations(&user_id)
+    let entities = stores
+        .entity()
+        .list_entities(&user_id, Some(&EntityType::conversation()))
         .await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
-    let mut result = Vec::with_capacity(convos.len());
-    for conv in convos {
-        let view = stores
-            .turn()
-            .get_view(&conv.main_view_id)
-            .await
-            .map_err(|e| format!("Failed to get view: {}", e))?
-            .ok_or_else(|| format!("View not found: {}", conv.main_view_id))?;
-        result.push(ConversationInfo::from_parts(&conv, &view));
+    let mut result = Vec::with_capacity(entities.len());
+    for entity in entities {
+        // Extract main_view_id from metadata
+        let main_view_id = entity.metadata
+            .as_ref()
+            .and_then(|m| m.get("main_view_id"))
+            .and_then(|v| v.as_str())
+            .map(|s| ViewId::from_string(s.to_string()));
+
+        if let Some(view_id) = main_view_id {
+            let view = stores
+                .turn()
+                .get_view(&view_id)
+                .await
+                .map_err(|e| format!("Failed to get view: {}", e))?
+                .ok_or_else(|| format!("View not found: {}", view_id))?;
+            result.push(ConversationInfo::from_entity(&entity, &view));
+        }
     }
 
     Ok(result)
@@ -413,8 +422,8 @@ pub async fn delete_conversation(
 
     let stores = state.get_stores()?;
     stores
-        .conversation()
-        .delete_conversation(&conversation_id)
+        .entity()
+        .delete_entity(&conversation_id)
         .await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
@@ -428,11 +437,18 @@ pub async fn rename_conversation(
 ) -> Result<(), String> {
     let stores = state.get_stores()?;
 
-    let name_opt = if name.trim().is_empty() { None } else { Some(name.as_str()) };
+    let mut entity = stores
+        .entity()
+        .get_entity(&conversation_id)
+        .await
+        .map_err(|e| format!("Failed to get conversation: {}", e))?
+        .ok_or_else(|| "Conversation not found".to_string())?;
+
+    entity.name = if name.trim().is_empty() { None } else { Some(name) };
 
     stores
-        .conversation()
-        .rename_conversation(&conversation_id, name_opt)
+        .entity()
+        .update_entity(&conversation_id, &entity)
         .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
@@ -444,11 +460,13 @@ pub async fn get_conversation_private(
     conversation_id: ConversationId,
 ) -> Result<bool, String> {
     let stores = state.get_stores()?;
-    stores
-        .conversation()
-        .is_conversation_private(&conversation_id)
+    let entity = stores
+        .entity()
+        .get_entity(&conversation_id)
         .await
-        .map_err(|e| format!("Failed to get conversation privacy: {}", e))
+        .map_err(|e| format!("Failed to get conversation: {}", e))?
+        .ok_or_else(|| "Conversation not found".to_string())?;
+    Ok(entity.is_private)
 }
 
 /// Set whether a conversation is marked as private
@@ -459,9 +477,19 @@ pub async fn set_conversation_private(
     is_private: bool,
 ) -> Result<(), String> {
     let stores = state.get_stores()?;
+
+    let mut entity = stores
+        .entity()
+        .get_entity(&conversation_id)
+        .await
+        .map_err(|e| format!("Failed to get conversation: {}", e))?
+        .ok_or_else(|| "Conversation not found".to_string())?;
+
+    entity.is_private = is_private;
+
     stores
-        .conversation()
-        .set_conversation_private(&conversation_id, is_private)
+        .entity()
+        .update_entity(&conversation_id, &entity)
         .await
         .map_err(|e| format!("Failed to set conversation privacy: {}", e))
 }

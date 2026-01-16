@@ -30,17 +30,17 @@ pub struct ConversationInfo {
 }
 
 impl ConversationInfo {
-    /// Create from core Stored<ConversationId, Conversation> and Stored<ViewId, View> (for turn_count)
-    pub fn from_parts(
-        conv: &noema_core::storage::Stored<ConversationId, noema_core::storage::Conversation>,
+    /// Create from StoredEntity and View
+    pub fn from_entity(
+        entity: &noema_core::storage::StoredEntity,
         view: &noema_core::storage::Stored<ViewId, noema_core::storage::View>,
     ) -> Self {
         Self {
-            id: conv.id.clone(),
-            name: conv.name.clone(),
+            id: entity.id.clone(),
+            name: entity.name.clone(),
             message_count: view.turn_count,
-            is_private: conv.is_private,
-            created_at: conv.created_at,
+            is_private: entity.is_private,
+            created_at: entity.created_at,
         }
     }
 }

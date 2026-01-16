@@ -19,10 +19,10 @@ use crate::storage::content::{ContentResolver, InputContent, StoredContent};
 use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, TurnId, UserId, ViewId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
-    AssetStore, BlobStore, ConversationStore, StorageTypes, Stores, TextStore, TurnStore,
+    AssetStore, BlobStore, EntityStore, StorageTypes, Stores, TextStore, TurnStore,
 };
 use crate::storage::types::{
-    Asset, BlobHash, ContentBlock as ContentBlockData, ContentOrigin, OriginKind,
+    Asset, BlobHash, ContentBlock as ContentBlockData, ContentOrigin, EntityType, OriginKind,
     TurnWithContent,
 };
 
@@ -34,7 +34,7 @@ pub struct StorageCoordinator<S: StorageTypes> {
     blob_store: Arc<S::Blob>,
     asset_store: Arc<S::Asset>,
     content_block_store: Arc<S::Text>,
-    conversation_store: Arc<S::Conversation>,
+    entity_store: Arc<S::Entity>,
     turn_store: Arc<S::Turn>,
     _marker: PhantomData<S>,
 }
@@ -46,7 +46,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             blob_store: stores.blob(),
             asset_store: stores.asset(),
             content_block_store: stores.text(),
-            conversation_store: stores.conversation(),
+            entity_store: stores.entity(),
             turn_store: stores.turn(),
             _marker: PhantomData,
         }
@@ -57,14 +57,14 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         blob_store: Arc<S::Blob>,
         asset_store: Arc<S::Asset>,
         content_block_store: Arc<S::Text>,
-        conversation_store: Arc<S::Conversation>,
+        entity_store: Arc<S::Entity>,
         turn_store: Arc<S::Turn>,
     ) -> Self {
         Self {
             blob_store,
             asset_store,
             content_block_store,
-            conversation_store,
+            entity_store,
             turn_store,
             _marker: PhantomData,
         }
@@ -180,7 +180,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     /// Open a session for a conversation, resolving or creating the main view.
     ///
     /// This method handles the multi-store coordination of:
-    /// 1. Getting or creating the main view for the conversation
+    /// 1. Getting the conversation entity and extracting main_view_id from metadata
     /// 2. Loading the view path (turns with content)
     /// 3. Resolving stored content to resolved messages
     ///
@@ -189,42 +189,58 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         &self,
         conversation_id: &ConversationId,
     ) -> Result<(ViewId, Vec<ResolvedMessage>)> {
-        // Get conversation to check for main_view_id
-        let conv = self.conversation_store
-            .get_conversation(conversation_id)
+        // Get conversation entity to extract main_view_id from metadata
+        let entity = self.entity_store
+            .get_entity(conversation_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
 
-        // Conversation has main_view_id - use it
-        self.open_session_with_view(&conv.main_view_id).await
-            .map(|resolved| (conv.main_view_id.clone(), resolved))
+        // Extract main_view_id from metadata
+        let main_view_id = entity.metadata
+            .as_ref()
+            .and_then(|m| m.get("main_view_id"))
+            .and_then(|v| v.as_str())
+            .map(ViewId::from_string)
+            .ok_or_else(|| anyhow::anyhow!("Conversation has no main_view_id: {}", conversation_id))?;
+
+        // Open session with the main view
+        self.open_session_with_view(&main_view_id).await
+            .map(|resolved| (main_view_id, resolved))
     }
 
     /// Create a new conversation with its main view.
     ///
     /// This method handles the multi-store coordination of:
-    /// 1. Creating the conversation record
+    /// 1. Creating the conversation entity
     /// 2. Creating the main view
-    /// 3. Setting the main_view_id on the conversation
+    /// 3. Setting the main_view_id in entity metadata
     ///
-    /// Returns the ConversationId for further operations.
+    /// Returns the ConversationId (EntityId) for further operations.
     pub async fn create_conversation_with_view(
         &self,
         user_id: &UserId,
         name: Option<&str>,
     ) -> Result<ConversationId> {
-        // Create conversation record
-        let conversation_id = self.conversation_store
-            .create_conversation(user_id, name)
+        // Create conversation entity
+        let conversation_id = self.entity_store
+            .create_entity(EntityType::conversation(), Some(user_id))
             .await?;
 
         // Create main view
         let view = self.turn_store.create_view().await?;
 
-        // Link them
-        self.conversation_store
-            .set_main_view_id(&conversation_id, &view.id)
-            .await?;
+        // Get entity and update with main_view_id and name
+        let mut entity = self.entity_store
+            .get_entity(&conversation_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Just-created entity not found"))?;
+
+        entity.name = name.map(|n| n.to_string());
+        entity.metadata = Some(serde_json::json!({
+            "main_view_id": view.id.as_str()
+        }));
+
+        self.entity_store.update_entity(&conversation_id, &entity).await?;
 
         Ok(conversation_id)
     }
@@ -396,7 +412,7 @@ mod tests {
     use super::*;
     use crate::storage::content::StoredContent;
     use crate::storage::implementations::mock::{
-        MockAssetStore, MockBlobStore, MockConversationStore, MockStorage, MockTextStore,
+        MockAssetStore, MockBlobStore, MockEntityStore, MockStorage, MockTextStore,
         MockTurnStore,
     };
     use crate::storage::traits::AssetStore;
@@ -406,7 +422,7 @@ mod tests {
             Arc::new(MockBlobStore::new()),
             Arc::new(MockAssetStore::new()),
             content_block_store,
-            Arc::new(MockConversationStore),
+            Arc::new(MockEntityStore),
             Arc::new(MockTurnStore),
         )
     }
@@ -420,7 +436,7 @@ mod tests {
             blob_store,
             asset_store,
             content_block_store,
-            Arc::new(MockConversationStore),
+            Arc::new(MockEntityStore),
             Arc::new(MockTurnStore),
         )
     }

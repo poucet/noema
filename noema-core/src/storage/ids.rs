@@ -92,12 +92,16 @@ macro_rules! define_id {
     };
 }
 
+// Entities (addressable layer) - must be defined first since ConversationId is an alias
+define_id!(EntityId, "Unique identifier for an addressable entity");
+
 // Content & Assets
 define_id!(ContentBlockId, "Unique identifier for a content block");
 define_id!(AssetId, "Unique identifier for a binary asset (SHA-256 hash)");
 
-// Conversations
-define_id!(ConversationId, "Unique identifier for a conversation");
+// Conversations (ConversationId is now an alias for EntityId)
+/// Type alias for backward compatibility - conversations are now entities
+pub type ConversationId = EntityId;
 define_id!(TurnId, "Unique identifier for a turn in a conversation");
 define_id!(SpanId, "Unique identifier for a span (alternative response)");
 define_id!(MessageId, "Unique identifier for a message within a span");
@@ -118,9 +122,6 @@ define_id!(ReferenceId, "Unique identifier for a cross-reference");
 
 // Users
 define_id!(UserId, "Unique identifier for a user");
-
-// Entities (addressable layer)
-define_id!(EntityId, "Unique identifier for an addressable entity");
 
 #[cfg(test)]
 mod tests {
