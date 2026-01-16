@@ -159,50 +159,76 @@ impl EntityStore for SqliteStore {
     ) -> Result<Vec<StoredEntity>> {
         let conn = self.conn().lock().unwrap();
 
-        let (sql, params): (&str, Vec<&dyn rusqlite::ToSql>) = match entity_type {
-            Some(et) => (
-                "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
-                 FROM entities
-                 WHERE user_id = ?1 AND entity_type = ?2 AND is_archived = 0
-                 ORDER BY updated_at DESC",
-                vec![&user_id as &dyn rusqlite::ToSql, &et.as_str() as &dyn rusqlite::ToSql],
-            ),
-            None => (
-                "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
-                 FROM entities
-                 WHERE user_id = ?1 AND is_archived = 0
-                 ORDER BY updated_at DESC",
-                vec![&user_id as &dyn rusqlite::ToSql],
-            ),
-        };
+        let entity_type_str = entity_type.map(|et| et.as_str().to_string());
 
-        let mut stmt = conn.prepare(sql)?;
-        let entities = stmt
-            .query_map(params.as_slice(), |row| {
-                let id: String = row.get(0)?;
-                let entity_type: String = row.get(1)?;
-                let user_id: Option<String> = row.get(2)?;
-                let name: Option<String> = row.get(3)?;
-                let slug: Option<String> = row.get(4)?;
-                let is_private: i32 = row.get(5)?;
-                let is_archived: i32 = row.get(6)?;
-                let created_at: i64 = row.get(7)?;
-                let updated_at: i64 = row.get(8)?;
-                Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at))
-            })?
-            .filter_map(|r| r.ok())
-            .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at)| {
-                let entity = Entity {
-                    entity_type: EntityType::new(entity_type),
-                    user_id: user_id.map(UserId::from_string),
-                    name,
-                    slug,
-                    is_private: is_private != 0,
-                    is_archived: is_archived != 0,
-                };
-                stored_editable(EntityId::from_string(id), entity, created_at, updated_at)
-            })
-            .collect();
+        let entities: Vec<StoredEntity> = match &entity_type_str {
+            Some(et_str) => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
+                     FROM entities
+                     WHERE user_id = ?1 AND entity_type = ?2 AND is_archived = 0
+                     ORDER BY updated_at DESC",
+                )?;
+                let rows = stmt.query_map(params![user_id.as_str(), et_str], |row| {
+                    let id: String = row.get(0)?;
+                    let entity_type: String = row.get(1)?;
+                    let user_id: Option<String> = row.get(2)?;
+                    let name: Option<String> = row.get(3)?;
+                    let slug: Option<String> = row.get(4)?;
+                    let is_private: i32 = row.get(5)?;
+                    let is_archived: i32 = row.get(6)?;
+                    let created_at: i64 = row.get(7)?;
+                    let updated_at: i64 = row.get(8)?;
+                    Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at))
+                })?;
+                rows.filter_map(|r| r.ok())
+                    .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at)| {
+                        let entity = Entity {
+                            entity_type: EntityType::new(entity_type),
+                            user_id: user_id.map(UserId::from_string),
+                            name,
+                            slug,
+                            is_private: is_private != 0,
+                            is_archived: is_archived != 0,
+                        };
+                        stored_editable(EntityId::from_string(id), entity, created_at, updated_at)
+                    })
+                    .collect()
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
+                     FROM entities
+                     WHERE user_id = ?1 AND is_archived = 0
+                     ORDER BY updated_at DESC",
+                )?;
+                let rows = stmt.query_map(params![user_id.as_str()], |row| {
+                    let id: String = row.get(0)?;
+                    let entity_type: String = row.get(1)?;
+                    let user_id: Option<String> = row.get(2)?;
+                    let name: Option<String> = row.get(3)?;
+                    let slug: Option<String> = row.get(4)?;
+                    let is_private: i32 = row.get(5)?;
+                    let is_archived: i32 = row.get(6)?;
+                    let created_at: i64 = row.get(7)?;
+                    let updated_at: i64 = row.get(8)?;
+                    Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at))
+                })?;
+                rows.filter_map(|r| r.ok())
+                    .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at)| {
+                        let entity = Entity {
+                            entity_type: EntityType::new(entity_type),
+                            user_id: user_id.map(UserId::from_string),
+                            name,
+                            slug,
+                            is_private: is_private != 0,
+                            is_archived: is_archived != 0,
+                        };
+                        stored_editable(EntityId::from_string(id), entity, created_at, updated_at)
+                    })
+                    .collect()
+            }
+        };
 
         Ok(entities)
     }
@@ -291,31 +317,33 @@ impl EntityStore for SqliteStore {
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
         let conn = self.conn().lock().unwrap();
 
-        let results: Vec<(EntityId, EntityRelation)> = match relation_type {
-            Some(rt) => {
+        let relation_type_str = relation_type.map(|rt| rt.as_str().to_string());
+
+        let results: Vec<(EntityId, EntityRelation)> = match &relation_type_str {
+            Some(rt_str) => {
                 let mut stmt = conn.prepare(
                     "SELECT to_id, relation, metadata, created_at
                      FROM entity_relations
                      WHERE from_id = ?1 AND relation = ?2
                      ORDER BY created_at DESC",
                 )?;
-                stmt.query_map(params![id.as_str(), rt.as_str()], |row| {
+                let rows = stmt.query_map(params![id.as_str(), rt_str], |row| {
                     let to_id: String = row.get(0)?;
                     let relation: String = row.get(1)?;
                     let metadata: Option<String> = row.get(2)?;
                     let created_at: i64 = row.get(3)?;
                     Ok((to_id, relation, metadata, created_at))
-                })?
-                .filter_map(|r| r.ok())
-                .map(|(to_id, relation, metadata, created_at)| {
-                    let entity_relation = EntityRelation {
-                        relation: RelationType::new(relation),
-                        metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
-                        created_at,
-                    };
-                    (EntityId::from_string(to_id), entity_relation)
-                })
-                .collect()
+                })?;
+                rows.filter_map(|r| r.ok())
+                    .map(|(to_id, relation, metadata, created_at)| {
+                        let entity_relation = EntityRelation {
+                            relation: RelationType::new(relation),
+                            metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
+                            created_at,
+                        };
+                        (EntityId::from_string(to_id), entity_relation)
+                    })
+                    .collect()
             }
             None => {
                 let mut stmt = conn.prepare(
@@ -324,23 +352,23 @@ impl EntityStore for SqliteStore {
                      WHERE from_id = ?1
                      ORDER BY created_at DESC",
                 )?;
-                stmt.query_map(params![id.as_str()], |row| {
+                let rows = stmt.query_map(params![id.as_str()], |row| {
                     let to_id: String = row.get(0)?;
                     let relation: String = row.get(1)?;
                     let metadata: Option<String> = row.get(2)?;
                     let created_at: i64 = row.get(3)?;
                     Ok((to_id, relation, metadata, created_at))
-                })?
-                .filter_map(|r| r.ok())
-                .map(|(to_id, relation, metadata, created_at)| {
-                    let entity_relation = EntityRelation {
-                        relation: RelationType::new(relation),
-                        metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
-                        created_at,
-                    };
-                    (EntityId::from_string(to_id), entity_relation)
-                })
-                .collect()
+                })?;
+                rows.filter_map(|r| r.ok())
+                    .map(|(to_id, relation, metadata, created_at)| {
+                        let entity_relation = EntityRelation {
+                            relation: RelationType::new(relation),
+                            metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
+                            created_at,
+                        };
+                        (EntityId::from_string(to_id), entity_relation)
+                    })
+                    .collect()
             }
         };
 
@@ -354,31 +382,33 @@ impl EntityStore for SqliteStore {
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
         let conn = self.conn().lock().unwrap();
 
-        let results: Vec<(EntityId, EntityRelation)> = match relation_type {
-            Some(rt) => {
+        let relation_type_str = relation_type.map(|rt| rt.as_str().to_string());
+
+        let results: Vec<(EntityId, EntityRelation)> = match &relation_type_str {
+            Some(rt_str) => {
                 let mut stmt = conn.prepare(
                     "SELECT from_id, relation, metadata, created_at
                      FROM entity_relations
                      WHERE to_id = ?1 AND relation = ?2
                      ORDER BY created_at DESC",
                 )?;
-                stmt.query_map(params![id.as_str(), rt.as_str()], |row| {
+                let rows = stmt.query_map(params![id.as_str(), rt_str], |row| {
                     let from_id: String = row.get(0)?;
                     let relation: String = row.get(1)?;
                     let metadata: Option<String> = row.get(2)?;
                     let created_at: i64 = row.get(3)?;
                     Ok((from_id, relation, metadata, created_at))
-                })?
-                .filter_map(|r| r.ok())
-                .map(|(from_id, relation, metadata, created_at)| {
-                    let entity_relation = EntityRelation {
-                        relation: RelationType::new(relation),
-                        metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
-                        created_at,
-                    };
-                    (EntityId::from_string(from_id), entity_relation)
-                })
-                .collect()
+                })?;
+                rows.filter_map(|r| r.ok())
+                    .map(|(from_id, relation, metadata, created_at)| {
+                        let entity_relation = EntityRelation {
+                            relation: RelationType::new(relation),
+                            metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
+                            created_at,
+                        };
+                        (EntityId::from_string(from_id), entity_relation)
+                    })
+                    .collect()
             }
             None => {
                 let mut stmt = conn.prepare(
@@ -387,23 +417,23 @@ impl EntityStore for SqliteStore {
                      WHERE to_id = ?1
                      ORDER BY created_at DESC",
                 )?;
-                stmt.query_map(params![id.as_str()], |row| {
+                let rows = stmt.query_map(params![id.as_str()], |row| {
                     let from_id: String = row.get(0)?;
                     let relation: String = row.get(1)?;
                     let metadata: Option<String> = row.get(2)?;
                     let created_at: i64 = row.get(3)?;
                     Ok((from_id, relation, metadata, created_at))
-                })?
-                .filter_map(|r| r.ok())
-                .map(|(from_id, relation, metadata, created_at)| {
-                    let entity_relation = EntityRelation {
-                        relation: RelationType::new(relation),
-                        metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
-                        created_at,
-                    };
-                    (EntityId::from_string(from_id), entity_relation)
-                })
-                .collect()
+                })?;
+                rows.filter_map(|r| r.ok())
+                    .map(|(from_id, relation, metadata, created_at)| {
+                        let entity_relation = EntityRelation {
+                            relation: RelationType::new(relation),
+                            metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
+                            created_at,
+                        };
+                        (EntityId::from_string(from_id), entity_relation)
+                    })
+                    .collect()
             }
         };
 
