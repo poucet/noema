@@ -119,6 +119,9 @@ define_id!(ReferenceId, "Unique identifier for a cross-reference");
 // Users
 define_id!(UserId, "Unique identifier for a user");
 
+// Entities (addressable layer)
+define_id!(EntityId, "Unique identifier for an addressable entity");
+
 #[cfg(test)]
 mod tests {
     use super::*;
