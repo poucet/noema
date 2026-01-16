@@ -28,6 +28,7 @@ impl StorageTypes for AppStorage {
     type Turn = SqliteStore;
     type User = SqliteStore;
     type Document = SqliteStore;
+    type Entity = SqliteStore;
 }
 
 /// Holds all store instances for the application.
@@ -64,6 +65,9 @@ impl Stores<AppStorage> for AppStores {
         self.sqlite.clone()
     }
     fn text(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn entity(&self) -> Arc<SqliteStore> {
         self.sqlite.clone()
     }
 }

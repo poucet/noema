@@ -134,14 +134,14 @@ See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - FR-0.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3.D1 | 🏗️ Define Entity, EntityRelation types and EntityStore trait |
-| ⬜ | 3.3.D2 | 📦 Add entities table |
-| ⬜ | 3.3.D3 | 📦 Add entity_relations table |
-| ⬜ | 3.3.D4 | ⚡ Implement SqliteEntityStore CRUD |
-| ⬜ | 3.3.D5 | ⚡ Implement entity relations (add, get, remove) |
-| ⬜ | 3.3.D6 | 🔧 Replace ConversationStore with EntityStore in coordinator |
-| ⬜ | 3.3.D7 | 🧹 Remove conversations table and ConversationStore trait |
-| ⬜ | 3.3.D8 | ✅ Unit tests for entity layer |
+| ✅ | 3.3.D1 | 🏗️ Define Entity, EntityRelation types and EntityStore trait |
+| ✅ | 3.3.D2 | 📦 Add entities table |
+| ✅ | 3.3.D3 | 📦 Add entity_relations table |
+| ✅ | 3.3.D4 | ⚡ Implement SqliteEntityStore CRUD |
+| ✅ | 3.3.D5 | ⚡ Implement entity relations (add, get, remove) |
+| ✅ | 3.3.D6 | 🔧 Add EntityStore to StorageTypes (migration deferred) |
+| 🔜 | 3.3.D7 | 🧹 Remove conversations table and ConversationStore trait |
+| ✅ | 3.3.D8 | ✅ Unit tests for entity layer |
 
 #### Part E: User Journeys - Implementation (6 journeys)
 

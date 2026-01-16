@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.D1"
-task_name: "Entity Layer: Schema design for entities table"
+task: "3.3.D2"
+task_name: "Entity Layer: Add entities table migration"
 
 # Completed
 completed_features:

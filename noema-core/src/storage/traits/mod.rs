@@ -47,7 +47,7 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Asset: AssetStore + Send + Sync;
     /// Text content storage
     type Text: TextStore + Send + Sync;
-    /// Conversation lifecycle storage
+    /// Conversation lifecycle storage (deprecated - use Entity)
     type Conversation: ConversationStore + Send + Sync;
     /// Turn/Span/Message/View storage
     type Turn: TurnStore + Send + Sync;
@@ -55,6 +55,8 @@ pub trait StorageTypes: Send + Sync + 'static {
     type User: UserStore + Send + Sync;
     /// Document storage
     type Document: DocumentStore + Send + Sync;
+    /// Entity storage (unified addressable layer)
+    type Entity: EntityStore + Send + Sync;
 }
 
 use std::sync::Arc;
@@ -87,4 +89,5 @@ pub trait Stores<S: StorageTypes>: Send + Sync {
     fn blob(&self) -> Arc<S::Blob>;
     fn asset(&self) -> Arc<S::Asset>;
     fn text(&self) -> Arc<S::Text>;
+    fn entity(&self) -> Arc<S::Entity>;
 }

@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 mod asset;
 mod conversation;
 mod document;
+mod entity;
 mod text;
 mod turn;
 mod user;
@@ -29,6 +30,7 @@ mod user;
 pub(crate) use asset::init_schema as init_asset_schema;
 pub(crate) use conversation::init_schema as init_conversation_schema;
 pub(crate) use document::init_schema as init_document_schema;
+pub(crate) use entity::init_schema as init_entity_schema;
 pub(crate) use text::init_schema as init_text_schema;
 pub(crate) use turn::init_schema as init_turn_schema;
 pub(crate) use user::init_schema as init_user_schema;
@@ -45,6 +47,7 @@ pub(crate) use user::init_schema as init_user_schema;
 /// - `AssetStore` - Asset metadata storage
 /// - `DocumentStore` - Document, tab, and revision storage
 /// - `UserStore` - User account management
+/// - `EntityStore` - Unified addressable layer
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
 }
@@ -78,6 +81,7 @@ impl SqliteStore {
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         init_user_schema(&conn)?;
+        init_entity_schema(&conn)?;
         init_conversation_schema(&conn)?;
         init_turn_schema(&conn)?;
         init_asset_schema(&conn)?;

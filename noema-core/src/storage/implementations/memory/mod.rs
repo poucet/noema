@@ -7,6 +7,7 @@ mod asset;
 mod blob;
 mod conversation;
 mod document;
+mod entity;
 mod text;
 mod turn;
 mod user;
@@ -15,6 +16,7 @@ pub use asset::MemoryAssetStore;
 pub use blob::MemoryBlobStore;
 pub use conversation::MemoryConversationStore;
 pub use document::MemoryDocumentStore;
+pub use entity::MemoryEntityStore;
 pub use text::MemoryTextStore;
 pub use turn::MemoryTurnStore;
 pub use user::MemoryUserStore;
@@ -32,4 +34,5 @@ impl StorageTypes for MemoryStorage {
     type Turn = MemoryTurnStore;
     type User = MemoryUserStore;
     type Document = MemoryDocumentStore;
+    type Entity = MemoryEntityStore;
 }
