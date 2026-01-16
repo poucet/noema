@@ -31,9 +31,10 @@ pub use user::{StoredUser, UserStore};
 ///     type Blob = FsBlobStore;
 ///     type Asset = SqliteStore;
 ///     type Text = SqliteStore;
-///     type Conversation = SqliteStore;
+///     type Conversation = SqliteStore;  // deprecated, will be removed
 ///     type User = SqliteStore;
 ///     type Document = SqliteStore;
+///     type Entity = SqliteStore;
 /// }
 ///
 /// // Then use as a single type parameter:
@@ -47,7 +48,7 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Asset: AssetStore + Send + Sync;
     /// Text content storage
     type Text: TextStore + Send + Sync;
-    /// Conversation lifecycle storage (deprecated - use Entity)
+    /// **DEPRECATED**: Use Entity instead. Kept for backward compatibility.
     type Conversation: ConversationStore + Send + Sync;
     /// Turn/Span/Message/View storage
     type Turn: TurnStore + Send + Sync;
@@ -55,7 +56,7 @@ pub trait StorageTypes: Send + Sync + 'static {
     type User: UserStore + Send + Sync;
     /// Document storage
     type Document: DocumentStore + Send + Sync;
-    /// Entity storage (unified addressable layer)
+    /// Entity storage (unified addressable layer for conversations, documents, assets)
     type Entity: EntityStore + Send + Sync;
 }
 
@@ -74,14 +75,16 @@ use std::sync::Arc;
 /// }
 ///
 /// impl Stores<AppStorage> for AppStores {
-///     fn conversation(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
+///     fn entity(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 ///     fn turn(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 ///     fn user(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 ///     fn document(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 ///     fn blob(&self) -> Arc<FsBlobStore> { self.blob.clone() }
+///     // ... other stores
 /// }
 /// ```
 pub trait Stores<S: StorageTypes>: Send + Sync {
+    /// **DEPRECATED**: Use entity() instead.
     fn conversation(&self) -> Arc<S::Conversation>;
     fn turn(&self) -> Arc<S::Turn>;
     fn user(&self) -> Arc<S::User>;
@@ -89,5 +92,6 @@ pub trait Stores<S: StorageTypes>: Send + Sync {
     fn blob(&self) -> Arc<S::Blob>;
     fn asset(&self) -> Arc<S::Asset>;
     fn text(&self) -> Arc<S::Text>;
+    /// Unified entity storage (conversations, documents, assets)
     fn entity(&self) -> Arc<S::Entity>;
 }

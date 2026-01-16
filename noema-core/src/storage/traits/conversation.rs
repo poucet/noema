@@ -1,7 +1,16 @@
 //! ConversationStore trait for conversation lifecycle operations
 //!
-//! This trait handles conversation-level CRUD: create, list, delete, rename, privacy.
-//! TurnStore is a separate trait for internal structure (turns, spans, messages, views).
+//! **DEPRECATED**: This trait is deprecated in favor of EntityStore.
+//! Conversations are now entities with type "conversation" and main_view_id in metadata.
+//! Use EntityStore methods instead:
+//! - create_conversation → entity_store.create_entity(EntityType::conversation(), ...)
+//! - get_conversation → entity_store.get_entity(...)
+//! - list_conversations → entity_store.list_entities(..., Some(&EntityType::conversation()))
+//! - delete_conversation → entity_store.delete_entity(...)
+//! - rename_conversation → entity_store.update_entity(...) with name field
+//! - privacy methods → entity_store.update_entity(...) with is_private field
+//!
+//! This trait is kept for backward compatibility during migration.
 
 use anyhow::Result;
 use async_trait::async_trait;
