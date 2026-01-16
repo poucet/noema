@@ -140,7 +140,7 @@ See [UNIFIED_CONTENT_MODEL.md](../../design/UNIFIED_CONTENT_MODEL.md) - FR-0.
 | ✅ | 3.3.D4 | ⚡ Implement SqliteEntityStore CRUD |
 | ✅ | 3.3.D5 | ⚡ Implement entity relations (add, get, remove) |
 | ✅ | 3.3.D6 | 🔧 Add EntityStore to StorageTypes (migration deferred) |
-| 🔜 | 3.3.D7 | 🧹 Remove conversations table and ConversationStore trait |
+| ✅ | 3.3.D7 | 🧹 Migrate to EntityStore (ConversationStore deprecated, not removed) |
 | ✅ | 3.3.D8 | ✅ Unit tests for entity layer |
 
 #### Part E: User Journeys - Implementation (6 journeys)
