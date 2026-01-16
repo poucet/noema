@@ -58,8 +58,8 @@ pub mod document_resolver;
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, ConversationStore, DocumentStore, StorageTypes,
-    StoredUser, Stores, TextStore, TurnStore, UserStore,
+    AssetStore, BlobStore, ConversationStore, DocumentStore, EntityStore, StorageTypes,
+    StoredEntity, StoredUser, Stores, TextStore, TurnStore, UserStore,
 };
 
 // Types
@@ -73,6 +73,8 @@ pub use types::{
     Turn, TurnWithContent, View, ViewSelection,
     // Document
     Document, DocumentRevision, DocumentSource, DocumentTab,
+    // Entity
+    Entity, EntityRelation, EntityType, RelationType,
     // Stored wrappers
     Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped,
     // User
@@ -93,8 +95,8 @@ pub use implementations::fs::FsBlobStore;
 
 // Memory implementations (for testing)
 pub use implementations::memory::{
-    MemoryAssetStore, MemoryBlobStore, MemoryTextStore, MemoryConversationStore,
-    MemoryDocumentStore, MemoryTurnStore, MemoryUserStore, MemoryStorage,
+    MemoryAssetStore, MemoryBlobStore, MemoryConversationStore, MemoryDocumentStore,
+    MemoryEntityStore, MemoryStorage, MemoryTextStore, MemoryTurnStore, MemoryUserStore,
 };
 
 // Document resolution
