@@ -93,6 +93,11 @@ pub struct Entity {
     pub is_private: bool,
     /// Whether entity is archived (hidden from default views)
     pub is_archived: bool,
+    /// Type-specific metadata as JSON
+    /// For conversations: {"main_view_id": "view-123"}
+    /// For documents: {"document_id": "doc-456"}
+    /// For assets: {"asset_id": "asset-789"}
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl Entity {
@@ -105,6 +110,7 @@ impl Entity {
             slug: None,
             is_private: true,
             is_archived: false,
+            metadata: None,
         }
     }
 
@@ -135,6 +141,12 @@ impl Entity {
     /// Mark as archived
     pub fn archived(mut self) -> Self {
         self.is_archived = true;
+        self
+    }
+
+    /// Set type-specific metadata
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = Some(metadata);
         self
     }
 }

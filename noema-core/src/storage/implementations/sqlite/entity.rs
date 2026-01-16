@@ -24,6 +24,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
             slug TEXT UNIQUE,
             is_private INTEGER NOT NULL DEFAULT 1,
             is_archived INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
@@ -81,7 +82,7 @@ impl EntityStore for SqliteStore {
     async fn get_entity(&self, id: &EntityId) -> Result<Option<StoredEntity>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
+            "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at
              FROM entities WHERE id = ?1",
             params![id.as_str()],
             |row| {
@@ -92,14 +93,15 @@ impl EntityStore for SqliteStore {
                 let slug: Option<String> = row.get(4)?;
                 let is_private: i32 = row.get(5)?;
                 let is_archived: i32 = row.get(6)?;
-                let created_at: i64 = row.get(7)?;
-                let updated_at: i64 = row.get(8)?;
-                Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at))
+                let metadata: Option<String> = row.get(7)?;
+                let created_at: i64 = row.get(8)?;
+                let updated_at: i64 = row.get(9)?;
+                Ok((id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at))
             },
         );
 
         match result {
-            Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at)) => {
+            Ok((id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at)) => {
                 let entity = Entity {
                     entity_type: EntityType::new(entity_type),
                     user_id: user_id.map(UserId::from_string),
@@ -107,6 +109,7 @@ impl EntityStore for SqliteStore {
                     slug,
                     is_private: is_private != 0,
                     is_archived: is_archived != 0,
+                    metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
                 };
                 Ok(Some(stored_editable(EntityId::from_string(id), entity, created_at, updated_at)))
             }
@@ -118,7 +121,7 @@ impl EntityStore for SqliteStore {
     async fn get_entity_by_slug(&self, slug: &str) -> Result<Option<StoredEntity>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
+            "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at
              FROM entities WHERE slug = ?1",
             params![slug],
             |row| {
@@ -129,14 +132,15 @@ impl EntityStore for SqliteStore {
                 let slug: Option<String> = row.get(4)?;
                 let is_private: i32 = row.get(5)?;
                 let is_archived: i32 = row.get(6)?;
-                let created_at: i64 = row.get(7)?;
-                let updated_at: i64 = row.get(8)?;
-                Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at))
+                let metadata: Option<String> = row.get(7)?;
+                let created_at: i64 = row.get(8)?;
+                let updated_at: i64 = row.get(9)?;
+                Ok((id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at))
             },
         );
 
         match result {
-            Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at)) => {
+            Ok((id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at)) => {
                 let entity = Entity {
                     entity_type: EntityType::new(entity_type),
                     user_id: user_id.map(UserId::from_string),
@@ -144,6 +148,7 @@ impl EntityStore for SqliteStore {
                     slug,
                     is_private: is_private != 0,
                     is_archived: is_archived != 0,
+                    metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
                 };
                 Ok(Some(stored_editable(EntityId::from_string(id), entity, created_at, updated_at)))
             }
@@ -164,7 +169,7 @@ impl EntityStore for SqliteStore {
         let entities: Vec<StoredEntity> = match &entity_type_str {
             Some(et_str) => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
+                    "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at
                      FROM entities
                      WHERE user_id = ?1 AND entity_type = ?2 AND is_archived = 0
                      ORDER BY updated_at DESC",
@@ -177,12 +182,13 @@ impl EntityStore for SqliteStore {
                     let slug: Option<String> = row.get(4)?;
                     let is_private: i32 = row.get(5)?;
                     let is_archived: i32 = row.get(6)?;
-                    let created_at: i64 = row.get(7)?;
-                    let updated_at: i64 = row.get(8)?;
-                    Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at))
+                    let metadata: Option<String> = row.get(7)?;
+                    let created_at: i64 = row.get(8)?;
+                    let updated_at: i64 = row.get(9)?;
+                    Ok((id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at))
                 })?;
                 rows.filter_map(|r| r.ok())
-                    .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at)| {
+                    .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at)| {
                         let entity = Entity {
                             entity_type: EntityType::new(entity_type),
                             user_id: user_id.map(UserId::from_string),
@@ -190,6 +196,7 @@ impl EntityStore for SqliteStore {
                             slug,
                             is_private: is_private != 0,
                             is_archived: is_archived != 0,
+                            metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
                         };
                         stored_editable(EntityId::from_string(id), entity, created_at, updated_at)
                     })
@@ -197,7 +204,7 @@ impl EntityStore for SqliteStore {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at
+                    "SELECT id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at
                      FROM entities
                      WHERE user_id = ?1 AND is_archived = 0
                      ORDER BY updated_at DESC",
@@ -210,12 +217,13 @@ impl EntityStore for SqliteStore {
                     let slug: Option<String> = row.get(4)?;
                     let is_private: i32 = row.get(5)?;
                     let is_archived: i32 = row.get(6)?;
-                    let created_at: i64 = row.get(7)?;
-                    let updated_at: i64 = row.get(8)?;
-                    Ok((id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at))
+                    let metadata: Option<String> = row.get(7)?;
+                    let created_at: i64 = row.get(8)?;
+                    let updated_at: i64 = row.get(9)?;
+                    Ok((id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at))
                 })?;
                 rows.filter_map(|r| r.ok())
-                    .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, created_at, updated_at)| {
+                    .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at)| {
                         let entity = Entity {
                             entity_type: EntityType::new(entity_type),
                             user_id: user_id.map(UserId::from_string),
@@ -223,6 +231,7 @@ impl EntityStore for SqliteStore {
                             slug,
                             is_private: is_private != 0,
                             is_archived: is_archived != 0,
+                            metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
                         };
                         stored_editable(EntityId::from_string(id), entity, created_at, updated_at)
                     })
@@ -236,15 +245,17 @@ impl EntityStore for SqliteStore {
     async fn update_entity(&self, id: &EntityId, entity: &Entity) -> Result<()> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();
+        let metadata_json = entity.metadata.as_ref().map(|m| m.to_string());
 
         conn.execute(
-            "UPDATE entities SET name = ?1, slug = ?2, is_private = ?3, is_archived = ?4, updated_at = ?5
-             WHERE id = ?6",
+            "UPDATE entities SET name = ?1, slug = ?2, is_private = ?3, is_archived = ?4, metadata = ?5, updated_at = ?6
+             WHERE id = ?7",
             params![
                 entity.name,
                 entity.slug,
                 entity.is_private as i32,
                 entity.is_archived as i32,
+                metadata_json,
                 now,
                 id.as_str()
             ],

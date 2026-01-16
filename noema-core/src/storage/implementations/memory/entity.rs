@@ -27,6 +27,7 @@ struct EntityEntry {
     slug: Option<String>,
     is_private: bool,
     is_archived: bool,
+    metadata: Option<serde_json::Value>,
     created_at: i64,
     updated_at: i64,
 }
@@ -40,6 +41,7 @@ impl EntityEntry {
             slug: self.slug.clone(),
             is_private: self.is_private,
             is_archived: self.is_archived,
+            metadata: self.metadata.clone(),
         };
         stored_editable(self.id.clone(), entity, self.created_at, self.updated_at)
     }
@@ -94,6 +96,7 @@ impl EntityStore for MemoryEntityStore {
             slug: None,
             is_private: true,
             is_archived: false,
+            metadata: None,
             created_at: now,
             updated_at: now,
         };
@@ -156,6 +159,7 @@ impl EntityStore for MemoryEntityStore {
             entry.slug = entity.slug.clone();
             entry.is_private = entity.is_private;
             entry.is_archived = entity.is_archived;
+            entry.metadata = entity.metadata.clone();
             entry.updated_at = now();
         }
         Ok(())
