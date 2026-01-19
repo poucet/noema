@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.F1"
-task_name: "User: Verify regenerate creates alternate, can switch between"
+task: "3.3.F2"
+task_name: "User: Verify span selection persists, affects subsequent context"
 
 # Completed
 completed_features:
