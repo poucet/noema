@@ -29,8 +29,8 @@ export async function initApp(): Promise<string> {
   return invoke<string>("init_app");
 }
 
-export async function getMessages(): Promise<DisplayMessage[]> {
-  return invoke<DisplayMessage[]>("get_messages");
+export async function getMessages(conversationId: string): Promise<DisplayMessage[]> {
+  return invoke<DisplayMessage[]>("get_messages", { conversationId });
 }
 
 export async function sendMessage(
