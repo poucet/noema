@@ -170,8 +170,16 @@ function App() {
         setIsConversationPrivate(isPrivate);
 
         // Load messages for this conversation
-        const msgs = await tauri.loadConversation(convId);
-        setMessages(Array.isArray(msgs) ? msgs : []);
+        try {
+          const msgs = await tauri.loadConversation(convId);
+          setMessages(Array.isArray(msgs) ? msgs : []);
+        } catch (err) {
+          // Conversation doesn't exist (stale ID in list), create a new one
+          appLog.error("Failed to load conversation, creating new one", String(err));
+          const newId = await tauri.newConversation();
+          setCurrentConversationId(newId);
+          setMessages([]);
+        }
 
         // Load views for this conversation
         const convViews = await tauri.listConversationViews(convId);
