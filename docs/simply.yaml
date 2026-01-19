@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.F2"
-task_name: "User: Verify span selection persists, affects subsequent context"
+task: "3.3.F3"
+task_name: "User: Verify edit creates fork, original unchanged"
 
 # Completed
 completed_features:
