@@ -362,7 +362,10 @@ function App() {
       parallelResponsesRef.current = new Map();
       setIsParallelMode(false);
       // Refresh messages to get the final state (will have first response)
-      tauri.getMessages().then(setMessages).catch(console.error);
+      setCurrentConversationId((currentId) => {
+        tauri.getMessages(currentId).then(setMessages).catch(console.error);
+        return currentId;
+      });
       // Refresh conversations
       tauri.listConversations().then(setConversations).catch(console.error);
     }).then((unlisten) => unlisteners.push(unlisten));
@@ -530,7 +533,7 @@ function App() {
     try {
       await tauri.selectSpan(currentConversationId, turnId, spanId);
       // Reload messages to reflect the new selection
-      const msgs = await tauri.getMessages();
+      const msgs = await tauri.getMessages(currentConversationId);
       setMessages(msgs);
     } catch (err) {
       appLog.error("Select span error", String(err));
@@ -972,7 +975,7 @@ function App() {
                                       setParallelSpanSetId("");
                                       setParallelAlternates([]);
                                       // Reload messages
-                                      const msgs = await tauri.getMessages();
+                                      const msgs = await tauri.getMessages(currentConversationId);
                                       setMessages(msgs);
                                     }}
                                     className={`px-2 py-1 text-xs rounded transition-colors ${
