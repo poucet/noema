@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.F5"
-task_name: "User: Verify switching views shows different conversation paths"
+task: "3.3.F6"
+task_name: "User: Verify can see all alternatives, select any one"
 
 # Completed
 completed_features:
