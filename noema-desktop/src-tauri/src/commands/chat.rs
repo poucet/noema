@@ -2,7 +2,7 @@
 
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
+use noema_core::storage::{ConversationStore, DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::collections::HashMap;
 use std::sync::Arc;
