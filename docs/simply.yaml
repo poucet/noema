@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.D2"
-task_name: "Entity Layer: Add entities table migration"
+task: "3.3.F1"
+task_name: "User: Verify regenerate creates alternate, can switch between"
 
 # Completed
 completed_features:
