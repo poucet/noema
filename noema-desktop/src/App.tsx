@@ -158,34 +158,39 @@ function App() {
 
         // Pick the most recent conversation, or create a new one
         let convId: string;
+        let conversationLoaded = false;
+
         if (convos.length > 0) {
-          convId = convos[0].id;
-        } else {
+          // Try to load the most recent conversation
+          try {
+            convId = convos[0].id;
+            const isPrivate = await tauri.getConversationPrivate(convId);
+            setIsConversationPrivate(isPrivate);
+            const msgs = await tauri.loadConversation(convId);
+            setMessages(Array.isArray(msgs) ? msgs : []);
+            const convViews = await tauri.listConversationViews(convId);
+            setViews(convViews);
+            const viewId = await tauri.getCurrentViewId(convId);
+            setCurrentViewId(viewId);
+            setCurrentConversationId(convId);
+            conversationLoaded = true;
+          } catch (err) {
+            // Conversation in list doesn't exist (stale data), fall through to create new one
+            appLog.error("Failed to load conversation from list, will create new one", String(err));
+          }
+        }
+
+        if (!conversationLoaded) {
+          // No conversations or failed to load - create a new one
           convId = await tauri.newConversation();
-        }
-        setCurrentConversationId(convId);
-
-        // Load privacy status for current conversation
-        const isPrivate = await tauri.getConversationPrivate(convId);
-        setIsConversationPrivate(isPrivate);
-
-        // Load messages for this conversation
-        try {
-          const msgs = await tauri.loadConversation(convId);
-          setMessages(Array.isArray(msgs) ? msgs : []);
-        } catch (err) {
-          // Conversation doesn't exist (stale ID in list), create a new one
-          appLog.error("Failed to load conversation, creating new one", String(err));
-          const newId = await tauri.newConversation();
-          setCurrentConversationId(newId);
+          setCurrentConversationId(convId);
           setMessages([]);
+          setIsConversationPrivate(false);
+          const convViews = await tauri.listConversationViews(convId);
+          setViews(convViews);
+          const viewId = await tauri.getCurrentViewId(convId);
+          setCurrentViewId(viewId);
         }
-
-        // Load views for this conversation
-        const convViews = await tauri.listConversationViews(convId);
-        setViews(convViews);
-        const viewId = await tauri.getCurrentViewId(convId);
-        setCurrentViewId(viewId);
 
         // Load models in background
         tauri.listModels().then(setModels).catch(console.error);
