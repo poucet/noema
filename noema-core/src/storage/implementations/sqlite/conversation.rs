@@ -62,29 +62,44 @@ impl ConversationStore for SqliteStore {
         &self,
         conversation_id: &ConversationId,
     ) -> Result<Option<Stored<ConversationId, Conversation>>> {
+        // Read from entities table (Entity Layer migration)
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT id, title, main_view_id, is_private, created_at
-             FROM conversations WHERE id = ?1",
+            "SELECT id, name, metadata, is_private, created_at
+             FROM entities WHERE id = ?1 AND entity_type = 'conversation'",
             params![conversation_id.as_str()],
             |row| {
                 let id: ConversationId = row.get(0)?;
                 let name: Option<String> = row.get(1)?;
-                let main_view_id: ViewId = row.get(2)?;
+                let metadata: Option<String> = row.get(2)?;
                 let is_private: i32 = row.get(3)?;
                 let created_at: i64 = row.get(4)?;
-                Ok((id, name, main_view_id, is_private, created_at))
+                Ok((id, name, metadata, is_private, created_at))
             },
         );
 
         match result {
-            Ok((id, name, main_view_id, is_private, created_at)) => {
-                let conversation = Conversation {
-                    name,
-                    main_view_id,
-                    is_private: is_private != 0,
-                };
-                Ok(Some(stored(id, conversation, created_at)))
+            Ok((id, name, metadata, is_private, created_at)) => {
+                // Extract main_view_id from metadata
+                let metadata_json: Option<serde_json::Value> = metadata
+                    .and_then(|m| serde_json::from_str(&m).ok());
+                let main_view_id_str = metadata_json
+                    .as_ref()
+                    .and_then(|m| m.get("main_view_id"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(view_id_str) = main_view_id_str {
+                    let main_view_id = ViewId::from_string(view_id_str.to_string());
+                    let conversation = Conversation {
+                        name,
+                        main_view_id,
+                        is_private: is_private != 0,
+                    };
+                    Ok(Some(stored(id, conversation, created_at)))
+                } else {
+                    // Entity exists but doesn't have main_view_id yet
+                    Ok(None)
+                }
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
@@ -92,31 +107,41 @@ impl ConversationStore for SqliteStore {
     }
 
     async fn list_conversations(&self, user_id: &UserId) -> Result<Vec<Stored<ConversationId, Conversation>>> {
+        // Read from entities table (Entity Layer migration)
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, main_view_id, is_private, created_at
-             FROM conversations
-             WHERE user_id = ?1 AND main_view_id IS NOT NULL
-             ORDER BY created_at DESC",
+            "SELECT id, name, metadata, is_private, created_at
+             FROM entities
+             WHERE user_id = ?1 AND entity_type = 'conversation' AND is_archived = 0
+             ORDER BY updated_at DESC",
         )?;
 
         let conversations = stmt
             .query_map(params![user_id.as_str()], |row| {
                 let id: ConversationId = row.get(0)?;
                 let name: Option<String> = row.get(1)?;
-                let main_view_id: ViewId = row.get(2)?;
+                let metadata: Option<String> = row.get(2)?;
                 let is_private: i32 = row.get(3)?;
                 let created_at: i64 = row.get(4)?;
-                Ok((id, name, main_view_id, is_private, created_at))
+                Ok((id, name, metadata, is_private, created_at))
             })?
             .filter_map(|r| r.ok())
-            .map(|(id, name, main_view_id, is_private, created_at)| {
+            .filter_map(|(id, name, metadata, is_private, created_at)| {
+                // Extract main_view_id from metadata
+                let metadata_json: Option<serde_json::Value> = metadata
+                    .and_then(|m| serde_json::from_str(&m).ok());
+                let main_view_id_str = metadata_json
+                    .as_ref()
+                    .and_then(|m| m.get("main_view_id"))
+                    .and_then(|v| v.as_str())?;
+
+                let main_view_id = ViewId::from_string(main_view_id_str.to_string());
                 let conversation = Conversation {
                     name,
                     main_view_id,
                     is_private: is_private != 0,
                 };
-                stored(id, conversation, created_at)
+                Some(stored(id, conversation, created_at))
             })
             .collect();
 
