@@ -169,6 +169,15 @@ impl<S: StorageTypes> Session<S> {
         self.llm_cache_valid = false;
     }
 
+    /// Reload messages from storage for current view
+    pub async fn reload(&mut self) -> Result<()> {
+        let resolved_cache = self.coordinator.open_session_with_view(&self.view_id).await?;
+        self.resolved_cache = resolved_cache;
+        self.llm_cache.clear();
+        self.llm_cache_valid = false;
+        Ok(())
+    }
+
     /// Clear pending messages without committing
     pub fn clear_pending(&mut self) {
         self.pending.clear();

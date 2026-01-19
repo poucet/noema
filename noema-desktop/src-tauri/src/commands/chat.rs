@@ -728,10 +728,11 @@ pub async fn select_span(
         .await
         .map_err(|e| format!("Failed to select span: {}", e))?;
 
-    // Clear the manager's cache so next get_messages returns updated path
+    // Reload the manager's messages from storage to reflect the new view selection
     let managers = state.managers.lock().await;
     if let Some(manager) = managers.get(&conversation_id) {
-        manager.clear_cache().await;
+        manager.reload().await
+            .map_err(|e| format!("Failed to reload messages: {}", e))?;
     }
 
     Ok(())

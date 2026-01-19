@@ -456,6 +456,11 @@ impl<S: StorageTypes> ConversationManager<S> {
     pub async fn clear_cache(&self) {
         self.session.lock().await.clear_cache();
     }
+
+    /// Reload messages from storage for current view
+    pub async fn reload(&self) -> Result<()> {
+        self.session.lock().await.reload().await
+    }
 }
 
 // ============================================================================
