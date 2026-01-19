@@ -213,7 +213,7 @@ User inspects a turn → sees all spans (alternatives) → can compare and selec
 | ✅ | 3.3.F1 | ✅ User: Verify regenerate creates alternate, can switch between |
 | ✅ | 3.3.F2 | ✅ User: Verify span selection persists, affects subsequent context |
 | ✅ | 3.3.F3 | ✅ User: Verify edit creates fork, original unchanged |
-| ⬜ | 3.3.F4 | ✅ User: Verify fork shares history, diverges after fork point |
+| ✅ | 3.3.F4 | ✅ User: Verify fork shares history, diverges after fork point |
 | ⬜ | 3.3.F5 | ✅ User: Verify switching views shows different conversation paths |
 | ⬜ | 3.3.F6 | ✅ User: Verify can see all alternatives, select any one |
 | ⬜ | 3.3.F7 | 🔧 User: SQL verify views, view_selections, entities have correct data |

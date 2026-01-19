@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3"
 feature_name: "Views, Forking, and User Journeys"
-task: "3.3.F4"
-task_name: "User: Verify fork shares history, diverges after fork point"
+task: "3.3.F5"
+task_name: "User: Verify switching views shows different conversation paths"
 
 # Completed
 completed_features:
