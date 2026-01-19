@@ -84,15 +84,21 @@ pub async fn get_messages(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
+    let stores = state.get_stores()?;
     let managers = state.managers.lock().await;
     let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
 
+    let view_id = manager.view_id().await;
+    // Use messages_for_display to preserve turn_id for alternates enrichment
     let msgs: Vec<DisplayMessage> = manager
-        .all_messages()
+        .messages_for_display()
         .await
         .iter()
         .map(DisplayMessage::from)
         .collect();
+
+    // Enrich with alternates
+    let msgs = enrich_with_alternates(msgs, stores, &view_id).await;
 
     Ok(msgs)
 }
