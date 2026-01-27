@@ -3,10 +3,11 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::{params, Connection, Row};
+use sha2::{Digest, Sha256};
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
-use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
+use crate::storage::ids::{AssetId, ContentBlockId, DocumentId, MessageId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
 use crate::storage::types::{stored, stored_editable, Document, DocumentRevision, DocumentSource, DocumentTab, Stored, StoredEditable};
 
@@ -436,5 +437,113 @@ impl DocumentStore for SqliteStore {
             .collect();
 
         Ok(revs)
+    }
+
+    async fn promote_from_message(
+        &self,
+        message_id: &MessageId,
+        user_id: &UserId,
+        title: Option<&str>,
+    ) -> Result<DocumentId> {
+        let conn = self.conn().lock().unwrap();
+        let now = unix_timestamp();
+
+        // 1. Get all text content_block_ids from the message
+        let content_block_ids: Vec<ContentBlockId> = {
+            let mut stmt = conn.prepare(
+                "SELECT content_block_id FROM message_content
+                 WHERE message_id = ?1 AND content_type = 'text' AND content_block_id IS NOT NULL
+                 ORDER BY sequence_number"
+            )?;
+            stmt.query_map(params![message_id.as_str()], |row| row.get::<_, ContentBlockId>(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        if content_block_ids.is_empty() {
+            anyhow::bail!("Message has no text content to promote");
+        }
+
+        // 2. Get the actual text from content_blocks
+        let mut text_parts = Vec::with_capacity(content_block_ids.len());
+        for block_id in &content_block_ids {
+            let text: String = conn.query_row(
+                "SELECT text FROM content_blocks WHERE id = ?1",
+                params![block_id.as_str()],
+                |row| row.get(0),
+            ).context("Failed to get text from content_block")?;
+            text_parts.push(text);
+        }
+        let content_markdown = text_parts.join("\n\n");
+
+        // 3. Determine title (use provided or first line)
+        let doc_title = title.map(|t| t.to_string()).unwrap_or_else(|| {
+            content_markdown
+                .lines()
+                .next()
+                .map(|l| l.trim_start_matches('#').trim())
+                .filter(|l| !l.is_empty())
+                .unwrap_or("Untitled")
+                .chars()
+                .take(100)
+                .collect()
+        });
+
+        // 4. Create document
+        let doc_id = DocumentId::new();
+        conn.execute(
+            "INSERT INTO documents (id, user_id, title, source, source_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                doc_id.as_str(),
+                user_id.as_str(),
+                &doc_title,
+                DocumentSource::AiGenerated.as_str(),
+                message_id.as_str(), // Store message_id as source_id for provenance
+                now,
+                now
+            ],
+        )?;
+
+        // 5. Create initial tab
+        let tab_id = TabId::new();
+        conn.execute(
+            "INSERT INTO document_tabs (id, document_id, tab_index, title, content_markdown, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                tab_id.as_str(),
+                doc_id.as_str(),
+                0,
+                "Main",
+                &content_markdown,
+                now,
+                now
+            ],
+        )?;
+
+        // 6. Create initial revision
+        let revision_id = RevisionId::new();
+        let content_hash = hex::encode(Sha256::digest(&content_markdown));
+        conn.execute(
+            "INSERT INTO document_revisions (id, tab_id, revision_number, content_markdown, content_hash, created_at, created_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                revision_id.as_str(),
+                tab_id.as_str(),
+                1,
+                &content_markdown,
+                &content_hash,
+                now,
+                user_id.as_str()
+            ],
+        )?;
+
+        // 7. Set tab's current revision
+        conn.execute(
+            "UPDATE document_tabs SET current_revision_id = ?1 WHERE id = ?2",
+            params![revision_id.as_str(), tab_id.as_str()],
+        )?;
+
+        Ok(doc_id)
     }
 }

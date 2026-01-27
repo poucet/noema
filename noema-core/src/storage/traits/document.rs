@@ -117,4 +117,24 @@ pub trait DocumentStore: Send + Sync {
 
     /// List revisions for a tab
     async fn list_document_revisions(&self, tab_id: &TabId) -> Result<Vec<StoredRevision>>;
+
+    /// Promote a message to a document
+    ///
+    /// Creates a new document from a message's text content. The message's
+    /// content_block references are resolved and stored as the document's
+    /// initial revision.
+    ///
+    /// # Arguments
+    /// * `message_id` - The message to promote
+    /// * `user_id` - The user who owns the new document
+    /// * `title` - Optional title (defaults to first line of content)
+    ///
+    /// # Returns
+    /// The new document ID
+    async fn promote_from_message(
+        &self,
+        message_id: &crate::storage::ids::MessageId,
+        user_id: &UserId,
+        title: Option<&str>,
+    ) -> Result<DocumentId>;
 }

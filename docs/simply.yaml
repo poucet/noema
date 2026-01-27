@@ -3,10 +3,10 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.3b"
-feature_name: "Subconversations"
-task: "3.3b.5"
-task_name: "User: Verify subconversation runs, result appears in parent"
+feature: "3.4"
+feature_name: "Document Structure"
+task: "3.4.1"
+task_name: "Define Document, Tab, Revision types"
 
 # Completed
 completed_features:

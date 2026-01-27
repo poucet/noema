@@ -3,7 +3,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
+use crate::storage::ids::{AssetId, DocumentId, MessageId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
 use crate::storage::types::{Document, DocumentRevision, DocumentSource, DocumentTab, Stored, StoredEditable};
 
@@ -99,6 +99,14 @@ impl DocumentStore for MockDocumentStore {
         unimplemented!()
     }
     async fn list_document_revisions(&self, _: &TabId) -> Result<Vec<Stored<RevisionId, DocumentRevision>>> {
+        unimplemented!()
+    }
+    async fn promote_from_message(
+        &self,
+        _: &MessageId,
+        _: &UserId,
+        _: Option<&str>,
+    ) -> Result<DocumentId> {
         unimplemented!()
     }
 }

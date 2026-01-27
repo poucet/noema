@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
+use crate::storage::ids::{AssetId, DocumentId, MessageId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
 use crate::storage::types::{
     stored, stored_editable, Document, DocumentRevision, DocumentSource, DocumentTab,
@@ -305,6 +305,15 @@ impl DocumentStore for MemoryDocumentStore {
             .collect();
         result.sort_by_key(|r| r.revision_number);
         Ok(result)
+    }
+
+    async fn promote_from_message(
+        &self,
+        _message_id: &MessageId,
+        _user_id: &UserId,
+        _title: Option<&str>,
+    ) -> Result<DocumentId> {
+        anyhow::bail!("promote_from_message not supported in memory store (requires message content access)")
     }
 }
 

@@ -14,8 +14,8 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ✅ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
 | 🔄 | P0 | 3.3 | Views and forking | Views, forking operations, entity layer, user journeys |
-| ⬜ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
-| ⬜ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
+| ✅ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
+| 🔄 | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
 | ⬜ | P2 | 3.7 | Temporal queries | Time-based activity summaries for LLM context |
@@ -238,21 +238,21 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.3b.2 | ⚡ Backend: `spawn_subconversation` - create linked conversation with initial context |
 | ✅ | 3.3b.3 | ⚡ Backend: `link_subconversation_result` - attach result to parent turn |
 | ✅ | 3.3b.4 | 🔧 Integration: Wire MCP agent spawn to use subconversation API |
-| ⬜ | 3.3b.5 | ✅ User: Verify subconversation runs, result appears in parent |
+| ⏸️ | 3.3b.5 | ✅ User: Verify subconversation runs, result appears in parent |
 
 ### 3.4 Document Structure (10 tasks)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.4.1 | 🏗️ Define Document, Tab, Revision types |
-| ⬜ | 3.4.2 | 📦 Add documents table migration |
-| ⬜ | 3.4.3 | 📦 Add document_tabs table migration |
-| ⬜ | 3.4.4 | 📦 Add revisions table migration |
-| ⬜ | 3.4.5 | 🏗️ Define DocumentStore trait |
-| ⬜ | 3.4.6 | ⚡ Implement document CRUD |
-| ⬜ | 3.4.7 | ⚡ Implement tab management |
-| ⬜ | 3.4.8 | ⚡ Implement revision commit/checkout |
-| ⬜ | 3.4.9 | ⚡ Implement promote_from_message |
+| ✅ | 3.4.1 | 🏗️ Define Document, Tab, Revision types |
+| ✅ | 3.4.2 | 📦 Add documents table migration |
+| ✅ | 3.4.3 | 📦 Add document_tabs table migration |
+| ✅ | 3.4.4 | 📦 Add revisions table migration |
+| ✅ | 3.4.5 | 🏗️ Define DocumentStore trait |
+| ✅ | 3.4.6 | ⚡ Implement document CRUD |
+| ✅ | 3.4.7 | ⚡ Implement tab management |
+| ✅ | 3.4.8 | ⚡ Implement revision commit/checkout |
+| ✅ | 3.4.9 | ⚡ Implement promote_from_message |
 | ⬜ | 3.4.10 | ✅ Unit tests for document structure |
 
 ### 3.5 Collections (12 tasks)
