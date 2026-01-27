@@ -3,16 +3,16 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.5"
-feature_name: "Collections"
-task: "3.5.1"
-task_name: "Define Collection, Item, View types"
+feature: "3.45"
+feature_name: "Manual Testing Checkpoint"
+task: "3.45.1"
+task_name: "Verify alternates display and selection"
 
 # Completed
 completed_features:
   - "3.1"   # Content blocks - Content-addressed text storage with origin tracking
   - "3.1b"  # Asset storage - Binary blob storage (images, audio, PDFs)
   - "3.2"   # Conversation structure - Turns, spans, messages with content references
-  - "3.3"   # Views and forking - Views, forking, entity layer (verification deferred)
-  - "3.3b"  # Subconversations - Spawned agent conversations (verification deferred)
-  - "3.4"   # Document structure - Documents with tabs and revision history
+  - "3.3"   # Views and forking - Views, forking, entity layer (code complete)
+  - "3.3b"  # Subconversations - Spawned agent conversations (code complete)
+  - "3.4"   # Document structure - Documents with tabs and revision history (code complete)

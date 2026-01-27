@@ -13,10 +13,11 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P0 | 3.1 | Content blocks | Content-addressed text storage with origin tracking |
 | ✅ | P0 | 3.1b | Asset storage | Binary blob storage (images, audio, PDFs) |
 | ✅ | P0 | 3.2 | Conversation structure | Turns, spans, messages with content references |
-| 🔄 | P0 | 3.3 | Views and forking | Views, forking operations, entity layer, user journeys |
+| ✅ | P0 | 3.3 | Views and forking | Views, forking operations, entity layer, user journeys |
 | ✅ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
 | ✅ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
-| 🔄 | P1 | 3.5 | Collections | Tree organization with tags and fields |
+| ⬜ | P1 | 3.45 | Manual testing | Consolidated verification checkpoint |
+| ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
 | ⬜ | P2 | 3.7 | Temporal queries | Time-based activity summaries for LLM context |
 
@@ -215,10 +216,10 @@ User inspects a turn → sees all spans (alternatives) → can compare and selec
 | ✅ | 3.3.F3 | ✅ User: Verify edit creates fork, original unchanged |
 | ✅ | 3.3.F4 | ✅ User: Verify fork shares history, diverges after fork point |
 | ✅ | 3.3.F5 | ✅ User: Verify switching views shows different conversation paths |
-| ⬜ | 3.3.F6 | ✅ User: Verify can see all alternatives, select any one |
-| ⬜ | 3.3.F7 | 🔧 User: SQL verify views, view_selections, entities have correct data |
-| ⬜ | 3.3.F8 | ✅ Final E2E: fresh install, all conversation features work |
-| ⬜ | 3.3.F9 | ✅ Final: Entity layer working - views are entities, forks use relations
+| ⏸️ | 3.3.F6 | ✅ User: Verify can see all alternatives, select any one (→ 3.45) |
+| ⏸️ | 3.3.F7 | 🔧 User: SQL verify views, view_selections, entities have correct data (→ 3.45) |
+| ⏸️ | 3.3.F8 | ✅ Final E2E: fresh install, all conversation features work (→ 3.45) |
+| ⏸️ | 3.3.F9 | ✅ Final: Entity layer working - views are entities, forks use relations (→ 3.45)
 
 ### 3.3b Subconversations (5 tasks)
 
@@ -238,7 +239,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.3b.2 | ⚡ Backend: `spawn_subconversation` - create linked conversation with initial context |
 | ✅ | 3.3b.3 | ⚡ Backend: `link_subconversation_result` - attach result to parent turn |
 | ✅ | 3.3b.4 | 🔧 Integration: Wire MCP agent spawn to use subconversation API |
-| ⏸️ | 3.3b.5 | ✅ User: Verify subconversation runs, result appears in parent |
+| ⏸️ | 3.3b.5 | ✅ User: Verify subconversation runs, result appears in parent (→ 3.45) |
 
 ### 3.4 Document Structure (10 tasks)
 
@@ -253,7 +254,22 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.4.7 | ⚡ Implement tab management |
 | ✅ | 3.4.8 | ⚡ Implement revision commit/checkout |
 | ✅ | 3.4.9 | ⚡ Implement promote_from_message |
-| ⬜ | 3.4.10 | ✅ Unit tests for document structure |
+| ✅ | 3.4.10 | ✅ Unit tests for document structure (in memory store) |
+
+### 3.45 Manual Testing Checkpoint (6 tasks)
+
+**Goal**: Consolidated manual verification of 3.3, 3.3b, and 3.4 before continuing to Collections.
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.45.1 | ✅ User: Verify can see all alternatives, select any one (from 3.3.F6) |
+| ⬜ | 3.45.2 | 🔧 User: SQL verify views, view_selections, entities have correct data (from 3.3.F7) |
+| ⬜ | 3.45.3 | ✅ User: Fresh install E2E - all conversation features work (from 3.3.F8) |
+| ⬜ | 3.45.4 | ✅ User: Entity layer - views are entities, forks use relations (from 3.3.F9) |
+| ⬜ | 3.45.5 | ✅ User: Verify subconversation runs, result appears in parent (from 3.3b.5) |
+| ⬜ | 3.45.6 | ✅ User: Document CRUD - create, tabs, revisions work in app |
+
+---
 
 ### 3.5 Collections (12 tasks)
 
