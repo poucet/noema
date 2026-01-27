@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3b"
 feature_name: "Subconversations"
-task: "3.3b.3"
-task_name: "Backend: link_subconversation_result command"
+task: "3.3b.5"
+task_name: "User: Verify subconversation runs, result appears in parent"
 
 # Completed
 completed_features:

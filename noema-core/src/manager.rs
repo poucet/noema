@@ -15,11 +15,12 @@ use tokio::task::JoinHandle;
 use crate::context::ConversationContext;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
-use crate::storage::ids::{ConversationId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, TurnId, UserId, ViewId};
 use crate::storage::session::{ResolvedMessage, Session};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::OriginKind;
 use crate::storage::DocumentResolver;
+use crate::agents::ConversationSpawnHandler;
 use crate::{Agent, McpAgent, McpRegistry, McpToolRegistry};
 
 /// Type alias for the shared event sender - sends (ConversationId, ManagerEvent) tuples
@@ -123,6 +124,7 @@ impl<S: StorageTypes> ConversationManager<S> {
         model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         document_resolver: Arc<dyn DocumentResolver>,
+        user_id: UserId,
         event_tx: SharedEventSender,
     ) -> Self {
         let conversation_id = session.conversation_id().clone();
@@ -143,6 +145,7 @@ impl<S: StorageTypes> ConversationManager<S> {
                 initial_model,
                 mcp_registry_clone,
                 document_resolver,
+                user_id,
                 cmd_rx,
                 event_tx,
             )
@@ -167,12 +170,27 @@ impl<S: StorageTypes> ConversationManager<S> {
         mut model: Arc<dyn ChatModel + Send + Sync>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         document_resolver: Arc<dyn DocumentResolver>,
+        user_id: UserId,
         mut cmd_rx: mpsc::UnboundedReceiver<ManagerCommand>,
         event_tx: SharedEventSender,
     ) {
-        // Create agent with MCP tool registry
+        // Create spawn handler for subconversations
+        let spawn_handler = Arc::new(ConversationSpawnHandler::new(
+            Arc::clone(&coordinator),
+            user_id,
+            Arc::clone(&mcp_registry),
+            Arc::clone(&document_resolver),
+            conversation_id.as_str().to_string(),
+        ));
+
+        // Create agent with MCP tool registry and spawn support
         let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
-        let agent = McpAgent::new(Arc::new(tool_registry), 10, document_resolver);
+        let agent = McpAgent::with_spawn_handler(
+            Arc::new(tool_registry),
+            10,
+            document_resolver,
+            spawn_handler,
+        );
 
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {

@@ -380,7 +380,8 @@ pub async fn load_conversation(
 
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
+    let user_id = state.user_id.lock().await.clone();
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
     state.managers.lock().await.insert(conversation_id, manager);
 
     // Enrich with alternates
@@ -412,7 +413,7 @@ pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String,
 
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
     state.managers.lock().await.insert(conv_id.clone(), manager);
 
     Ok(conv_id.as_str().to_string())
@@ -707,7 +708,8 @@ pub async fn switch_view(
 
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
+    let user_id = state.user_id.lock().await.clone();
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
     state.managers.lock().await.insert(conversation_id, manager);
 
     Ok(messages)
@@ -980,7 +982,8 @@ pub async fn edit_message(
 
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, event_tx);
+    let user_id = state.user_id.lock().await.clone();
+    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
 
     // Trigger AI to respond to the edited message
     let core_tool_config = match tool_config {
