@@ -372,6 +372,106 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         Ok(result)
     }
 
+    /// Get the final result text from a subconversation.
+    ///
+    /// Returns the text content of the last assistant message in the subconversation's
+    /// main view. Returns None if there are no messages or no text content.
+    pub async fn get_subconversation_result(
+        &self,
+        subconversation_id: &ConversationId,
+    ) -> Result<Option<String>> {
+        // Get the main view ID from entity metadata
+        let entity = self.entity_store
+            .get_entity(subconversation_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Subconversation not found: {}", subconversation_id))?;
+
+        let main_view_id = entity.metadata
+            .as_ref()
+            .and_then(|m| m.get("main_view_id"))
+            .and_then(|v| v.as_str())
+            .map(ViewId::from_string)
+            .ok_or_else(|| anyhow::anyhow!("Subconversation has no main_view_id"))?;
+
+        // Get the view path
+        let path = self.turn_store.get_view_path(&main_view_id).await?;
+
+        // Find the last assistant message
+        for turn in path.into_iter().rev() {
+            if turn.turn.role() == Role::Assistant {
+                // Get the last message content from this turn
+                for msg in turn.messages.into_iter().rev() {
+                    if msg.message.role == Role::Assistant {
+                        // Resolve and extract text from content
+                        let resolved = self.resolve_stored_content(&msg.content).await?;
+                        let text: Vec<String> = resolved
+                            .into_iter()
+                            .filter_map(|c| c.as_text().map(|t| t.to_string()))
+                            .collect();
+
+                        if !text.is_empty() {
+                            return Ok(Some(text.join("\n")));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Link a subconversation's result back to the parent conversation.
+    ///
+    /// Creates a ToolResult message in the parent conversation's current span
+    /// containing the subconversation's final result. This is used when a
+    /// spawned agent completes and its result should appear in the parent flow.
+    ///
+    /// # Arguments
+    /// * `subconversation_id` - The subconversation whose result to link
+    /// * `parent_span_id` - The span in the parent to add the ToolResult to
+    /// * `parent_turn_id` - The turn in the parent (for ResolvedMessage)
+    /// * `tool_call_id` - The ID of the original ToolCall that spawned this
+    /// * `tool_name` - The name of the tool (e.g., "spawn_agent")
+    ///
+    /// # Returns
+    /// The resolved message that was added (for caching in Session)
+    pub async fn link_subconversation_result(
+        &self,
+        subconversation_id: &ConversationId,
+        parent_span_id: &SpanId,
+        parent_turn_id: &TurnId,
+        tool_call_id: &str,
+        tool_name: &str,
+    ) -> Result<ResolvedMessage> {
+        // Get the subconversation's result
+        let result_text = self
+            .get_subconversation_result(subconversation_id)
+            .await?
+            .unwrap_or_else(|| "(no result)".to_string());
+
+        // Create a ToolResult that includes both the result and a reference to the subconversation
+        let tool_result = llm::ToolResult {
+            id: tool_call_id.to_string(),
+            name: tool_name.to_string(),
+            result: serde_json::json!({
+                "result": result_text,
+                "subconversation_id": subconversation_id.as_str()
+            }),
+            is_error: false,
+        };
+
+        // Add as a message in the parent span
+        let content = vec![ContentBlock::ToolResult(tool_result.clone())];
+        self.add_message(
+            parent_span_id,
+            parent_turn_id,
+            Role::Tool,
+            content,
+            OriginKind::System,
+        )
+        .await
+    }
+
     /// Resolve a view path (turns with content) to resolved messages.
     async fn resolve_path(&self, path: &[TurnWithContent]) -> Result<Vec<ResolvedMessage>> {
         let mut messages = Vec::new();

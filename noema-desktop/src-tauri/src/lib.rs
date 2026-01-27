@@ -200,6 +200,8 @@ pub fn run() {
             commands::chat::spawn_subconversation,
             commands::chat::get_parent_conversation,
             commands::chat::list_subconversations,
+            commands::chat::get_subconversation_result,
+            commands::chat::link_subconversation_result,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,

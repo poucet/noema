@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3b"
 feature_name: "Subconversations"
-task: "3.3b.2"
-task_name: "Backend: spawn_subconversation command"
+task: "3.3b.3"
+task_name: "Backend: link_subconversation_result command"
 
 # Completed
 completed_features:

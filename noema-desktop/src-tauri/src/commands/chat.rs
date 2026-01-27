@@ -849,6 +849,59 @@ pub struct SubconversationInfo {
     pub at_span_id: Option<String>,
 }
 
+/// Get the final result from a subconversation.
+///
+/// Returns the text content of the last assistant message in the subconversation.
+#[tauri::command]
+pub async fn get_subconversation_result(
+    state: State<'_, Arc<AppState>>,
+    subconversation_id: ConversationId,
+) -> Result<Option<String>, String> {
+    let coordinator = state.get_coordinator()?;
+
+    coordinator
+        .get_subconversation_result(&subconversation_id)
+        .await
+        .map_err(|e| format!("Failed to get subconversation result: {}", e))
+}
+
+/// Link a subconversation's result back to the parent conversation.
+///
+/// Creates a ToolResult message in the parent span containing the subconversation's
+/// final result. Returns the messages in the updated parent conversation.
+#[tauri::command]
+pub async fn link_subconversation_result(
+    state: State<'_, Arc<AppState>>,
+    subconversation_id: ConversationId,
+    parent_conversation_id: ConversationId,
+    parent_span_id: SpanId,
+    parent_turn_id: TurnId,
+    tool_call_id: String,
+    tool_name: String,
+) -> Result<(), String> {
+    let coordinator = state.get_coordinator()?;
+
+    coordinator
+        .link_subconversation_result(
+            &subconversation_id,
+            &parent_span_id,
+            &parent_turn_id,
+            &tool_call_id,
+            &tool_name,
+        )
+        .await
+        .map_err(|e| format!("Failed to link subconversation result: {}", e))?;
+
+    // Reload the parent manager to reflect the new message
+    let managers = state.managers.lock().await;
+    if let Some(manager) = managers.get(&parent_conversation_id) {
+        manager.reload().await
+            .map_err(|e| format!("Failed to reload parent conversation: {}", e))?;
+    }
+
+    Ok(())
+}
+
 /// Edit a user message, creating a fork with the new content and triggering AI response
 ///
 /// This creates a new view forked from the current view at the specified turn,
