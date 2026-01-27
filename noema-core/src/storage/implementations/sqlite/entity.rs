@@ -724,4 +724,42 @@ mod tests {
         let to_relations = store.get_relations_to(&entity2, None).await.unwrap();
         assert!(to_relations.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_subconversation_spawned_from_relation() {
+        let store = SqliteStore::in_memory().unwrap();
+
+        // Create parent conversation
+        let parent = store.create_entity(EntityType::conversation(), None).await.unwrap();
+
+        // Create subconversation (spawned agent)
+        let sub = store.create_entity(EntityType::conversation(), None).await.unwrap();
+
+        // Link subconversation to parent with spawn metadata
+        let metadata = serde_json::json!({
+            "at_turn_id": "turn-123",
+            "at_span_id": "span-456"
+        });
+        store
+            .add_relation(&sub, &parent, RelationType::spawned_from(), Some(metadata.clone()))
+            .await
+            .unwrap();
+
+        // Verify relation from sub's perspective
+        let from_relations = store
+            .get_relations_from(&sub, Some(&RelationType::spawned_from()))
+            .await
+            .unwrap();
+        assert_eq!(from_relations.len(), 1);
+        assert_eq!(from_relations[0].0, parent);
+        assert_eq!(from_relations[0].1.metadata, Some(metadata.clone()));
+
+        // Verify backlink from parent's perspective
+        let to_relations = store
+            .get_relations_to(&parent, Some(&RelationType::spawned_from()))
+            .await
+            .unwrap();
+        assert_eq!(to_relations.len(), 1);
+        assert_eq!(to_relations[0].0, sub);
+    }
 }

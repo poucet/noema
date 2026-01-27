@@ -234,7 +234,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.3b.1 | 🏗️ Schema: Add `parent_conversation_id`, `parent_turn_id` to conversations table |
+| ✅ | 3.3b.1 | 🏗️ Add `RelationType::spawned_from()` for subconversation relations |
 | ⬜ | 3.3b.2 | ⚡ Backend: `spawn_subconversation` - create linked conversation with initial context |
 | ⬜ | 3.3b.3 | ⚡ Backend: `link_subconversation_result` - attach result to parent turn |
 | ⬜ | 3.3b.4 | 🔧 Integration: Wire MCP agent spawn to use subconversation API |

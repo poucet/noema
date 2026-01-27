@@ -193,6 +193,12 @@ impl RelationType {
     pub fn grouped_with() -> Self {
         Self::new("grouped_with")
     }
+
+    /// Subconversation spawned from parent conversation
+    /// Metadata: {"at_turn_id": "...", "at_span_id": "..."}
+    pub fn spawned_from() -> Self {
+        Self::new("spawned_from")
+    }
 }
 
 impl std::fmt::Display for RelationType {
@@ -271,6 +277,7 @@ mod tests {
         assert_eq!(RelationType::references().as_str(), "references");
         assert_eq!(RelationType::derived_from().as_str(), "derived_from");
         assert_eq!(RelationType::grouped_with().as_str(), "grouped_with");
+        assert_eq!(RelationType::spawned_from().as_str(), "spawned_from");
     }
 
     #[test]

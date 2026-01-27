@@ -3,10 +3,10 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.3"
-feature_name: "Views, Forking, and User Journeys"
-task: "3.3.F6"
-task_name: "User: Verify can see all alternatives, select any one"
+feature: "3.3b"
+feature_name: "Subconversations"
+task: "3.3b.1"
+task_name: "Add RelationType::spawned_from() for subconversations"
 
 # Completed
 completed_features:
