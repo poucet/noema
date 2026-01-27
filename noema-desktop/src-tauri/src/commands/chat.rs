@@ -752,6 +752,103 @@ pub struct EditMessageResponse {
     pub messages: Vec<DisplayMessage>,
 }
 
+/// Spawn a subconversation from a parent conversation.
+///
+/// Creates a new conversation linked to the parent via spawned_from relation.
+/// The subconversation can run independently (e.g., for an agent) while maintaining
+/// the link back to where it was spawned.
+///
+/// # Returns
+/// The new subconversation's ID as a string.
+#[tauri::command]
+pub async fn spawn_subconversation(
+    state: State<'_, Arc<AppState>>,
+    parent_conversation_id: ConversationId,
+    at_turn_id: TurnId,
+    at_span_id: Option<SpanId>,
+    name: Option<String>,
+) -> Result<String, String> {
+    let coordinator = state.get_coordinator()?;
+    let user_id = state.user_id.lock().await.clone();
+
+    let sub_id = coordinator
+        .spawn_subconversation(
+            &parent_conversation_id,
+            &user_id,
+            &at_turn_id,
+            at_span_id.as_ref(),
+            name.as_deref(),
+        )
+        .await
+        .map_err(|e| format!("Failed to spawn subconversation: {}", e))?;
+
+    Ok(sub_id.as_str().to_string())
+}
+
+/// Get the parent conversation for a subconversation.
+///
+/// Returns null if the conversation has no parent.
+#[tauri::command]
+pub async fn get_parent_conversation(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+) -> Result<Option<ParentConversationInfo>, String> {
+    let coordinator = state.get_coordinator()?;
+
+    match coordinator.get_parent_conversation(&conversation_id).await {
+        Ok(Some((parent_id, at_turn_id, at_span_id))) => {
+            Ok(Some(ParentConversationInfo {
+                parent_conversation_id: parent_id.as_str().to_string(),
+                at_turn_id: at_turn_id.as_str().to_string(),
+                at_span_id: at_span_id.map(|s| s.as_str().to_string()),
+            }))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("Failed to get parent conversation: {}", e)),
+    }
+}
+
+/// Information about a parent conversation
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentConversationInfo {
+    pub parent_conversation_id: String,
+    pub at_turn_id: String,
+    pub at_span_id: Option<String>,
+}
+
+/// List all subconversations spawned from a parent conversation.
+#[tauri::command]
+pub async fn list_subconversations(
+    state: State<'_, Arc<AppState>>,
+    parent_conversation_id: ConversationId,
+) -> Result<Vec<SubconversationInfo>, String> {
+    let coordinator = state.get_coordinator()?;
+
+    let subs = coordinator
+        .list_subconversations(&parent_conversation_id)
+        .await
+        .map_err(|e| format!("Failed to list subconversations: {}", e))?;
+
+    Ok(subs
+        .into_iter()
+        .map(|(sub_id, at_turn_id, at_span_id)| SubconversationInfo {
+            conversation_id: sub_id.as_str().to_string(),
+            at_turn_id: at_turn_id.as_str().to_string(),
+            at_span_id: at_span_id.map(|s| s.as_str().to_string()),
+        })
+        .collect())
+}
+
+/// Information about a subconversation
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubconversationInfo {
+    pub conversation_id: String,
+    pub at_turn_id: String,
+    pub at_span_id: Option<String>,
+}
+
 /// Edit a user message, creating a fork with the new content and triggering AI response
 ///
 /// This creates a new view forked from the current view at the specified turn,

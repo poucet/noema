@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.3b"
 feature_name: "Subconversations"
-task: "3.3b.1"
-task_name: "Add RelationType::spawned_from() for subconversations"
+task: "3.3b.2"
+task_name: "Backend: spawn_subconversation command"
 
 # Completed
 completed_features:

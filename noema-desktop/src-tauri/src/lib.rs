@@ -196,6 +196,10 @@ pub fn run() {
             commands::chat::switch_view,
             commands::chat::select_span,
             commands::chat::edit_message,
+            // Subconversation commands
+            commands::chat::spawn_subconversation,
+            commands::chat::get_parent_conversation,
+            commands::chat::list_subconversations,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,

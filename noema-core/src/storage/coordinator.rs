@@ -257,6 +257,121 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         self.resolve_path(&path).await
     }
 
+    /// Spawn a subconversation linked to a parent conversation.
+    ///
+    /// Creates a new conversation entity and links it to the parent via
+    /// entity_relations with RelationType::spawned_from(). The metadata
+    /// records which turn in the parent triggered the spawn.
+    ///
+    /// # Arguments
+    /// * `parent_conversation_id` - The parent conversation entity ID
+    /// * `user_id` - The user who owns the subconversation
+    /// * `at_turn_id` - The turn in the parent where the spawn was triggered
+    /// * `at_span_id` - Optional: the specific span at that turn
+    /// * `name` - Optional name for the subconversation
+    ///
+    /// # Returns
+    /// The new subconversation's ConversationId
+    pub async fn spawn_subconversation(
+        &self,
+        parent_conversation_id: &ConversationId,
+        user_id: &UserId,
+        at_turn_id: &TurnId,
+        at_span_id: Option<&SpanId>,
+        name: Option<&str>,
+    ) -> Result<ConversationId> {
+        use crate::storage::types::RelationType;
+
+        // Create the subconversation with its own view
+        let sub_conversation_id = self.create_conversation_with_view(user_id, name).await?;
+
+        // Build spawn metadata
+        let mut metadata = serde_json::json!({
+            "at_turn_id": at_turn_id.as_str()
+        });
+        if let Some(span_id) = at_span_id {
+            metadata["at_span_id"] = serde_json::Value::String(span_id.as_str().to_string());
+        }
+
+        // Link subconversation → parent with spawned_from relation
+        self.entity_store
+            .add_relation(
+                &sub_conversation_id,
+                parent_conversation_id,
+                RelationType::spawned_from(),
+                Some(metadata),
+            )
+            .await?;
+
+        Ok(sub_conversation_id)
+    }
+
+    /// Get the parent conversation for a subconversation.
+    ///
+    /// Returns None if the conversation has no parent (is not a subconversation).
+    pub async fn get_parent_conversation(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Option<(ConversationId, TurnId, Option<SpanId>)>> {
+        use crate::storage::types::RelationType;
+
+        let relations = self.entity_store
+            .get_relations_from(conversation_id, Some(&RelationType::spawned_from()))
+            .await?;
+
+        if let Some((parent_id, relation)) = relations.into_iter().next() {
+            let at_turn_id = relation.metadata
+                .as_ref()
+                .and_then(|m| m.get("at_turn_id"))
+                .and_then(|v| v.as_str())
+                .map(TurnId::from_string)
+                .ok_or_else(|| anyhow::anyhow!("spawned_from relation missing at_turn_id"))?;
+
+            let at_span_id = relation.metadata
+                .as_ref()
+                .and_then(|m| m.get("at_span_id"))
+                .and_then(|v| v.as_str())
+                .map(SpanId::from_string);
+
+            Ok(Some((parent_id, at_turn_id, at_span_id)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// List all subconversations spawned from a parent conversation.
+    pub async fn list_subconversations(
+        &self,
+        parent_conversation_id: &ConversationId,
+    ) -> Result<Vec<(ConversationId, TurnId, Option<SpanId>)>> {
+        use crate::storage::types::RelationType;
+
+        let relations = self.entity_store
+            .get_relations_to(parent_conversation_id, Some(&RelationType::spawned_from()))
+            .await?;
+
+        let mut result = Vec::new();
+        for (sub_id, relation) in relations {
+            let at_turn_id = relation.metadata
+                .as_ref()
+                .and_then(|m| m.get("at_turn_id"))
+                .and_then(|v| v.as_str())
+                .map(TurnId::from_string);
+
+            let at_span_id = relation.metadata
+                .as_ref()
+                .and_then(|m| m.get("at_span_id"))
+                .and_then(|v| v.as_str())
+                .map(SpanId::from_string);
+
+            if let Some(turn_id) = at_turn_id {
+                result.push((sub_id, turn_id, at_span_id));
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Resolve a view path (turns with content) to resolved messages.
     async fn resolve_path(&self, path: &[TurnWithContent]) -> Result<Vec<ResolvedMessage>> {
         let mut messages = Vec::new();
