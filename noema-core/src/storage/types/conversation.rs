@@ -5,13 +5,15 @@
 //! - `Turn` - Core turn data (role only), stored as `Stored<TurnId, Turn>`
 //! - `Span` - Core span data, stored as `Stored<SpanId, Span>`
 //! - `Message` - Individual message within a span, stored as `Stored<MessageId, Message>`
-//! - `View` - A path through turns/spans (defines order), stored as `Stored<ViewId, View>`
+//!
+//! Conversations are entities (see EntityType::conversation()) that have their own
+//! linear sequence of turns via conversation_selections.
 
 use llm::Role;
 use serde::{Deserialize, Serialize};
 
 use crate::storage::content::StoredContent;
-use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{MessageId, SpanId, TurnId};
 use crate::storage::types::Stored;
 
 
@@ -21,9 +23,9 @@ use crate::storage::types::Stored;
 
 /// Core turn data - a structural node that can have multiple spans
 ///
-/// Turns are independent entities; views link them together and define order.
+/// Turns are independent entities; conversations link them together and define order.
 /// A turn represents a point where someone "speaks" (user or assistant).
-/// Multiple views can reference the same turn through view_selections.
+/// Multiple conversations can reference the same turn through conversation_selections.
 ///
 /// Use with `Stored<TurnId, Turn>` for the full stored representation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -135,75 +137,10 @@ pub struct MessageWithContent {
 }
 
 // ============================================================================
-// View Types
-// ============================================================================
-
-/// Fork origin information - where a view was forked from
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ForkInfo {
-    /// View this was forked from
-    pub from_view_id: ViewId,
-    /// Turn where the fork occurred
-    pub at_turn_id: TurnId,
-}
-
-/// Core view data - selects one span per turn
-///
-/// Views are entities that conversations point to. The "main" view is stored
-/// in Conversation.main_view_id. Forked views track their origin.
-///
-/// Use with `Stored<ViewId, View>` for the full stored representation.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct View {
-    /// Fork origin (None for main views, Some for forked views)
-    pub fork: Option<ForkInfo>,
-    /// Number of turns selected in this view
-    pub turn_count: usize,
-}
-
-impl View {
-    /// Create a new main view (not forked)
-    pub fn new() -> Self {
-        Self {
-            fork: None,
-            turn_count: 0,
-        }
-    }
-
-    /// Create a forked view
-    pub fn forked(from_view_id: ViewId, at_turn_id: TurnId, turn_count: usize) -> Self {
-        Self {
-            fork: Some(ForkInfo {
-                from_view_id,
-                at_turn_id,
-            }),
-            turn_count,
-        }
-    }
-}
-
-impl Default for View {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Selection of a span within a view
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ViewSelection {
-    /// View making the selection
-    pub view_id: ViewId,
-    /// Turn being selected
-    pub turn_id: TurnId,
-    /// Selected span at that turn
-    pub span_id: SpanId,
-}
-
-// ============================================================================
 // Composite Types (for queries)
 // ============================================================================
 
-/// A turn with its selected span and messages (for view path queries)
+/// A turn with its selected span and messages (for conversation path queries)
 #[derive(Clone, Debug)]
 pub struct TurnWithContent {
     /// The turn
@@ -215,13 +152,14 @@ pub struct TurnWithContent {
 }
 
 // ============================================================================
-// Conversation (REMOVED - use Entity with EntityType::conversation() instead)
+// Conversation (Entity-based)
 // ============================================================================
 //
-// Conversations are now fully represented as entities:
+// Conversations are fully represented as entities:
 // - Entity.entity_type = EntityType::conversation()
-// - Entity.metadata["main_view_id"] = the main view ID
 // - Entity.name, Entity.is_private, etc. for common fields
+// - Selections stored in conversation_selections table
+// - Forks tracked via entity_relations with RelationType::forked_from()
 //
 // See EntityStore for CRUD operations.
 

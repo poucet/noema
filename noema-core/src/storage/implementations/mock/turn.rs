@@ -5,11 +5,9 @@ use async_trait::async_trait;
 use llm::Role;
 
 use crate::storage::content::StoredContent;
-use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId};
 use crate::storage::traits::TurnStore;
-use crate::storage::types::{
-    Message, MessageWithContent, Span, Stored, Turn, TurnWithContent, View,
-};
+use crate::storage::types::{Message, MessageWithContent, Span, Stored, Turn, TurnWithContent};
 
 /// Mock turn store that returns unimplemented for all operations
 pub struct MockTurnStore;
@@ -45,38 +43,28 @@ impl TurnStore for MockTurnStore {
     async fn get_message(&self, _: &MessageId) -> Result<Option<Stored<MessageId, Message>>> {
         unimplemented!()
     }
-    async fn create_view(&self) -> Result<Stored<ViewId, View>> {
+    async fn select_span(&self, _: &ConversationId, _: &TurnId, _: &SpanId) -> Result<()> {
         unimplemented!()
     }
-    async fn get_view(&self, _: &ViewId) -> Result<Option<Stored<ViewId, View>>> {
+    async fn get_selected_span(&self, _: &ConversationId, _: &TurnId) -> Result<Option<SpanId>> {
         unimplemented!()
     }
-    async fn list_related_views(&self, _: &ViewId) -> Result<Vec<Stored<ViewId, View>>> {
+    async fn get_conversation_path(&self, _: &ConversationId) -> Result<Vec<TurnWithContent>> {
         unimplemented!()
     }
-    async fn select_span(&self, _: &ViewId, _: &TurnId, _: &SpanId) -> Result<()> {
+    async fn get_context_at(&self, _: &ConversationId, _: &TurnId) -> Result<Vec<TurnWithContent>> {
         unimplemented!()
     }
-    async fn get_selected_span(&self, _: &ViewId, _: &TurnId) -> Result<Option<SpanId>> {
-        unimplemented!()
-    }
-    async fn get_view_path(&self, _: &ViewId) -> Result<Vec<TurnWithContent>> {
-        unimplemented!()
-    }
-    async fn fork_view(&self, _: &ViewId, _: &TurnId) -> Result<Stored<ViewId, View>> {
-        unimplemented!()
-    }
-    async fn get_view_context_at(&self, _: &ViewId, _: &TurnId) -> Result<Vec<TurnWithContent>> {
-        unimplemented!()
-    }
-    async fn edit_turn(
+    async fn copy_selections(
         &self,
-        _: &ViewId,
+        _: &ConversationId,
+        _: &ConversationId,
         _: &TurnId,
-        _: Vec<(Role, Vec<StoredContent>)>,
-        _: Option<&str>,
         _: bool,
-    ) -> Result<(Stored<SpanId, Span>, Option<Stored<ViewId, View>>)> {
+    ) -> Result<usize> {
+        unimplemented!()
+    }
+    async fn get_turn_count(&self, _: &ConversationId) -> Result<usize> {
         unimplemented!()
     }
 }

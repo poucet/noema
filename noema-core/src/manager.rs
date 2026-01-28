@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 use crate::context::ConversationContext;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
-use crate::storage::ids::{ConversationId, TurnId, UserId, ViewId};
+use crate::storage::ids::{ConversationId, TurnId, UserId};
 use crate::storage::session::{ResolvedMessage, Session};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::OriginKind;
@@ -321,6 +321,7 @@ impl<S: StorageTypes> ConversationManager<S> {
 
                 // Commit pending messages
                 let commit_result = Self::commit_pending(
+                    conversation_id,
                     session,
                     coordinator,
                     Some(model.id()),
@@ -349,6 +350,7 @@ impl<S: StorageTypes> ConversationManager<S> {
 
     /// Commit pending messages to storage
     async fn commit_pending(
+        conversation_id: &ConversationId,
         session: &Arc<Mutex<Session<S>>>,
         coordinator: &Arc<StorageCoordinator<S>>,
         model_id: Option<&str>,
@@ -360,7 +362,6 @@ impl<S: StorageTypes> ConversationManager<S> {
             return Ok(());
         }
 
-        let view_id = sess.view_id().clone();
         let pending: Vec<ChatMessage> = sess.pending().to_vec();
 
         // Track current turn and span for adding messages
@@ -377,7 +378,7 @@ impl<S: StorageTypes> ConversationManager<S> {
                 CommitMode::AtTurn(tid) => {
                     if current_span.is_none() {
                         let span = coordinator
-                            .create_and_select_span(&view_id, tid, model_id)
+                            .create_and_select_span(conversation_id, tid, model_id)
                             .await?;
                         current_turn = Some(tid.clone());
                         current_span = Some(span);
@@ -388,7 +389,7 @@ impl<S: StorageTypes> ConversationManager<S> {
                     if current_role != Some(span_role) {
                         let tid = coordinator.create_turn(span_role).await?;
                         let span = coordinator
-                            .create_and_select_span(&view_id, &tid, model_id)
+                            .create_and_select_span(conversation_id, &tid, model_id)
                             .await?;
                         current_turn = Some(tid);
                         current_span = Some(span);
@@ -455,11 +456,6 @@ impl<S: StorageTypes> ConversationManager<S> {
         self.model.name()
     }
 
-    /// Get the current view ID
-    pub async fn view_id(&self) -> ViewId {
-        self.session.lock().await.view_id().clone()
-    }
-
     /// Get all messages (committed + pending) for display
     pub async fn all_messages(&self) -> Vec<ChatMessage> {
         self.session.lock().await.all_messages()
@@ -478,17 +474,5 @@ impl<S: StorageTypes> ConversationManager<S> {
     /// Reload messages from storage for current view
     pub async fn reload(&self) -> Result<()> {
         self.session.lock().await.reload().await
-    }
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-fn llm_role_to_origin(role: llm::Role) -> OriginKind {
-    match role {
-        llm::Role::User => OriginKind::User,
-        llm::Role::Assistant => OriginKind::Assistant,
-        llm::Role::System => OriginKind::System,
     }
 }

@@ -155,8 +155,8 @@ impl<S: StorageTypes> SpawnHandler for ConversationSpawnHandler<S> {
             .await?;
 
         // 2. Open a session for the subconversation
-        let (view_id, resolved_messages) = self.coordinator.open_session(&sub_id).await?;
-        let mut session = Session::new(self.coordinator.clone(), sub_id.clone(), view_id);
+        let resolved_messages = self.coordinator.open_session(&sub_id).await?;
+        let mut session = Session::new(self.coordinator.clone(), sub_id.clone());
         for msg in resolved_messages {
             session.add_resolved(msg);
         }

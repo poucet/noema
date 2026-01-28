@@ -7,12 +7,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::storage::content::StoredContent;
-use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId};
 use crate::storage::traits::TurnStore;
-use crate::storage::types::{
-    stored, ForkInfo, Message, MessageWithContent, Span, Stored, Turn,
-    TurnWithContent, View,
-};
+use crate::storage::types::{stored, Message, MessageWithContent, Span, Stored, Turn, TurnWithContent};
 
 fn now() -> i64 {
     std::time::SystemTime::now()
@@ -21,9 +18,9 @@ fn now() -> i64 {
         .as_millis() as i64
 }
 
-/// View selection with sequence number
+/// Conversation selection with sequence number
 #[derive(Debug, Clone)]
-struct ViewSelection {
+struct ConversationSelection {
     span_id: SpanId,
     sequence_number: i32,
 }
@@ -42,8 +39,7 @@ pub struct MemoryTurnStore {
     spans: Mutex<HashMap<SpanId, InternalSpan>>,
     messages: Mutex<HashMap<MessageId, Stored<MessageId, Message>>>,
     message_content: Mutex<HashMap<MessageId, Vec<StoredContent>>>,
-    views: Mutex<HashMap<ViewId, Stored<ViewId, View>>>,
-    view_selections: Mutex<HashMap<(ViewId, TurnId), ViewSelection>>,
+    conversation_selections: Mutex<HashMap<(ConversationId, TurnId), ConversationSelection>>,
 }
 
 impl MemoryTurnStore {
@@ -197,124 +193,56 @@ impl TurnStore for MemoryTurnStore {
         Ok(messages.get(message_id).cloned())
     }
 
-    // ========== View Management ==========
-
-    async fn create_view(&self) -> Result<Stored<ViewId, View>> {
-        let mut views = self.views.lock().unwrap();
-
-        let id = ViewId::new();
-        let now = now();
-        let view = View {
-            fork: None,
-            turn_count: 0,
-        };
-        let stored = stored(id.clone(), view, now);
-
-        views.insert(id, stored.clone());
-        Ok(stored)
-    }
-
-    async fn get_view(&self, view_id: &ViewId) -> Result<Option<Stored<ViewId, View>>> {
-        let views = self.views.lock().unwrap();
-        let selections = self.view_selections.lock().unwrap();
-
-        Ok(views.get(view_id).map(|v| {
-            let turn_count = selections
-                .iter()
-                .filter(|((vid, _), _)| vid == view_id)
-                .count();
-            let view = View {
-                turn_count,
-                fork: v.fork.clone(),
-            };
-            stored(v.id.clone(), view, v.created_at)
-        }))
-    }
-
-    async fn list_related_views(&self, main_view_id: &ViewId) -> Result<Vec<Stored<ViewId, View>>> {
-        let views = self.views.lock().unwrap();
-        let selections = self.view_selections.lock().unwrap();
-
-        // Collect all views that are part of the fork tree starting from main_view_id
-        let mut result = Vec::new();
-        let mut to_visit = vec![main_view_id.clone()];
-        let mut visited = std::collections::HashSet::new();
-
-        while let Some(vid) = to_visit.pop() {
-            if visited.contains(&vid) {
-                continue;
-            }
-            visited.insert(vid.clone());
-
-            if let Some(v) = views.get(&vid) {
-                let turn_count = selections
-                    .iter()
-                    .filter(|((view_id, _), _)| view_id == &vid)
-                    .count();
-                let view = View {
-                    turn_count,
-                    fork: v.fork.clone(),
-                };
-                result.push(stored(v.id.clone(), view, v.created_at));
-
-                // Find all views that were forked from this view
-                for (other_id, other_view) in views.iter() {
-                    if let Some(ref fork) = other_view.fork {
-                        if &fork.from_view_id == &vid {
-                            to_visit.push(other_id.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Sort by created_at
-        result.sort_by_key(|v| v.created_at);
-        Ok(result)
-    }
+    // ========== Selection Management ==========
 
     async fn select_span(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         turn_id: &TurnId,
         span_id: &SpanId,
     ) -> Result<()> {
-        let mut selections = self.view_selections.lock().unwrap();
+        let mut selections = self.conversation_selections.lock().unwrap();
 
-        // Get next sequence number for this view
+        // Get next sequence number for this conversation
         let sequence_number = selections
             .iter()
-            .filter(|((vid, _), _)| vid == view_id)
+            .filter(|((cid, _), _)| cid == conversation_id)
             .map(|(_, sel)| sel.sequence_number)
             .max()
             .map(|n| n + 1)
             .unwrap_or(0);
 
         selections.insert(
-            (view_id.clone(), turn_id.clone()),
-            ViewSelection { span_id: span_id.clone(), sequence_number },
+            (conversation_id.clone(), turn_id.clone()),
+            ConversationSelection {
+                span_id: span_id.clone(),
+                sequence_number,
+            },
         );
         Ok(())
     }
 
     async fn get_selected_span(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         turn_id: &TurnId,
     ) -> Result<Option<SpanId>> {
-        let selections = self.view_selections.lock().unwrap();
+        let selections = self.conversation_selections.lock().unwrap();
         Ok(selections
-            .get(&(view_id.clone(), turn_id.clone()))
+            .get(&(conversation_id.clone(), turn_id.clone()))
             .map(|sel| sel.span_id.clone()))
     }
 
-    async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>> {
-        // Get all selections for this view, sorted by sequence
+    async fn get_conversation_path(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Vec<TurnWithContent>> {
+        // Get all selections for this conversation, sorted by sequence
         let selections: Vec<_> = {
-            let sels = self.view_selections.lock().unwrap();
+            let sels = self.conversation_selections.lock().unwrap();
             let mut entries: Vec<_> = sels
                 .iter()
-                .filter(|((vid, _), _)| vid == view_id)
+                .filter(|((cid, _), _)| cid == conversation_id)
                 .map(|((_, tid), sel)| (tid.clone(), sel.span_id.clone(), sel.sequence_number))
                 .collect();
             entries.sort_by_key(|(_, _, seq)| *seq);
@@ -346,72 +274,26 @@ impl TurnStore for MemoryTurnStore {
         Ok(result)
     }
 
-    async fn fork_view(&self, view_id: &ViewId, at_turn_id: &TurnId) -> Result<Stored<ViewId, View>> {
-        // Find the sequence number of the fork point
-        let at_turn_seq = {
-            let selections = self.view_selections.lock().unwrap();
-            selections
-                .get(&(view_id.clone(), at_turn_id.clone()))
-                .map(|sel| sel.sequence_number)
-                .ok_or_else(|| anyhow::anyhow!("Turn not in view"))?
-        };
-
-        // Copy selections before the fork point and count them
-        let new_selections: Vec<_> = {
-            let selections = self.view_selections.lock().unwrap();
-            selections
-                .iter()
-                .filter(|((vid, _), sel)| vid == view_id && sel.sequence_number < at_turn_seq)
-                .map(|((_, tid), sel)| (tid.clone(), sel.clone()))
-                .collect()
-        };
-
-        let turn_count = new_selections.len();
-
-        let id = ViewId::new();
-        let now = now();
-        let view = View {
-            fork: Some(ForkInfo {
-                from_view_id: view_id.clone(),
-                at_turn_id: at_turn_id.clone(),
-            }),
-            turn_count,
-        };
-        let stored = stored(id.clone(), view, now);
-
-        {
-            let mut selections = self.view_selections.lock().unwrap();
-            for (tid, sel) in new_selections {
-                selections.insert((id.clone(), tid), sel);
-            }
-        }
-
-        let mut views = self.views.lock().unwrap();
-        views.insert(id, stored.clone());
-
-        Ok(stored)
-    }
-
-    async fn get_view_context_at(
+    async fn get_context_at(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         up_to_turn_id: &TurnId,
     ) -> Result<Vec<TurnWithContent>> {
-        // Get sequence of the up_to turn in this view
+        // Get sequence of the up_to turn in this conversation
         let up_to_seq = {
-            let selections = self.view_selections.lock().unwrap();
+            let selections = self.conversation_selections.lock().unwrap();
             selections
-                .get(&(view_id.clone(), up_to_turn_id.clone()))
+                .get(&(conversation_id.clone(), up_to_turn_id.clone()))
                 .map(|sel| sel.sequence_number)
-                .ok_or_else(|| anyhow::anyhow!("Turn not in view"))?
+                .ok_or_else(|| anyhow::anyhow!("Turn not in conversation"))?
         };
 
         // Get all selections before the up_to turn
         let selections: Vec<_> = {
-            let sels = self.view_selections.lock().unwrap();
+            let sels = self.conversation_selections.lock().unwrap();
             let mut entries: Vec<_> = sels
                 .iter()
-                .filter(|((vid, _), sel)| vid == view_id && sel.sequence_number < up_to_seq)
+                .filter(|((cid, _), sel)| cid == conversation_id && sel.sequence_number < up_to_seq)
                 .map(|((_, tid), sel)| (tid.clone(), sel.span_id.clone(), sel.sequence_number))
                 .collect();
             entries.sort_by_key(|(_, _, seq)| *seq);
@@ -438,32 +320,55 @@ impl TurnStore for MemoryTurnStore {
         Ok(result)
     }
 
-    async fn edit_turn(
+    async fn copy_selections(
         &self,
-        view_id: &ViewId,
-        turn_id: &TurnId,
-        messages: Vec<(Role, Vec<StoredContent>)>,
-        model_id: Option<&str>,
-        create_fork: bool,
-    ) -> Result<(Stored<SpanId, Span>, Option<Stored<ViewId, View>>)> {
-        let span = self.create_span(turn_id, model_id).await?;
-
-        for (role, content) in messages {
-            self.add_message(&span.id, role, &content).await?;
-        }
-
-        let forked_view = if create_fork {
-            let new_view = self.fork_view(view_id, turn_id).await?;
-            self.select_span(&new_view.id, turn_id, &span.id).await?;
-            Some(new_view)
-        } else {
-            self.select_span(view_id, turn_id, &span.id).await?;
-            None
+        from_conversation_id: &ConversationId,
+        to_conversation_id: &ConversationId,
+        up_to_turn_id: &TurnId,
+        include_turn: bool,
+    ) -> Result<usize> {
+        // Find the sequence number of the cutoff turn
+        let cutoff_seq = {
+            let selections = self.conversation_selections.lock().unwrap();
+            selections
+                .get(&(from_conversation_id.clone(), up_to_turn_id.clone()))
+                .map(|sel| sel.sequence_number)
+                .ok_or_else(|| anyhow::anyhow!("Turn not in source conversation"))?
         };
 
-        let span = self.get_span(&span.id).await?.unwrap_or(span);
+        // Cutoff: if include_turn, include the turn, otherwise exclude
+        let cutoff = if include_turn { cutoff_seq + 1 } else { cutoff_seq };
 
-        Ok((span, forked_view))
+        // Get selections to copy
+        let selections_to_copy: Vec<_> = {
+            let selections = self.conversation_selections.lock().unwrap();
+            selections
+                .iter()
+                .filter(|((cid, _), sel)| cid == from_conversation_id && sel.sequence_number < cutoff)
+                .map(|((_, tid), sel)| (tid.clone(), sel.clone()))
+                .collect()
+        };
+
+        let count = selections_to_copy.len();
+
+        // Insert the copied selections
+        {
+            let mut selections = self.conversation_selections.lock().unwrap();
+            for (tid, sel) in selections_to_copy {
+                selections.insert((to_conversation_id.clone(), tid), sel);
+            }
+        }
+
+        Ok(count)
+    }
+
+    async fn get_turn_count(&self, conversation_id: &ConversationId) -> Result<usize> {
+        let selections = self.conversation_selections.lock().unwrap();
+        let count = selections
+            .iter()
+            .filter(|((cid, _), _)| cid == conversation_id)
+            .count();
+        Ok(count)
     }
 }
 
@@ -520,32 +425,69 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_view_path() {
+    async fn test_conversation_path() {
         let store = MemoryTurnStore::new();
 
-        // Create view
-        let view = store.create_view().await.unwrap();
+        // Use a conversation ID
+        let conversation_id = ConversationId::new();
 
-        // Create user turn with span and message, select in view
+        // Create user turn with span and message, select in conversation
         let turn1 = store.create_turn(llm::Role::User).await.unwrap();
         let span1 = store.create_span(&turn1.id, None).await.unwrap();
         let content_block_id = crate::storage::ids::ContentBlockId::new();
         let content = vec![StoredContent::text_ref(content_block_id)];
         store.add_message(&span1.id, llm::Role::User, &content).await.unwrap();
-        store.select_span(&view.id, &turn1.id, &span1.id).await.unwrap();
+        store.select_span(&conversation_id, &turn1.id, &span1.id).await.unwrap();
 
-        // Create assistant turn with span and message, select in view
+        // Create assistant turn with span and message, select in conversation
         let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
         let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
         let content_block_id2 = crate::storage::ids::ContentBlockId::new();
         let content2 = vec![StoredContent::text_ref(content_block_id2)];
         store.add_message(&span2.id, llm::Role::Assistant, &content2).await.unwrap();
-        store.select_span(&view.id, &turn2.id, &span2.id).await.unwrap();
+        store.select_span(&conversation_id, &turn2.id, &span2.id).await.unwrap();
 
-        // Get view path
-        let path = store.get_view_path(&view.id).await.unwrap();
+        // Get conversation path
+        let path = store.get_conversation_path(&conversation_id).await.unwrap();
         assert_eq!(path.len(), 2);
         assert_eq!(path[0].turn.role(), llm::Role::User);
         assert_eq!(path[1].turn.role(), llm::Role::Assistant);
+
+        // Verify turn count
+        let count = store.get_turn_count(&conversation_id).await.unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_copy_selections() {
+        let store = MemoryTurnStore::new();
+
+        let conv1 = ConversationId::new();
+        let conv2 = ConversationId::new();
+
+        // Create a conversation with 3 turns
+        let turn1 = store.create_turn(llm::Role::User).await.unwrap();
+        let span1 = store.create_span(&turn1.id, None).await.unwrap();
+        store.select_span(&conv1, &turn1.id, &span1.id).await.unwrap();
+
+        let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
+        let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
+        store.select_span(&conv1, &turn2.id, &span2.id).await.unwrap();
+
+        let turn3 = store.create_turn(llm::Role::User).await.unwrap();
+        let span3 = store.create_span(&turn3.id, None).await.unwrap();
+        store.select_span(&conv1, &turn3.id, &span3.id).await.unwrap();
+
+        // Copy up to turn2 (include_turn = true) - should get turns 1 and 2
+        let copied = store.copy_selections(&conv1, &conv2, &turn2.id, true).await.unwrap();
+        assert_eq!(copied, 2);
+
+        let path = store.get_conversation_path(&conv2).await.unwrap();
+        assert_eq!(path.len(), 2);
+
+        // Copy to another conv up to turn2 (include_turn = false) - should get only turn 1
+        let conv3 = ConversationId::new();
+        let copied = store.copy_selections(&conv1, &conv3, &turn2.id, false).await.unwrap();
+        assert_eq!(copied, 1);
     }
 }

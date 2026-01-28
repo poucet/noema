@@ -344,7 +344,7 @@ impl ViewConfig {
 /// A saved view configuration for a collection
 ///
 /// Views allow different ways to display the same collection.
-/// Use with `StoredEditable<ViewId, CollectionView>`.
+/// Use with `StoredEditable<CollectionViewId, CollectionView>`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CollectionView {
     /// Parent collection

@@ -20,7 +20,7 @@ pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use entity::{EntityStore, StoredEntity};
 pub use reference::{ReferenceStore, StoredReference};
 pub use text::{TextStore, StoredTextBlock};
-pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage, StoredView};
+pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage};
 pub use user::{StoredUser, UserStore};
 
 /// Bundles all storage type associations into a single trait.
@@ -50,7 +50,7 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Asset: AssetStore + Send + Sync;
     /// Text content storage
     type Text: TextStore + Send + Sync;
-    /// Turn/Span/Message/View storage
+    /// Turn/Span/Message storage
     type Turn: TurnStore + Send + Sync;
     /// User storage
     type User: UserStore + Send + Sync;

@@ -9,20 +9,17 @@ use super::SqliteStore;
 use crate::storage::content::StoredContent;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{
-    AssetId, ContentBlockId, DocumentId, MessageContentId, MessageId, SpanId, TurnId, ViewId
+    AssetId, ContentBlockId, ConversationId, DocumentId, MessageContentId, MessageId, SpanId, TurnId,
 };
-use crate::storage::traits::{StoredMessage, StoredSpan, StoredTurn, StoredView, TurnStore};
-use crate::storage::types::{
-    stored, ForkInfo, Message, MessageWithContent, Span,
-    Turn, TurnWithContent, View,
-};
+use crate::storage::traits::{StoredMessage, StoredSpan, StoredTurn, TurnStore};
+use crate::storage::types::{stored, Message, MessageWithContent, Span, Turn, TurnWithContent};
 
-/// Initialize turn-related schema (turns, spans, messages, views)
+/// Initialize turn-related schema (turns, spans, messages, conversation_selections)
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         -- Turns: structural nodes that can have multiple spans
-        -- Order is determined by view_selections.sequence_number
+        -- Order is determined by conversation_selections.sequence_number
         CREATE TABLE IF NOT EXISTS turns (
             id TEXT PRIMARY KEY,
             role TEXT CHECK(role IN ('user', 'assistant')) NOT NULL,
@@ -67,25 +64,18 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_message_content_message ON message_content(message_id, sequence_number);
         CREATE INDEX IF NOT EXISTS idx_message_content_block ON message_content(content_block_id);
 
-        -- Views: paths through conversation (span selections per turn)
-        CREATE TABLE IF NOT EXISTS views (
-            id TEXT PRIMARY KEY,
-            forked_from_view_id TEXT REFERENCES views(id),
-            forked_at_turn_id TEXT REFERENCES turns(id),
-            created_at INTEGER NOT NULL
-        );
-
-        -- View selections: which span is selected at each turn for a view
-        -- sequence_number defines the order of turns within this view
-        CREATE TABLE IF NOT EXISTS view_selections (
-            view_id TEXT NOT NULL REFERENCES views(id) ON DELETE CASCADE,
+        -- Conversation selections: which span is selected at each turn for a conversation
+        -- Each conversation has its own linear sequence of turns.
+        -- sequence_number defines the order of turns within the conversation.
+        CREATE TABLE IF NOT EXISTS conversation_selections (
+            conversation_id TEXT NOT NULL,
             turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
             span_id TEXT NOT NULL REFERENCES spans(id) ON DELETE CASCADE,
             sequence_number INTEGER NOT NULL,
-            PRIMARY KEY (view_id, turn_id)
+            PRIMARY KEY (conversation_id, turn_id)
         );
-        CREATE INDEX IF NOT EXISTS idx_view_selections_span ON view_selections(span_id);
-        CREATE INDEX IF NOT EXISTS idx_view_selections_seq ON view_selections(view_id, sequence_number);
+        CREATE INDEX IF NOT EXISTS idx_conv_selections_span ON conversation_selections(span_id);
+        CREATE INDEX IF NOT EXISTS idx_conv_selections_seq ON conversation_selections(conversation_id, sequence_number);
         "#,
     )?;
     Ok(())
@@ -360,131 +350,43 @@ impl TurnStore for SqliteStore {
         }
     }
 
-    // ========== View Management ==========
-
-    async fn create_view(&self) -> Result<StoredView> {
-        let conn = self.conn().lock().unwrap();
-        let id = ViewId::new();
-        let now = unix_timestamp();
-
-        conn.execute(
-            "INSERT INTO views (id, created_at) VALUES (?1, ?2)",
-            params![id, now],
-        )?;
-
-        Ok(stored(id, View::new(), now))
-    }
-
-    async fn get_view(&self, view_id: &ViewId) -> Result<Option<StoredView>> {
-        let conn = self.conn().lock().unwrap();
-        let result = conn.query_row(
-            "SELECT v.id, v.forked_from_view_id, v.forked_at_turn_id, v.created_at,
-                    (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = v.id) as turn_count
-             FROM views v WHERE v.id = ?1",
-            params![view_id],
-            |row| {
-                let id: ViewId = row.get(0)?;
-                let forked_from: Option<ViewId> = row.get(1)?;
-                let forked_at: Option<TurnId> = row.get(2)?;
-                let created: i64 = row.get(3)?;
-                let turn_count: usize = row.get(4)?;
-                Ok((id, forked_from, forked_at, created, turn_count))
-            },
-        );
-
-        match result {
-            Ok((id, forked_from, forked_at, created, turn_count)) => {
-                let fork = match (forked_from, forked_at) {
-                    (Some(from_view_id), Some(at_turn_id)) => Some(ForkInfo { from_view_id, at_turn_id }),
-                    _ => None,
-                };
-                let view = View { fork, turn_count };
-                Ok(Some(stored(id, view, created)))
-            }
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    async fn list_related_views(&self, main_view_id: &ViewId) -> Result<Vec<StoredView>> {
-        let conn = self.conn().lock().unwrap();
-
-        // Use recursive CTE to find all views in the fork tree
-        let mut stmt = conn.prepare(
-            "WITH RECURSIVE view_tree AS (
-                -- Base case: the main view
-                SELECT id, forked_from_view_id, forked_at_turn_id, created_at
-                FROM views WHERE id = ?1
-                UNION ALL
-                -- Recursive case: views forked from views in the tree
-                SELECT v.id, v.forked_from_view_id, v.forked_at_turn_id, v.created_at
-                FROM views v
-                INNER JOIN view_tree vt ON v.forked_from_view_id = vt.id
-            )
-            SELECT vt.id, vt.forked_from_view_id, vt.forked_at_turn_id, vt.created_at,
-                   (SELECT COUNT(*) FROM view_selections vs WHERE vs.view_id = vt.id) as turn_count
-            FROM view_tree vt
-            ORDER BY vt.created_at ASC"
-        )?;
-
-        let rows = stmt.query_map(params![main_view_id], |row| {
-            let id: ViewId = row.get(0)?;
-            let forked_from: Option<ViewId> = row.get(1)?;
-            let forked_at: Option<TurnId> = row.get(2)?;
-            let created: i64 = row.get(3)?;
-            let turn_count: usize = row.get(4)?;
-            Ok((id, forked_from, forked_at, created, turn_count))
-        })?;
-
-        let mut views = Vec::new();
-        for row_result in rows {
-            let (id, forked_from, forked_at, created, turn_count) = row_result?;
-            let fork = match (forked_from, forked_at) {
-                (Some(from_view_id), Some(at_turn_id)) => Some(ForkInfo { from_view_id, at_turn_id }),
-                _ => None,
-            };
-            let view = View { fork, turn_count };
-            views.push(stored(id, view, created));
-        }
-
-        Ok(views)
-    }
+    // ========== Selection Management ==========
 
     async fn select_span(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         turn_id: &TurnId,
         span_id: &SpanId,
     ) -> Result<()> {
         let conn = self.conn().lock().unwrap();
 
-        // Get next sequence number for this view (only used for new insertions)
+        // Get next sequence number for this conversation (only used for new insertions)
         let sequence_number: i32 = conn
             .query_row(
-                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM view_selections WHERE view_id = ?1",
-                params![view_id],
+                "SELECT COALESCE(MAX(sequence_number), -1) + 1 FROM conversation_selections WHERE conversation_id = ?1",
+                params![conversation_id],
                 |row| row.get(0),
             )
             .unwrap_or(0);
 
         conn.execute(
-            "INSERT INTO view_selections (view_id, turn_id, span_id, sequence_number)
+            "INSERT INTO conversation_selections (conversation_id, turn_id, span_id, sequence_number)
              VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(view_id, turn_id) DO UPDATE SET span_id = ?3",
-            params![view_id, turn_id, span_id, sequence_number],
+             ON CONFLICT(conversation_id, turn_id) DO UPDATE SET span_id = ?3",
+            params![conversation_id, turn_id, span_id, sequence_number],
         )?;
         Ok(())
     }
 
     async fn get_selected_span(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         turn_id: &TurnId,
     ) -> Result<Option<SpanId>> {
         let conn = self.conn().lock().unwrap();
         let result = conn.query_row(
-            "SELECT span_id FROM view_selections WHERE view_id = ?1 AND turn_id = ?2",
-            params![view_id, turn_id],
+            "SELECT span_id FROM conversation_selections WHERE conversation_id = ?1 AND turn_id = ?2",
+            params![conversation_id, turn_id],
             |row| {
                 let span_id: SpanId = row.get(0)?;
                 Ok(span_id)
@@ -498,17 +400,20 @@ impl TurnStore for SqliteStore {
         }
     }
 
-    async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>> {
-        // Get all selections for this view, ordered by sequence_number
+    async fn get_conversation_path(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Vec<TurnWithContent>> {
+        // Get all selections for this conversation, ordered by sequence_number
         let selections: Vec<(TurnId, SpanId)> = {
             let conn = self.conn().lock().unwrap();
             let mut stmt = conn.prepare(
-                "SELECT turn_id, span_id FROM view_selections
-                 WHERE view_id = ?1
+                "SELECT turn_id, span_id FROM conversation_selections
+                 WHERE conversation_id = ?1
                  ORDER BY sequence_number",
             )?;
 
-            let rows = stmt.query_map(params![view_id], |row| {
+            let rows = stmt.query_map(params![conversation_id], |row| {
                 let turn_id: TurnId = row.get(0)?;
                 let span_id: SpanId = row.get(1)?;
                 Ok((turn_id, span_id))
@@ -541,57 +446,17 @@ impl TurnStore for SqliteStore {
         Ok(result)
     }
 
-    async fn fork_view(
+    async fn get_context_at(
         &self,
-        view_id: &ViewId,
-        at_turn_id: &TurnId,
-    ) -> Result<StoredView> {
-        let new_id = ViewId::new();
-        let now = unix_timestamp();
-
-        let conn = self.conn().lock().unwrap();
-
-        // Get the sequence number of the fork point in the original view
-        let fork_seq: i32 = conn.query_row(
-            "SELECT sequence_number FROM view_selections WHERE view_id = ?1 AND turn_id = ?2",
-            params![view_id, at_turn_id],
-            |row| row.get(0),
-        )?;
-
-        conn.execute(
-            "INSERT INTO views (id, forked_from_view_id, forked_at_turn_id, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![new_id, view_id, at_turn_id, now],
-        )?;
-
-        // Copy selections before the fork point (sequence_number < fork_seq)
-        conn.execute(
-            "INSERT INTO view_selections (view_id, turn_id, span_id, sequence_number)
-             SELECT ?1, vs.turn_id, vs.span_id, vs.sequence_number
-             FROM view_selections vs
-             WHERE vs.view_id = ?2
-               AND vs.sequence_number < ?3",
-            params![new_id, view_id, fork_seq],
-        )?;
-
-        // turn_count is the number of copied selections (fork_seq since sequence starts at 0)
-        let turn_count = fork_seq as usize;
-
-        let view = View::forked(view_id.clone(), at_turn_id.clone(), turn_count);
-        Ok(stored(new_id, view, now))
-    }
-
-    async fn get_view_context_at(
-        &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         up_to_turn_id: &TurnId,
     ) -> Result<Vec<TurnWithContent>> {
-        // Get sequence number of the up_to turn in this view
+        // Get sequence number of the up_to turn in this conversation
         let up_to_seq: i32 = {
             let conn = self.conn().lock().unwrap();
             conn.query_row(
-                "SELECT sequence_number FROM view_selections WHERE view_id = ?1 AND turn_id = ?2",
-                params![view_id, up_to_turn_id],
+                "SELECT sequence_number FROM conversation_selections WHERE conversation_id = ?1 AND turn_id = ?2",
+                params![conversation_id, up_to_turn_id],
                 |row| row.get(0),
             )?
         };
@@ -600,12 +465,12 @@ impl TurnStore for SqliteStore {
         let selections: Vec<(TurnId, SpanId)> = {
             let conn = self.conn().lock().unwrap();
             let mut stmt = conn.prepare(
-                "SELECT turn_id, span_id FROM view_selections
-                 WHERE view_id = ?1 AND sequence_number < ?2
+                "SELECT turn_id, span_id FROM conversation_selections
+                 WHERE conversation_id = ?1 AND sequence_number < ?2
                  ORDER BY sequence_number",
             )?;
 
-            let rows = stmt.query_map(params![view_id, up_to_seq], |row| {
+            let rows = stmt.query_map(params![conversation_id, up_to_seq], |row| {
                 let turn_id: TurnId = row.get(0)?;
                 let span_id: SpanId = row.get(1)?;
                 Ok((turn_id, span_id))
@@ -634,32 +499,45 @@ impl TurnStore for SqliteStore {
         Ok(result)
     }
 
-    async fn edit_turn(
+    async fn copy_selections(
         &self,
-        view_id: &ViewId,
-        turn_id: &TurnId,
-        messages: Vec<(Role, Vec<StoredContent>)>,
-        model_id: Option<&str>,
-        create_fork: bool,
-    ) -> Result<(StoredSpan, Option<StoredView>)> {
-        let span = self.create_span(turn_id, model_id).await?;
+        from_conversation_id: &ConversationId,
+        to_conversation_id: &ConversationId,
+        up_to_turn_id: &TurnId,
+        include_turn: bool,
+    ) -> Result<usize> {
+        let conn = self.conn().lock().unwrap();
 
-        for (role, content) in messages {
-            self.add_message(&span.id, role, &content).await?;
-        }
+        // Get the sequence number of the cutoff turn
+        let cutoff_seq: i32 = conn.query_row(
+            "SELECT sequence_number FROM conversation_selections WHERE conversation_id = ?1 AND turn_id = ?2",
+            params![from_conversation_id, up_to_turn_id],
+            |row| row.get(0),
+        )?;
 
-        let forked_view = if create_fork {
-            let new_view = self.fork_view(view_id, turn_id).await?;
-            self.select_span(&new_view.id, turn_id, &span.id).await?;
-            Some(new_view)
-        } else {
-            self.select_span(view_id, turn_id, &span.id).await?;
-            None
-        };
+        // Copy selections: if include_turn is true, include the turn, otherwise exclude it
+        let cutoff = if include_turn { cutoff_seq + 1 } else { cutoff_seq };
 
-        let span = self.get_span(&span.id).await?.unwrap_or(span);
+        let copied = conn.execute(
+            "INSERT INTO conversation_selections (conversation_id, turn_id, span_id, sequence_number)
+             SELECT ?1, cs.turn_id, cs.span_id, cs.sequence_number
+             FROM conversation_selections cs
+             WHERE cs.conversation_id = ?2
+               AND cs.sequence_number < ?3",
+            params![to_conversation_id, from_conversation_id, cutoff],
+        )?;
 
-        Ok((span, forked_view))
+        Ok(copied)
+    }
+
+    async fn get_turn_count(&self, conversation_id: &ConversationId) -> Result<usize> {
+        let conn = self.conn().lock().unwrap();
+        let count: usize = conn.query_row(
+            "SELECT COUNT(*) FROM conversation_selections WHERE conversation_id = ?1",
+            params![conversation_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 }
 
@@ -809,32 +687,69 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_view_path() {
+    async fn test_conversation_path() {
         let store = create_test_store();
 
-        // Create view
-        let view = store.create_view().await.unwrap();
+        // Use a conversation ID (in real usage, this would come from EntityStore)
+        let conversation_id = ConversationId::new();
 
-        // Create user turn with span and message, select in view
+        // Create user turn with span and message, select in conversation
         let turn1 = store.create_turn(llm::Role::User).await.unwrap();
         let span1 = store.create_span(&turn1.id, None).await.unwrap();
         let content_block_id = ContentBlockId::new();
         let content = vec![StoredContent::text_ref(content_block_id)];
         store.add_message(&span1.id, Role::User, &content).await.unwrap();
-        store.select_span(&view.id, &turn1.id, &span1.id).await.unwrap();
+        store.select_span(&conversation_id, &turn1.id, &span1.id).await.unwrap();
 
-        // Create assistant turn with span and message, select in view
+        // Create assistant turn with span and message, select in conversation
         let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
         let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
         let content_block_id2 = ContentBlockId::new();
         let content2 = vec![StoredContent::text_ref(content_block_id2)];
         store.add_message(&span2.id, Role::Assistant, &content2).await.unwrap();
-        store.select_span(&view.id, &turn2.id, &span2.id).await.unwrap();
+        store.select_span(&conversation_id, &turn2.id, &span2.id).await.unwrap();
 
-        // Get view path
-        let path = store.get_view_path(&view.id).await.unwrap();
+        // Get conversation path
+        let path = store.get_conversation_path(&conversation_id).await.unwrap();
         assert_eq!(path.len(), 2);
         assert_eq!(path[0].turn.role(), llm::Role::User);
         assert_eq!(path[1].turn.role(), llm::Role::Assistant);
+
+        // Verify turn count
+        let count = store.get_turn_count(&conversation_id).await.unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_copy_selections() {
+        let store = create_test_store();
+
+        let conv1 = ConversationId::new();
+        let conv2 = ConversationId::new();
+
+        // Create a conversation with 3 turns
+        let turn1 = store.create_turn(llm::Role::User).await.unwrap();
+        let span1 = store.create_span(&turn1.id, None).await.unwrap();
+        store.select_span(&conv1, &turn1.id, &span1.id).await.unwrap();
+
+        let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
+        let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
+        store.select_span(&conv1, &turn2.id, &span2.id).await.unwrap();
+
+        let turn3 = store.create_turn(llm::Role::User).await.unwrap();
+        let span3 = store.create_span(&turn3.id, None).await.unwrap();
+        store.select_span(&conv1, &turn3.id, &span3.id).await.unwrap();
+
+        // Copy up to turn2 (include_turn = true) - should get turns 1 and 2
+        let copied = store.copy_selections(&conv1, &conv2, &turn2.id, true).await.unwrap();
+        assert_eq!(copied, 2);
+
+        let path = store.get_conversation_path(&conv2).await.unwrap();
+        assert_eq!(path.len(), 2);
+
+        // Copy to another conv up to turn2 (include_turn = false) - should get only turn 1
+        let conv3 = ConversationId::new();
+        let copied = store.copy_selections(&conv1, &conv3, &turn2.id, false).await.unwrap();
+        assert_eq!(copied, 1);
     }
 }

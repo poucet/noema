@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::storage::content::{ContentResolver, InputContent, StoredContent};
-use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, TurnId, UserId, ViewId};
+use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, TurnId, UserId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
     AssetStore, BlobStore, EntityStore, StorageTypes, Stores, TextStore, TurnStore,
@@ -163,60 +163,48 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         Ok(turn.id)
     }
 
-    /// Create a span at a turn and select it in the view.
+    /// Create a span at a turn and select it in the conversation.
     pub async fn create_and_select_span(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         turn_id: &TurnId,
         model_id: Option<&str>,
     ) -> Result<SpanId> {
         let span = self.turn_store.create_span(turn_id, model_id).await?;
-        self.turn_store.select_span(view_id, turn_id, &span.id).await?;
+        self.turn_store.select_span(conversation_id, turn_id, &span.id).await?;
         Ok(span.id)
     }
 
     // ========== Session Methods ==========
 
-    /// Open a session for a conversation, resolving or creating the main view.
+    /// Open a session for a conversation.
     ///
     /// This method handles the multi-store coordination of:
-    /// 1. Getting the conversation entity and extracting main_view_id from metadata
-    /// 2. Loading the view path (turns with content)
+    /// 1. Getting the conversation entity
+    /// 2. Loading the conversation path (turns with content)
     /// 3. Resolving stored content to resolved messages
     ///
-    /// Returns (view_id, resolved_messages) for Session construction.
+    /// Returns resolved messages for Session construction.
     pub async fn open_session(
         &self,
         conversation_id: &ConversationId,
-    ) -> Result<(ViewId, Vec<ResolvedMessage>)> {
-        // Get conversation entity to extract main_view_id from metadata
-        let entity = self.entity_store
+    ) -> Result<Vec<ResolvedMessage>> {
+        // Verify conversation exists
+        let _ = self.entity_store
             .get_entity(conversation_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
 
-        // Extract main_view_id from metadata
-        let main_view_id = entity.metadata
-            .as_ref()
-            .and_then(|m| m.get("main_view_id"))
-            .and_then(|v| v.as_str())
-            .map(ViewId::from_string)
-            .ok_or_else(|| anyhow::anyhow!("Conversation has no main_view_id: {}", conversation_id))?;
-
-        // Open session with the main view
-        self.open_session_with_view(&main_view_id).await
-            .map(|resolved| (main_view_id, resolved))
+        // Load conversation path and resolve content
+        let path = self.turn_store.get_conversation_path(conversation_id).await?;
+        self.resolve_path(&path).await
     }
 
-    /// Create a new conversation with its main view.
-    ///
-    /// This method handles the multi-store coordination of:
-    /// 1. Creating the conversation entity
-    /// 2. Creating the main view
-    /// 3. Setting the main_view_id in entity metadata
+    /// Create a new conversation entity.
     ///
     /// Returns the ConversationId (EntityId) for further operations.
-    pub async fn create_conversation_with_view(
+    /// The conversation starts empty - use add_message to add turns.
+    pub async fn create_conversation(
         &self,
         user_id: &UserId,
         name: Option<&str>,
@@ -226,35 +214,105 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             .create_entity(EntityType::conversation(), Some(user_id))
             .await?;
 
-        // Create main view
-        let view = self.turn_store.create_view().await?;
-
-        // Get entity and update with main_view_id and name
-        let mut entity = self.entity_store
-            .get_entity(&conversation_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Just-created entity not found"))?;
-
-        entity.name = name.map(|n| n.to_string());
-        entity.metadata = Some(serde_json::json!({
-            "main_view_id": view.id.as_str()
-        }));
-
-        self.entity_store.update_entity(&conversation_id, &entity).await?;
+        // Set name if provided
+        if let Some(n) = name {
+            let mut entity = self.entity_store
+                .get_entity(&conversation_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Just-created entity not found"))?;
+            entity.name = Some(n.to_string());
+            self.entity_store.update_entity(&conversation_id, &entity).await?;
+        }
 
         Ok(conversation_id)
     }
 
-    /// Open a session for a specific view.
+    /// Fork a conversation at a specific turn.
     ///
-    /// Loads the view path and resolves all content for Session construction.
-    /// Returns resolved messages for the view.
-    pub async fn open_session_with_view(
+    /// Creates a new conversation entity, copies selections up to and including
+    /// the fork turn, and links it to the original via entity_relations.
+    ///
+    /// # Arguments
+    /// * `conversation_id` - The conversation to fork from
+    /// * `at_turn_id` - The turn at which to fork (fork includes this turn)
+    /// * `name` - Optional name for the forked conversation
+    ///
+    /// # Returns
+    /// The new conversation ID
+    pub async fn fork_conversation(
         &self,
-        view_id: &ViewId,
-    ) -> Result<Vec<ResolvedMessage>> {
-        let path = self.turn_store.get_view_path(view_id).await?;
-        self.resolve_path(&path).await
+        conversation_id: &ConversationId,
+        at_turn_id: &TurnId,
+        name: Option<&str>,
+    ) -> Result<ConversationId> {
+        use crate::storage::types::RelationType;
+
+        // Get the original conversation to copy user_id
+        let original_entity = self.entity_store
+            .get_entity(conversation_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Conversation not found: {}", conversation_id))?;
+
+        // Create new conversation entity
+        let new_conversation_id = self.entity_store
+            .create_entity(EntityType::conversation(), original_entity.user_id.as_ref())
+            .await?;
+
+        // Set name on new conversation
+        if let Some(n) = name {
+            let mut new_entity = self.entity_store
+                .get_entity(&new_conversation_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Just-created entity not found"))?;
+            new_entity.name = Some(n.to_string());
+            self.entity_store.update_entity(&new_conversation_id, &new_entity).await?;
+        }
+
+        // Copy selections from original to new (include the fork turn)
+        self.turn_store
+            .copy_selections(conversation_id, &new_conversation_id, at_turn_id, true)
+            .await?;
+
+        // Add forked_from relation
+        self.entity_store
+            .add_relation(
+                &new_conversation_id,
+                conversation_id,
+                RelationType::forked_from(),
+                Some(serde_json::json!({
+                    "at_turn_id": at_turn_id.as_str()
+                })),
+            )
+            .await?;
+
+        Ok(new_conversation_id)
+    }
+
+    /// Get conversations forked from a given conversation.
+    pub async fn get_forked_conversations(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Vec<(ConversationId, TurnId)>> {
+        use crate::storage::types::RelationType;
+
+        let relations = self.entity_store
+            .get_relations_to(conversation_id, Some(&RelationType::forked_from()))
+            .await?;
+
+        let mut result = Vec::new();
+        for (forked_id, relation) in relations {
+            let at_turn_id = relation.metadata
+                .as_ref()
+                .and_then(|m| m.get("at_turn_id"))
+                .and_then(|v| v.as_str())
+                .map(TurnId::from_string);
+
+            if let Some(turn_id) = at_turn_id {
+                result.push((forked_id, turn_id));
+            }
+        }
+
+        Ok(result)
     }
 
     /// Spawn a subconversation linked to a parent conversation.
@@ -282,8 +340,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     ) -> Result<ConversationId> {
         use crate::storage::types::RelationType;
 
-        // Create the subconversation with its own view
-        let sub_conversation_id = self.create_conversation_with_view(user_id, name).await?;
+        // Create the subconversation
+        let sub_conversation_id = self.create_conversation(user_id, name).await?;
 
         // Build spawn metadata
         let mut metadata = serde_json::json!({
@@ -374,27 +432,20 @@ impl<S: StorageTypes> StorageCoordinator<S> {
 
     /// Get the final result text from a subconversation.
     ///
-    /// Returns the text content of the last assistant message in the subconversation's
-    /// main view. Returns None if there are no messages or no text content.
+    /// Returns the text content of the last assistant message in the subconversation.
+    /// Returns None if there are no messages or no text content.
     pub async fn get_subconversation_result(
         &self,
         subconversation_id: &ConversationId,
     ) -> Result<Option<String>> {
-        // Get the main view ID from entity metadata
-        let entity = self.entity_store
+        // Verify conversation exists
+        let _ = self.entity_store
             .get_entity(subconversation_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Subconversation not found: {}", subconversation_id))?;
 
-        let main_view_id = entity.metadata
-            .as_ref()
-            .and_then(|m| m.get("main_view_id"))
-            .and_then(|v| v.as_str())
-            .map(ViewId::from_string)
-            .ok_or_else(|| anyhow::anyhow!("Subconversation has no main_view_id"))?;
-
-        // Get the view path
-        let path = self.turn_store.get_view_path(&main_view_id).await?;
+        // Get the conversation path
+        let path = self.turn_store.get_conversation_path(subconversation_id).await?;
 
         // Find the last assistant message
         for turn in path.into_iter().rev() {
@@ -441,7 +492,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         parent_span_id: &SpanId,
         parent_turn_id: &TurnId,
         tool_call_id: &str,
-        tool_name: &str,
+        _tool_name: &str,
     ) -> Result<ResolvedMessage> {
         // Get the subconversation's result
         let result_text = self
@@ -472,7 +523,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         .await
     }
 
-    /// Resolve a view path (turns with content) to resolved messages.
+    /// Resolve a conversation path (turns with content) to resolved messages.
     async fn resolve_path(&self, path: &[TurnWithContent]) -> Result<Vec<ResolvedMessage>> {
         let mut messages = Vec::new();
 
@@ -587,11 +638,11 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     /// before generating a new response at the target turn.
     pub async fn get_context_before_turn(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         turn_id: &TurnId,
     ) -> Result<Vec<ResolvedMessage>> {
         let context_path = self.turn_store
-            .get_view_context_at(view_id, turn_id)
+            .get_context_at(conversation_id, turn_id)
             .await?;
 
         self.resolve_path(&context_path).await

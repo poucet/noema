@@ -1,7 +1,7 @@
 //! DB-agnostic Session implementation
 //!
 //! Session provides:
-//! - Runtime state management (view_id, cache)
+//! - Runtime state management (conversation context, cache)
 //! - Pending message buffer for uncommitted changes
 //! - Lazy resolution of assets/documents for LLM
 //! - Implements ConversationContext directly
@@ -15,7 +15,7 @@ use crate::context::{ConversationContext, MessagesGuard};
 use crate::manager::CommitMode;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
-use crate::storage::ids::{ConversationId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, SpanId, TurnId};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::OriginKind;
 
@@ -29,7 +29,7 @@ use super::types::{ResolvedContent, ResolvedMessage};
 ///
 /// Generic over `S: StorageTypes` which bundles all storage type associations.
 ///
-/// Session is runtime state: conversation context, current view, cached resolved messages.
+/// Session is runtime state: conversation context, cached resolved messages.
 /// Implements ConversationContext for direct use with agents.
 ///
 /// # Type Derivation
@@ -52,8 +52,6 @@ pub struct Session<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
     /// Conversation ID
     conversation_id: ConversationId,
-    /// Current view being used
-    view_id: ViewId,
     /// Cached resolved messages (text resolved, assets/docs cached lazily)
     resolved_cache: Vec<ResolvedMessage>,
     /// Cached ChatMessages for LLM (lazily populated from resolved_cache)
@@ -67,18 +65,17 @@ pub struct Session<S: StorageTypes> {
 impl<S: StorageTypes> Session<S> {
     /// Open a session for an existing conversation
     ///
-    /// Delegates view resolution to the StorageCoordinator which handles
-    /// the multi-store coordination of getting/creating views and resolving content.
+    /// Delegates to the StorageCoordinator which handles the multi-store
+    /// coordination of loading and resolving content.
     pub async fn open(
         coordinator: Arc<StorageCoordinator<S>>,
         conversation_id: ConversationId,
     ) -> Result<Self> {
-        let (view_id, resolved_cache) = coordinator.open_session(&conversation_id).await?;
+        let resolved_cache = coordinator.open_session(&conversation_id).await?;
 
         Ok(Self {
             coordinator,
             conversation_id,
-            view_id,
             resolved_cache,
             llm_cache: Vec::new(),
             llm_cache_valid: false,
@@ -90,12 +87,10 @@ impl<S: StorageTypes> Session<S> {
     pub fn new(
         coordinator: Arc<StorageCoordinator<S>>,
         conversation_id: ConversationId,
-        view_id: ViewId,
     ) -> Self {
         Self {
             coordinator,
             conversation_id,
-            view_id,
             resolved_cache: Vec::new(),
             llm_cache: Vec::new(),
             llm_cache_valid: false,
@@ -103,35 +98,10 @@ impl<S: StorageTypes> Session<S> {
         }
     }
 
-    /// Open a session for a specific view
-    ///
-    /// Use this when switching to a non-main view (e.g., after forking).
-    pub async fn open_view(
-        coordinator: Arc<StorageCoordinator<S>>,
-        conversation_id: ConversationId,
-        view_id: ViewId,
-    ) -> Result<Self> {
-        let resolved_cache = coordinator.open_session_with_view(&view_id).await?;
-
-        Ok(Self {
-            coordinator,
-            conversation_id,
-            view_id,
-            resolved_cache,
-            llm_cache: Vec::new(),
-            llm_cache_valid: false,
-            pending: Vec::new(),
-        })
-    }
-
     pub fn conversation_id(&self) -> &ConversationId {
         &self.conversation_id
     }
 
-    pub fn view_id(&self) -> &ViewId {
-        &self.view_id
-    }
-    
     /// Get committed messages for display - returns cached ResolvedContent
     pub fn messages_for_display(&self) -> &[ResolvedMessage] {
         &self.resolved_cache
@@ -162,16 +132,16 @@ impl<S: StorageTypes> Session<S> {
         result
     }
 
-    /// Clear the session cache (used when switching views)
+    /// Clear the session cache (used when switching conversations)
     pub fn clear_cache(&mut self) {
         self.resolved_cache.clear();
         self.llm_cache.clear();
         self.llm_cache_valid = false;
     }
 
-    /// Reload messages from storage for current view
+    /// Reload messages from storage for current conversation
     pub async fn reload(&mut self) -> Result<()> {
-        let resolved_cache = self.coordinator.open_session_with_view(&self.view_id).await?;
+        let resolved_cache = self.coordinator.open_session(&self.conversation_id).await?;
         self.resolved_cache = resolved_cache;
         self.llm_cache.clear();
         self.llm_cache_valid = false;
@@ -271,7 +241,7 @@ impl<S: StorageTypes> Session<S> {
                     // Regeneration: create span at existing turn once, reuse for all messages
                     if current_span.is_none() {
                         let span = self.coordinator
-                            .create_and_select_span(&self.view_id, tid, model_id)
+                            .create_and_select_span(&self.conversation_id, tid, model_id)
                             .await?;
                         current_turn = Some(tid.clone());
                         current_span = Some(span);
@@ -282,7 +252,7 @@ impl<S: StorageTypes> Session<S> {
                     if current_role != Some(span_role) {
                         let tid = self.coordinator.create_turn(span_role).await?;
                         let span = self.coordinator
-                            .create_and_select_span(&self.view_id, &tid, model_id)
+                            .create_and_select_span(&self.conversation_id, &tid, model_id)
                             .await?;
                         current_turn = Some(tid);
                         current_span = Some(span);

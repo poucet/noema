@@ -106,7 +106,6 @@ define_id!(TurnId, "Unique identifier for a turn in a conversation");
 define_id!(SpanId, "Unique identifier for a span (alternative response)");
 define_id!(MessageId, "Unique identifier for a message within a span");
 define_id!(MessageContentId, "Unique identifier for a content item within a message");
-define_id!(ViewId, "Unique identifier for a view (path through alternatives)");
 
 // Documents
 define_id!(DocumentId, "Unique identifier for a document");

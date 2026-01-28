@@ -1,18 +1,18 @@
 //! TurnStore trait for Turn/Span/Message storage operations
 //!
-//! This trait defines the operations for the Turn/Span/Message/View
-//! conversation structure. Turns are structural nodes; views define
-//! ordering via selections.
+//! This trait defines the operations for the Turn/Span/Message
+//! conversation structure. Turns are structural nodes; conversations
+//! define ordering via selections.
 
 use anyhow::Result;
 use async_trait::async_trait;
 
 use llm::Role;
 use crate::storage::content::StoredContent;
-use crate::storage::ids::{MessageId, SpanId, TurnId, ViewId};
+use crate::storage::ids::{ConversationId, MessageId, SpanId, TurnId};
 use crate::storage::types::{
     Message, MessageWithContent, Span,
-    Stored, Turn, TurnWithContent, View,
+    Stored, Turn, TurnWithContent,
 };
 
 /// Stored representation of a Turn (immutable)
@@ -23,9 +23,6 @@ pub type StoredSpan = Stored<SpanId, Span>;
 
 /// Stored representation of a Message (immutable)
 pub type StoredMessage = Stored<MessageId, Message>;
-
-/// Stored representation of a View (immutable)
-pub type StoredView = Stored<ViewId, View>;
 
 /// Trait for Turn/Span/Message storage operations
 #[async_trait]
@@ -75,74 +72,59 @@ pub trait TurnStore: Send + Sync {
     /// Get a specific message by ID
     async fn get_message(&self, message_id: &MessageId) -> Result<Option<StoredMessage>>;
 
-    // ========== View Management ==========
+    // ========== Selection Management ==========
+    //
+    // Selections link turns to conversations. Each conversation has its own
+    // linear sequence of (turn, selected_span) pairs.
 
-    /// Create a new view
+    /// Select a span for a turn within a conversation
     ///
-    /// Views are linked to conversations via Conversation.main_view_id.
-    async fn create_view(&self) -> Result<StoredView>;
-
-    /// Get a view by its ID
-    async fn get_view(&self, view_id: &ViewId) -> Result<Option<StoredView>>;
-
-    /// List all views related to a main view (main view + all forks)
-    ///
-    /// Returns the main view and all views that were forked from it (recursively).
-    async fn list_related_views(&self, main_view_id: &ViewId) -> Result<Vec<StoredView>>;
-
-    /// Select a span for a turn within a view
-    ///
-    /// Updates which span is selected at the given turn for the given view.
+    /// Updates which span is selected at the given turn for the given conversation.
+    /// If this is a new turn for the conversation, it's appended to the sequence.
     async fn select_span(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         turn_id: &TurnId,
         span_id: &SpanId,
     ) -> Result<()>;
 
-    /// Get the selected span for a turn within a view
-    async fn get_selected_span(&self, view_id: &ViewId, turn_id: &TurnId)
-        -> Result<Option<SpanId>>;
-
-    /// Get the full view path (all turns with their selected spans and messages)
-    async fn get_view_path(&self, view_id: &ViewId) -> Result<Vec<TurnWithContent>>;
-
-    /// Fork a view at a specific turn
-    ///
-    /// Creates a new view that shares selections with the original up to (but
-    /// not including) the fork turn.
-    async fn fork_view(
+    /// Get the selected span for a turn within a conversation
+    async fn get_selected_span(
         &self,
-        view_id: &ViewId,
-        at_turn_id: &TurnId,
-    ) -> Result<StoredView>;
+        conversation_id: &ConversationId,
+        turn_id: &TurnId,
+    ) -> Result<Option<SpanId>>;
 
-    /// Get the view path up to (but not including) a specific turn
+    /// Get the full conversation path (all turns with their selected spans and messages)
+    async fn get_conversation_path(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Vec<TurnWithContent>>;
+
+    /// Get the conversation path up to (but not including) a specific turn
     ///
     /// Returns turns with their selected spans from the start of the
     /// conversation up to but not including the specified turn.
     /// Useful for building context when editing mid-conversation.
-    async fn get_view_context_at(
+    async fn get_context_at(
         &self,
-        view_id: &ViewId,
+        conversation_id: &ConversationId,
         up_to_turn_id: &TurnId,
     ) -> Result<Vec<TurnWithContent>>;
 
-    /// Edit a turn by creating a new span with new content
+    /// Copy selections from one conversation to another up to a specific turn
     ///
-    /// Creates a new span at the specified turn with the given messages.
-    /// If `create_fork` is true, also creates a forked view that selects
-    /// this new span at the edited turn.
-    ///
-    /// Each message is a (role, content) pair.
-    /// Returns the new span and optionally the new view.
-    async fn edit_turn(
+    /// Used when forking: copies the turn sequence from source to target.
+    /// If `include_turn` is true, copies up to and including the turn.
+    /// If `include_turn` is false, copies up to but not including the turn.
+    async fn copy_selections(
         &self,
-        view_id: &ViewId,
-        turn_id: &TurnId,
-        messages: Vec<(Role, Vec<StoredContent>)>,
-        model_id: Option<&str>,
-        create_fork: bool,
-    ) -> Result<(StoredSpan, Option<StoredView>)>;
+        from_conversation_id: &ConversationId,
+        to_conversation_id: &ConversationId,
+        up_to_turn_id: &TurnId,
+        include_turn: bool,
+    ) -> Result<usize>;
 
+    /// Get the number of turns in a conversation
+    async fn get_turn_count(&self, conversation_id: &ConversationId) -> Result<usize>;
 }

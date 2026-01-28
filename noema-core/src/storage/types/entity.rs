@@ -34,6 +34,9 @@ impl EntityType {
     }
 
     /// Conversation entity type
+    ///
+    /// Conversations are the primary user-facing concept. Each conversation
+    /// has an associated view that holds the turn/span structure.
     pub fn conversation() -> Self {
         Self::new("conversation")
     }

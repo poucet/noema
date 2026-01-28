@@ -18,10 +18,7 @@ pub mod user;
 pub use asset::Asset;
 pub use blob::BlobHash;
 pub use content_block::{ContentBlock, ContentOrigin, ContentType, OriginKind};
-pub use conversation::{
-    ForkInfo, Message, MessageWithContent,
-    Span, Turn, TurnWithContent, View, ViewSelection,
-};
+pub use conversation::{Message, MessageWithContent, Span, Turn, TurnWithContent};
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
 pub use entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 pub use collection::{
