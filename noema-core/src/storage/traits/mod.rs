@@ -7,6 +7,7 @@ mod blob;
 mod conversation;
 mod document;
 mod entity;
+mod reference;
 mod text;
 mod turn;
 mod user;
@@ -16,6 +17,7 @@ pub use blob::BlobStore;
 pub use conversation::{ConversationStore, StoredConversation};
 pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use entity::{EntityStore, StoredEntity};
+pub use reference::{ReferenceStore, StoredReference};
 pub use text::{TextStore, StoredTextBlock};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage, StoredView};
 pub use user::{StoredUser, UserStore};
@@ -58,6 +60,8 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Document: DocumentStore + Send + Sync;
     /// Entity storage (unified addressable layer for conversations, documents, assets)
     type Entity: EntityStore + Send + Sync;
+    /// Reference storage (cross-references between entities)
+    type Reference: ReferenceStore + Send + Sync;
 }
 
 use std::sync::Arc;
@@ -94,4 +98,6 @@ pub trait Stores<S: StorageTypes>: Send + Sync {
     fn text(&self) -> Arc<S::Text>;
     /// Unified entity storage (conversations, documents, assets)
     fn entity(&self) -> Arc<S::Entity>;
+    /// Cross-reference storage
+    fn reference(&self) -> Arc<S::Reference>;
 }
