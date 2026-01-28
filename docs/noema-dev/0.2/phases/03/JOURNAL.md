@@ -776,3 +776,73 @@ This cleanup eliminates data duplication between `entities` and `conversations` 
 
 ---
 
+## 2026-01-28: Views Abstraction Removal
+
+Major architectural simplification: removed the intermediate `views` layer entirely.
+
+### Key Insight
+
+"A conversation is something the user had with a model. It might be forked from another conversation, it may share a span with a subconversation. Views were useful when they were hierarchical, but if it's just a linear list of messages, then we can rely on just forking conversations without views."
+
+### Architecture Change
+
+**Before (with views):**
+```
+entities (conversations)
+  └── views
+        └── view_selections (turn_id → span_id mappings)
+              └── turns/spans/messages
+```
+
+**After (without views):**
+```
+entities (conversations)
+  └── conversation_selections (turn_id → span_id mappings)
+        └── turns/spans/messages
+```
+
+### Storage Layer Changes
+
+- Removed `View`, `ViewSelection`, `ForkInfo` types
+- `TurnStore` trait: replaced view-based methods with conversation-based:
+  - `get_selected_span(conversation_id, turn_id)` instead of `(view_id, turn_id)`
+  - `select_span(conversation_id, turn_id, span_id)` instead of `(view_id, ...)`
+  - `get_conversation_messages()` instead of `get_view_messages()`
+- `Session` no longer tracks `view_id` - just `conversation_id`
+- `StorageCoordinator::open_session()` returns `Vec<ResolvedMessage>` (was `(ViewId, Vec)`)
+
+### Fork Handling
+
+Forks are now separate conversation entities:
+- `coordinator.fork_conversation(conv_id, turn_id)` creates new entity with copied selections
+- `forked_from` relation tracked in `entity_relations` table
+- Switching to a fork = loading that conversation (not switching views)
+
+### Desktop Frontend Updates
+
+**Tauri commands:**
+- Removed `get_current_view_id`, `switch_view`
+- `fork_conversation` returns `String` (conversation ID)
+- `list_conversation_views` → returns `ForkInfoResponse[]`
+- `edit_message` → returns `new_conversation_id`
+
+**TypeScript:**
+- Replaced `ViewInfo` with `ForkInfo` interface
+- `listConversationViews` → `listConversationForks`
+- Removed `getCurrentViewId`, `switchView`
+
+**React app:**
+- `views` state → `forks` state
+- Removed `currentViewId` state
+- `ViewSelector` now shows forks as separate conversations
+- Fork actions switch to new conversation via `loadConversation`
+
+### Benefits
+
+1. **Simpler mental model** - Conversations own their selections directly
+2. **Entity-centric** - Forks are first-class entities with relations
+3. **Less indirection** - No intermediate views table to maintain
+4. **Cleaner forking** - Fork creates new conversation, not new view in same conversation
+
+---
+
