@@ -17,8 +17,8 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
 | ✅ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ⬜ | P1 | 3.45 | Manual testing | Consolidated verification checkpoint |
-| ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
+| ⬜ | P2 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P2 | 3.7 | Temporal queries | Time-based activity summaries for LLM context |
 
 Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
