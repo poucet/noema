@@ -152,6 +152,54 @@ impl Entity {
 }
 
 // ============================================================================
+// EntityRangeQuery
+// ============================================================================
+
+/// Query parameters for time-range entity search
+///
+/// Used with `EntityStore::list_entities_in_range`.
+#[derive(Clone, Debug, Default)]
+pub struct EntityRangeQuery {
+    /// Start of time range (unix timestamp ms, inclusive)
+    pub start: i64,
+    /// End of time range (unix timestamp ms, inclusive)
+    pub end: i64,
+    /// Filter to specific entity types (None = all types)
+    pub entity_types: Option<Vec<EntityType>>,
+    /// Maximum number of results (None = no limit)
+    pub limit: Option<u32>,
+}
+
+impl EntityRangeQuery {
+    /// Create a new query for a time range
+    pub fn new(start: i64, end: i64) -> Self {
+        Self {
+            start,
+            end,
+            entity_types: None,
+            limit: None,
+        }
+    }
+
+    /// Filter to specific entity types
+    pub fn with_types(mut self, types: impl IntoIterator<Item = EntityType>) -> Self {
+        self.entity_types = Some(types.into_iter().collect());
+        self
+    }
+
+    /// Limit number of results
+    pub fn with_limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    /// Get entity types as slice (for query)
+    pub fn types_slice(&self) -> Option<&[EntityType]> {
+        self.entity_types.as_deref()
+    }
+}
+
+// ============================================================================
 // RelationType
 // ============================================================================
 

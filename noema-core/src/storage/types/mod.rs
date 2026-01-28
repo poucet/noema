@@ -23,7 +23,7 @@ pub use conversation::{
     Span, Turn, TurnWithContent, View, ViewSelection,
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
-pub use entity::{Entity, EntityRelation, EntityType, RelationType};
+pub use entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 pub use collection::{
     Collection, CollectionItem, CollectionView, FieldDefinition, FieldType,
     ItemTarget, ViewConfig, ViewType,

@@ -7,7 +7,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::storage::ids::{EntityId, UserId};
-use crate::storage::types::entity::{Entity, EntityRelation, EntityType, RelationType};
+use crate::storage::types::entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 use crate::storage::types::StoredEditable;
 
 /// Stored representation of an Entity (mutable - can be renamed, archived, etc.)
@@ -51,20 +51,10 @@ pub trait EntityStore: Send + Sync {
     ///
     /// Returns entities ordered by `updated_at` descending (most recent first).
     /// Excludes archived entities.
-    ///
-    /// # Arguments
-    /// - `user_id`: Scope to this user's entities
-    /// - `start`: Start of time range (unix timestamp ms, inclusive)
-    /// - `end`: End of time range (unix timestamp ms, inclusive)
-    /// - `entity_types`: Filter to specific types (None = all types)
-    /// - `limit`: Maximum results (None = no limit)
     async fn list_entities_in_range(
         &self,
         user_id: &UserId,
-        start: i64,
-        end: i64,
-        entity_types: Option<&[EntityType]>,
-        limit: Option<u32>,
+        query: &EntityRangeQuery,
     ) -> Result<Vec<StoredEntity>>;
 
     /// Update an entity's mutable fields
