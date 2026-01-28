@@ -39,6 +39,29 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 }
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Parse a reference from a database row
+fn parse_reference(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredReference> {
+    let id: ReferenceId = row.get(0)?;
+    let from_entity_id: EntityId = row.get(1)?;
+    let to_entity_id: EntityId = row.get(2)?;
+    let relation_type: Option<String> = row.get(3)?;
+    let context: Option<String> = row.get(4)?;
+    let created_at: i64 = row.get(5)?;
+
+    let reference = Reference {
+        from_entity_id,
+        to_entity_id,
+        relation_type: relation_type.map(RelationType::from),
+        context,
+    };
+
+    Ok(stored(id, reference, created_at))
+}
+
+// ============================================================================
 // ReferenceStore Implementation
 // ============================================================================
 
@@ -93,16 +116,40 @@ impl ReferenceStore for SqliteStore {
         Ok(rows)
     }
 
-    async fn get_outgoing(&self, _entity_id: &EntityId) -> Result<Vec<StoredReference>> {
-        todo!("Implement in 3.6.5")
+    async fn get_outgoing(&self, entity_id: &EntityId) -> Result<Vec<StoredReference>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
+             FROM references WHERE from_entity_id = ?1
+             ORDER BY created_at DESC"
+        )?;
+
+        let refs = stmt
+            .query_map(params![entity_id.as_str()], parse_reference)?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(refs)
     }
 
     async fn get_outgoing_by_type(
         &self,
-        _entity_id: &EntityId,
-        _relation_type: &RelationType,
+        entity_id: &EntityId,
+        relation_type: &RelationType,
     ) -> Result<Vec<StoredReference>> {
-        todo!("Implement in 3.6.5")
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
+             FROM references WHERE from_entity_id = ?1 AND relation_type = ?2
+             ORDER BY created_at DESC"
+        )?;
+
+        let refs = stmt
+            .query_map(params![entity_id.as_str(), relation_type.as_str()], parse_reference)?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(refs)
     }
 
     async fn get_backlinks(&self, _entity_id: &EntityId) -> Result<Vec<StoredReference>> {

@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.6"
 feature_name: "Cross-references"
-task: "3.6.5"
-task_name: "Implement get_outgoing"
+task: "3.6.6"
+task_name: "Implement get_backlinks"
 
 # Completed
 completed_features:
