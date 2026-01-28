@@ -11,17 +11,17 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
         r#"
         -- Temporal indexes for time-range queries
 
-        -- Content blocks: query by creation time
+        -- Content blocks: query by creation time (already created in text.rs, but IF NOT EXISTS is safe)
         CREATE INDEX IF NOT EXISTS idx_content_blocks_created ON content_blocks(created_at);
 
         -- Messages: query by creation time
-        CREATE INDEX IF NOT EXISTS idx_ucm_messages_created ON ucm_messages(created_at);
+        CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 
         -- Turns: query by creation time
         CREATE INDEX IF NOT EXISTS idx_turns_created ON turns(created_at);
 
         -- Spans: query by creation time
-        CREATE INDEX IF NOT EXISTS idx_ucm_spans_created ON ucm_spans(created_at);
+        CREATE INDEX IF NOT EXISTS idx_spans_created ON spans(created_at);
 
         -- Document revisions: query by creation time
         CREATE INDEX IF NOT EXISTS idx_document_revisions_created ON document_revisions(created_at);
