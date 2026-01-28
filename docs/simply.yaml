@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.8"
 feature_name: "Manual testing"
-task: "3.8.1"
-task_name: "Verify can see all alternatives, select any one"
+task: "3.8.F2"
+task_name: "Re-test: Document CRUD works end-to-end"
 
 # Completed
 completed_features:

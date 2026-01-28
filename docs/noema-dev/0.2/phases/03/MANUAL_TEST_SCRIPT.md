@@ -172,8 +172,11 @@ sqlite3 ~/.local/share/noema/database/noema.db
    - [ ] Switch back to main view
    - [ ] Verify: Main view unchanged, fork has new messages
 
-**Result**: [ ] PASS / [x] FAIL
-**Notes**: Fork from assistant message bug; entity layer not integrated with views
+**Result**: [x] PASS / [ ] FAIL (after fixes)
+**Notes**:
+- B1 fixed: Fork from assistant message now works
+- B3 fixed: Entity relations used for forks (verified in DB)
+- B4 partial: Original conversations get names, forks don't (minor gap)
 
 ---
 

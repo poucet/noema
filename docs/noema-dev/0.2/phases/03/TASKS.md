@@ -297,8 +297,8 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.8.F1 | ✅ Re-test: Entity layer - views are entities, forks use relations |
-| ⬜ | 3.8.F2 | ✅ Re-test: Subconversations work end-to-end |
+| ✅ | 3.8.F1 | ✅ Re-test: Entity layer - views are entities, forks use relations |
+| ⏸️ | 3.8.F2 | ✅ Re-test: Subconversations work end-to-end (spawn_agent not wired) |
 | ⬜ | 3.8.F3 | ✅ Re-test: Document CRUD works end-to-end |
 | ⬜ | 3.8.F4 | ✅ Re-test: Cross-references and backlinks work |
 | ⬜ | 3.8.F5 | ✅ Final: All 7 original tests pass
