@@ -8,8 +8,8 @@ Interactive verification of Unified Content Model features.
 
 ## Prerequisites
 
-- [ ] App compiles: `cargo build -p noema`
-- [ ] App runs: `noema`
+- [x] App compiles: `cargo build -p noema`
+- [x] App runs: `noema`
 - [ ] Fresh database (optional): delete `~/.noema/noema.db` for clean slate
 
 ---
@@ -21,34 +21,34 @@ Interactive verification of Unified Content Model features.
 ### Steps
 
 1. **Start a conversation**
-   - [ ] Open noema
-   - [ ] Send a message: "Hello, tell me a short joke"
-   - [ ] Wait for response
+   - [x] Open noema
+   - [x] Send a message: "Hello, tell me a short joke"
+   - [x] Wait for response
 
 2. **Regenerate response**
-   - [ ] Click the regenerate button on the assistant message
-   - [ ] Wait for new response
-   - [ ] Verify: UI shows indicator that alternatives exist (e.g., "1/2" or navigation arrows)
+   - [x] Click the regenerate button on the assistant message
+   - [x] Wait for new response
+   - [x] Verify: UI shows indicator that alternatives exist (e.g., "1/2" or navigation arrows)
 
 3. **View alternatives**
-   - [ ] Click to view/expand alternatives panel
-   - [ ] Verify: Both responses are visible
-   - [ ] Verify: Each shows metadata (timestamp, model if available)
+   - [x] Click to view/expand alternatives panel
+   - [x] Verify: Both responses are visible
+   - [ ] Verify: Each shows metadata (timestamp, model if available) ⚠️ **ISSUE: No metadata displayed**
 
 4. **Select alternative**
-   - [ ] Select the first (original) response
-   - [ ] Verify: It becomes the active response shown in conversation
-   - [ ] Select the second (regenerated) response
-   - [ ] Verify: Conversation updates to show second response
+   - [x] Select the first (original) response
+   - [x] Verify: It becomes the active response shown in conversation
+   - [x] Select the second (regenerated) response
+   - [x] Verify: Conversation updates to show second response
 
 5. **Persistence check**
-   - [ ] Send a follow-up message: "That was funny"
-   - [ ] Verify: The LLM responds based on whichever joke was selected
-   - [ ] Close and reopen the app
-   - [ ] Verify: Your selection persisted
+   - [x] Send a follow-up message: "That was funny"
+   - [x] Verify: The LLM responds based on whichever joke was selected
+   - [x] Close and reopen the app
+   - [x] Verify: Your selection persisted
 
-**Result**: [ ] PASS / [ ] FAIL
-**Notes**:
+**Result**: [x] PASS / [ ] FAIL
+**Notes**: Missing metadata on alternatives (non-blocking)
 
 ---
 
@@ -61,44 +61,45 @@ Interactive verification of Unified Content Model features.
 Open SQLite and run these queries:
 
 ```bash
-sqlite3 ~/.noema/noema.db
+sqlite3 ~/.local/share/noema/database/noema.db
 ```
 
 1. **Views table**
    ```sql
-   SELECT id, entity_id, name, is_main FROM views LIMIT 5;
+   SELECT * FROM views LIMIT 5;
    ```
-   - [ ] Views exist with entity_id references
-   - [ ] Main view has `is_main = 1`
+   - [x] Views exist with IDs and timestamps
+   - [ ] ⚠️ **SCHEMA GAP**: No `entity_id`, `name`, `is_main` columns - views not linked to entities yet
 
 2. **View selections**
    ```sql
    SELECT view_id, turn_id, span_id FROM view_selections LIMIT 10;
    ```
-   - [ ] Selections exist linking views to spans at turns
-   - [ ] If you regenerated, multiple spans should exist for same turn
+   - [x] Selections exist linking views to spans at turns
+   - [x] Multiple spans exist for regenerated turn
 
 3. **Entities table**
    ```sql
    SELECT id, entity_type, name, slug FROM entities LIMIT 10;
    ```
-   - [ ] Entities exist with type 'view'
-   - [ ] Names/slugs populated for named conversations
+   - [x] Entities table exists with proper schema
+   - [x] Entity exists with type 'conversation'
+   - [ ] ⚠️ name/slug empty on conversation entity
 
 4. **Turns and spans**
    ```sql
-   SELECT t.id, t.sequence, s.id as span_id, s.role
+   SELECT t.id, t.role, s.id as span_id, s.model_id
    FROM turns t
    JOIN spans s ON s.turn_id = t.id
-   ORDER BY t.sequence, s.created_at
-   LIMIT 20;
+   ORDER BY t.created_at, s.created_at
+   LIMIT 15;
    ```
-   - [ ] Turns have sequential numbers
-   - [ ] Spans have correct roles (user/assistant)
-   - [ ] Regenerated turns have multiple spans
+   - [x] Turns have roles (user/assistant) - ordered by created_at, not sequence
+   - [x] Spans linked to turns with model_id
+   - [x] Regenerated turns have multiple spans
 
-**Result**: [ ] PASS / [ ] FAIL
-**Notes**:
+**Result**: [ ] PASS / [x] FAIL (partial - core works, entity integration missing)
+**Notes**: Core data model works. Schema differs from spec: views not linked to entities, turns use created_at not sequence, role on turn not span. Entity layer integration is a blocking gap.
 
 ---
 
@@ -110,33 +111,33 @@ sqlite3 ~/.noema/noema.db
 
 1. **Clean slate**
    ```bash
-   mv ~/.noema ~/.noema.backup
+   mv ~/.local/share/noema ~/.local/share/noema.backup
    ```
-   - [ ] Backup moved
+   - [x] Backup moved
 
 2. **First run**
-   - [ ] Run `noema`
-   - [ ] App creates fresh database
-   - [ ] No errors on startup
+   - [x] Run `noema`
+   - [x] App creates fresh database
+   - [x] No errors on startup (after copying config for API keys)
 
 3. **Basic conversation**
-   - [ ] Start new conversation
-   - [ ] Send message, receive response
-   - [ ] Message appears correctly
+   - [x] Start new conversation
+   - [x] Send message, receive response
+   - [x] Message appears correctly
 
 4. **Regenerate works**
-   - [ ] Regenerate a response
-   - [ ] Alternatives UI appears
-   - [ ] Can switch between them
+   - [x] Regenerate a response
+   - [x] Alternatives UI appears
+   - [x] Can switch between them
 
 5. **Restore backup**
    ```bash
-   rm -rf ~/.noema && mv ~/.noema.backup ~/.noema
+   rm -rf ~/.local/share/noema && mv ~/.local/share/noema.backup ~/.local/share/noema
    ```
-   - [ ] Restored
+   - [x] Restored
 
-**Result**: [ ] PASS / [ ] FAIL
-**Notes**:
+**Result**: [x] PASS / [ ] FAIL
+**Notes**: Fresh install needs config copied for API keys (expected behavior)
 
 ---
 
@@ -147,20 +148,16 @@ sqlite3 ~/.noema/noema.db
 ### Steps
 
 1. **Create a fork**
-   - [ ] Start conversation with 3+ messages
-   - [ ] Fork from an earlier turn (not the last one)
-   - [ ] Verify: New view created
+   - [x] Start conversation with 3+ messages
+   - [x] Fork from an earlier user message - works
+   - [ ] ⚠️ **BUG**: Fork from assistant message drops the assistant message
 
-2. **Check entity created**
+2. **Check fork recorded**
    ```sql
-   SELECT e.id, e.entity_type, v.is_main, v.forked_from_turn_id
-   FROM entities e
-   JOIN views v ON v.entity_id = e.id
-   ORDER BY e.created_at DESC
-   LIMIT 5;
+   SELECT * FROM views ORDER BY created_at DESC LIMIT 5;
    ```
-   - [ ] Forked view has entity
-   - [ ] `forked_from_turn_id` is set
+   - [ ] ⚠️ **SKIP**: Views not linked to entities (schema gap from Test 2)
+   - [x] `forked_from_view_id` and `forked_at_turn_id` ARE set correctly on forked views
 
 3. **Check relation created**
    ```sql
@@ -168,15 +165,15 @@ sqlite3 ~/.noema/noema.db
    FROM entity_relations
    WHERE relation_type = 'forked_from';
    ```
-   - [ ] Fork relation exists between view entities
+   - [ ] ⚠️ **SKIP**: Entity relations not created (views not entities)
 
 4. **Views independent**
    - [ ] Continue conversation in forked view
    - [ ] Switch back to main view
    - [ ] Verify: Main view unchanged, fork has new messages
 
-**Result**: [ ] PASS / [ ] FAIL
-**Notes**:
+**Result**: [ ] PASS / [x] FAIL
+**Notes**: Fork from assistant message bug; entity layer not integrated with views
 
 ---
 
@@ -203,8 +200,8 @@ sqlite3 ~/.noema/noema.db
 3. **Result appears**
    - [ ] Subconversation result visible in parent conversation
 
-**Result**: [ ] PASS / [ ] FAIL / [ ] SKIPPED
-**Notes**:
+**Result**: [ ] PASS / [ ] FAIL / [x] SKIPPED
+**Notes**: MCP agent functionality not yet in UI
 
 ---
 
@@ -241,8 +238,8 @@ sqlite3 ~/.noema/noema.db
    - [ ] Verify: Both tabs visible
    - [ ] Each tab has independent content
 
-**Result**: [ ] PASS / [ ] FAIL / [ ] SKIPPED
-**Notes**:
+**Result**: [ ] PASS / [ ] FAIL / [x] SKIPPED
+**Notes**: Document UI not yet implemented
 
 ---
 
@@ -269,8 +266,8 @@ sqlite3 ~/.noema/noema.db
    - [ ] View the referenced entity
    - [ ] Verify: Backlinks panel shows incoming reference
 
-**Result**: [ ] PASS / [ ] FAIL / [ ] SKIPPED
-**Notes**:
+**Result**: [ ] PASS / [ ] FAIL / [x] SKIPPED
+**Notes**: Reference UI not yet implemented
 
 ---
 
@@ -278,18 +275,26 @@ sqlite3 ~/.noema/noema.db
 
 | Test | Status | Notes |
 |------|--------|-------|
-| 1. Alternatives & Selection | | |
-| 2. SQL Data Verification | | |
-| 3. Fresh Install E2E | | |
-| 4. Entity Layer | | |
-| 5. Subconversations | | |
-| 6. Document CRUD | | |
-| 7. Cross-References | | |
+| 1. Alternatives & Selection | ✅ PASS | Missing metadata on alternatives |
+| 2. SQL Data Verification | ⚠️ PARTIAL | Core works, entity layer integration missing |
+| 3. Fresh Install E2E | ✅ PASS | Needs config copy for API keys |
+| 4. Entity Layer | ❌ FAIL | Fork from assistant drops message; entity integration missing |
+| 5. Subconversations | ⏸️ NEEDS UI | Backend done (3.3b), UI integration needed |
+| 6. Document CRUD | ⏸️ NEEDS UI | Backend done (3.4), UI needed |
+| 7. Cross-References | ⏸️ NEEDS UI | Backend done (3.6), UI needed |
 
-**Overall Phase 03 Status**: [ ] READY FOR PHASE 04 / [ ] NEEDS FIXES
+**Overall Phase 03 Status**: [ ] READY FOR PHASE 04 / [x] NEEDS FIXES
 
 **Blocking Issues**:
+- [ ] Fork from assistant message may link to previous user turn instead (needs investigation)
+- [ ] **Entity layer not integrated with views** - views should BE entities (view.id = entity.id), currently standalone table
+- [ ] **Entity relations not used for forks** - forked_from should be an entity_relation, not a column
+- [ ] Conversation entity name/slug not populated
 
+**UI Integration Needed** (backend done, UI not wired):
+- [ ] **Subconversations** - backend done (3.3b), needs UI integration
+- [ ] **Document CRUD** - backend done (3.4), needs UI
+- [ ] **Cross-references** - backend done (3.6), needs UI
 
-**Non-blocking Issues** (can fix in Phase 04):
-
+**Non-blocking Issues** (polish after features work):
+- [ ] Alternatives panel doesn't show metadata (timestamp, model)

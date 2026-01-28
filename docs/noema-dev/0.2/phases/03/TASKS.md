@@ -19,7 +19,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
 | ✅ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ✅ | P2 | 3.7 | Temporal queries | Time-based entity queries (entities table only) |
-| ⬜ | P2 | 3.8 | Manual testing | End-of-phase verification checkpoint |
+| 🔄 | P2 | 3.8 | Manual testing | End-of-phase verification - **IN PROGRESS: issues found, fixes needed** |
 
 Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
 
@@ -256,19 +256,52 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.4.9 | ⚡ Implement promote_from_message |
 | ✅ | 3.4.10 | ✅ Unit tests for document structure (in memory store) |
 
-### 3.8 Manual Testing Checkpoint (7 tasks)
+### 3.8 Manual Testing Checkpoint
 
 **Goal**: Consolidated manual verification of all Phase 3 features.
 
+#### Initial Test Results (2026-01-28)
+
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.8.1 | ✅ User: Verify can see all alternatives, select any one (from 3.3.F6) |
-| ⬜ | 3.8.2 | 🔧 User: SQL verify views, view_selections, entities have correct data (from 3.3.F7) |
-| ⬜ | 3.8.3 | ✅ User: Fresh install E2E - all conversation features work (from 3.3.F8) |
-| ⬜ | 3.8.4 | ✅ User: Entity layer - views are entities, forks use relations (from 3.3.F9) |
-| ⬜ | 3.8.5 | ✅ User: Verify subconversation runs, result appears in parent (from 3.3b.5) |
-| ⬜ | 3.8.6 | ✅ User: Document CRUD - create, tabs, revisions work in app |
-| ⬜ | 3.8.7 | ✅ User: Cross-references - create refs, verify backlinks work |
+| ✅ | 3.8.1 | ✅ User: Verify can see all alternatives, select any one |
+| ⚠️ | 3.8.2 | 🔧 User: SQL verify views, view_selections, entities have correct data |
+| ✅ | 3.8.3 | ✅ User: Fresh install E2E - all conversation features work |
+| ❌ | 3.8.4 | ✅ User: Entity layer - views are entities, forks use relations |
+| 🚫 | 3.8.5 | ✅ User: Verify subconversation runs, result appears in parent |
+| 🚫 | 3.8.6 | ✅ User: Document CRUD - create, tabs, revisions work in app |
+| 🚫 | 3.8.7 | ✅ User: Cross-references - create refs, verify backlinks work |
+
+**Legend**: ✅ pass, ⚠️ partial, ❌ fail, 🚫 blocked (needs UI)
+
+#### Blocking Issues Found
+
+| Status | # | Task |
+|--------|---|------|
+| ✅ | 3.8.B1 | 🐛 Fix: Fork from assistant message drops assistant message |
+| ⏸️ | 3.8.B2 | 🔧 Fix: Entity layer not integrated with views (views should BE entities) |
+| ✅ | 3.8.B3 | 🔧 Fix: Entity relations not used for forks (use entity_relations, not column) |
+| ✅ | 3.8.B4 | 🔧 Fix: Conversation entity name/slug not populated |
+
+> **Note**: B2 deferred - keeping current conversation+view architecture. Entity relations now used for forks.
+
+#### UI Integration Needed (Backend Done)
+
+| Status | # | Task |
+|--------|---|------|
+| ✅ | 3.8.U1 | 🔧 UI: Wire subconversations to frontend (backend 3.3b done) |
+| ✅ | 3.8.U2 | 🔧 UI: Create document CRUD interface (backend 3.4 done) |
+| ✅ | 3.8.U3 | 🔧 UI: Create cross-reference/backlink interface (backend 3.6 done) |
+
+#### Final Verification (after fixes)
+
+| Status | # | Task |
+|--------|---|------|
+| ⬜ | 3.8.F1 | ✅ Re-test: Entity layer - views are entities, forks use relations |
+| ⬜ | 3.8.F2 | ✅ Re-test: Subconversations work end-to-end |
+| ⬜ | 3.8.F3 | ✅ Re-test: Document CRUD works end-to-end |
+| ⬜ | 3.8.F4 | ✅ Re-test: Cross-references and backlinks work |
+| ⬜ | 3.8.F5 | ✅ Final: All 7 original tests pass
 
 ---
 
