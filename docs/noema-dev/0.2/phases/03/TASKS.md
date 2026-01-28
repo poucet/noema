@@ -256,9 +256,9 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.4.9 | ⚡ Implement promote_from_message |
 | ✅ | 3.4.10 | ✅ Unit tests for document structure (in memory store) |
 
-### 3.45 Manual Testing Checkpoint (6 tasks)
+### 3.45 Manual Testing Checkpoint (7 tasks)
 
-**Goal**: Consolidated manual verification of 3.3, 3.3b, and 3.4 before continuing to Collections.
+**Goal**: Consolidated manual verification of 3.3, 3.3b, 3.4, and 3.6 before continuing to Collections.
 
 | Status | # | Task |
 |--------|---|------|
@@ -268,6 +268,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ⬜ | 3.45.4 | ✅ User: Entity layer - views are entities, forks use relations (from 3.3.F9) |
 | ⬜ | 3.45.5 | ✅ User: Verify subconversation runs, result appears in parent (from 3.3b.5) |
 | ⬜ | 3.45.6 | ✅ User: Document CRUD - create, tabs, revisions work in app |
+| ⬜ | 3.45.7 | ✅ User: Cross-references - create refs, verify backlinks work |
 
 ---
 
