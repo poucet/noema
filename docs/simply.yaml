@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.7"
 feature_name: "Temporal queries"
-task: "3.7.3"
-task_name: "Implement query_by_time_range"
+task: "3.7.6"
+task_name: "Unit tests for temporal queries"
 
 # Completed
 completed_features:
