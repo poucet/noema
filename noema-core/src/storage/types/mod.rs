@@ -30,5 +30,5 @@ pub use collection::{
 };
 pub use reference::{EntityRef, Reference};
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
-pub use temporal::{ActivitySummary, ContentKind, ContentPreview, TemporalEntity, TemporalQuery};
+pub use temporal::{ActivitySummary, TemporalEntity, TemporalQuery};
 pub use user::User;

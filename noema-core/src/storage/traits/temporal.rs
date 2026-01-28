@@ -1,9 +1,10 @@
 //! TemporalStore trait for time-based entity queries
 //!
-//! Provides time-range queries and activity summaries for:
-//! - Slash command/search (lazy loading)
-//! - Manual context injection (eager loading)
-//! - Future MCP/RAG integration (eager loading)
+//! Queries the `entities` table only. Content loading is the caller's
+//! responsibility via domain-specific stores (TurnStore, DocumentStore, etc.).
+//!
+//! This design supports hierarchical storage where different entity types
+//! may live in different backends.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,21 +14,15 @@ use crate::storage::types::temporal::{ActivitySummary, TemporalEntity, TemporalQ
 
 /// Trait for time-based entity queries
 ///
-/// Queries entities via the unified `entities` table (which has temporal indexes),
-/// then optionally resolves content from domain-specific tables based on entity type.
-///
-/// # Query Flow
-///
-/// 1. Base query on `entities` table filtered by user, time range, and entity types
-/// 2. If `include_content = true`, resolve content previews by dispatching to:
-///    - `conversation` → latest message via views → turns → spans → messages
-///    - `document` → latest revision → content_blocks
-///    - `asset` → metadata only (size, mime_type), never blobs
+/// Queries entities via the unified `entities` table only. Content loading
+/// is explicitly not part of this trait to support hierarchical storage
+/// architectures where different entity types may live in different stores.
 ///
 /// # Use Cases
 ///
-/// - **Search/Browse** (`include_content: false`): Fast metadata-only queries
-/// - **Injection/RAG** (`include_content: true`): Full content for LLM context
+/// - **Search/Browse**: Find recently updated entities
+/// - **Activity Feed**: Show what the user has been working on
+/// - **Context Building**: Caller loads content via appropriate stores
 #[async_trait]
 pub trait TemporalStore: Send + Sync {
     /// Query entities by time range
@@ -37,11 +32,12 @@ pub trait TemporalStore: Send + Sync {
     ///
     /// # Arguments
     /// - `user_id`: Scope query to this user's entities
-    /// - `query`: Query parameters (time range, entity types, content flag, limit)
+    /// - `query`: Query parameters (time range, entity types, limit)
     ///
     /// # Content Loading
-    /// - If `query.include_content = false`: `content_preview` will be `None`
-    /// - If `query.include_content = true`: `content_preview` populated for each entity
+    /// This method returns entity metadata only. To load content, use the
+    /// appropriate domain store (TurnStore for conversations, DocumentStore
+    /// for documents, etc.) with the returned entity IDs.
     async fn query_entities(
         &self,
         user_id: &UserId,
@@ -50,10 +46,7 @@ pub trait TemporalStore: Send + Sync {
 
     /// Get activity summary for a time range
     ///
-    /// Returns aggregate statistics without loading full content:
-    /// - Entity counts by type
-    /// - Total messages created
-    /// - Total document revisions
+    /// Returns aggregate entity counts by type.
     ///
     /// # Arguments
     /// - `user_id`: Scope summary to this user's entities
@@ -65,32 +58,4 @@ pub trait TemporalStore: Send + Sync {
         start: i64,
         end: i64,
     ) -> Result<ActivitySummary>;
-
-    /// Render activity as markdown for LLM context injection
-    ///
-    /// Formats temporal query results as markdown suitable for including
-    /// in an LLM prompt. Groups entities by type with timestamps.
-    ///
-    /// # Arguments
-    /// - `user_id`: Scope to this user's entities
-    /// - `query`: Query parameters (always loads content for rendering)
-    /// - `max_chars`: Optional character limit for output (truncates oldest first)
-    ///
-    /// # Output Format
-    /// ```markdown
-    /// ## Recent Activity (Jan 15 - Jan 22)
-    ///
-    /// ### Conversations
-    /// - **Project Planning** (updated 2h ago): "Let's discuss the API design..."
-    /// - **Bug Triage** (updated 1d ago): "The issue is in the parser..."
-    ///
-    /// ### Documents
-    /// - **API Design** (updated 3h ago): "# Overview\n\nThis document..."
-    /// ```
-    async fn render_activity_context(
-        &self,
-        user_id: &UserId,
-        query: &TemporalQuery,
-        max_chars: Option<u32>,
-    ) -> Result<String>;
 }
