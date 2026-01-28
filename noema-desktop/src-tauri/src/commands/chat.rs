@@ -2,7 +2,7 @@
 
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{ConversationStore, DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
+use noema_core::storage::{DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
 use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -609,14 +609,21 @@ pub async fn list_conversation_views(
 ) -> Result<Vec<ThreadInfoResponse>, String> {
     let stores = state.get_stores()?;
 
-    let conv = stores.conversation()
-        .get_conversation(&conversation_id)
+    let entity = stores.entity()
+        .get_entity(&conversation_id)
         .await
         .map_err(|e| format!("Failed to get conversation: {}", e))?
         .ok_or_else(|| format!("Conversation not found: {}", conversation_id))?;
 
+    let main_view_id = entity.metadata
+        .as_ref()
+        .and_then(|m| m.get("main_view_id"))
+        .and_then(|v| v.as_str())
+        .map(|s| ViewId::from_string(s.to_string()))
+        .ok_or_else(|| "Conversation has no main_view_id".to_string())?;
+
     let views = stores.turn()
-        .list_related_views(&conv.main_view_id)
+        .list_related_views(&main_view_id)
         .await
         .map_err(|e| format!("Failed to list views: {}", e))?;
 

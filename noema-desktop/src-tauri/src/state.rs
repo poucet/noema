@@ -24,11 +24,12 @@ impl StorageTypes for AppStorage {
     type Blob = FsBlobStore;
     type Asset = SqliteStore;
     type Text = SqliteStore;
-    type Conversation = SqliteStore;
     type Turn = SqliteStore;
     type User = SqliteStore;
     type Document = SqliteStore;
     type Entity = SqliteStore;
+    type Reference = SqliteStore;
+    type Collection = SqliteStore;
 }
 
 /// Holds all store instances for the application.
@@ -46,9 +47,6 @@ impl AppStores {
 }
 
 impl Stores<AppStorage> for AppStores {
-    fn conversation(&self) -> Arc<SqliteStore> {
-        self.sqlite.clone()
-    }
     fn turn(&self) -> Arc<SqliteStore> {
         self.sqlite.clone()
     }
@@ -68,6 +66,12 @@ impl Stores<AppStorage> for AppStores {
         self.sqlite.clone()
     }
     fn entity(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn reference(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+    fn collection(&self) -> Arc<SqliteStore> {
         self.sqlite.clone()
     }
 }

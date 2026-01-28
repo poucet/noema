@@ -9,6 +9,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use llm::ToolResultContent;
 
+use crate::context::ConversationContext;
+
 /// Arguments for spawning a subconversation agent
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
 pub struct SpawnAgentArgs {
@@ -89,7 +91,7 @@ use crate::storage::ids::{SpanId, TurnId, UserId};
 use crate::storage::session::Session;
 use crate::storage::traits::StorageTypes;
 use crate::Agent;
-use llm::{ChatMessage, ChatModel, ChatPayload, ContentBlock};
+use llm::{ChatMessage, ChatPayload, ContentBlock};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -154,7 +156,7 @@ impl<S: StorageTypes> SpawnHandler for ConversationSpawnHandler<S> {
 
         // 2. Open a session for the subconversation
         let (view_id, resolved_messages) = self.coordinator.open_session(&sub_id).await?;
-        let mut session = Session::new(sub_id.clone(), view_id, self.coordinator.clone());
+        let mut session = Session::new(self.coordinator.clone(), sub_id.clone(), view_id);
         for msg in resolved_messages {
             session.add_resolved(msg);
         }

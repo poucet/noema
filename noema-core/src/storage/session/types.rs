@@ -122,6 +122,14 @@ impl ResolvedContent {
             _ => None,
         }
     }
+
+    /// Get the text content if this is a Text variant
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text { text } => Some(text),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

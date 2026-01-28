@@ -13,7 +13,7 @@
 //! ## Storage Traits
 //!
 //! - `TurnStore` - Turn/Span/Message conversation storage
-//! - `ConversationStore` - Conversation-level CRUD
+//! - `EntityStore` - Unified CRUD for conversations, documents, assets
 //! - `TextStore` - Content-addressed text storage
 //! - `AssetStore` - Asset metadata storage
 //! - `BlobStore` - Content-addressable binary storage
@@ -58,7 +58,7 @@ pub mod document_resolver;
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, ConversationStore, DocumentStore, EntityStore, StorageTypes,
+    AssetStore, BlobStore, DocumentStore, EntityStore, StorageTypes,
     StoredEntity, StoredUser, Stores, TextStore, TurnStore, UserStore,
 };
 
@@ -68,8 +68,8 @@ pub use types::{
     Asset,
     // ContentBlock
     ContentBlock, ContentOrigin, ContentType, OriginKind,
-    // Conversation
-    Conversation, ForkInfo, Message, MessageWithContent, Span,
+    // Conversation structure (turns, spans, messages, views)
+    ForkInfo, Message, MessageWithContent, Span,
     Turn, TurnWithContent, View, ViewSelection,
     // Document
     Document, DocumentRevision, DocumentSource, DocumentTab,
@@ -95,8 +95,9 @@ pub use implementations::fs::FsBlobStore;
 
 // Memory implementations (for testing)
 pub use implementations::memory::{
-    MemoryAssetStore, MemoryBlobStore, MemoryConversationStore, MemoryDocumentStore,
-    MemoryEntityStore, MemoryStorage, MemoryTextStore, MemoryTurnStore, MemoryUserStore,
+    MemoryAssetStore, MemoryBlobStore, MemoryCollectionStore, MemoryDocumentStore,
+    MemoryEntityStore, MemoryReferenceStore, MemoryStorage, MemoryTextStore, MemoryTurnStore,
+    MemoryUserStore,
 };
 
 // Document resolution

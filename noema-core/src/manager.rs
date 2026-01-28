@@ -7,7 +7,7 @@
 //! - Event streaming to UI
 
 use anyhow::Result;
-use llm::{ChatMessage, ChatModel, ChatPayload, Role};
+use llm::{ChatMessage, ChatModel, ChatPayload};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;

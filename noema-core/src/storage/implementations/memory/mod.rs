@@ -5,18 +5,20 @@
 
 mod asset;
 mod blob;
-mod conversation;
+mod collection;
 mod document;
 mod entity;
+mod reference;
 mod text;
 mod turn;
 mod user;
 
 pub use asset::MemoryAssetStore;
 pub use blob::MemoryBlobStore;
-pub use conversation::MemoryConversationStore;
+pub use collection::MemoryCollectionStore;
 pub use document::MemoryDocumentStore;
 pub use entity::MemoryEntityStore;
+pub use reference::MemoryReferenceStore;
 pub use text::MemoryTextStore;
 pub use turn::MemoryTurnStore;
 pub use user::MemoryUserStore;
@@ -30,9 +32,10 @@ impl StorageTypes for MemoryStorage {
     type Blob = MemoryBlobStore;
     type Asset = MemoryAssetStore;
     type Text = MemoryTextStore;
-    type Conversation = MemoryConversationStore;
     type Turn = MemoryTurnStore;
     type User = MemoryUserStore;
     type Document = MemoryDocumentStore;
     type Entity = MemoryEntityStore;
+    type Reference = MemoryReferenceStore;
+    type Collection = MemoryCollectionStore;
 }

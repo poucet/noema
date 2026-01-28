@@ -5,7 +5,7 @@
 mod asset;
 mod blob;
 mod collection;
-mod conversation;
+// conversation module removed - use EntityStore instead
 mod document;
 mod entity;
 mod reference;
@@ -17,7 +17,6 @@ mod user;
 pub use asset::{AssetStore, StoredAsset};
 pub use blob::BlobStore;
 pub use collection::{CollectionStore, ItemField, StoredCollection, StoredCollectionItem, StoredCollectionView, StoredItemField};
-pub use conversation::{ConversationStore, StoredConversation};
 pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use entity::{EntityStore, StoredEntity};
 pub use reference::{ReferenceStore, StoredReference};
@@ -37,7 +36,6 @@ pub use user::{StoredUser, UserStore};
 ///     type Blob = FsBlobStore;
 ///     type Asset = SqliteStore;
 ///     type Text = SqliteStore;
-///     type Conversation = SqliteStore;  // deprecated, will be removed
 ///     type User = SqliteStore;
 ///     type Document = SqliteStore;
 ///     type Entity = SqliteStore;
@@ -54,8 +52,6 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Asset: AssetStore + Send + Sync;
     /// Text content storage
     type Text: TextStore + Send + Sync;
-    /// **DEPRECATED**: Use Entity instead. Kept for backward compatibility.
-    type Conversation: ConversationStore + Send + Sync;
     /// Turn/Span/Message/View storage
     type Turn: TurnStore + Send + Sync;
     /// User storage
@@ -94,8 +90,6 @@ use std::sync::Arc;
 /// }
 /// ```
 pub trait Stores<S: StorageTypes>: Send + Sync {
-    /// **DEPRECATED**: Use entity() instead.
-    fn conversation(&self) -> Arc<S::Conversation>;
     fn turn(&self) -> Arc<S::Turn>;
     fn user(&self) -> Arc<S::User>;
     fn document(&self) -> Arc<S::Document>;

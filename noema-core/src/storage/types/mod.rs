@@ -19,7 +19,7 @@ pub use asset::Asset;
 pub use blob::BlobHash;
 pub use content_block::{ContentBlock, ContentOrigin, ContentType, OriginKind};
 pub use conversation::{
-    Conversation, ForkInfo, Message, MessageWithContent,
+    ForkInfo, Message, MessageWithContent,
     Span, Turn, TurnWithContent, View, ViewSelection,
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};

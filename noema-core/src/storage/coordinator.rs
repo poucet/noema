@@ -450,22 +450,22 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             .unwrap_or_else(|| "(no result)".to_string());
 
         // Create a ToolResult that includes both the result and a reference to the subconversation
+        let result_content = format!(
+            "{}\n\n[subconversation_id: {}]",
+            result_text,
+            subconversation_id.as_str()
+        );
         let tool_result = llm::ToolResult {
-            id: tool_call_id.to_string(),
-            name: tool_name.to_string(),
-            result: serde_json::json!({
-                "result": result_text,
-                "subconversation_id": subconversation_id.as_str()
-            }),
-            is_error: false,
+            tool_call_id: tool_call_id.to_string(),
+            content: vec![llm::ToolResultContent::text(result_content)],
         };
 
-        // Add as a message in the parent span
+        // Add as a message in the parent span (tool results are sent as User role)
         let content = vec![ContentBlock::ToolResult(tool_result.clone())];
         self.add_message(
             parent_span_id,
             parent_turn_id,
-            Role::Tool,
+            Role::User,
             content,
             OriginKind::System,
         )

@@ -6,10 +6,10 @@
 //!
 //! All trait implementations are in submodules:
 //! - `asset` - AssetStore impl
-//! - `content_block` - TextStore impl
-//! - `conversation` - ConversationStore impl
+//! - `text` - TextStore impl
 //! - `turn` - TurnStore impl
 //! - `document` - DocumentStore impl
+//! - `entity` - EntityStore impl
 //! - `user` - UserStore impl
 
 use anyhow::Result;
@@ -20,7 +20,6 @@ use std::sync::{Arc, Mutex};
 // Submodules with trait implementations
 mod asset;
 mod collection;
-mod conversation;
 mod document;
 mod entity;
 mod reference;
@@ -32,7 +31,6 @@ mod user;
 // Re-export init_schema functions for use in SqliteStore::init_schema
 pub(crate) use asset::init_schema as init_asset_schema;
 pub(crate) use collection::init_schema as init_collection_schema;
-pub(crate) use conversation::init_schema as init_conversation_schema;
 pub(crate) use document::init_schema as init_document_schema;
 pub(crate) use entity::init_schema as init_entity_schema;
 pub(crate) use reference::init_schema as init_reference_schema;
@@ -48,12 +46,11 @@ pub(crate) use user::init_schema as init_user_schema;
 ///
 /// Implements all storage traits:
 /// - `TurnStore` - Turn/Span/Message conversation storage
-/// - `ConversationStore` - Conversation-level CRUD
+/// - `EntityStore` - Unified addressable layer (conversations, documents, assets)
 /// - `TextStore` - Content-addressed text storage
 /// - `AssetStore` - Asset metadata storage
 /// - `DocumentStore` - Document, tab, and revision storage
 /// - `UserStore` - User account management
-/// - `EntityStore` - Unified addressable layer
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
 }
@@ -88,7 +85,6 @@ impl SqliteStore {
         let conn = self.conn.lock().unwrap();
         init_user_schema(&conn)?;
         init_entity_schema(&conn)?;
-        init_conversation_schema(&conn)?;
         init_turn_schema(&conn)?;
         init_asset_schema(&conn)?;
         init_document_schema(&conn)?;

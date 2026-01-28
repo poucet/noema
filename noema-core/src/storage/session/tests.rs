@@ -12,50 +12,45 @@ use crate::manager::CommitMode;
 use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::{ConversationId, UserId, ViewId};
 use crate::storage::implementations::memory::{
-    MemoryAssetStore, MemoryBlobStore, MemoryConversationStore,
+    MemoryAssetStore, MemoryBlobStore, MemoryEntityStore,
     MemoryStorage, MemoryTextStore, MemoryTurnStore,
 };
 use crate::storage::session::Session;
-use crate::storage::traits::{ConversationStore, TurnStore};
+use crate::storage::traits::TurnStore;
 
 /// Create test coordinator with memory stores
 fn make_test_coordinator() -> (
     Arc<StorageCoordinator<MemoryStorage>>,
     Arc<MemoryTurnStore>,
-    Arc<MemoryConversationStore>,
 ) {
     let turn_store = Arc::new(MemoryTurnStore::new());
-    let conversation_store = Arc::new(MemoryConversationStore::with_turn_store(turn_store.clone()));
+    let entity_store = Arc::new(MemoryEntityStore::new());
 
     let coordinator = Arc::new(StorageCoordinator::new(
         Arc::new(MemoryBlobStore::new()),
         Arc::new(MemoryAssetStore::new()),
         Arc::new(MemoryTextStore::new()),
-        conversation_store.clone(),
+        entity_store,
         turn_store.clone(),
     ));
 
-    (coordinator, turn_store, conversation_store)
+    (coordinator, turn_store)
 }
 
-/// Create a conversation with its main view
+/// Create a conversation with its main view using the coordinator
 async fn create_test_conversation(
-    conversation_store: &MemoryConversationStore,
-    turn_store: &MemoryTurnStore,
+    coordinator: &StorageCoordinator<MemoryStorage>,
 ) -> (ConversationId, ViewId) {
     let user_id = UserId::new();
-    let conversation_id = conversation_store
-        .create_conversation(&user_id, Some("Test Conversation"))
+    let conversation_id = coordinator
+        .create_conversation_with_view(&user_id, Some("Test Conversation"))
         .await
         .unwrap();
 
-    let view = turn_store.create_view().await.unwrap();
-    conversation_store
-        .set_main_view_id(&conversation_id, &view.id)
-        .await
-        .unwrap();
+    // Get the main_view_id from the conversation
+    let (view_id, _) = coordinator.open_session(&conversation_id).await.unwrap();
 
-    (conversation_id, view.id)
+    (conversation_id, view_id)
 }
 
 // ============================================================================
@@ -64,8 +59,8 @@ async fn create_test_conversation(
 
 #[tokio::test]
 async fn test_session_new_creates_empty_session() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let session = Session::<MemoryStorage>::new(
         coordinator,
@@ -81,8 +76,8 @@ async fn test_session_new_creates_empty_session() {
 
 #[tokio::test]
 async fn test_session_open_loads_existing_messages() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     // Create a session, add messages, and commit
     {
@@ -123,8 +118,8 @@ async fn test_session_open_loads_existing_messages() {
 
 #[tokio::test]
 async fn test_session_add_to_pending() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -148,8 +143,8 @@ async fn test_session_add_to_pending() {
 
 #[tokio::test]
 async fn test_session_commit_moves_to_resolved() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -178,8 +173,8 @@ async fn test_session_commit_moves_to_resolved() {
 
 #[tokio::test]
 async fn test_session_all_messages_combines_resolved_and_pending() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -211,8 +206,8 @@ async fn test_session_all_messages_combines_resolved_and_pending() {
 
 #[tokio::test]
 async fn test_session_as_conversation_context() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -239,8 +234,8 @@ async fn test_session_as_conversation_context() {
 
 #[tokio::test]
 async fn test_session_context_commit() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -265,8 +260,8 @@ async fn test_session_context_commit() {
 
 #[tokio::test]
 async fn test_session_truncate_clears_all() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -295,8 +290,8 @@ async fn test_session_truncate_clears_all() {
 
 #[tokio::test]
 async fn test_session_truncate_at_turn() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -338,8 +333,8 @@ async fn test_session_truncate_at_turn() {
 
 #[tokio::test]
 async fn test_session_clear_cache() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -364,8 +359,8 @@ async fn test_session_clear_cache() {
 
 #[tokio::test]
 async fn test_session_clear_pending() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -392,8 +387,8 @@ async fn test_session_clear_pending() {
 
 #[tokio::test]
 async fn test_session_open_view() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, main_view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, turn_store) = make_test_coordinator();
+    let (conversation_id, main_view_id) = create_test_conversation(&coordinator).await;
 
     // Create session with main view and add messages
     {
@@ -438,8 +433,8 @@ async fn test_session_open_view() {
 
 #[tokio::test]
 async fn test_session_commit_at_turn_regeneration() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator.clone(),
@@ -483,8 +478,8 @@ async fn test_session_commit_at_turn_regeneration() {
 
 #[tokio::test]
 async fn test_session_preserves_message_content() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,
@@ -512,8 +507,8 @@ async fn test_session_preserves_message_content() {
 
 #[tokio::test]
 async fn test_session_multi_content_message() {
-    let (coordinator, turn_store, conversation_store) = make_test_coordinator();
-    let (conversation_id, view_id) = create_test_conversation(&conversation_store, &turn_store).await;
+    let (coordinator, _turn_store) = make_test_coordinator();
+    let (conversation_id, view_id) = create_test_conversation(&coordinator).await;
 
     let mut session = Session::<MemoryStorage>::new(
         coordinator,

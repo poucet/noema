@@ -215,44 +215,15 @@ pub struct TurnWithContent {
 }
 
 // ============================================================================
-// Conversation
+// Conversation (REMOVED - use Entity with EntityType::conversation() instead)
 // ============================================================================
-
-/// Core conversation data
-///
-/// Use with `Stored<ConversationId, Conversation>` for the full stored representation.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Conversation {
-    /// Human-readable name/title
-    pub name: Option<String>,
-    /// The main view for this conversation
-    pub main_view_id: ViewId,
-    /// Whether this conversation contains private/sensitive content
-    pub is_private: bool,
-}
-
-impl Conversation {
-    /// Create a new conversation with a main view
-    pub fn new(main_view_id: ViewId) -> Self {
-        Self {
-            name: None,
-            main_view_id,
-            is_private: false,
-        }
-    }
-
-    /// Set the conversation name
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Mark as private
-    pub fn private(mut self) -> Self {
-        self.is_private = true;
-        self
-    }
-}
+//
+// Conversations are now fully represented as entities:
+// - Entity.entity_type = EntityType::conversation()
+// - Entity.metadata["main_view_id"] = the main view ID
+// - Entity.name, Entity.is_private, etc. for common fields
+//
+// See EntityStore for CRUD operations.
 
 #[cfg(test)]
 mod tests {

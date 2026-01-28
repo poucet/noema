@@ -455,9 +455,8 @@ impl DocumentStore for SqliteStore {
                  WHERE message_id = ?1 AND content_type = 'text' AND content_block_id IS NOT NULL
                  ORDER BY sequence_number"
             )?;
-            stmt.query_map(params![message_id.as_str()], |row| row.get::<_, ContentBlockId>(0))?
-                .filter_map(|r| r.ok())
-                .collect()
+            let rows = stmt.query_map(params![message_id.as_str()], |row| row.get::<_, ContentBlockId>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
         };
 
         if content_block_ids.is_empty() {
