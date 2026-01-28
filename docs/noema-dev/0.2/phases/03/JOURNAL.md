@@ -640,6 +640,36 @@ Added comprehensive integration tests for the Session API with memory-based stor
 
 ---
 
+## 2026-01-28: Documentation Update
+
+Updated core documentation to reflect the Unified Content Model architecture.
+
+### Changes
+
+**STORAGE.md** (rewritten):
+- Restructured around three-layer UCM model (Addressable, Structure, Content)
+- Added entity layer tables (`entities`, `entity_relations`)
+- Updated conversation structure to Turn → Span → Message hierarchy
+- Added document structure with tabs and revisions
+- Updated storage traits section for new API
+- Added Session API documentation
+- Included migration notes from 1.x
+
+**ARCHITECTURE.md** (new):
+- High-level vision and guiding principles (local-first, content immutable, structure mutable)
+- Three-layer architecture diagram and explanation
+- Core concepts documentation (Views as Conversations, Spans as Flows, Content with Origin)
+- Crate structure overview
+- Data flow diagrams (message send, fork operations)
+- Phase roadmap summary (Phase 3 through Phase 8)
+- Future hook system overview
+- Extension points (adding stores, entity types, providers)
+- Key design decisions with rationale
+
+These documents capture where Noema 0.2 is headed architecturally.
+
+---
+
 ## 2026-01-15: Bug Fixes for Edit Message Flow
 
 ### Bug 1: Edit Doesn't Trigger AI Response
