@@ -36,13 +36,14 @@ This plan covers a major feature wave for Noema 0.2, organized into 7 phases. Ke
 ### Phase 3: Unified Content Model
 | Done | Pri | # | Feature | Complexity | Impact |
 |------|-----|---|---------|------------|--------|
-| ⬜ | P0 | 3.1 | Content blocks (text storage with origin tracking) | Medium | Very High |
-| ⬜ | P0 | 3.1b | Asset storage (images, audio, binary blobs) | Medium | High |
-| ⬜ | P0 | 3.2 | Conversation structure (turns, spans, messages) | High | Very High |
-| ⬜ | P0 | 3.3 | Views and forking (conversation branching) | High | Very High |
-| ⬜ | P1 | 3.4 | Document structure (tabs, revision history) | Medium | High |
+| ✅ | P0 | 3.1 | Content blocks (text storage with origin tracking) | Medium | Very High |
+| ✅ | P0 | 3.1b | Asset storage (images, audio, binary blobs) | Medium | High |
+| ✅ | P0 | 3.2 | Conversation structure (turns, spans, messages) | High | Very High |
+| ✅ | P0 | 3.3 | Views and forking (conversation branching) | High | Very High |
+| ✅ | P0 | 3.3b | Subconversations (spawned agent conversations) | Medium | High |
+| ✅ | P1 | 3.4 | Document structure (tabs, revision history) | Medium | High |
 | ⬜ | P1 | 3.5 | Collections (tree organization, tags, fields) | Medium | High |
-| ⬜ | P1 | 3.6 | Cross-references and backlinks | Medium | High |
+| 🚧 | P1 | 3.6 | Cross-references and backlinks | Medium | High |
 | ⬜ | P2 | 3.7 | Temporal queries (activity summaries for LLM) | Medium | Medium |
 | ⬜ | P2 | 3.8 | Session integration (connect engine to new model) | Medium | Very High |
 | ⬜ | P2 | 30 | Import/export and data portability | Medium | High |
@@ -335,11 +336,21 @@ ALTER TABLE documents ADD COLUMN summary_embedding BLOB;
 
 ## Phase 3: Unified Content Model
 
+**Status**: 6/10 features complete, 1 in progress (3.6 Cross-references)
+
 **Problem**: Conversations, documents, and organization are separate systems. No parallel model responses, conversation forking, cross-referencing, or unified search.
 
 **Solution**: Separate immutable content (text, assets) from mutable structure (conversations, documents, collections). All text is searchable and referenceable.
 
 **Core Principle**: Content is heavy and immutable. Structure is lightweight and mutable.
+
+**Completed**:
+- ✅ Content blocks with origin tracking and full-text search
+- ✅ Asset storage with content-addressed deduplication
+- ✅ Turn/Span/Message hierarchy replacing legacy model
+- ✅ Views, forking, entity layer with all 6 user journeys
+- ✅ Subconversations with parent-child relationships
+- ✅ Document tabs with per-tab revision history
 
 ---
 
@@ -404,6 +415,23 @@ Navigate and branch conversation history.
 - Explore "what if I had asked differently?"
 - A/B test different prompts
 - Keep multiple conversation threads without data duplication
+
+---
+
+### Feature 3.3b: Subconversations
+
+Spawned agent conversations with parent-child relationships.
+
+**Capabilities**:
+- **Spawn**: Create child conversation from parent with scoped context
+- **Link results**: Connect sub-conversation outcomes back to parent
+- **Entity relations**: Track parent-child via `spawned_from` relation
+- **Independent execution**: Sub-conversations run autonomously
+
+**Use Cases Enabled**:
+- MCP agent spawns focused sub-task conversation
+- Research agent explores tangent without polluting main thread
+- Parallel exploration with results merged back
 
 ---
 
@@ -701,9 +729,9 @@ version = "0.2.0"
 
 | Phase | Files |
 |-------|-------|
-| 1 | `ModelSelector.tsx` |
-| 2 | `ChatInput.tsx`, `engine.rs` (parallel conversations) |
-| 3 | New: `storage/content_block/`, `storage/asset/`, `storage/conversation/` (rewrite), `storage/document/` (rewrite), `storage/collection/`, `storage/reference/` |
+| 1 ✅ | `ModelSelector.tsx` |
+| 2 ⏸️ | `ChatInput.tsx`, `engine.rs` (parallel conversations) |
+| 3 🚧 | `storage/traits/` (text, asset, turn, document, entity), `storage/types/` (content_block, asset, conversation, document, entity, reference), `storage/implementations/sqlite/` |
 | 4 | Updates using new content model for deferred features |
 | 5 | New: `storage/tag/`, `storage/vector/`, `embedding/`, `TagTree.tsx`, `SearchBar.tsx` |
 | 6 | New: `storage/memory/`, `rag/`, `summarizer.rs`, `MemoriesPanel.tsx` |
@@ -716,26 +744,30 @@ version = "0.2.0"
 ```
 Prerequisites: Version consolidation
 
-Phase 1 → Phase 2 → Phase 3 (Unified Content Model) → Phase 4 → Phase 5 → Phase 6 → Phase 7
-                              ↓
-                   Content Blocks (3.1) + Assets (3.1b)
-                              ↓
-                   Conversations (3.2) + Views (3.3)
-                              ↓
-                   Documents (3.4) + Collections (3.5)
-                              ↓
-                   References (3.6) + Temporal (3.7)
-                              ↓
-                   Session Integration (3.8) + Import/Export (30)
-                              ↓
-                   Deferred Features (1, 6, 10, 12, 13, 17)
-                              ↓
-                   Embeddings (14) ──→ RAG (15)
-                              ↓              ↓
-                   Tags (7,11) ───→ Memories (8)
-                              ↓
-                   Skills (21) ──→ Agents (19, 20)
+Phase 1 ✅ → Phase 2 ⏸️ → Phase 3 (Unified Content Model) → Phase 4 → Phase 5 → Phase 6 → Phase 7
+                                        ↓
+                             Content Blocks (3.1) ✅ + Assets (3.1b) ✅
+                                        ↓
+                             Conversations (3.2) ✅ + Views (3.3) ✅ + Subconversations (3.3b) ✅
+                                        ↓
+                             Documents (3.4) ✅ + Collections (3.5) ⬜
+                                        ↓
+                          → References (3.6) 🚧 ← CURRENT
+                                        ↓
+                             Temporal (3.7) ⬜
+                                        ↓
+                             Session Integration (3.8) + Import/Export (30)
+                                        ↓
+                             Deferred Features (1, 6, 10, 12, 13, 17)
+                                        ↓
+                             Embeddings (14) ──→ RAG (15)
+                                        ↓              ↓
+                             Tags (7,11) ───→ Memories (8)
+                                        ↓
+                             Skills (21) ──→ Agents (19, 20)
 ```
+
+**Legend**: ✅ Complete | 🚧 In Progress | ⏸️ Paused | ⬜ Not Started
 
 ---
 
