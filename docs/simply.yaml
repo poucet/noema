@@ -3,10 +3,10 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.5"
-feature_name: "Collections"
-task: "3.5.12"
-task_name: "Unit tests for collections"
+feature: "3.7"
+feature_name: "Temporal queries"
+task: "3.7.1"
+task_name: "Add temporal indexes to tables"
 
 # Completed
 completed_features:
@@ -16,4 +16,5 @@ completed_features:
   - "3.3"   # Views and forking - Views, forking, entity layer (code complete)
   - "3.3b"  # Subconversations - Spawned agent conversations (code complete)
   - "3.4"   # Document structure - Documents with tabs and revision history (code complete)
+  - "3.5"   # Collections - Tree organization with tags and fields (code complete)
   - "3.6"   # Cross-references - Entity linking with backlinks (code complete)

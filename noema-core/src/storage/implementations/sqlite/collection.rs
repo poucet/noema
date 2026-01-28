@@ -768,3 +768,219 @@ impl CollectionStore for SqliteStore {
         Ok(items)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::traits::{CollectionStore, EntityStore, UserStore};
+    use crate::storage::types::{EntityType, ViewConfig};
+
+    async fn setup_store_with_user() -> (SqliteStore, UserId) {
+        let store = SqliteStore::in_memory().unwrap();
+        let user_id = store
+            .create_user("test@example.com", "Test User")
+            .await
+            .unwrap();
+        (store, user_id)
+    }
+
+    #[tokio::test]
+    async fn test_create_and_get_collection() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let id = store
+            .create_collection(&user_id, "My Tasks", Some("Task list"), Some("📋"))
+            .await
+            .unwrap();
+
+        let collection = store.get_collection(&id).await.unwrap().unwrap();
+        assert_eq!(collection.name, "My Tasks");
+        assert_eq!(collection.description.as_deref(), Some("Task list"));
+        assert_eq!(collection.icon.as_deref(), Some("📋"));
+    }
+
+    #[tokio::test]
+    async fn test_list_collections() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        store.create_collection(&user_id, "Alpha", None, None).await.unwrap();
+        store.create_collection(&user_id, "Beta", None, None).await.unwrap();
+
+        let collections = store.list_collections(&user_id).await.unwrap();
+        assert_eq!(collections.len(), 2);
+        // Sorted by name
+        assert_eq!(collections[0].name, "Alpha");
+        assert_eq!(collections[1].name, "Beta");
+    }
+
+    #[tokio::test]
+    async fn test_delete_collection() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let id = store.create_collection(&user_id, "ToDelete", None, None).await.unwrap();
+        assert!(store.delete_collection(&id).await.unwrap());
+        assert!(store.get_collection(&id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_add_and_get_items() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let collection_id = store.create_collection(&user_id, "Test", None, None).await.unwrap();
+
+        // Create an entity to reference
+        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+
+        let item_id = store
+            .add_item(&collection_id, &ItemTarget::entity(entity_id.clone()), None, 0, Some("Doc"))
+            .await
+            .unwrap();
+
+        let item = store.get_item(&item_id).await.unwrap().unwrap();
+        assert_eq!(item.position, 0);
+        assert_eq!(item.name_override.as_deref(), Some("Doc"));
+
+        let items = store.get_items(&collection_id).await.unwrap();
+        assert_eq!(items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_tree_structure() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let collection_id = store.create_collection(&user_id, "Tree", None, None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+
+        // Create root item
+        let root_id = store
+            .add_item(&collection_id, &ItemTarget::entity(entity_id.clone()), None, 0, None)
+            .await
+            .unwrap();
+
+        // Create child item
+        let child_id = store
+            .add_item(&collection_id, &ItemTarget::entity(entity_id.clone()), Some(&root_id), 0, None)
+            .await
+            .unwrap();
+
+        let root_items = store.get_root_items(&collection_id).await.unwrap();
+        assert_eq!(root_items.len(), 1);
+
+        let children = store.get_children(&root_id).await.unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id(), &child_id);
+    }
+
+    #[tokio::test]
+    async fn test_move_item() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let collection_id = store.create_collection(&user_id, "Move", None, None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+
+        let item_id = store
+            .add_item(&collection_id, &ItemTarget::entity(entity_id), None, 0, None)
+            .await
+            .unwrap();
+
+        assert!(store.move_item(&item_id, None, 5).await.unwrap());
+
+        let item = store.get_item(&item_id).await.unwrap().unwrap();
+        assert_eq!(item.position, 5);
+    }
+
+    #[tokio::test]
+    async fn test_fields() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let collection_id = store.create_collection(&user_id, "Fields", None, None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+
+        let item_id = store
+            .add_item(&collection_id, &ItemTarget::entity(entity_id), None, 0, None)
+            .await
+            .unwrap();
+
+        // Set fields
+        store.set_field(&item_id, &ItemField::text("status", "todo")).await.unwrap();
+        store.set_field(&item_id, &ItemField::number("priority", 1.0)).await.unwrap();
+
+        let fields = store.get_fields(&item_id).await.unwrap();
+        assert_eq!(fields.len(), 2);
+
+        // Update field
+        store.set_field(&item_id, &ItemField::text("status", "done")).await.unwrap();
+        let fields = store.get_fields(&item_id).await.unwrap();
+        assert_eq!(fields.len(), 2); // Still 2, not 3
+
+        // Remove field
+        assert!(store.remove_field(&item_id, "priority").await.unwrap());
+        let fields = store.get_fields(&item_id).await.unwrap();
+        assert_eq!(fields.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_tags() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let collection_id = store.create_collection(&user_id, "Tags", None, None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+
+        let item_id = store
+            .add_item(&collection_id, &ItemTarget::entity(entity_id), None, 0, None)
+            .await
+            .unwrap();
+
+        store.add_tag(&item_id, "urgent").await.unwrap();
+        store.add_tag(&item_id, "work").await.unwrap();
+
+        let tags = store.get_tags(&item_id).await.unwrap();
+        assert_eq!(tags.len(), 2);
+
+        let by_tag = store.find_by_tag(&collection_id, "urgent").await.unwrap();
+        assert_eq!(by_tag.len(), 1);
+
+        assert!(store.remove_tag(&item_id, "urgent").await.unwrap());
+        let tags = store.get_tags(&item_id).await.unwrap();
+        assert_eq!(tags.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_views() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let collection_id = store.create_collection(&user_id, "Views", None, None).await.unwrap();
+
+        let view = CollectionView::new(collection_id.clone(), "List View", ViewConfig::list()).as_default();
+
+        let view_id = store.create_view(&collection_id, "List View", &view).await.unwrap();
+
+        let stored = store.get_view(&view_id).await.unwrap().unwrap();
+        assert_eq!(stored.name, "List View");
+        assert!(stored.is_default);
+
+        let default = store.get_default_view(&collection_id).await.unwrap().unwrap();
+        assert_eq!(default.id(), &view_id);
+
+        let views = store.list_views(&collection_id).await.unwrap();
+        assert_eq!(views.len(), 1);
+
+        assert!(store.delete_view(&view_id).await.unwrap());
+        assert!(store.get_view(&view_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_items_by_entity() {
+        let (store, user_id) = setup_store_with_user().await;
+
+        let collection_id = store.create_collection(&user_id, "Find", None, None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+
+        // Add same entity to collection twice
+        store.add_item(&collection_id, &ItemTarget::entity(entity_id.clone()), None, 0, None).await.unwrap();
+        store.add_item(&collection_id, &ItemTarget::entity(entity_id.clone()), None, 1, None).await.unwrap();
+
+        let items = store.find_items_by_entity(&entity_id).await.unwrap();
+        assert_eq!(items.len(), 2);
+    }
+}

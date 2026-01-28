@@ -17,7 +17,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P1 | 3.3b | Subconversations | Spawned agent conversations linked to parent |
 | ✅ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ✅ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
-| ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
+| ✅ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P2 | 3.7 | Temporal queries | Time-based activity summaries for LLM context |
 | ⬜ | P2 | 3.8 | Manual testing | End-of-phase verification checkpoint |
 
@@ -287,7 +287,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.5.9 | ⚡ Implement item management |
 | ✅ | 3.5.10 | ⚡ Implement field and tag operations |
 | ✅ | 3.5.11 | ⚡ Implement view creation and query |
-| ⬜ | 3.5.12 | ✅ Unit tests for collections |
+| ✅ | 3.5.12 | ✅ Unit tests for collections |
 
 ### 3.6 Cross-References (7 tasks)
 
