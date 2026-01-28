@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.7"
 feature_name: "Temporal queries"
-task: "3.7.2"
-task_name: "Define TemporalStore trait"
+task: "3.7.3"
+task_name: "Implement query_by_time_range"
 
 # Completed
 completed_features:
