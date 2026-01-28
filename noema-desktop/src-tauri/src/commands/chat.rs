@@ -3,7 +3,8 @@
 use llm::{Role, create_model, list_all_models};
 use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
 use noema_core::storage::{DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
-use noema_core::storage::ids::{ConversationId, TurnId, SpanId, ViewId};
+use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
+use noema_core::storage::traits::ReferenceStore;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -20,7 +21,7 @@ use crate::types::{
 async fn enrich_with_alternates<S: StorageTypes, T: Stores<S>>(
     messages: Vec<DisplayMessage>,
     stores: &T,
-    view_id: &ViewId,
+    conversation_id: &ConversationId,
 ) -> Vec<DisplayMessage> {
     // Collect unique turn IDs from messages
     let turn_ids: Vec<TurnId> = messages
@@ -37,9 +38,9 @@ async fn enrich_with_alternates<S: StorageTypes, T: Stores<S>>(
         // Get all spans for this turn
         if let Ok(spans) = stores.turn().get_spans(&turn_id).await {
             if spans.len() > 1 {
-                // Get the selected span for this view
+                // Get the selected span for this conversation
                 let selected_span = stores.turn()
-                    .get_selected_span(view_id, &turn_id)
+                    .get_selected_span(conversation_id, &turn_id)
                     .await
                     .ok()
                     .flatten();
@@ -88,7 +89,6 @@ pub async fn get_messages(
     let managers = state.managers.lock().await;
     let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
 
-    let view_id = manager.view_id().await;
     // Use messages_for_display to preserve turn_id for alternates enrichment
     let msgs: Vec<DisplayMessage> = manager
         .messages_for_display()
@@ -98,7 +98,7 @@ pub async fn get_messages(
         .collect();
 
     // Enrich with alternates
-    let msgs = enrich_with_alternates(msgs, stores, &view_id).await;
+    let msgs = enrich_with_alternates(msgs, stores, &conversation_id).await;
 
     Ok(msgs)
 }
@@ -312,22 +312,13 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
 
     let mut result = Vec::with_capacity(entities.len());
     for entity in entities {
-        // Extract main_view_id from metadata
-        let main_view_id = entity.metadata
-            .as_ref()
-            .and_then(|m| m.get("main_view_id"))
-            .and_then(|v| v.as_str())
-            .map(|s| ViewId::from_string(s.to_string()));
-
-        if let Some(view_id) = main_view_id {
-            let view = stores
-                .turn()
-                .get_view(&view_id)
-                .await
-                .map_err(|e| format!("Failed to get view: {}", e))?
-                .ok_or_else(|| format!("View not found: {}", view_id))?;
-            result.push(ConversationInfo::from_entity(&entity, &view));
-        }
+        // Get turn count for this conversation
+        let turn_count = stores
+            .turn()
+            .get_turn_count(&entity.id)
+            .await
+            .unwrap_or(0);
+        result.push(ConversationInfo::from_entity(&entity, turn_count));
     }
 
     Ok(result)
@@ -346,7 +337,6 @@ pub async fn load_conversation(
     {
         let managers = state.managers.lock().await;
         if let Some(manager) = managers.get(&conversation_id) {
-            let view_id = manager.view_id().await;
             // Use messages_for_display to preserve turn_id for alternates enrichment
             let messages: Vec<DisplayMessage> = manager
                 .messages_for_display()
@@ -355,7 +345,7 @@ pub async fn load_conversation(
                 .map(DisplayMessage::from)
                 .collect();
             // Enrich with alternates
-            let messages = enrich_with_alternates(messages, stores, &view_id).await;
+            let messages = enrich_with_alternates(messages, stores, &conversation_id).await;
             return Ok(messages);
         }
     }
@@ -365,7 +355,6 @@ pub async fn load_conversation(
         .await
         .map_err(|e| format!("Failed to open conversation: {}", e))?;
 
-    let view_id = session.view_id().clone();
     let messages: Vec<DisplayMessage> = session
         .messages_for_display()
         .iter()
@@ -382,28 +371,35 @@ pub async fn load_conversation(
     let event_tx = state.event_sender();
     let user_id = state.user_id.lock().await.clone();
     let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
-    state.managers.lock().await.insert(conversation_id, manager);
+    state.managers.lock().await.insert(conversation_id.clone(), manager);
 
     // Enrich with alternates
-    let messages = enrich_with_alternates(messages, stores, &view_id).await;
+    let messages = enrich_with_alternates(messages, stores, &conversation_id).await;
     Ok(messages)
 }
 
 /// Create a new conversation and load its manager
 #[tauri::command]
-pub async fn new_conversation(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+pub async fn new_conversation(
+    state: State<'_, Arc<AppState>>,
+    name: Option<String>,
+) -> Result<String, String> {
     let stores = state.get_stores()?;
     let coordinator = state.get_coordinator()?;
     let user_id = state.user_id.lock().await.clone();
 
+    // Use provided name, or generate a default timestamp-based name
+    let conversation_name = name.unwrap_or_else(|| {
+        let now = chrono::Utc::now();
+        format!("Chat {}", now.format("%b %d, %H:%M"))
+    });
+
     let conv_id = coordinator
-        .create_conversation_with_view(&user_id, None)
+        .create_conversation(&user_id, Some(&conversation_name))
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
-    let session = Session::open(coordinator.clone(), conv_id.clone())
-        .await
-        .map_err(|e| format!("Failed to open new conversation: {}", e))?;
+    let session = Session::new(coordinator.clone(), conv_id.clone());
 
     let model_id_str = state.model_id.lock().await.clone();
     let mcp_registry = state.get_mcp_registry()?;
@@ -524,10 +520,10 @@ pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, Stri
 }
 
 // ============================================================================
-// Turn/Span/View Commands
+// Turn/Span Commands
 // ============================================================================
 
-use crate::types::ThreadInfoResponse;
+use crate::types::ForkInfoResponse;
 
 /// Information about a span (alternate response) for UI display
 #[derive(Debug, Clone, serde::Serialize)]
@@ -601,44 +597,42 @@ pub async fn get_span_messages(
     Ok(result)
 }
 
-/// List all views (branches) for a conversation
+/// List all forks of a conversation
 #[tauri::command]
 pub async fn list_conversation_views(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
-) -> Result<Vec<ThreadInfoResponse>, String> {
+) -> Result<Vec<ForkInfoResponse>, String> {
     let stores = state.get_stores()?;
+    let coordinator = state.get_coordinator()?;
 
-    let entity = stores.entity()
+    // Verify conversation exists
+    let _entity = stores.entity()
         .get_entity(&conversation_id)
         .await
         .map_err(|e| format!("Failed to get conversation: {}", e))?
         .ok_or_else(|| format!("Conversation not found: {}", conversation_id))?;
 
-    let main_view_id = entity.metadata
-        .as_ref()
-        .and_then(|m| m.get("main_view_id"))
-        .and_then(|v| v.as_str())
-        .map(|s| ViewId::from_string(s.to_string()))
-        .ok_or_else(|| "Conversation has no main_view_id".to_string())?;
-
-    let views = stores.turn()
-        .list_related_views(&main_view_id)
+    // Get forks of this conversation
+    let forks = coordinator
+        .get_forked_conversations(&conversation_id)
         .await
-        .map_err(|e| format!("Failed to list views: {}", e))?;
+        .map_err(|e| format!("Failed to list forks: {}", e))?;
 
-    Ok(views.into_iter().map(ThreadInfoResponse::from).collect())
-}
+    let mut result = Vec::with_capacity(forks.len());
+    for (fork_id, at_turn_id) in forks {
+        let turn_count = stores.turn().get_turn_count(&fork_id).await.unwrap_or(0);
+        let fork_entity = stores.entity().get_entity(&fork_id).await.ok().flatten();
+        let created_at = fork_entity.map(|e| e.created_at).unwrap_or(0);
+        result.push(ForkInfoResponse {
+            conversation_id: fork_id,
+            forked_at_turn_id: at_turn_id,
+            turn_count,
+            created_at,
+        });
+    }
 
-/// Get the current view ID for a conversation
-#[tauri::command]
-pub async fn get_current_view_id(
-    state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
-) -> Result<Option<String>, String> {
-    let managers = state.managers.lock().await;
-    let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
-    Ok(Some(manager.view_id().await.to_string()))
+    Ok(result)
 }
 
 /// Regenerate response at a specific turn
@@ -666,60 +660,26 @@ pub async fn regenerate_response(
 }
 
 /// Fork a conversation at a specific turn
+///
+/// Creates a new conversation entity with copied selections and links them
+/// via entity_relations with forked_from relation.
+///
+/// Returns the new conversation ID.
 #[tauri::command]
 pub async fn fork_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
     at_turn_id: TurnId,
-) -> Result<ThreadInfoResponse, String> {
-    let current_view_id = {
-        let managers = state.managers.lock().await;
-        let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
-        manager.view_id().await
-    };
+) -> Result<String, String> {
+    let coordinator = state.get_coordinator()?;
 
-    let stores = state.get_stores()?;
-
-    let new_view = stores.turn()
-        .fork_view(&current_view_id, &at_turn_id)
+    // Fork using coordinator (creates entity + copies selections + relation)
+    let new_conversation_id = coordinator
+        .fork_conversation(&conversation_id, &at_turn_id, None)
         .await
         .map_err(|e| format!("Failed to fork conversation: {}", e))?;
 
-    Ok(ThreadInfoResponse::from(new_view))
-}
-
-/// Switch to a different view in a conversation
-#[tauri::command]
-pub async fn switch_view(
-    state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
-    view_id: ViewId,
-) -> Result<Vec<DisplayMessage>, String> {
-    let stores = state.get_stores()?;
-    let coordinator = state.get_coordinator()?;
-
-    let session = Session::open_view(coordinator.clone(), conversation_id.clone(), view_id)
-        .await
-        .map_err(|e| format!("Failed to open view: {}", e))?;
-
-    let messages: Vec<DisplayMessage> = session
-        .messages_for_display()
-        .iter()
-        .map(DisplayMessage::from)
-        .collect();
-
-    let model_id_str = state.model_id.lock().await.clone();
-    let mcp_registry = state.get_mcp_registry()?;
-    let model = create_model(&model_id_str)
-        .map_err(|e| format!("Failed to create model: {}", e))?;
-
-    let document_resolver: Arc<dyn DocumentResolver> = stores.document();
-    let event_tx = state.event_sender();
-    let user_id = state.user_id.lock().await.clone();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
-    state.managers.lock().await.insert(conversation_id, manager);
-
-    Ok(messages)
+    Ok(new_conversation_id.as_str().to_string())
 }
 
 /// Select a specific span at a turn
@@ -730,20 +690,14 @@ pub async fn select_span(
     turn_id: TurnId,
     span_id: SpanId,
 ) -> Result<(), String> {
-    let current_view_id = {
-        let managers = state.managers.lock().await;
-        let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
-        manager.view_id().await
-    };
-
     let stores = state.get_stores()?;
 
     stores.turn()
-        .select_span(&current_view_id, &turn_id, &span_id)
+        .select_span(&conversation_id, &turn_id, &span_id)
         .await
         .map_err(|e| format!("Failed to select span: {}", e))?;
 
-    // Reload the manager's messages from storage to reflect the new view selection
+    // Reload the manager's messages from storage to reflect the new selection
     let managers = state.managers.lock().await;
     if let Some(manager) = managers.get(&conversation_id) {
         manager.reload().await
@@ -751,14 +705,6 @@ pub async fn select_span(
     }
 
     Ok(())
-}
-
-/// Response from edit_message command
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EditMessageResponse {
-    pub view: ThreadInfoResponse,
-    pub messages: Vec<DisplayMessage>,
 }
 
 /// Spawn a subconversation from a parent conversation.
@@ -911,11 +857,49 @@ pub async fn link_subconversation_result(
     Ok(())
 }
 
-/// Edit a user message, creating a fork with the new content and triggering AI response
+/// List conversations forked from a given conversation.
+#[tauri::command]
+pub async fn list_forked_conversations(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: ConversationId,
+) -> Result<Vec<ForkedConversationInfo>, String> {
+    let coordinator = state.get_coordinator()?;
+
+    let forks = coordinator
+        .get_forked_conversations(&conversation_id)
+        .await
+        .map_err(|e| format!("Failed to list forked conversations: {}", e))?;
+
+    Ok(forks
+        .into_iter()
+        .map(|(fork_id, at_turn_id)| ForkedConversationInfo {
+            conversation_id: fork_id.as_str().to_string(),
+            at_turn_id: at_turn_id.as_str().to_string(),
+        })
+        .collect())
+}
+
+/// Information about a forked conversation
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkedConversationInfo {
+    pub conversation_id: String,
+    pub at_turn_id: String,
+}
+
+/// Response from edit_message command
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditMessageResponse {
+    pub new_conversation_id: String,
+    pub messages: Vec<DisplayMessage>,
+}
+
+/// Edit a user message, creating a forked conversation with the new content and triggering AI response
 ///
-/// This creates a new view forked from the current view at the specified turn,
-/// with a new span containing the edited message content. The manager is
-/// switched to use the new view and the AI is triggered to respond.
+/// This creates a new conversation forked from the current one at the specified turn,
+/// with a new span containing the edited message content. The UI should switch to
+/// the new conversation.
 #[tauri::command]
 pub async fn edit_message(
     state: State<'_, Arc<AppState>>,
@@ -941,40 +925,45 @@ pub async fn edit_message(
         return Err("Message must have text, documents, or attachments".to_string());
     }
 
-    let current_view_id = {
-        let managers = state.managers.lock().await;
-        let manager = managers.get(&conversation_id).ok_or("Conversation not loaded")?;
-        manager.view_id().await
-    };
-
     let stores = state.get_stores()?;
     let coordinator = state.get_coordinator()?;
 
-    // Store input content as StoredContent refs
+    // Fork the conversation at the turn
+    let new_conversation_id = coordinator
+        .fork_conversation(&conversation_id, &turn_id, None)
+        .await
+        .map_err(|e| format!("Failed to fork conversation: {}", e))?;
+
+    // Store the new content and create a new span at the turn
     let stored_content = coordinator
         .store_input_content(input_content, OriginKind::User)
         .await
         .map_err(|e| format!("Failed to store content: {}", e))?;
 
-    // Edit turn: creates new span with content and forks the view
-    let (_span, new_view) = stores.turn()
-        .edit_turn(
-            &current_view_id,
-            &turn_id,
-            vec![(Role::User, stored_content)],
-            None, // No model_id for user messages
-            true, // Create fork
-        )
+    // Create a new span with the edited content
+    let span_id = coordinator
+        .create_and_select_span(&new_conversation_id, &turn_id, None)
         .await
-        .map_err(|e| format!("Failed to edit message: {}", e))?;
+        .map_err(|e| format!("Failed to create span: {}", e))?;
 
-    let new_view = new_view.ok_or("Expected new view from edit_turn with create_fork=true")?;
-    let new_view_id = new_view.id.clone();
+    // Resolve content blocks for the message
+    let mut blocks = Vec::with_capacity(stored_content.len());
+    for item in &stored_content {
+        let block = item.resolve(coordinator.as_ref()).await
+            .map_err(|e| format!("Failed to resolve content: {}", e))?;
+        blocks.push(block);
+    }
 
-    // Switch to the new view (creates new session and manager)
-    let session = Session::open_view(coordinator.clone(), conversation_id.clone(), new_view_id.clone())
+    // Add the message to the span
+    coordinator
+        .add_message(&span_id, &turn_id, Role::User, blocks, OriginKind::User)
         .await
-        .map_err(|e| format!("Failed to open new view: {}", e))?;
+        .map_err(|e| format!("Failed to add message: {}", e))?;
+
+    // Re-open session to get the updated messages
+    let session = Session::open(coordinator.clone(), new_conversation_id.clone())
+        .await
+        .map_err(|e| format!("Failed to reload conversation: {}", e))?;
 
     let messages: Vec<DisplayMessage> = session
         .messages_for_display()
@@ -1005,13 +994,138 @@ pub async fn edit_message(
     // Trigger agent before inserting (background task will start processing)
     manager.run_agent(core_tool_config);
 
-    state.managers.lock().await.insert(conversation_id, manager);
+    state.managers.lock().await.insert(new_conversation_id.clone(), manager);
 
     // Enrich with alternates
-    let messages = enrich_with_alternates(messages, stores, &new_view_id).await;
+    let messages = enrich_with_alternates(messages, stores, &new_conversation_id).await;
 
     Ok(EditMessageResponse {
-        view: ThreadInfoResponse::from(new_view),
+        new_conversation_id: new_conversation_id.as_str().to_string(),
         messages,
     })
+}
+
+// ============================================================================
+// Cross-Reference Commands
+// ============================================================================
+
+/// Information about a cross-reference
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceInfo {
+    pub id: String,
+    pub from_entity_id: String,
+    pub to_entity_id: String,
+    pub relation_type: Option<String>,
+    pub context: Option<String>,
+    pub created_at: i64,
+}
+
+/// Create a cross-reference from one entity to another
+#[tauri::command]
+pub async fn create_reference(
+    state: State<'_, Arc<AppState>>,
+    from_entity_id: String,
+    to_entity_id: String,
+    relation_type: Option<String>,
+    context: Option<String>,
+) -> Result<String, String> {
+    use noema_core::storage::{ids::EntityId, types::RelationType};
+
+    let stores = state.get_stores()?;
+
+    let from_id = EntityId::from_string(from_entity_id);
+    let to_id = EntityId::from_string(to_entity_id);
+    let rel_type = relation_type.map(RelationType::new);
+
+    let ref_id = stores
+        .reference()
+        .create_reference(
+            &from_id,
+            &to_id,
+            rel_type.as_ref(),
+            context.as_deref(),
+        )
+        .await
+        .map_err(|e| format!("Failed to create reference: {}", e))?;
+
+    Ok(ref_id.as_str().to_string())
+}
+
+/// Delete a cross-reference
+#[tauri::command]
+pub async fn delete_reference(
+    state: State<'_, Arc<AppState>>,
+    reference_id: String,
+) -> Result<bool, String> {
+    use noema_core::storage::ids::ReferenceId;
+
+    let stores = state.get_stores()?;
+    let ref_id = ReferenceId::from_string(reference_id);
+
+    stores
+        .reference()
+        .delete_reference(&ref_id)
+        .await
+        .map_err(|e| format!("Failed to delete reference: {}", e))
+}
+
+/// Get all references from an entity (outgoing links)
+#[tauri::command]
+pub async fn get_entity_references(
+    state: State<'_, Arc<AppState>>,
+    entity_id: String,
+) -> Result<Vec<ReferenceInfo>, String> {
+    use noema_core::storage::ids::EntityId;
+
+    let stores = state.get_stores()?;
+    let id = EntityId::from_string(entity_id);
+
+    let refs = stores
+        .reference()
+        .get_outgoing(&id)
+        .await
+        .map_err(|e| format!("Failed to get references: {}", e))?;
+
+    Ok(refs
+        .into_iter()
+        .map(|r| ReferenceInfo {
+            id: r.id.as_str().to_string(),
+            from_entity_id: r.from_entity_id.as_str().to_string(),
+            to_entity_id: r.to_entity_id.as_str().to_string(),
+            relation_type: r.relation_type.clone().map(|t| t.as_str().to_string()),
+            context: r.context.clone(),
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
+/// Get all backlinks to an entity (incoming references)
+#[tauri::command]
+pub async fn get_entity_backlinks(
+    state: State<'_, Arc<AppState>>,
+    entity_id: String,
+) -> Result<Vec<ReferenceInfo>, String> {
+    use noema_core::storage::ids::EntityId;
+
+    let stores = state.get_stores()?;
+    let id = EntityId::from_string(entity_id);
+
+    let refs = stores
+        .reference()
+        .get_backlinks(&id)
+        .await
+        .map_err(|e| format!("Failed to get backlinks: {}", e))?;
+
+    Ok(refs
+        .into_iter()
+        .map(|r| ReferenceInfo {
+            id: r.id.as_str().to_string(),
+            from_entity_id: r.from_entity_id.as_str().to_string(),
+            to_entity_id: r.to_entity_id.as_str().to_string(),
+            relation_type: r.relation_type.clone().map(|t| t.as_str().to_string()),
+            context: r.context.clone(),
+            created_at: r.created_at,
+        })
+        .collect())
 }

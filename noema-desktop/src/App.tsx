@@ -44,9 +44,8 @@ function App() {
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   // Document selected in the documents activity (shown in main panel)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  // View management for conversation forks
-  const [views, setViews] = useState<tauri.ViewInfo[]>([]);
-  const [currentViewId, setCurrentViewId] = useState<string | null>(null);
+  // Fork management - lists conversations forked from current one
+  const [forks, setForks] = useState<tauri.ForkInfo[]>([]);
   // Prefilled input text (used when forking from a user message to let them edit and resend)
   const [prefilledInput, setPrefilledInput] = useState<string>("");
   // Tools enabled state - controls whether MCP tools are sent to the model
@@ -168,10 +167,8 @@ function App() {
             setIsConversationPrivate(isPrivate);
             const msgs = await tauri.loadConversation(convId);
             setMessages(Array.isArray(msgs) ? msgs : []);
-            const convViews = await tauri.listConversationViews(convId);
-            setViews(convViews);
-            const viewId = await tauri.getCurrentViewId(convId);
-            setCurrentViewId(viewId);
+            const convForks = await tauri.listConversationForks(convId);
+            setForks(convForks);
             setCurrentConversationId(convId);
             conversationLoaded = true;
           } catch (err) {
@@ -186,10 +183,7 @@ function App() {
           setCurrentConversationId(convId);
           setMessages([]);
           setIsConversationPrivate(false);
-          const convViews = await tauri.listConversationViews(convId);
-          setViews(convViews);
-          const viewId = await tauri.getCurrentViewId(convId);
-          setCurrentViewId(viewId);
+          setForks([]);
         }
 
         // Load models in background
@@ -442,11 +436,9 @@ function App() {
       // Load privacy status for this conversation
       const isPrivate = await tauri.getConversationPrivate(id);
       setIsConversationPrivate(isPrivate);
-      // Load views for this conversation
-      const convViews = await tauri.listConversationViews(id);
-      setViews(convViews);
-      const viewId = await tauri.getCurrentViewId(id);
-      setCurrentViewId(viewId);
+      // Load forks for this conversation
+      const convForks = await tauri.listConversationForks(id);
+      setForks(convForks);
     } catch (err) {
       appLog.error("Select conversation error", String(err));
       setError(String(err));
@@ -541,20 +533,23 @@ function App() {
     }
   };
 
-  // Fork handler - creates a new view forked at the given turn
+  // Fork handler - creates a new conversation forked at the given turn
   const handleFork = async (turnId: string, role: "user" | "assistant", userText?: string) => {
     appLog.info(`Forking at turn: turnId=${turnId}, role=${role}`);
     try {
       setError(null);
-      const newView = await tauri.forkConversation(currentConversationId, turnId);
-      appLog.info(`Created fork: viewId=${newView.id}`);
-      // Switch to the new forked view
-      const msgs = await tauri.switchView(currentConversationId, newView.id);
-      setMessages(msgs);
-      setCurrentViewId(newView.id);
-      // Refresh views list
-      const convViews = await tauri.listConversationViews(currentConversationId);
-      setViews(convViews);
+      const newConversationId = await tauri.forkConversation(currentConversationId, turnId);
+      appLog.info(`Created fork: conversationId=${newConversationId}`);
+      // Load the forked conversation
+      const msgs = await tauri.loadConversation(newConversationId);
+      setCurrentConversationId(newConversationId);
+      setMessages(Array.isArray(msgs) ? msgs : []);
+      // Load forks for the new conversation
+      const convForks = await tauri.listConversationForks(newConversationId);
+      setForks(convForks);
+      // Refresh conversation list to include the fork
+      const convos = await tauri.listConversations();
+      setConversations(convos);
       // For user messages, prefill the input with their original text so they can edit and resend
       if (role === "user" && userText) {
         setPrefilledInput(userText);
@@ -565,18 +560,10 @@ function App() {
     }
   };
 
-  // Switch to a different view in the current conversation
-  const handleSwitchView = async (viewId: string) => {
-    appLog.info(`Switching to view: ${viewId}`);
-    try {
-      setError(null);
-      const msgs = await tauri.switchView(currentConversationId, viewId);
-      setMessages(msgs);
-      setCurrentViewId(viewId);
-    } catch (err) {
-      appLog.error("Switch view error", String(err));
-      setError(String(err));
-    }
+  // Switch to a forked conversation
+  const handleSwitchToFork = async (forkConversationId: string) => {
+    appLog.info(`Switching to fork: ${forkConversationId}`);
+    await handleSelectConversation(forkConversationId);
   };
 
   // Clear prefilled input (used after forking when user wants to cancel the edit)
@@ -614,13 +601,17 @@ function App() {
       const toolConfig: ToolConfig = { enabled: toolsEnabled, serverIds: null, toolNames: null };
       const result = await tauri.editMessage(currentConversationId, editingMessage.turnId, content, toolConfig);
 
-      // Update state with the new view and messages
+      // Switch to the new forked conversation
+      setCurrentConversationId(result.newConversationId);
       setMessages(result.messages);
-      setCurrentViewId(result.view.id);
 
-      // Refresh views list to include the new fork
-      const convViews = await tauri.listConversationViews(currentConversationId);
-      setViews(convViews);
+      // Refresh forks list for the new conversation
+      const convForks = await tauri.listConversationForks(result.newConversationId);
+      setForks(convForks);
+
+      // Refresh conversation list to include the fork
+      const convos = await tauri.listConversations();
+      setConversations(convos);
 
       // Close the modal (AI response will stream in via events)
       setEditingMessage(null);
@@ -838,12 +829,11 @@ function App() {
                 <span>{isConversationPrivate ? "Private" : "Not Private"}</span>
               </button>
             )}
-            {/* View selector - shown when conversation has multiple views (forks) */}
-            {activeActivity === "conversations" && views.length > 1 && (
+            {/* Fork selector - shown when conversation has forks */}
+            {activeActivity === "conversations" && forks.length > 0 && (
               <ViewSelector
-                views={views}
-                currentViewId={currentViewId}
-                onSwitchView={handleSwitchView}
+                forks={forks}
+                onSwitchToFork={handleSwitchToFork}
               />
             )}
           </div>

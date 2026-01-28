@@ -199,6 +199,99 @@ pub async fn delete_document(state: State<'_, Arc<AppState>>, doc_id: DocumentId
     stores.document().delete_document(&doc_id).await.map_err(|e| e.to_string())
 }
 
+/// Create a new user document
+#[tauri::command]
+pub async fn create_document(
+    state: State<'_, Arc<AppState>>,
+    title: String,
+) -> Result<DocumentInfoResponse, String> {
+    let stores = state.get_stores()?;
+    let user_id = state.user_id.lock().await.clone();
+
+    let doc_id = stores
+        .document()
+        .create_document(&user_id, &title, DocumentSource::UserCreated, None)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let doc = stores
+        .document()
+        .get_document(&doc_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Document not found after creation")?;
+
+    Ok(DocumentInfoResponse::from(doc))
+}
+
+/// Update a document's title
+#[tauri::command]
+pub async fn update_document_title(
+    state: State<'_, Arc<AppState>>,
+    doc_id: DocumentId,
+    title: String,
+) -> Result<(), String> {
+    let stores = state.get_stores()?;
+
+    stores
+        .document()
+        .update_document_title(&doc_id, &title)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Create a new tab in a document
+#[tauri::command]
+pub async fn create_document_tab(
+    state: State<'_, Arc<AppState>>,
+    doc_id: DocumentId,
+    title: String,
+    parent_tab_id: Option<TabId>,
+    content: Option<String>,
+) -> Result<DocumentTabResponse, String> {
+    let stores = state.get_stores()?;
+
+    let tab_id = stores
+        .document()
+        .create_document_tab(
+            &doc_id,
+            parent_tab_id.as_ref(),
+            0, // tab_index - will be ordered by creation time
+            &title,
+            None, // icon
+            content.as_deref(),
+            &[], // referenced_assets
+            None, // source_tab_id
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let tab = stores
+        .document()
+        .get_document_tab(&tab_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Tab not found after creation")?;
+
+    Ok(DocumentTabResponse::from(tab))
+}
+
+/// Update a document tab's content
+#[tauri::command]
+pub async fn update_document_tab_content(
+    state: State<'_, Arc<AppState>>,
+    tab_id: TabId,
+    content: String,
+) -> Result<(), String> {
+    let stores = state.get_stores()?;
+
+    stores
+        .document()
+        .update_document_tab_content(&tab_id, &content, &[])
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Sync a Google Doc (trigger refresh from MCP server)
 /// This will call the MCP server to refresh the document
 #[tauri::command]

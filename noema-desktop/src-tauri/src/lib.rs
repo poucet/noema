@@ -186,14 +186,12 @@ pub fn run() {
             commands::chat::get_model_name,
             commands::chat::get_favorite_models,
             commands::chat::toggle_favorite_model,
-            // Turn/Span/View commands (Phase 3 UCM)
+            // Turn/Span commands (Phase 3 UCM)
             commands::chat::get_turn_alternates,
             commands::chat::get_span_messages,
-            commands::chat::list_conversation_views,
-            commands::chat::get_current_view_id,
+            commands::chat::list_conversation_views, // Returns forks of this conversation
             commands::chat::regenerate_response,
             commands::chat::fork_conversation,
-            commands::chat::switch_view,
             commands::chat::select_span,
             commands::chat::edit_message,
             // Subconversation commands
@@ -202,6 +200,13 @@ pub fn run() {
             commands::chat::list_subconversations,
             commands::chat::get_subconversation_result,
             commands::chat::link_subconversation_result,
+            // Fork commands
+            commands::chat::list_forked_conversations,
+            // Cross-reference commands
+            commands::chat::create_reference,
+            commands::chat::delete_reference,
+            commands::chat::get_entity_references,
+            commands::chat::get_entity_backlinks,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,
@@ -241,6 +246,10 @@ pub fn run() {
             commands::gdocs::get_document_content,
             commands::gdocs::get_document_tab,
             commands::gdocs::delete_document,
+            commands::gdocs::create_document,
+            commands::gdocs::update_document_title,
+            commands::gdocs::create_document_tab,
+            commands::gdocs::update_document_tab_content,
             commands::gdocs::sync_google_doc,
             // Google Docs OAuth commands
             commands::gdocs::get_gdocs_oauth_status,

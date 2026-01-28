@@ -1,7 +1,7 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
-use noema_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId, ViewId};
+use noema_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -30,15 +30,15 @@ pub struct ConversationInfo {
 }
 
 impl ConversationInfo {
-    /// Create from StoredEntity and View
+    /// Create from StoredEntity with turn count
     pub fn from_entity(
         entity: &noema_core::storage::StoredEntity,
-        view: &noema_core::storage::Stored<ViewId, noema_core::storage::View>,
+        turn_count: usize,
     ) -> Self {
         Self {
             id: entity.id.clone(),
             name: entity.name.clone(),
-            message_count: view.turn_count,
+            message_count: turn_count,
             is_private: entity.is_private,
             created_at: entity.created_at,
         }
@@ -408,42 +408,19 @@ impl From<DisplayInputContent> for noema_core::storage::InputContent {
     }
 }
 
-/// Information about a view/branch in a conversation (replaces legacy Thread concept)
+/// Information about a forked conversation
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
-pub struct ThreadInfoResponse {
+pub struct ForkInfoResponse {
     #[ts(type = "string")]
-    pub id: ViewId,
-    /// The view this was forked from (None for main views)
-    #[ts(type = "string | null")]
-    pub forked_from_view_id: Option<ViewId>,
-    /// The turn at which this view forked (None for main views)
-    #[ts(type = "string | null")]
-    pub forked_at_turn_id: Option<TurnId>,
-    /// Number of turns in this view
+    pub conversation_id: ConversationId,
+    /// The turn at which this conversation forked
+    #[ts(type = "string")]
+    pub forked_at_turn_id: TurnId,
+    /// Number of turns in this conversation
     pub turn_count: usize,
     pub created_at: i64,
-    /// Whether this is the main view (derived from fork being None)
-    pub is_main: bool,
-}
-
-impl From<noema_core::storage::Stored<ViewId, noema_core::storage::View>> for ThreadInfoResponse {
-    fn from(stored: noema_core::storage::Stored<ViewId, noema_core::storage::View>) -> Self {
-        let is_main = stored.fork.is_none();
-        let (forked_from_view_id, forked_at_turn_id) = match &stored.fork {
-            Some(fork) => (Some(fork.from_view_id.clone()), Some(fork.at_turn_id.clone())),
-            None => (None, None),
-        };
-        Self {
-            id: stored.id.clone(),
-            forked_from_view_id,
-            forked_at_turn_id,
-            turn_count: stored.turn_count,
-            created_at: stored.created_at,
-            is_main,
-        }
-    }
 }
 
 // =============================================================================
@@ -563,7 +540,7 @@ mod ts_export {
         TruncatedEvent::export_all().expect("Failed to export TruncatedEvent");
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
         DisplayInputContent::export_all().expect("Failed to export DisplayInputContent");
-        ThreadInfoResponse::export_all().expect("Failed to export ThreadInfoResponse");
+        ForkInfoResponse::export_all().expect("Failed to export ForkInfoResponse");
         ToolConfig::export_all().expect("Failed to export ToolConfig");
     }
 }

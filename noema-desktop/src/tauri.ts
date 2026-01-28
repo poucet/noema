@@ -67,8 +67,8 @@ export async function loadConversation(
   return invoke<DisplayMessage[]>("load_conversation", { conversationId });
 }
 
-export async function newConversation(): Promise<string> {
-  return invoke<string>("new_conversation");
+export async function newConversation(name?: string): Promise<string> {
+  return invoke<string>("new_conversation", { name });
 }
 
 export async function deleteConversation(
@@ -386,6 +386,50 @@ export async function deleteDocument(docId: string): Promise<boolean> {
   return invoke<boolean>("delete_document", { docId });
 }
 
+/**
+ * Create a new user document
+ */
+export async function createDocument(title: string): Promise<DocumentInfoResponse> {
+  return invoke<DocumentInfoResponse>("create_document", { title });
+}
+
+/**
+ * Update a document's title
+ */
+export async function updateDocumentTitle(
+  docId: string,
+  title: string
+): Promise<void> {
+  return invoke<void>("update_document_title", { docId, title });
+}
+
+/**
+ * Create a new tab in a document
+ */
+export async function createDocumentTab(
+  docId: string,
+  title: string,
+  parentTabId?: string,
+  content?: string
+): Promise<DocumentTabResponse> {
+  return invoke<DocumentTabResponse>("create_document_tab", {
+    docId,
+    title,
+    parentTabId,
+    content,
+  });
+}
+
+/**
+ * Update a document tab's content
+ */
+export async function updateDocumentTabContent(
+  tabId: string,
+  content: string
+): Promise<void> {
+  return invoke<void>("update_document_tab_content", { tabId, content });
+}
+
 export async function syncGoogleDoc(docId: string): Promise<void> {
   return invoke<void>("sync_google_doc", { docId });
 }
@@ -419,7 +463,7 @@ export async function searchDocuments(
   return invoke<DocumentInfoResponse[]>("search_documents", { query, limit });
 }
 
-// Turn/Span/View management (Phase 3 UCM model)
+// Turn/Span management (Phase 3 UCM model)
 export interface SpanInfo {
   id: string;
   modelId: string | null;
@@ -440,28 +484,19 @@ export async function getSpanMessages(
   return invoke<DisplayMessage[]>("get_span_messages", { spanId });
 }
 
-// View management (replaces Thread/Fork management)
-// Matches the backend ThreadInfoResponse type
-export interface ViewInfo {
-  id: string;
-  forkedFromViewId: string | null;
-  forkedAtTurnId: string | null;
+// Fork management
+// Matches the backend ForkInfoResponse type
+export interface ForkInfo {
+  conversationId: string;
+  forkedAtTurnId: string;
   turnCount: number;
   createdAt: number;
-  isMain: boolean;
-  name?: string | null; // Optional for display purposes
 }
 
-export async function listConversationViews(
+export async function listConversationForks(
   conversationId: string
-): Promise<ViewInfo[]> {
-  return invoke<ViewInfo[]>("list_conversation_views", { conversationId });
-}
-
-export async function getCurrentViewId(
-  conversationId: string
-): Promise<string | null> {
-  return invoke<string | null>("get_current_view_id", { conversationId });
+): Promise<ForkInfo[]> {
+  return invoke<ForkInfo[]>("list_conversation_views", { conversationId });
 }
 
 /**
@@ -478,30 +513,20 @@ export async function regenerateResponse(
 
 /**
  * Fork a conversation at a specific turn
- * Creates a new view (branch) that shares history up to but not including the specified turn.
+ * Creates a new conversation that shares history up to but not including the specified turn.
+ * Returns the new conversation's ID.
  */
 export async function forkConversation(
   conversationId: string,
   atTurnId: string,
   name?: string
-): Promise<ViewInfo> {
-  return invoke<ViewInfo>("fork_conversation", { conversationId, atTurnId, name });
-}
-
-/**
- * Switch to a different view in a conversation
- * Creates a new session for the specified view and updates the loaded engine.
- */
-export async function switchView(
-  conversationId: string,
-  viewId: string
-): Promise<DisplayMessage[]> {
-  return invoke<DisplayMessage[]>("switch_view", { conversationId, viewId });
+): Promise<string> {
+  return invoke<string>("fork_conversation", { conversationId, atTurnId, name });
 }
 
 /**
  * Select a specific span at a turn
- * Updates the view selection to use the specified span at the given turn.
+ * Updates the conversation selection to use the specified span at the given turn.
  */
 export async function selectSpan(
   conversationId: string,
@@ -515,13 +540,13 @@ export async function selectSpan(
  * Response from editing a message
  */
 export interface EditMessageResponse {
-  view: ViewInfo;
+  newConversationId: string;
   messages: DisplayMessage[];
 }
 
 /**
  * Edit a user message, creating a fork with the new content
- * Creates a new view forked at the specified turn with the edited content,
+ * Creates a new conversation forked at the specified turn with the edited content,
  * then triggers the AI to respond to the edited message.
  */
 export async function editMessage(
@@ -531,4 +556,161 @@ export async function editMessage(
   toolConfig?: ToolConfig
 ): Promise<EditMessageResponse> {
   return invoke<EditMessageResponse>("edit_message", { conversationId, turnId, content, toolConfig });
+}
+
+// Subconversation types
+export interface ParentConversationInfo {
+  parentConversationId: string;
+  atTurnId: string;
+  atSpanId: string | null;
+}
+
+export interface SubconversationInfo {
+  conversationId: string;
+  atTurnId: string;
+  atSpanId: string | null;
+}
+
+/**
+ * Spawn a subconversation from a parent conversation.
+ * Creates a new conversation linked to the parent via spawned_from relation.
+ */
+export async function spawnSubconversation(
+  parentConversationId: string,
+  atTurnId: string,
+  atSpanId?: string,
+  name?: string
+): Promise<string> {
+  return invoke<string>("spawn_subconversation", {
+    parentConversationId,
+    atTurnId,
+    atSpanId,
+    name,
+  });
+}
+
+/**
+ * Get the parent conversation for a subconversation.
+ * Returns null if the conversation has no parent.
+ */
+export async function getParentConversation(
+  conversationId: string
+): Promise<ParentConversationInfo | null> {
+  return invoke<ParentConversationInfo | null>("get_parent_conversation", {
+    conversationId,
+  });
+}
+
+/**
+ * List all subconversations spawned from a parent conversation.
+ */
+export async function listSubconversations(
+  parentConversationId: string
+): Promise<SubconversationInfo[]> {
+  return invoke<SubconversationInfo[]>("list_subconversations", {
+    parentConversationId,
+  });
+}
+
+/**
+ * Get the final result from a subconversation.
+ * Returns the text content of the last assistant message.
+ */
+export async function getSubconversationResult(
+  subconversationId: string
+): Promise<string | null> {
+  return invoke<string | null>("get_subconversation_result", {
+    subconversationId,
+  });
+}
+
+/**
+ * Link a subconversation's result back to the parent conversation.
+ * Creates a ToolResult message in the parent span.
+ */
+export async function linkSubconversationResult(
+  subconversationId: string,
+  parentConversationId: string,
+  parentSpanId: string,
+  parentTurnId: string,
+  toolCallId: string,
+  toolName: string
+): Promise<void> {
+  return invoke<void>("link_subconversation_result", {
+    subconversationId,
+    parentConversationId,
+    parentSpanId,
+    parentTurnId,
+    toolCallId,
+    toolName,
+  });
+}
+
+// Forked conversation types
+export interface ForkedConversationInfo {
+  conversationId: string;
+  atTurnId: string;
+}
+
+/**
+ * List all conversations forked from a given conversation.
+ */
+export async function listForkedConversations(
+  conversationId: string
+): Promise<ForkedConversationInfo[]> {
+  return invoke<ForkedConversationInfo[]>("list_forked_conversations", {
+    conversationId,
+  });
+}
+
+// Cross-reference types
+export interface ReferenceInfo {
+  id: string;
+  fromEntityId: string;
+  toEntityId: string;
+  relationType: string | null;
+  context: string | null;
+  createdAt: number;
+}
+
+/**
+ * Create a cross-reference from one entity to another.
+ */
+export async function createReference(
+  fromEntityId: string,
+  toEntityId: string,
+  relationType?: string,
+  context?: string
+): Promise<string> {
+  return invoke<string>("create_reference", {
+    fromEntityId,
+    toEntityId,
+    relationType,
+    context,
+  });
+}
+
+/**
+ * Delete a cross-reference.
+ */
+export async function deleteReference(referenceId: string): Promise<boolean> {
+  return invoke<boolean>("delete_reference", { referenceId });
+}
+
+/**
+ * Get all references from an entity (outgoing links).
+ */
+export async function getEntityReferences(
+  entityId: string
+): Promise<ReferenceInfo[]> {
+  return invoke<ReferenceInfo[]>("get_entity_references", { entityId });
+}
+
+/**
+ * Get all backlinks to an entity (incoming references).
+ */
+export async function getEntityBacklinks(
+  entityId: string
+): Promise<ReferenceInfo[]> {
+  return invoke<ReferenceInfo[]>("get_entity_backlinks", { entityId });
 }
