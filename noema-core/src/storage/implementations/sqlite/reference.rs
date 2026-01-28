@@ -210,3 +210,208 @@ impl ReferenceStore for SqliteStore {
         Ok(exists)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::traits::EntityStore;
+    use crate::storage::types::EntityType;
+
+    async fn setup_store_with_entities() -> (SqliteStore, EntityId, EntityId, EntityId) {
+        let store = SqliteStore::in_memory().unwrap();
+
+        // Create test entities
+        let entity_a = store
+            .create_entity(EntityType::conversation(), None)
+            .await
+            .unwrap();
+        let entity_b = store
+            .create_entity(EntityType::document(), None)
+            .await
+            .unwrap();
+        let entity_c = store
+            .create_entity(EntityType::asset(), None)
+            .await
+            .unwrap();
+
+        (store, entity_a, entity_b, entity_c)
+    }
+
+    #[tokio::test]
+    async fn test_create_reference() {
+        let (store, entity_a, entity_b, _) = setup_store_with_entities().await;
+
+        let ref_id = store
+            .create_reference(
+                &entity_a,
+                &entity_b,
+                Some(&RelationType::new("cites")),
+                Some("See document for details"),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.reference_exists(&entity_a, &entity_b, Some(&RelationType::new("cites"))).await.unwrap());
+        assert!(!ref_id.as_str().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_reference_without_type() {
+        let (store, entity_a, entity_b, _) = setup_store_with_entities().await;
+
+        store
+            .create_reference(&entity_a, &entity_b, None, None)
+            .await
+            .unwrap();
+
+        assert!(store.reference_exists(&entity_a, &entity_b, None).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_delete_reference() {
+        let (store, entity_a, entity_b, _) = setup_store_with_entities().await;
+
+        let ref_id = store
+            .create_reference(&entity_a, &entity_b, None, None)
+            .await
+            .unwrap();
+
+        assert!(store.delete_reference(&ref_id).await.unwrap());
+        assert!(!store.reference_exists(&entity_a, &entity_b, None).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_delete_references_between() {
+        let (store, entity_a, entity_b, _) = setup_store_with_entities().await;
+
+        // Create multiple references between same entities
+        store
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .await
+            .unwrap();
+        store
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("mentions")), None)
+            .await
+            .unwrap();
+
+        let deleted = store.delete_references_between(&entity_a, &entity_b).await.unwrap();
+        assert_eq!(deleted, 2);
+
+        assert!(!store.reference_exists(&entity_a, &entity_b, Some(&RelationType::new("cites"))).await.unwrap());
+        assert!(!store.reference_exists(&entity_a, &entity_b, Some(&RelationType::new("mentions"))).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_get_outgoing() {
+        let (store, entity_a, entity_b, entity_c) = setup_store_with_entities().await;
+
+        // A references B and C
+        store
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .await
+            .unwrap();
+        store
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("mentions")), None)
+            .await
+            .unwrap();
+
+        let outgoing = store.get_outgoing(&entity_a).await.unwrap();
+        assert_eq!(outgoing.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_outgoing_by_type() {
+        let (store, entity_a, entity_b, entity_c) = setup_store_with_entities().await;
+
+        store
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .await
+            .unwrap();
+        store
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("mentions")), None)
+            .await
+            .unwrap();
+
+        let cites_only = store
+            .get_outgoing_by_type(&entity_a, &RelationType::new("cites"))
+            .await
+            .unwrap();
+        assert_eq!(cites_only.len(), 1);
+        assert_eq!(cites_only[0].to_entity_id, entity_b);
+    }
+
+    #[tokio::test]
+    async fn test_get_backlinks() {
+        let (store, entity_a, entity_b, entity_c) = setup_store_with_entities().await;
+
+        // A and B both reference C
+        store
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("cites")), None)
+            .await
+            .unwrap();
+        store
+            .create_reference(&entity_b, &entity_c, Some(&RelationType::new("mentions")), None)
+            .await
+            .unwrap();
+
+        let backlinks = store.get_backlinks(&entity_c).await.unwrap();
+        assert_eq!(backlinks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_backlinks_by_type() {
+        let (store, entity_a, entity_b, entity_c) = setup_store_with_entities().await;
+
+        store
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("cites")), None)
+            .await
+            .unwrap();
+        store
+            .create_reference(&entity_b, &entity_c, Some(&RelationType::new("mentions")), None)
+            .await
+            .unwrap();
+
+        let cites_only = store
+            .get_backlinks_by_type(&entity_c, &RelationType::new("cites"))
+            .await
+            .unwrap();
+        assert_eq!(cites_only.len(), 1);
+        assert_eq!(cites_only[0].from_entity_id, entity_a);
+    }
+
+    #[tokio::test]
+    async fn test_reference_with_context() {
+        let (store, entity_a, entity_b, _) = setup_store_with_entities().await;
+
+        store
+            .create_reference(
+                &entity_a,
+                &entity_b,
+                Some(&RelationType::new("mentions")),
+                Some("@api-design"),
+            )
+            .await
+            .unwrap();
+
+        let outgoing = store.get_outgoing(&entity_a).await.unwrap();
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].context.as_deref(), Some("@api-design"));
+    }
+
+    #[tokio::test]
+    async fn test_unique_constraint() {
+        let (store, entity_a, entity_b, _) = setup_store_with_entities().await;
+
+        // First reference succeeds
+        store
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .await
+            .unwrap();
+
+        // Duplicate reference should fail
+        let result = store
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .await;
+        assert!(result.is_err());
+    }
+}
