@@ -105,6 +105,8 @@ pub struct McpRegistry {
     retry_tokens: HashMap<String, CancellationToken>,
     /// Current status of each server
     server_status: HashMap<String, ServerStatus>,
+    /// Ephemeral servers (not persisted to config)
+    ephemeral_servers: HashMap<String, ServerConfig>,
 }
 
 impl McpRegistry {
@@ -115,6 +117,7 @@ impl McpRegistry {
             connections: HashMap::new(),
             retry_tokens: HashMap::new(),
             server_status: HashMap::new(),
+            ephemeral_servers: HashMap::new(),
         }
     }
 
@@ -134,13 +137,22 @@ impl McpRegistry {
         &mut self.config
     }
 
-    /// List all configured servers
+    /// List all configured servers (includes ephemeral servers)
     pub fn list_servers(&self) -> Vec<(&str, &ServerConfig)> {
-        self.config
+        let mut servers: Vec<_> = self.config
             .servers
             .iter()
             .map(|(id, cfg)| (id.as_str(), cfg))
-            .collect()
+            .collect();
+
+        // Add ephemeral servers
+        servers.extend(
+            self.ephemeral_servers
+                .iter()
+                .map(|(id, cfg)| (id.as_str(), cfg))
+        );
+
+        servers
     }
 
     /// Check if a server is connected
@@ -153,15 +165,17 @@ impl McpRegistry {
         self.connections.get(id)
     }
 
-    /// Connect to a configured server
+    /// Connect to a configured server (checks both persistent and ephemeral)
     pub async fn connect(&mut self, id: &str) -> Result<&ConnectedServer> {
         if self.connections.contains_key(id) {
             return Ok(self.connections.get(id).unwrap());
         }
 
+        // Check persistent config first, then ephemeral
         let server_config = self
             .config
             .get_server(id)
+            .or_else(|| self.ephemeral_servers.get(id))
             .ok_or_else(|| anyhow::anyhow!("Server '{}' not found in configuration", id))?
             .clone();
 
@@ -215,6 +229,32 @@ impl McpRegistry {
     /// Add a new server to the configuration
     pub fn add_server(&mut self, id: String, config: ServerConfig) {
         self.config.add_server(id, config);
+    }
+
+    /// Register an ephemeral server (not persisted to config).
+    /// These are typically in-process servers started per-conversation.
+    pub fn register_ephemeral(&mut self, id: String, url: String) {
+        let config = ServerConfig {
+            name: id.clone(),
+            url,
+            auth: crate::mcp::AuthMethod::None,
+            auth_token: None,
+            auto_connect: true,
+            auto_retry: false,
+            use_well_known: false,
+        };
+        self.ephemeral_servers.insert(id, config);
+    }
+
+    /// Unregister an ephemeral server and disconnect if connected
+    pub async fn unregister_ephemeral(&mut self, id: &str) {
+        self.ephemeral_servers.remove(id);
+        self.disconnect(id).await.ok();
+    }
+
+    /// Get an ephemeral server config
+    pub fn get_ephemeral(&self, id: &str) -> Option<&ServerConfig> {
+        self.ephemeral_servers.get(id)
     }
 
     /// Remove a server from the configuration (disconnects if connected)
@@ -288,14 +328,24 @@ impl McpRegistry {
         self.retry_tokens.remove(id);
     }
 
-    /// Get servers that should auto-connect
+    /// Get servers that should auto-connect (includes ephemeral servers)
     pub fn auto_connect_servers(&self) -> Vec<(String, ServerConfig)> {
-        self.config
+        let mut servers: Vec<_> = self.config
             .servers
             .iter()
             .filter(|(_, cfg)| cfg.auto_connect)
             .map(|(id, cfg)| (id.clone(), cfg.clone()))
-            .collect()
+            .collect();
+
+        // Add ephemeral servers with auto_connect
+        servers.extend(
+            self.ephemeral_servers
+                .iter()
+                .filter(|(_, cfg)| cfg.auto_connect)
+                .map(|(id, cfg)| (id.clone(), cfg.clone()))
+        );
+
+        servers
     }
 }
 
@@ -603,50 +653,75 @@ impl McpToolRegistry {
     pub async fn call(&self, name: &str, args: serde_json::Value) -> Result<Vec<ToolResultContent>> {
         traffic_log::log_mcp_request(name, &args);
 
-        let registry = self.mcp_registry.lock().await;
+        // Get the tool caller and coerced arguments under the lock, then release it
+        // before making the actual call. This prevents deadlock when tools spawn
+        // subconversations that need to use the same registry.
+        let (tool_caller, arguments) = {
+            let registry = self.mcp_registry.lock().await;
 
-        // Find which server has this tool
-        for (_server_id, server) in registry.connected_servers() {
-            if let Some(tool) = server.tools.iter().find(|t| t.name == name) {
-                // Coerce arguments to match the tool's schema
-                // This fixes issues where LLMs return strings for numeric values
-                let schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
-                let coerced_args = coerce_args_to_schema(&args, &schema);
-                let arguments = coerced_args.as_object().cloned();
+            // Find which server has this tool
+            let mut found = None;
+            for (_server_id, server) in registry.connected_servers() {
+                if let Some(tool) = server.tools.iter().find(|t| t.name == name) {
+                    // Coerce arguments to match the tool's schema
+                    let schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
+                    let coerced_args = coerce_args_to_schema(&args, &schema);
+                    let arguments = coerced_args.as_object().cloned();
 
-                match server.call_tool(name.to_string(), arguments).await {
-                    Ok(result) => {
-                        // Convert MCP content to our ToolResultContent format
-                        let content: Vec<ToolResultContent> = result
-                            .content
-                            .into_iter()
-                            .filter_map(|c| mcp_content_to_tool_result(&c.raw))
-                            .collect();
-
-                        traffic_log::log_mcp_response(name, &content);
-                        return Ok(content);
-                    }
-                    Err(e) => {
-                        traffic_log::log_mcp_error(name, &e.to_string());
-                        return Err(e);
-                    }
+                    // Get a lock-free tool caller
+                    found = Some((server.tool_caller(), arguments));
+                    break;
                 }
             }
-        }
 
-        let err_msg = format!("Tool '{}' not found in any connected MCP server", name);
-        traffic_log::log_mcp_error(name, &err_msg);
-        Err(anyhow::anyhow!(err_msg))
+            match found {
+                Some(f) => f,
+                None => {
+                    let err_msg = format!("Tool '{}' not found in any connected MCP server", name);
+                    traffic_log::log_mcp_error(name, &err_msg);
+                    return Err(anyhow::anyhow!(err_msg));
+                }
+            }
+        }; // Lock released here
+
+        // Make the call without holding the registry lock
+        match tool_caller.call_tool(name.to_string(), arguments).await {
+            Ok(result) => {
+                // Convert MCP content to our ToolResultContent format
+                let content: Vec<ToolResultContent> = result
+                    .content
+                    .into_iter()
+                    .filter_map(|c| mcp_content_to_tool_result(&c.raw))
+                    .collect();
+
+                traffic_log::log_mcp_response(name, &content);
+                Ok(content)
+            }
+            Err(e) => {
+                traffic_log::log_mcp_error(name, &e.to_string());
+                Err(e)
+            }
+        }
     }
 
     /// Check if a tool exists in any connected server
     pub async fn has_tool(&self, name: &str) -> bool {
+        self.get_server_for_tool(name).await.is_some()
+    }
+
+    /// Get the server ID that provides a tool
+    pub async fn get_server_for_tool(&self, name: &str) -> Option<String> {
         let registry = self.mcp_registry.lock().await;
-        for (_server_id, server) in registry.connected_servers() {
+        for (server_id, server) in registry.connected_servers() {
             if server.tools.iter().any(|t| t.name == name) {
-                return true;
+                return Some(server_id.to_string());
             }
         }
-        false
+        None
+    }
+
+    /// Check if a tool belongs to a specific server
+    pub async fn is_tool_from_server(&self, tool_name: &str, server_id: &str) -> bool {
+        self.get_server_for_tool(tool_name).await.as_deref() == Some(server_id)
     }
 }

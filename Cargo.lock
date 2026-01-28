@@ -3180,6 +3180,7 @@ dependencies = [
  "noema-audio",
  "noema-core",
  "noema-ext",
+ "noema-mcp-core",
  "noema-mcp-gdocs",
  "regex",
  "reqwest",
@@ -3216,6 +3217,25 @@ dependencies = [
  "lopdf",
  "pdf-extract",
  "pdfium-render",
+]
+
+[[package]]
+name = "noema-mcp-core"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "llm",
+ "noema-core",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]

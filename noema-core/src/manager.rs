@@ -12,16 +12,33 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
+use crate::agents::{ExecutionContext, ToolEnricher};
 use crate::context::ConversationContext;
 use crate::storage::content::InputContent;
 use crate::storage::coordinator::StorageCoordinator;
-use crate::storage::ids::{ConversationId, TurnId, UserId};
+use crate::storage::ids::{ConversationId, SpanId, TurnId, UserId};
 use crate::storage::session::{ResolvedMessage, Session};
 use crate::storage::traits::StorageTypes;
 use crate::storage::types::OriginKind;
 use crate::storage::DocumentResolver;
-use crate::agents::ConversationSpawnHandler;
 use crate::{Agent, McpAgent, McpRegistry, McpToolRegistry};
+
+/// Create an enricher that injects execution context for noema-core tools.
+///
+/// This keeps the "noema-core" knowledge in application code rather than library code.
+fn create_noema_core_enricher() -> ToolEnricher {
+    Arc::new(|tool_name, args, context| {
+        // Inject context for noema-core tools (spawn_agent needs it)
+        if tool_name == "spawn_agent" {
+            match args {
+                serde_json::Value::Object(map) => serde_json::Value::Object(context.inject_into(map)),
+                other => other,
+            }
+        } else {
+            args
+        }
+    })
+}
 
 /// Type alias for the shared event sender - sends (ConversationId, ManagerEvent) tuples
 pub type SharedEventSender = mpsc::UnboundedSender<(ConversationId, ManagerEvent)>;
@@ -72,8 +89,11 @@ pub enum ManagerCommand {
     },
     /// Truncate context to before a specific turn (None = clear all)
     Truncate(Option<TurnId>),
-    /// Change the model
-    SetModel(Arc<dyn ChatModel + Send + Sync>),
+    /// Change the model (model_id should be in provider/model format)
+    SetModel {
+        model: Arc<dyn ChatModel + Send + Sync>,
+        model_id: String,
+    },
 }
 
 /// Events emitted from the background task
@@ -109,6 +129,8 @@ pub struct ConversationManager<S: StorageTypes> {
     mcp_registry: Arc<Mutex<McpRegistry>>,
     cmd_tx: mpsc::UnboundedSender<ManagerCommand>,
     model: Arc<dyn ChatModel + Send + Sync>,
+    /// Full model ID in provider/model format (e.g., "gemini/gemini-3-flash-preview")
+    model_id: String,
     #[allow(dead_code)]
     task_handle: JoinHandle<()>,
 }
@@ -118,10 +140,13 @@ impl<S: StorageTypes> ConversationManager<S> {
     ///
     /// The `event_tx` is a shared channel sender - events are sent as `(ConversationId, ManagerEvent)`
     /// tuples to allow centralized dispatch to UI.
+    ///
+    /// `model_id` should be the full model ID in `provider/model` format (e.g., "gemini/gemini-3-flash-preview")
     pub fn new(
         session: Session<S>,
         coordinator: Arc<StorageCoordinator<S>>,
         model: Arc<dyn ChatModel + Send + Sync>,
+        model_id: String,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         document_resolver: Arc<dyn DocumentResolver>,
         user_id: UserId,
@@ -136,6 +161,7 @@ impl<S: StorageTypes> ConversationManager<S> {
         let mcp_registry_clone = Arc::clone(&mcp_registry);
         let initial_model = Arc::clone(&model);
         let conversation_id_clone = conversation_id.clone();
+        let model_id_clone = model_id.clone();
 
         let task_handle = tokio::spawn(async move {
             Self::background_loop(
@@ -143,6 +169,7 @@ impl<S: StorageTypes> ConversationManager<S> {
                 session_clone,
                 coordinator_clone,
                 initial_model,
+                model_id_clone,
                 mcp_registry_clone,
                 document_resolver,
                 user_id,
@@ -159,6 +186,7 @@ impl<S: StorageTypes> ConversationManager<S> {
             mcp_registry,
             cmd_tx,
             model,
+            model_id,
             task_handle,
         }
     }
@@ -168,30 +196,13 @@ impl<S: StorageTypes> ConversationManager<S> {
         session: Arc<Mutex<Session<S>>>,
         coordinator: Arc<StorageCoordinator<S>>,
         mut model: Arc<dyn ChatModel + Send + Sync>,
+        mut model_id: String,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         document_resolver: Arc<dyn DocumentResolver>,
         user_id: UserId,
         mut cmd_rx: mpsc::UnboundedReceiver<ManagerCommand>,
         event_tx: SharedEventSender,
     ) {
-        // Create spawn handler for subconversations
-        let spawn_handler = Arc::new(ConversationSpawnHandler::new(
-            Arc::clone(&coordinator),
-            user_id,
-            Arc::clone(&mcp_registry),
-            Arc::clone(&document_resolver),
-            conversation_id.as_str().to_string(),
-        ));
-
-        // Create agent with MCP tool registry and spawn support
-        let tool_registry = McpToolRegistry::new(Arc::clone(&mcp_registry));
-        let agent = McpAgent::with_spawn_handler(
-            Arc::new(tool_registry),
-            10,
-            document_resolver,
-            spawn_handler,
-        );
-
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 ManagerCommand::SendMessage { content, tool_config } => {
@@ -207,17 +218,48 @@ impl<S: StorageTypes> ConversationManager<S> {
                             // Emit user message for immediate UI feedback
                             let _ = event_tx.send((conversation_id.clone(), ManagerEvent::UserMessageAdded(user_msg)));
 
-                            // Step 2: Run agent
-                            Self::run_agent_and_commit(
+                            // Step 2: Commit user message first (creates the user turn)
+                            // This is needed so spawn_agent has a valid parent turn
+                            let commit_result = Self::commit_pending(
                                 &conversation_id,
                                 &session,
                                 &coordinator,
-                                &agent,
-                                &model,
-                                tool_config,
-                                CommitMode::NewTurns,
-                                &event_tx,
+                                Some(model.id()),
+                                &CommitMode::NewTurns,
                             ).await;
+
+                            match commit_result {
+                                Ok(Some((turn_id, span_id))) => {
+                                    // Build execution context and run agent
+                                    let exec_ctx = ExecutionContext::with_all(
+                                        user_id.clone(),
+                                        conversation_id.clone(),
+                                        turn_id,
+                                        Some(span_id),
+                                        model_id.clone(),
+                                    );
+
+                                    Self::run_agent_and_commit(
+                                        &conversation_id,
+                                        &session,
+                                        &coordinator,
+                                        &mcp_registry,
+                                        &document_resolver,
+                                        exec_ctx,
+                                        &model,
+                                        tool_config,
+                                        CommitMode::NewTurns,
+                                        &event_tx,
+                                    ).await;
+                                }
+                                Ok(None) => {
+                                    // No pending messages to commit (shouldn't happen)
+                                    let _ = event_tx.send((conversation_id.clone(), ManagerEvent::Error("No user message to commit".to_string())));
+                                }
+                                Err(e) => {
+                                    let _ = event_tx.send((conversation_id.clone(), ManagerEvent::Error(format!("Failed to commit user message: {}", e))));
+                                }
+                            }
                         }
                         Err(e) => {
                             let _ = event_tx.send((conversation_id.clone(), ManagerEvent::Error(format!("Failed to add message: {}", e))));
@@ -226,11 +268,34 @@ impl<S: StorageTypes> ConversationManager<S> {
                 }
 
                 ManagerCommand::RunAgent { tool_config, commit_mode } => {
+                    // For regeneration, the turn already exists
+                    // Get the turn_id from commit_mode if it's AtTurn
+                    let exec_ctx = if let CommitMode::AtTurn(ref turn_id) = commit_mode {
+                        // Create span for the regeneration
+                        if let Ok(span_id) = coordinator.create_and_select_span(&conversation_id, turn_id, Some(model.id())).await {
+                            ExecutionContext::with_all(
+                                user_id.clone(),
+                                conversation_id.clone(),
+                                turn_id.clone(),
+                                Some(span_id),
+                                model_id.clone(),
+                            )
+                        } else {
+                            ExecutionContext::default()
+                        }
+                    } else {
+                        // For NewTurns mode without prior commit, context may be incomplete
+                        // This case is less common - typically used after truncate
+                        ExecutionContext::default()
+                    };
+
                     Self::run_agent_and_commit(
                         &conversation_id,
                         &session,
                         &coordinator,
-                        &agent,
+                        &mcp_registry,
+                        &document_resolver,
+                        exec_ctx,
                         &model,
                         tool_config,
                         commit_mode,
@@ -244,9 +309,10 @@ impl<S: StorageTypes> ConversationManager<S> {
                     let _ = event_tx.send((conversation_id.clone(), ManagerEvent::Truncated(turn_id)));
                 }
 
-                ManagerCommand::SetModel(new_model) => {
+                ManagerCommand::SetModel { model: new_model, model_id: new_model_id } => {
                     let name = new_model.name().to_string();
                     model = new_model;
+                    model_id = new_model_id;
                     let _ = event_tx.send((conversation_id.clone(), ManagerEvent::ModelChanged(name)));
                 }
             }
@@ -290,12 +356,24 @@ impl<S: StorageTypes> ConversationManager<S> {
         conversation_id: &ConversationId,
         session: &Arc<Mutex<Session<S>>>,
         coordinator: &Arc<StorageCoordinator<S>>,
-        agent: &McpAgent,
+        mcp_registry: &Arc<Mutex<McpRegistry>>,
+        document_resolver: &Arc<dyn DocumentResolver>,
+        execution_context: ExecutionContext,
         model: &Arc<dyn ChatModel + Send + Sync>,
         tool_config: ToolConfig,
         commit_mode: CommitMode,
         event_tx: &SharedEventSender,
     ) {
+        // Create agent with enricher for noema-core tools
+        let tool_registry = McpToolRegistry::new(Arc::clone(mcp_registry));
+        let agent = McpAgent::with_enricher(
+            Arc::new(tool_registry),
+            10,
+            Arc::clone(document_resolver),
+            execution_context,
+            create_noema_core_enricher(),
+        );
+
         // Run agent
         let execute_result = {
             let mut sess = session.lock().await;
@@ -319,7 +397,7 @@ impl<S: StorageTypes> ConversationManager<S> {
                     }
                 }
 
-                // Commit pending messages
+                // Commit pending messages (assistant messages)
                 let commit_result = Self::commit_pending(
                     conversation_id,
                     session,
@@ -349,25 +427,27 @@ impl<S: StorageTypes> ConversationManager<S> {
     }
 
     /// Commit pending messages to storage
+    /// Returns the (turn_id, span_id) of the first turn committed, if any
     async fn commit_pending(
         conversation_id: &ConversationId,
         session: &Arc<Mutex<Session<S>>>,
         coordinator: &Arc<StorageCoordinator<S>>,
         model_id: Option<&str>,
         commit_mode: &CommitMode,
-    ) -> Result<()> {
+    ) -> Result<Option<(TurnId, SpanId)>> {
         let mut sess = session.lock().await;
 
         if sess.pending().is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
         let pending: Vec<ChatMessage> = sess.pending().to_vec();
 
         // Track current turn and span for adding messages
         let mut current_turn: Option<TurnId> = None;
-        let mut current_span = None;
+        let mut current_span: Option<SpanId> = None;
         let mut current_role = None;
+        let mut first_turn_info: Option<(TurnId, SpanId)> = None;
 
         for msg in pending {
             let origin = OriginKind::from(msg.role);
@@ -399,6 +479,11 @@ impl<S: StorageTypes> ConversationManager<S> {
                 }
             };
 
+            // Track first turn info for return value
+            if first_turn_info.is_none() {
+                first_turn_info = Some((turn_id.clone(), span_id.clone()));
+            }
+
             let resolved = coordinator
                 .add_message(&span_id, &turn_id, msg.role, msg.payload.content, origin)
                 .await?;
@@ -406,7 +491,7 @@ impl<S: StorageTypes> ConversationManager<S> {
         }
 
         sess.clear_pending();
-        Ok(())
+        Ok(first_turn_info)
     }
 
     // ========================================================================
@@ -440,17 +525,18 @@ impl<S: StorageTypes> ConversationManager<S> {
         let _ = self.cmd_tx.send(ManagerCommand::Truncate(None));
     }
 
-    /// Set the model
-    pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>) {
+    /// Set the model (model_id should be in provider/model format)
+    pub fn set_model(&mut self, model: Arc<dyn ChatModel + Send + Sync>, model_id: String) {
         self.model = Arc::clone(&model);
-        let _ = self.cmd_tx.send(ManagerCommand::SetModel(model));
+        self.model_id = model_id.clone();
+        let _ = self.cmd_tx.send(ManagerCommand::SetModel { model, model_id });
     }
 
     /// Get conversation ID
     pub fn conversation_id(&self) -> &ConversationId {
         &self.conversation_id
     }
-    
+
     /// Get current model name
     pub fn model_name(&self) -> &str {
         self.model.name()

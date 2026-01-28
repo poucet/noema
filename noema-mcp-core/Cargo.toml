@@ -1,0 +1,39 @@
+[package]
+name = "noema-mcp-core"
+version.workspace = true
+edition.workspace = true
+description = "Core MCP server for Noema - exposes spawn_agent and other internal tools"
+
+[lib]
+name = "noema_mcp_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Internal crates
+noema-core = { path = "../noema-core" }
+llm = { path = "../noema-core/llm" }
+
+# MCP protocol
+rmcp = { version = "0.9", features = ["server", "transport-streamable-http-server"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP server
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower-service = "0.3"
+http-body-util = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+
+# Error handling
+anyhow = "1"
+
+# Async traits
+async-trait = "0.1"

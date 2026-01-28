@@ -1,9 +1,9 @@
 //! Agent with dynamic MCP tool support
 
-use crate::agents::spawn_handler::{SpawnAgentArgs, SpawnHandler, spawn_agent_tool_definition};
+use super::ExecutionContext;
+use crate::mcp::McpToolRegistry;
 use crate::storage::document_resolver::{DocumentFormatter, DocumentResolver};
 use crate::storage::ids::DocumentId;
-use crate::mcp::McpToolRegistry;
 use crate::traffic_log;
 use crate::Agent;
 use crate::ConversationContext;
@@ -11,22 +11,26 @@ use anyhow::Result;
 use async_trait::async_trait;
 use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest, ContentBlock, ToolResultContent};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+
+/// Function that enriches tool call arguments before execution.
+/// Takes (tool_name, arguments, execution_context) and returns enriched arguments.
+pub type ToolEnricher =
+    Arc<dyn Fn(&str, serde_json::Value, &ExecutionContext) -> serde_json::Value + Send + Sync>;
 
 /// Agent that dynamically uses tools from connected MCP servers.
 ///
-/// Optionally supports a SpawnHandler for the built-in `spawn_agent` tool,
-/// which allows creating subconversations for complex subtasks.
+/// All tools (including spawn_agent) come from MCP servers registered
+/// in the McpRegistry. The noema-mcp-core server provides spawn_agent.
+///
+/// An optional enricher callback can inject execution context into specific
+/// tool calls (e.g., for noema-core tools that need conversation_id, turn_id, etc).
 pub struct McpAgent {
     tools: Arc<McpToolRegistry>,
     max_iterations: usize,
     document_resolver: Arc<dyn DocumentResolver>,
     document_formatter: DocumentFormatter,
-    spawn_handler: Option<Arc<dyn SpawnHandler>>,
-    /// Current turn ID for spawn context (set during execution)
-    current_turn_id: Arc<Mutex<Option<String>>>,
-    /// Current span ID for spawn context (set during execution)
-    current_span_id: Arc<Mutex<Option<String>>>,
+    execution_context: ExecutionContext,
+    enricher: Option<ToolEnricher>,
 }
 
 impl McpAgent {
@@ -34,40 +38,42 @@ impl McpAgent {
         tools: Arc<McpToolRegistry>,
         max_iterations: usize,
         document_resolver: Arc<dyn DocumentResolver>,
+        execution_context: ExecutionContext,
     ) -> Self {
         Self {
             tools,
             max_iterations,
             document_resolver,
             document_formatter: DocumentFormatter,
-            spawn_handler: None,
-            current_turn_id: Arc::new(Mutex::new(None)),
-            current_span_id: Arc::new(Mutex::new(None)),
+            execution_context,
+            enricher: None,
         }
     }
 
-    /// Create an agent with spawn support enabled
-    pub fn with_spawn_handler(
+    /// Create an agent with a tool enricher callback.
+    ///
+    /// The enricher is called for every tool call and can modify arguments
+    /// (e.g., to inject execution context for specific tools).
+    pub fn with_enricher(
         tools: Arc<McpToolRegistry>,
         max_iterations: usize,
         document_resolver: Arc<dyn DocumentResolver>,
-        spawn_handler: Arc<dyn SpawnHandler>,
+        execution_context: ExecutionContext,
+        enricher: ToolEnricher,
     ) -> Self {
         Self {
             tools,
             max_iterations,
             document_resolver,
             document_formatter: DocumentFormatter,
-            spawn_handler: Some(spawn_handler),
-            current_turn_id: Arc::new(Mutex::new(None)),
-            current_span_id: Arc::new(Mutex::new(None)),
+            execution_context,
+            enricher: Some(enricher),
         }
     }
 
-    /// Set spawn context (turn/span IDs) for the current execution
-    pub async fn set_spawn_context(&self, turn_id: Option<String>, span_id: Option<String>) {
-        *self.current_turn_id.lock().await = turn_id;
-        *self.current_span_id.lock().await = span_id;
+    /// Get the execution context
+    pub fn execution_context(&self) -> &ExecutionContext {
+        &self.execution_context
     }
 
     pub fn tools(&self) -> &McpToolRegistry {
@@ -76,11 +82,6 @@ impl McpAgent {
 
     pub fn max_iterations(&self) -> usize {
         self.max_iterations
-    }
-
-    /// Check if spawn_agent is enabled
-    pub fn has_spawn_handler(&self) -> bool {
-        self.spawn_handler.is_some()
     }
 
     /// Execute streaming without any tools
@@ -146,80 +147,32 @@ impl McpAgent {
         self.document_formatter.inject_documents(request, &resolved);
     }
 
-    /// Get all tool definitions including built-in spawn_agent if handler is set
-    async fn get_tool_definitions(&self) -> Vec<llm::ToolDefinition> {
-        let mut definitions = self.tools.get_all_definitions().await;
-
-        // Add spawn_agent if handler is available
-        if self.spawn_handler.is_some() {
-            definitions.push(spawn_agent_tool_definition());
-        }
-
-        definitions
-    }
-
-    /// Process a single tool call, handling spawn_agent specially
+    /// Process a single tool call via MCP registry
     async fn process_single_tool_call(
         &self,
         tool_call: &llm::ToolCall,
-        model: &Arc<dyn ChatModel + Send + Sync>,
     ) -> Vec<ToolResultContent> {
-        // Check if this is a spawn_agent call
-        if tool_call.name == "spawn_agent" {
-            if let Some(ref handler) = self.spawn_handler {
-                // Parse spawn arguments
-                match serde_json::from_value::<SpawnAgentArgs>(tool_call.arguments.clone()) {
-                    Ok(args) => {
-                        let turn_id = self.current_turn_id.lock().await.clone();
-                        let span_id = self.current_span_id.lock().await.clone();
-
-                        match handler
-                            .spawn(
-                                turn_id.as_deref().unwrap_or(""),
-                                span_id.as_deref(),
-                                args,
-                                Arc::clone(model),
-                            )
-                            .await
-                        {
-                            Ok(result) => result.to_tool_result_content(),
-                            Err(e) => {
-                                vec![ToolResultContent::text(format!(
-                                    "Error spawning agent: {}",
-                                    e
-                                ))]
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        vec![ToolResultContent::text(format!(
-                            "Invalid spawn_agent arguments: {}",
-                            e
-                        ))]
-                    }
-                }
-            } else {
-                vec![ToolResultContent::text(
-                    "spawn_agent is not available (no handler configured)".to_string(),
-                )]
+        // Apply enricher if present
+        let args = match &self.enricher {
+            Some(enricher) => {
+                enricher(&tool_call.name, tool_call.arguments.clone(), &self.execution_context)
             }
-        } else {
-            // Regular MCP tool call
-            self.tools
-                .call(&tool_call.name, tool_call.arguments.clone())
-                .await
-                .unwrap_or_else(|e| vec![ToolResultContent::text(format!("Error: {}", e))])
-        }
+            None => tool_call.arguments.clone(),
+        };
+
+        self.tools
+            .call(&tool_call.name, args)
+            .await
+            .unwrap_or_else(|e| vec![ToolResultContent::text(format!("Error: {}", e))])
     }
 
     async fn process_tool_calls(
         &self,
         context: &mut dyn ConversationContext,
         tool_calls: Vec<&llm::ToolCall>,
-        model: &Arc<dyn ChatModel + Send + Sync>,
     ) {
         for tool_call in tool_calls {
-            let result_content = self.process_single_tool_call(tool_call, model).await;
+            let result_content = self.process_single_tool_call(tool_call).await;
 
             let result_msg =
                 ChatMessage::user(ChatPayload::tool_result(tool_call.id.clone(), result_content));
@@ -237,7 +190,7 @@ impl Agent for McpAgent {
         model: Arc<dyn ChatModel + Send + Sync>,
     ) -> Result<()> {
         for iteration in 0..self.max_iterations {
-            let tool_definitions = self.get_tool_definitions().await;
+            let tool_definitions = self.tools.get_all_definitions().await;
 
             let messages = context.messages().await?;
             let mut request = if tool_definitions.is_empty() {
@@ -257,7 +210,7 @@ impl Agent for McpAgent {
                 break;
             }
 
-            self.process_tool_calls(context, tool_calls, &model).await;
+            self.process_tool_calls(context, tool_calls).await;
 
             if iteration == self.max_iterations - 1 {
                 tracing::warn!(
@@ -278,7 +231,7 @@ impl Agent for McpAgent {
         use futures::StreamExt;
 
         for iteration in 0..self.max_iterations {
-            let tool_definitions = self.get_tool_definitions().await;
+            let tool_definitions = self.tools.get_all_definitions().await;
 
             let messages = context.messages().await?;
             let mut request = if tool_definitions.is_empty() {
@@ -327,7 +280,7 @@ impl Agent for McpAgent {
                 break;
             }
 
-            self.process_tool_calls(context, tool_calls, &model).await;
+            self.process_tool_calls(context, tool_calls).await;
 
             if iteration == self.max_iterations - 1 {
                 tracing::warn!(

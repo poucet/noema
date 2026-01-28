@@ -24,10 +24,10 @@ pub mod storage;
 pub mod traffic_log;
 
 pub use agent::Agent;
-pub use agents::{McpAgent, SimpleAgent, ToolAgent};
+pub use agents::{McpAgent};
 pub use context::{ConversationContext, MessagesGuard};
 
 // New manager API
-pub use manager::{ConversationManager, ManagerCommand, ManagerEvent, SharedEventSender, ToolConfig};
+pub use manager::{CommitMode, ConversationManager, ManagerCommand, ManagerEvent, SharedEventSender, ToolConfig};
 
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
