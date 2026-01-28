@@ -15,7 +15,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
         -- Cross-references between entities
-        CREATE TABLE IF NOT EXISTS references (
+        CREATE TABLE IF NOT EXISTS entity_references (
             id TEXT PRIMARY KEY,
             from_entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
             to_entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
@@ -26,13 +26,13 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
         );
 
         -- Index for forward lookups (outgoing references from an entity)
-        CREATE INDEX IF NOT EXISTS idx_references_from ON references(from_entity_id);
+        CREATE INDEX IF NOT EXISTS idx_references_from ON entity_references(from_entity_id);
 
         -- Index for backward lookups (backlinks to an entity)
-        CREATE INDEX IF NOT EXISTS idx_references_to ON references(to_entity_id);
+        CREATE INDEX IF NOT EXISTS idx_references_to ON entity_references(to_entity_id);
 
         -- Index for finding references by type
-        CREATE INDEX IF NOT EXISTS idx_references_type ON references(relation_type) WHERE relation_type IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_references_type ON entity_references(relation_type) WHERE relation_type IS NOT NULL;
         "#,
     )?;
     Ok(())
@@ -79,7 +79,7 @@ impl ReferenceStore for SqliteStore {
         let now = unix_timestamp();
 
         conn.execute(
-            "INSERT INTO references (id, from_entity_id, to_entity_id, relation_type, context, created_at)
+            "INSERT INTO entity_references (id, from_entity_id, to_entity_id, relation_type, context, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 id.as_str(),
@@ -97,7 +97,7 @@ impl ReferenceStore for SqliteStore {
     async fn delete_reference(&self, id: &ReferenceId) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
         let rows = conn.execute(
-            "DELETE FROM references WHERE id = ?1",
+            "DELETE FROM entity_references WHERE id = ?1",
             params![id.as_str()],
         )?;
         Ok(rows > 0)
@@ -110,7 +110,7 @@ impl ReferenceStore for SqliteStore {
     ) -> Result<usize> {
         let conn = self.conn().lock().unwrap();
         let rows = conn.execute(
-            "DELETE FROM references WHERE from_entity_id = ?1 AND to_entity_id = ?2",
+            "DELETE FROM entity_references WHERE from_entity_id = ?1 AND to_entity_id = ?2",
             params![from_entity_id.as_str(), to_entity_id.as_str()],
         )?;
         Ok(rows)
@@ -120,7 +120,7 @@ impl ReferenceStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
-             FROM references WHERE from_entity_id = ?1
+             FROM entity_references WHERE from_entity_id = ?1
              ORDER BY created_at DESC"
         )?;
 
@@ -140,7 +140,7 @@ impl ReferenceStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
-             FROM references WHERE from_entity_id = ?1 AND relation_type = ?2
+             FROM entity_references WHERE from_entity_id = ?1 AND relation_type = ?2
              ORDER BY created_at DESC"
         )?;
 
@@ -156,7 +156,7 @@ impl ReferenceStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
-             FROM references WHERE to_entity_id = ?1
+             FROM entity_references WHERE to_entity_id = ?1
              ORDER BY created_at DESC"
         )?;
 
@@ -176,7 +176,7 @@ impl ReferenceStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
-             FROM references WHERE to_entity_id = ?1 AND relation_type = ?2
+             FROM entity_references WHERE to_entity_id = ?1 AND relation_type = ?2
              ORDER BY created_at DESC"
         )?;
 
@@ -197,12 +197,12 @@ impl ReferenceStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let exists: bool = match relation_type {
             Some(rt) => conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM references WHERE from_entity_id = ?1 AND to_entity_id = ?2 AND relation_type = ?3)",
+                "SELECT EXISTS(SELECT 1 FROM entity_references WHERE from_entity_id = ?1 AND to_entity_id = ?2 AND relation_type = ?3)",
                 params![from_entity_id.as_str(), to_entity_id.as_str(), rt.as_str()],
                 |row| row.get(0),
             )?,
             None => conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM references WHERE from_entity_id = ?1 AND to_entity_id = ?2 AND relation_type IS NULL)",
+                "SELECT EXISTS(SELECT 1 FROM entity_references WHERE from_entity_id = ?1 AND to_entity_id = ?2 AND relation_type IS NULL)",
                 params![from_entity_id.as_str(), to_entity_id.as_str()],
                 |row| row.get(0),
             )?,
