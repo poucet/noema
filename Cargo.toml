@@ -4,6 +4,6 @@ members = ["commands", "config", "noema-core", "noema-core/llm", "noema-audio", 
 default-members = ["noema-desktop/src-tauri"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Chris"]
 edition = "2021"

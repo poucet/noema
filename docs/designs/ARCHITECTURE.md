@@ -374,8 +374,8 @@ template: "Good morning! What's on your mind today?"
 |----------|---------|
 | [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md) | Detailed UCM design, feature requirements |
 | [HOOK_SYSTEM.md](HOOK_SYSTEM.md) | Event-driven automation design |
-| [STORAGE.md](../../STORAGE.md) | Database schema reference |
-| [ROADMAP.md](../ROADMAP.md) | Full feature roadmap |
+| [STORAGE.md](../STORAGE.md) | Database schema reference |
+| [FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md) | Future feature roadmap |
 
 ---
 

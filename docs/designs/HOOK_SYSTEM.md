@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Created:** 2026-01-10
-**Related:** [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md), IDEAS #5, #6, #7, #8
+**Related:** [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md)
 
 ---
 
