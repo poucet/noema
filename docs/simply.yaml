@@ -3,10 +3,10 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.45"
-feature_name: "Manual Testing Checkpoint"
-task: "3.45.1"
-task_name: "Verify alternates display and selection"
+feature: "3.6"
+feature_name: "Cross-references"
+task: "3.6.1"
+task_name: "Define Reference and EntityRef types"
 
 # Completed
 completed_features:
