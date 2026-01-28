@@ -702,3 +702,45 @@ Extended `ToolCall` struct with `extra: serde_json::Value` field to preserve pro
 
 ---
 
+## 2026-01-28: Temporal Queries (3.7)
+
+### 3.7.1: Temporal Indexes ✅
+
+Added indexes on `created_at`/`updated_at` columns for time-range queries:
+- `content_blocks`, `ucm_messages`, `turns`, `ucm_spans`
+- `document_revisions`, `entities`, `collections`, `collection_items`
+
+### 3.7.2: TemporalStore Trait ✅
+
+Defined `TemporalStore` trait with types for time-based entity queries.
+
+**Design decisions:**
+- Lazy vs eager loading via `include_content: bool` flag
+- Caller controls date range (no hardcoded "recent")
+- Query via unified `entities` table, dispatch to domain tables for content
+- Assets return metadata only (size, mime_type), never blobs
+- Future-proof via `EntityType` filtering
+
+**Types:**
+- `TemporalQuery` - query params (start, end, entity_types, include_content, limit)
+- `TemporalEntity` - entity with optional content preview
+- `ContentPreview` - message text, revision text, or asset metadata
+- `ActivitySummary` - aggregate stats for time range
+
+**Trait methods:**
+- `query_entities()` - time-range query with optional content
+- `get_activity_summary()` - counts and stats
+- `render_activity_context()` - markdown for LLM injection
+
+### Entity Layer Cleanup (before 3.7.3)
+
+Pausing temporal query implementation to clean up Entity layer redundancy.
+
+**Issue:** Domain tables have redundant fields that should only exist in `entities`:
+- `Conversation.name`, `Conversation.is_private` → use `Entity.name`, `Entity.is_private`
+- `Document.user_id`, `Document.title` → use `Entity.user_id`, `Entity.name`
+
+This cleanup ensures temporal queries have a single source of truth (entities table).
+
+---
+
