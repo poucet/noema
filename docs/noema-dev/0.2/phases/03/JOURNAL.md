@@ -744,3 +744,35 @@ This cleanup ensures temporal queries have a single source of truth (entities ta
 
 ---
 
+## 2026-01-28: ConversationStore Removal
+
+Completed the Entity layer cleanup by fully removing `ConversationStore`.
+
+### Changes
+
+**ConversationStore eliminated:**
+- Deleted `ConversationStore` trait and all implementations (sqlite, memory, mock)
+- Removed `Conversation` struct from types
+- Updated `StorageTypes` and `Stores` traits to remove `type Conversation`
+- Conversations now represented purely as entities with `entity_type = "conversation"` and `metadata.main_view_id`
+
+**Desktop app updates:**
+- `list_conversations` now uses `EntityStore::list_by_type()` instead of `ConversationStore::list()`
+- Removed `Conversation` type from `state.rs`
+
+**Required supporting changes:**
+- Added stub implementations for `MemoryReferenceStore` and `MemoryCollectionStore`
+- Added stub implementations for `MockReferenceStore` and `MockCollectionStore`
+- Fixed `Session::new()` argument order in spawn_handler
+- Fixed `ToolResult` construction to use new llm API (`tool_call_id`, `content`)
+- Added `as_text()` helper to `ResolvedContent`
+- Fixed borrow checker issue in sqlite document.rs
+
+**SQL schema fixes:**
+- Renamed `references` table to `entity_references` (SQL reserved word)
+- Fixed temporal schema table names (`ucm_messages` → `messages`, `ucm_spans` → `spans`)
+
+This cleanup eliminates data duplication between `entities` and `conversations` tables.
+
+---
+
