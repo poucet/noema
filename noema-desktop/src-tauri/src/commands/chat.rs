@@ -7,7 +7,7 @@ use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
 use noema_core::storage::traits::ReferenceStore;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::logging::log_message;
 use crate::state::AppState;
@@ -248,7 +248,7 @@ pub async fn set_model(
     {
         let mut managers = state.managers.lock().await;
         let manager = managers.get_mut(&conversation_id).ok_or("Conversation not loaded")?;
-        manager.set_model(new_model);
+        manager.set_model(new_model, full_model_id.clone());
     }
 
     *state.model_id.lock().await = full_model_id.clone();
@@ -327,11 +327,13 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
 /// Load a conversation (creating a manager for it if not already loaded)
 #[tauri::command]
 pub async fn load_conversation(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
     let stores = state.get_stores()?;
     let coordinator = state.get_coordinator()?;
+    let model_id_str = state.model_id.lock().await.clone();
 
     // Check if already loaded
     {
@@ -361,7 +363,6 @@ pub async fn load_conversation(
         .map(DisplayMessage::from)
         .collect();
 
-    let model_id_str = state.model_id.lock().await.clone();
     let mcp_registry = state.get_mcp_registry()?;
 
     let model = create_model(&model_id_str)
@@ -370,7 +371,18 @@ pub async fn load_conversation(
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
     let user_id = state.user_id.lock().await.clone();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
+
+    // Create manager (context is injected via enricher in McpAgent)
+    let manager = ConversationManager::new(
+        session,
+        coordinator,
+        model,
+        model_id_str.clone(),
+        mcp_registry,
+        document_resolver,
+        user_id,
+        event_tx,
+    );
     state.managers.lock().await.insert(conversation_id.clone(), manager);
 
     // Enrich with alternates
@@ -381,6 +393,7 @@ pub async fn load_conversation(
 /// Create a new conversation and load its manager
 #[tauri::command]
 pub async fn new_conversation(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     name: Option<String>,
 ) -> Result<String, String> {
@@ -409,7 +422,18 @@ pub async fn new_conversation(
 
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
+
+    // Create manager (context is injected via enricher in McpAgent)
+    let manager = ConversationManager::new(
+        session,
+        coordinator,
+        model,
+        model_id_str.clone(),
+        mcp_registry,
+        document_resolver,
+        user_id,
+        event_tx,
+    );
     state.managers.lock().await.insert(conv_id.clone(), manager);
 
     Ok(conv_id.as_str().to_string())
@@ -902,6 +926,7 @@ pub struct EditMessageResponse {
 /// the new conversation.
 #[tauri::command]
 pub async fn edit_message(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
     turn_id: TurnId,
@@ -979,7 +1004,18 @@ pub async fn edit_message(
     let document_resolver: Arc<dyn DocumentResolver> = stores.document();
     let event_tx = state.event_sender();
     let user_id = state.user_id.lock().await.clone();
-    let manager = ConversationManager::new(session, coordinator, model, mcp_registry, document_resolver, user_id, event_tx);
+
+    // Create manager (context is injected via enricher in McpAgent)
+    let manager = ConversationManager::new(
+        session,
+        coordinator,
+        model,
+        model_id_str.clone(),
+        mcp_registry,
+        document_resolver,
+        user_id,
+        event_tx,
+    );
 
     // Trigger AI to respond to the edited message
     let core_tool_config = match tool_config {

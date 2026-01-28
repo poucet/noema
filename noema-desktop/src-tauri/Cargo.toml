@@ -42,6 +42,7 @@ llm = { path = "../../noema-core/llm" }
 config = { path = "../../config" }
 noema-audio = { path = "../../noema-audio", features = ["browser"] }
 noema-ext = { path = "../../noema-ext" }
+noema-mcp-core = { path = "../../noema-mcp-core" }
 noema-mcp-gdocs = { path = "../../noema-mcp-gdocs" }
 thiserror = "2.0.17"
 

@@ -1,19 +1,72 @@
 //! Google Docs commands for managing imported documents
 //!
 //! Uses the episteme-compatible document model with documents, tabs, and revisions.
+//! Google Drive/Docs API calls are made directly using GoogleDocsClient.
 
-use noema_core::mcp::{AuthMethod, McpConfig, ServerConfig};
+use base64::Engine as _;
+use config::PathManager;
 use noema_core::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 use noema_core::storage::{Document, DocumentSource, DocumentStore, DocumentTab, StoredEditable, Stores, UserStore};
-use rmcp::model::RawContent;
+use noema_mcp_gdocs::GoogleDocsClient;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::State;
 use tracing::{debug, info};
 use ts_rs::TS;
 
-use crate::gdocs_server::GDocsServerState;
 use crate::state::AppState;
+
+// ============================================================================
+// Google OAuth Token Storage
+// ============================================================================
+
+/// Stored Google OAuth credentials and tokens
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GoogleOAuthConfig {
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub expires_at: Option<i64>,
+}
+
+impl GoogleOAuthConfig {
+    fn config_path() -> Option<std::path::PathBuf> {
+        PathManager::data_dir().map(|d| d.join("google_oauth.json"))
+    }
+
+    pub fn load() -> Option<Self> {
+        let path = Self::config_path()?;
+        let content = std::fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    pub fn save(&self) -> Result<(), String> {
+        let path = Self::config_path().ok_or("Could not determine data directory")?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        std::fs::write(&path, content).map_err(|e| e.to_string())
+    }
+
+    pub fn has_credentials(&self) -> bool {
+        !self.client_id.is_empty()
+    }
+
+    pub fn has_valid_token(&self) -> bool {
+        self.access_token.is_some()
+    }
+
+    /// Create a GoogleDocsClient if we have a valid access token
+    pub fn create_client(&self) -> Option<GoogleDocsClient> {
+        self.access_token.as_ref().map(|token| GoogleDocsClient::new(token.clone()))
+    }
+}
 
 /// Document info response for the frontend
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -324,93 +377,50 @@ pub struct GDocsOAuthStatus {
 
 /// Get the current Google Docs OAuth configuration status
 #[tauri::command]
-pub async fn get_gdocs_oauth_status(
-    app: tauri::AppHandle,
-) -> Result<GDocsOAuthStatus, String> {
-    let gdocs_state = app.state::<GDocsServerState>();
-    let server_url = gdocs_state.url().await;
-    let server_running = server_url.is_some();
-
-    // Check MCP config for credentials
-    let config = McpConfig::load().unwrap_or_default();
-    let (credentials_configured, is_authenticated) = if let Some(server) = config.get_server("gdocs") {
-        match &server.auth {
-            AuthMethod::OAuth { client_id, access_token, .. } => {
-                let has_creds = !client_id.is_empty();
-                let has_token = access_token.is_some();
-                (has_creds, has_token)
-            }
-            _ => (false, false),
-        }
-    } else {
-        (false, false)
-    };
+pub async fn get_gdocs_oauth_status() -> Result<GDocsOAuthStatus, String> {
+    let config = GoogleOAuthConfig::load().unwrap_or_default();
 
     Ok(GDocsOAuthStatus {
-        server_running,
-        server_url,
-        credentials_configured,
-        is_authenticated,
+        server_running: true, // Direct API access is always "running"
+        server_url: None, // No MCP server URL
+        credentials_configured: config.has_credentials(),
+        is_authenticated: config.has_valid_token(),
     })
 }
 
-/// Configure Google OAuth credentials for the Google Docs MCP server
+/// Configure Google OAuth credentials
 #[tauri::command]
 pub async fn configure_gdocs_oauth(
-    app: tauri::AppHandle,
-    state: State<'_, Arc<AppState>>,
     client_id: String,
     client_secret: Option<String>,
 ) -> Result<(), String> {
-    let gdocs_state = app.state::<GDocsServerState>();
-    let server_url = gdocs_state.url().await
-        .ok_or("Google Docs server not running")?;
+    let mut config = GoogleOAuthConfig::load().unwrap_or_default();
+    config.client_id = client_id;
+    config.client_secret = client_secret;
+    config.save()?;
+    Ok(())
+}
 
-    // Create the server config with OAuth credentials
-    let server_config = ServerConfig {
-        name: "Google Docs".to_string(),
-        url: server_url,
-        auth: AuthMethod::OAuth {
-            client_id,
-            client_secret,
-            authorization_url: Some("https://accounts.google.com/o/oauth2/v2/auth".to_string()),
-            token_url: Some("https://oauth2.googleapis.com/token".to_string()),
-            scopes: vec![
-                "https://www.googleapis.com/auth/drive.readonly".to_string(),
-                "https://www.googleapis.com/auth/documents.readonly".to_string(),
-            ],
-            access_token: None,
-            refresh_token: None,
-            expires_at: None,
-        },
-        use_well_known: true,
-        auth_token: None,
-        auto_connect: true,
-        auto_retry: true,
-    };
-
-    // Update the in-memory MCP registry if available, otherwise save to config file
-    if let Ok(mcp_registry) = state.get_mcp_registry() {
-        let mut registry = mcp_registry.lock().await;
-        registry.add_server("gdocs".to_string(), server_config.clone());
-        registry.save_config().map_err(|e| format!("Failed to save config: {}", e))?;
-    } else {
-        // Engine not initialized yet, save directly to config file
-        let mut config = McpConfig::load().unwrap_or_default();
-        config.add_server("gdocs".to_string(), server_config);
-        config.save().map_err(|e| format!("Failed to save config: {}", e))?;
-    }
-
+/// Store OAuth tokens after successful authentication
+#[tauri::command]
+pub async fn store_gdocs_tokens(
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_at: Option<i64>,
+) -> Result<(), String> {
+    let mut config = GoogleOAuthConfig::load().unwrap_or_default();
+    config.access_token = Some(access_token);
+    config.refresh_token = refresh_token;
+    config.expires_at = expires_at;
+    config.save()?;
     Ok(())
 }
 
 /// Get the Google Docs server URL (for manual MCP connection)
 #[tauri::command]
-pub async fn get_gdocs_server_url(
-    app: tauri::AppHandle,
-) -> Result<Option<String>, String> {
-    let gdocs_state = app.state::<GDocsServerState>();
-    Ok(gdocs_state.url().await)
+pub async fn get_gdocs_server_url() -> Result<Option<String>, String> {
+    // No MCP server - direct API access
+    Ok(None)
 }
 
 /// Google Doc listing item from Drive
@@ -424,99 +434,35 @@ pub struct GoogleDocListItem {
     pub created_time: Option<String>,
 }
 
-/// List Google Docs from Drive via MCP server
+/// List Google Docs from Drive
 #[tauri::command]
 pub async fn list_google_docs(
-    state: State<'_, Arc<AppState>>,
+    _state: State<'_, Arc<AppState>>,
     query: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<GoogleDocListItem>, String> {
-    // Get a cloneable tool caller so we don't hold the lock during the async call
-    let tool_caller = {
-        let mcp_registry = state.get_mcp_registry()?;
-        let registry = mcp_registry.lock().await;
+    let config = GoogleOAuthConfig::load()
+        .ok_or("Google OAuth not configured")?;
 
-        // Find the gdocs server connection and get a cloneable tool caller
-        registry
-            .get_connection("gdocs")
-            .ok_or("Google Docs server not connected. Please authenticate first.")?
-            .tool_caller()
-        // Locks are dropped here when the block ends
-    };
+    let client = config.create_client()
+        .ok_or("Not authenticated with Google. Please sign in first.")?;
 
-    // Build arguments for gdocs_list tool
-    let mut args = serde_json::Map::new();
-    if let Some(q) = query {
-        args.insert("query".to_string(), serde_json::Value::String(q));
-    }
-    args.insert(
-        "limit".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(limit.unwrap_or(20))),
-    );
+    debug!("Calling Google Drive API to list docs, query: {:?}", query);
 
-    debug!("Calling gdocs_list with args: {:?}", args);
-
-    // Call the MCP server (without holding any locks)
-    let result = tool_caller
-        .call_tool("gdocs_list".to_string(), Some(args))
+    let files = client
+        .list_documents(query.as_deref(), limit.unwrap_or(20))
         .await
         .map_err(|e| format!("Failed to list Google Docs: {}", e))?;
 
-    // Check if the result is an error
-    if result.is_error.unwrap_or(false) {
-        let error_text = result
-            .content
-            .first()
-            .and_then(|c| match &c.raw {
-                RawContent::Text(t) => Some(t.text.as_str()),
-                _ => None,
-            })
-            .unwrap_or("Unknown error");
-        return Err(error_text.to_string());
-    }
-
-    // Parse the result - it's a JSON array of documents
-    let content = result
-        .content
-        .first()
-        .ok_or("Empty response from gdocs_list")?;
-
-    let text = match &content.raw {
-        RawContent::Text(text_content) => &text_content.text,
-        _ => return Err("Invalid response format: expected text".to_string()),
-    };
-
-    let docs: Vec<GoogleDocListItem> =
-        serde_json::from_str(text).map_err(|e| format!("Failed to parse response: {}", e))?;
-
-    Ok(docs)
-}
-
-/// Response from gdocs_extract MCP tool
-#[derive(Debug, Deserialize)]
-struct ExtractResponse {
-    doc_id: String,
-    title: String,
-    tabs: Vec<ExtractedTab>,
-    images: Vec<ExtractedImage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExtractedTab {
-    source_tab_id: String,
-    title: String,
-    icon: Option<String>,
-    /// Markdown content for this tab (converted by MCP server from Docs API)
-    content_markdown: String,
-    parent_tab_id: Option<String>,
-    tab_index: i32,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExtractedImage {
-    object_id: String,
-    data_base64: String,
-    mime_type: String,
+    Ok(files
+        .into_iter()
+        .map(|f| GoogleDocListItem {
+            id: f.id,
+            name: f.name,
+            modified_time: f.modified_time,
+            created_time: f.created_time,
+        })
+        .collect())
 }
 
 /// Import a Google Doc into local storage
@@ -547,73 +493,32 @@ pub async fn import_google_doc(
         return Ok(DocumentInfoResponse::from(existing));
     }
 
-    // Get a cloneable tool caller so we don't hold the lock during the async call
-    let tool_caller = {
-        let mcp_registry = state.get_mcp_registry()?;
-        let registry = mcp_registry.lock().await;
+    // Get Google API client
+    let config = GoogleOAuthConfig::load()
+        .ok_or("Google OAuth not configured")?;
+    let client = config.create_client()
+        .ok_or("Not authenticated with Google. Please sign in first.")?;
 
-        registry
-            .get_connection("gdocs")
-            .ok_or("Google Docs server not connected. Please authenticate first.")?
-            .tool_caller()
-        // Locks are dropped here when the block ends
-    };
+    debug!("Extracting Google Doc: {}", google_doc_id);
 
-    // Call the MCP server to extract the document (without holding any locks)
-    let mut args = serde_json::Map::new();
-    args.insert(
-        "doc_id".to_string(),
-        serde_json::Value::String(google_doc_id.clone()),
-    );
-
-    debug!("Calling gdocs_extract for doc: {}", google_doc_id);
-
-    let result = tool_caller
-        .call_tool("gdocs_extract".to_string(), Some(args))
+    // Extract document using GoogleDocsClient
+    let extracted = client
+        .extract_document(&google_doc_id)
         .await
         .map_err(|e| format!("Failed to extract Google Doc: {}", e))?;
 
-    // Check if the result is an error
-    if result.is_error.unwrap_or(false) {
-        let error_text = result
-            .content
-            .first()
-            .and_then(|c| match &c.raw {
-                RawContent::Text(t) => Some(t.text.as_str()),
-                _ => None,
-            })
-            .unwrap_or("Unknown error");
-        return Err(error_text.to_string());
-    }
-
-    let content = result
-        .content
-        .first()
-        .ok_or("Empty response from gdocs_extract")?;
-
-    let text = match &content.raw {
-        RawContent::Text(text_content) => &text_content.text,
-        _ => return Err("Invalid response format: expected text".to_string()),
-    };
-
-    let extract_response: ExtractResponse =
-        serde_json::from_str(text).map_err(|e| format!("Failed to parse extract response: {}", e))?;
-
     info!(
         "Extracted doc '{}' with {} tabs and {} images",
-        extract_response.title,
-        extract_response.tabs.len(),
-        extract_response.images.len()
+        extracted.title,
+        extracted.tabs.len(),
+        extracted.images.len()
     );
-
-    // Store the document and its content
-    // (We already have the stores and user from the check above)
 
     // Create the document
     let doc_id = document_store
         .create_document(
             &user.id,
-            &extract_response.title,
+            &extracted.title,
             DocumentSource::GoogleDrive,
             Some(&google_doc_id),
         )
@@ -623,9 +528,11 @@ pub async fn import_google_doc(
     // Store images first so we can reference them in tabs
     let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
-    for image in &extract_response.images {
+    for image in &extracted.images {
+        // Images come as raw bytes from GoogleDocsClient, encode to base64 for storage
+        let data_base64 = base64::engine::general_purpose::STANDARD.encode(&image.data);
         let asset_id = coordinator
-            .store_asset(&image.data_base64, &image.mime_type)
+            .store_asset(&data_base64, &image.mime_type)
             .await
             .map_err(|e| format!("Failed to store image: {}", e))?;
 
@@ -642,40 +549,18 @@ pub async fn import_google_doc(
         .collect();
 
     // First pass: create all tabs without parent references
-    // Each tab now has its own markdown content from the Docs API structured content
-    // Replace object:OBJECT_ID with asset:BLOB_HASH so frontend can resolve to URLs
-    info!("Processing {} tabs with {} image mappings", extract_response.tabs.len(), image_id_map.len());
-    for tab in &extract_response.tabs {
+    info!("Processing {} tabs with {} image mappings", extracted.tabs.len(), image_id_map.len());
+    for tab in &extracted.tabs {
         let mut content = tab.content_markdown.clone();
 
-        // Debug: log first 500 chars of content to see list formatting
-        if content.contains("- ") {
-            debug!("Tab '{}' markdown sample (first 500 chars):\n{}", tab.title, content.chars().take(500).collect::<String>());
-        }
-
-        // Log if this tab has any image references
-        if content.contains("object:") {
-            info!("Tab '{}' contains object: references", tab.title);
-        }
-        if content.contains("![image]") {
-            info!("Tab '{}' contains ![image] markdown, first 200 chars: {}", tab.title, &content.chars().take(200).collect::<String>());
-        }
-
+        // Replace object:OBJECT_ID with noema-asset:// URLs
         for (object_id, blob_hash) in &image_id_map {
             let object_ref = format!("object:{}", object_id);
-            // Use full noema-asset:// URL so frontend doesn't need to rewrite
             let asset_url = format!("noema-asset://localhost/{}", blob_hash);
             if content.contains(&object_ref) {
                 info!("Replacing {} -> {} in tab '{}'", object_ref, asset_url, tab.title);
             }
             content = content.replace(&object_ref, &asset_url);
-        }
-
-        // Log final state
-        if content.contains("noema-asset://") {
-            info!("Tab '{}' now contains noema-asset:// URLs", tab.title);
-        } else if content.contains("![image]") {
-            info!("Tab '{}' still has ![image] but no noema-asset:// URLs - content sample: {}", tab.title, &content.chars().take(300).collect::<String>());
         }
 
         let source_tab_id = TabId::from_string(tab.source_tab_id.clone());
@@ -697,7 +582,7 @@ pub async fn import_google_doc(
     }
 
     // Second pass: update parent references
-    for tab in &extract_response.tabs {
+    for tab in &extracted.tabs {
         if let Some(parent_source_id) = &tab.parent_tab_id {
             if let (Some(tab_id), Some(parent_id)) = (
                 tab_id_map.get(&tab.source_tab_id),
@@ -744,6 +629,5 @@ pub async fn search_documents(
     Ok(docs.into_iter().map(DocumentInfoResponse::from).collect())
 }
 
-// HTML to Markdown conversion is no longer needed!
-// The MCP server now returns markdown directly from the Google Docs API structured content.
+// Note: GoogleDocsClient returns markdown directly from the Google Docs API structured content.
 // Each tab has its own content_markdown field with proper per-tab markdown.

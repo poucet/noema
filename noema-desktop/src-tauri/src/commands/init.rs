@@ -11,9 +11,10 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::chat::start_event_receiver_loop;
-use crate::gdocs_server::{self, GDocsServerState};
+use crate::core_server::{self, CoreServerState};
 use crate::logging::log_message;
 use crate::state::AppState;
+use noema_core::storage::DocumentResolver;
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {
@@ -78,12 +79,12 @@ async fn do_init(app: AppHandle, state: Arc<AppState>) -> Result<String, String>
     let model_name = init_default_model(&state).await?;
     log_message(&format!("Default model set: {}", model_name));
 
-    // Start embedded Google Docs MCP server
-    start_gdocs_server(&app).await;
-
     // Initialize MCP registry (global, not per-conversation)
     let mcp_registry = init_mcp(&state)?;
     log_message("MCP registry loaded");
+
+    // Start embedded Noema Core MCP server (provides spawn_agent tool)
+    start_core_server(&app, &state, mcp_registry.clone()).await;
 
     // Start auto-connect for MCP servers (runs in background)
     start_mcp_auto_connect(app.clone(), mcp_registry).await;
@@ -96,15 +97,43 @@ async fn do_init(app: AppHandle, state: Arc<AppState>) -> Result<String, String>
     Ok(model_name)
 }
 
-/// Start the embedded Google Docs MCP server
-async fn start_gdocs_server(app: &AppHandle) {
-    let gdocs_state = app.state::<GDocsServerState>();
-    match gdocs_server::start_gdocs_server(&gdocs_state).await {
+/// Start the embedded Noema Core MCP server
+async fn start_core_server(
+    app: &AppHandle,
+    state: &AppState,
+    mcp_registry: Arc<tokio::sync::Mutex<McpRegistry>>,
+) {
+    let core_state = app.state::<CoreServerState>();
+
+    // Get coordinator and document resolver
+    let coordinator = match state.get_coordinator() {
+        Ok(c) => c,
+        Err(e) => {
+            log_message(&format!("Failed to get coordinator for core server: {}", e));
+            return;
+        }
+    };
+
+    let stores = match state.get_stores() {
+        Ok(s) => s,
+        Err(e) => {
+            log_message(&format!("Failed to get stores for core server: {}", e));
+            return;
+        }
+    };
+    let document_resolver: Arc<dyn DocumentResolver> = stores.document();
+
+    match core_server::start_core_server(
+        &core_state,
+        coordinator,
+        mcp_registry,
+        document_resolver,
+    ).await {
         Ok(url) => {
-            log_message(&format!("Google Docs MCP server started at {}", url));
+            log_message(&format!("Noema Core MCP server started at {}", url));
         }
         Err(e) => {
-            log_message(&format!("Failed to start Google Docs server: {}", e));
+            log_message(&format!("Failed to start Noema Core server: {}", e));
         }
     }
 }
