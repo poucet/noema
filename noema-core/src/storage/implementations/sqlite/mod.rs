@@ -22,6 +22,7 @@ mod asset;
 mod conversation;
 mod document;
 mod entity;
+mod reference;
 mod text;
 mod turn;
 mod user;
@@ -31,6 +32,7 @@ pub(crate) use asset::init_schema as init_asset_schema;
 pub(crate) use conversation::init_schema as init_conversation_schema;
 pub(crate) use document::init_schema as init_document_schema;
 pub(crate) use entity::init_schema as init_entity_schema;
+pub(crate) use reference::init_schema as init_reference_schema;
 pub(crate) use text::init_schema as init_text_schema;
 pub(crate) use turn::init_schema as init_turn_schema;
 pub(crate) use user::init_schema as init_user_schema;
@@ -87,6 +89,7 @@ impl SqliteStore {
         init_asset_schema(&conn)?;
         init_document_schema(&conn)?;
         init_text_schema(&conn)?;
+        init_reference_schema(&conn)?;
         Ok(())
     }
 }

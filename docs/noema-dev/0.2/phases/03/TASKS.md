@@ -294,7 +294,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | Status | # | Task |
 |--------|---|------|
 | ✅ | 3.6.1 | 🏗️ Define Reference and EntityRef types |
-| ⬜ | 3.6.2 | 📦 Add references table migration |
+| ✅ | 3.6.2 | 📦 Add references table migration |
 | ⬜ | 3.6.3 | 🏗️ Define ReferenceStore trait |
 | ⬜ | 3.6.4 | ⚡ Implement create and delete |
 | ⬜ | 3.6.5 | ⚡ Implement get_outgoing |
