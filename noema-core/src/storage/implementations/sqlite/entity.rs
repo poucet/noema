@@ -242,6 +242,111 @@ impl EntityStore for SqliteStore {
         Ok(entities)
     }
 
+    async fn list_entities_in_range(
+        &self,
+        user_id: &UserId,
+        start: i64,
+        end: i64,
+        entity_types: Option<&[EntityType]>,
+        limit: Option<u32>,
+    ) -> Result<Vec<StoredEntity>> {
+        let conn = self.conn().lock().unwrap();
+
+        // Build query with optional type filter
+        let (sql, type_filter): (String, Option<Vec<String>>) = match entity_types {
+            Some(types) if !types.is_empty() => {
+                let placeholders: Vec<&str> = types.iter().map(|_| "?").collect();
+                let type_list = placeholders.join(", ");
+                let sql = format!(
+                    r#"
+                    SELECT id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at
+                    FROM entities
+                    WHERE user_id = ?1
+                      AND updated_at >= ?2
+                      AND updated_at <= ?3
+                      AND is_archived = 0
+                      AND entity_type IN ({})
+                    ORDER BY updated_at DESC
+                    {}
+                    "#,
+                    type_list,
+                    limit.map(|l| format!("LIMIT {}", l)).unwrap_or_default()
+                );
+                let types_str: Vec<String> = types.iter().map(|t| t.as_str().to_string()).collect();
+                (sql, Some(types_str))
+            }
+            _ => {
+                let sql = format!(
+                    r#"
+                    SELECT id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at
+                    FROM entities
+                    WHERE user_id = ?1
+                      AND updated_at >= ?2
+                      AND updated_at <= ?3
+                      AND is_archived = 0
+                    ORDER BY updated_at DESC
+                    {}
+                    "#,
+                    limit.map(|l| format!("LIMIT {}", l)).unwrap_or_default()
+                );
+                (sql, None)
+            }
+        };
+
+        let mut stmt = conn.prepare(&sql)?;
+
+        let rows: Vec<(String, String, Option<String>, Option<String>, Option<String>, i32, i32, Option<String>, i64, i64)> = match &type_filter {
+            Some(types) => {
+                let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![
+                    Box::new(user_id.as_str().to_string()),
+                    Box::new(start),
+                    Box::new(end),
+                ];
+                for t in types {
+                    params_vec.push(Box::new(t.clone()));
+                }
+                let params_refs: Vec<&dyn rusqlite::ToSql> =
+                    params_vec.iter().map(|p| p.as_ref()).collect();
+
+                stmt.query_map(params_refs.as_slice(), |row| {
+                    Ok((
+                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
+                        row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            }
+            None => stmt
+                .query_map(params![user_id.as_str(), start, end], |row| {
+                    Ok((
+                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
+                        row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect(),
+        };
+
+        let entities = rows
+            .into_iter()
+            .map(|(id, entity_type, user_id, name, slug, is_private, is_archived, metadata, created_at, updated_at)| {
+                let entity = Entity {
+                    entity_type: EntityType::new(entity_type),
+                    user_id: user_id.map(UserId::from_string),
+                    name,
+                    slug,
+                    is_private: is_private != 0,
+                    is_archived: is_archived != 0,
+                    metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
+                };
+                stored_editable(EntityId::from_string(id), entity, created_at, updated_at)
+            })
+            .collect();
+
+        Ok(entities)
+    }
+
     async fn update_entity(&self, id: &EntityId, entity: &Entity) -> Result<()> {
         let conn = self.conn().lock().unwrap();
         let now = unix_timestamp();

@@ -47,6 +47,26 @@ pub trait EntityStore: Send + Sync {
         entity_type: Option<&EntityType>,
     ) -> Result<Vec<StoredEntity>>;
 
+    /// List entities updated within a time range
+    ///
+    /// Returns entities ordered by `updated_at` descending (most recent first).
+    /// Excludes archived entities.
+    ///
+    /// # Arguments
+    /// - `user_id`: Scope to this user's entities
+    /// - `start`: Start of time range (unix timestamp ms, inclusive)
+    /// - `end`: End of time range (unix timestamp ms, inclusive)
+    /// - `entity_types`: Filter to specific types (None = all types)
+    /// - `limit`: Maximum results (None = no limit)
+    async fn list_entities_in_range(
+        &self,
+        user_id: &UserId,
+        start: i64,
+        end: i64,
+        entity_types: Option<&[EntityType]>,
+        limit: Option<u32>,
+    ) -> Result<Vec<StoredEntity>>;
+
     /// Update an entity's mutable fields
     ///
     /// Updates name, slug, is_private, is_archived. Entity type cannot be changed.

@@ -9,7 +9,6 @@ mod collection;
 mod document;
 mod entity;
 mod reference;
-mod temporal;
 mod text;
 mod turn;
 mod user;
@@ -20,7 +19,6 @@ pub use collection::{CollectionStore, ItemField, StoredCollection, StoredCollect
 pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use entity::{EntityStore, StoredEntity};
 pub use reference::{ReferenceStore, StoredReference};
-pub use temporal::TemporalStore;
 pub use text::{TextStore, StoredTextBlock};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage, StoredView};
 pub use user::{StoredUser, UserStore};

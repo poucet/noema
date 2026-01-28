@@ -3,10 +3,10 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.7"
-feature_name: "Temporal queries"
-task: "3.7.6"
-task_name: "Unit tests for temporal queries"
+feature: "3.8"
+feature_name: "Manual testing"
+task: "3.8.1"
+task_name: "Verify can see all alternatives, select any one"
 
 # Completed
 completed_features:
@@ -18,3 +18,4 @@ completed_features:
   - "3.4"   # Document structure - Documents with tabs and revision history (code complete)
   - "3.5"   # Collections - Tree organization with tags and fields (code complete)
   - "3.6"   # Cross-references - Entity linking with backlinks (code complete)
+  - "3.7"   # Temporal queries - Time-based entity queries (entities table only)

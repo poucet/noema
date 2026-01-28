@@ -18,7 +18,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P1 | 3.4 | Document structure | Documents with tabs and revision history |
 | ✅ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
 | ✅ | P1 | 3.5 | Collections | Tree organization with tags and fields |
-| ⬜ | P2 | 3.7 | Temporal queries | Time-based activity summaries for LLM context |
+| ✅ | P2 | 3.7 | Temporal queries | Time-based entity queries (entities table only) |
 | ⬜ | P2 | 3.8 | Manual testing | End-of-phase verification checkpoint |
 
 Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
