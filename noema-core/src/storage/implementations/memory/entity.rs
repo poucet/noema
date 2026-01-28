@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use crate::storage::ids::{EntityId, UserId};
 use crate::storage::traits::{EntityStore, StoredEntity};
-use crate::storage::types::entity::{Entity, EntityRelation, EntityType, RelationType};
+use crate::storage::types::entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 use crate::storage::types::stored_editable;
 
 fn now() -> i64 {
@@ -138,6 +138,31 @@ impl EntityStore for MemoryEntityStore {
             .map(|e| e.to_stored())
             .collect();
         result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(result)
+    }
+
+    async fn list_entities_in_range(
+        &self,
+        user_id: &UserId,
+        query: &EntityRangeQuery,
+    ) -> Result<Vec<StoredEntity>> {
+        let entities = self.entities.lock().unwrap();
+        let mut result: Vec<_> = entities
+            .values()
+            .filter(|e| e.user_id.as_ref() == Some(user_id))
+            .filter(|e| !e.is_archived)
+            .filter(|e| {
+                query.entity_types.as_ref().map_or(true, |types| {
+                    types.iter().any(|t| &e.entity_type == t)
+                })
+            })
+            .filter(|e| e.updated_at >= query.start && e.updated_at <= query.end)
+            .map(|e| e.to_stored())
+            .collect();
+        result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        if let Some(limit) = query.limit {
+            result.truncate(limit as usize);
+        }
         Ok(result)
     }
 

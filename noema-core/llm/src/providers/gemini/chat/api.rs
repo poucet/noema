@@ -412,7 +412,20 @@ const UNSUPPORTED_SCHEMA_KEYS: &[&str] = &[
     "$dynamicAnchor",
     "$vocabulary",
     "$comment",
+    "additionalProperties",
+    "default",
+    "examples",
+    "format",
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "pattern",
+    "uniqueItems",
+    "minItems",
+    "maxItems",
     // Note: $ref and $defs are handled specially - $ref is resolved, then both are removed
+    // Note: anyOf/oneOf/allOf are handled specially - first option is used
 ];
 
 /// Sanitize a JSON Schema for Gemini API compatibility.
@@ -461,33 +474,83 @@ fn sanitize_schema_recursive(
         return serde_json::json!({});
     }
 
+    // Handle anyOf/oneOf/allOf - take the first option and merge with parent
+    // This is a simplification but handles common cases like optional types
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(variants) = obj.get(key) {
+            if let Some(arr) = variants.as_array() {
+                // Find first non-null variant
+                for variant in arr {
+                    if let Some(variant_obj) = variant.as_object() {
+                        // Skip null types (used for optional fields)
+                        if variant_obj.get("type") == Some(&serde_json::json!("null")) {
+                            continue;
+                        }
+                        // Use this variant, but merge any other keys from parent
+                        let mut merged = variant_obj.clone();
+                        for (k, v) in &obj {
+                            if k != key && !merged.contains_key(k) {
+                                merged.insert(k.clone(), v.clone());
+                            }
+                        }
+                        return sanitize_schema_recursive(serde_json::Value::Object(merged), defs);
+                    }
+                }
+            }
+        }
+    }
+
     // Build new object without unsupported keys
     let mut result = serde_json::Map::new();
     for (key, value) in obj {
         // Skip unsupported keys
         // Note: "definitions" is JSON Schema draft 4-7, "$defs" is draft 2019-09+
+        // Note: anyOf/oneOf/allOf are handled above
         if UNSUPPORTED_SCHEMA_KEYS.contains(&key.as_str())
             || key == "$defs"
             || key == "definitions"
             || key == "$ref"
+            || key == "anyOf"
+            || key == "oneOf"
+            || key == "allOf"
         {
             continue;
         }
 
-        let sanitized_value = match value {
-            serde_json::Value::Object(_) => sanitize_schema_recursive(value, defs),
-            serde_json::Value::Array(arr) => serde_json::Value::Array(
-                arr.into_iter()
-                    .map(|item| {
-                        if item.is_object() {
-                            sanitize_schema_recursive(item, defs)
-                        } else {
-                            item
-                        }
-                    })
-                    .collect(),
-            ),
-            other => other,
+        // Gemini expects UPPERCASE type names (STRING, INTEGER, etc.)
+        // Also handle array types like ["string", "null"] by picking first non-null
+        let sanitized_value = if key == "type" {
+            match &value {
+                serde_json::Value::String(t) => {
+                    serde_json::Value::String(t.to_uppercase())
+                }
+                serde_json::Value::Array(arr) => {
+                    // Find first non-null type
+                    let first_type = arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .find(|t| *t != "null")
+                        .unwrap_or("string");
+                    serde_json::Value::String(first_type.to_uppercase())
+                }
+                _ => value,
+            }
+        } else {
+            match value {
+                serde_json::Value::Object(_) => sanitize_schema_recursive(value, defs),
+                serde_json::Value::Array(arr) => serde_json::Value::Array(
+                    arr.into_iter()
+                        .map(|item| {
+                            if item.is_object() {
+                                sanitize_schema_recursive(item, defs)
+                            } else {
+                                item
+                            }
+                        })
+                        .collect(),
+                ),
+                other => other,
+            }
         };
         result.insert(key, sanitized_value);
     }

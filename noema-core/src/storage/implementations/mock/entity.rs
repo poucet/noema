@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::storage::ids::{EntityId, UserId};
 use crate::storage::traits::{EntityStore, StoredEntity};
-use crate::storage::types::entity::{EntityRelation, EntityType, RelationType};
+use crate::storage::types::entity::{EntityRangeQuery, EntityRelation, EntityType, RelationType};
 
 /// Mock entity store that returns unimplemented for all operations
 pub struct MockEntityStore;
@@ -22,6 +22,9 @@ impl EntityStore for MockEntityStore {
         unimplemented!()
     }
     async fn list_entities(&self, _: &UserId, _: Option<&EntityType>) -> Result<Vec<StoredEntity>> {
+        unimplemented!()
+    }
+    async fn list_entities_in_range(&self, _: &UserId, _: &EntityRangeQuery) -> Result<Vec<StoredEntity>> {
         unimplemented!()
     }
     async fn update_entity(&self, _: &EntityId, _: &crate::storage::types::Entity) -> Result<()> {
