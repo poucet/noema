@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.5"
 feature_name: "Collections"
-task: "3.5.4"
-task_name: "Add item_fields table migration"
+task: "3.5.7"
+task_name: "Define CollectionStore trait"
 
 # Completed
 completed_features:
