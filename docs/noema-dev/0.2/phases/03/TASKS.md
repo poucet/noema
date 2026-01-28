@@ -298,7 +298,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.6.3 | 🏗️ Define ReferenceStore trait |
 | ✅ | 3.6.4 | ⚡ Implement create and delete |
 | ✅ | 3.6.5 | ⚡ Implement get_outgoing |
-| ⬜ | 3.6.6 | ⚡ Implement get_backlinks |
+| ✅ | 3.6.6 | ⚡ Implement get_backlinks |
 | ⬜ | 3.6.7 | ✅ Unit tests for references |
 
 ### 3.7 Temporal Queries (6 tasks)

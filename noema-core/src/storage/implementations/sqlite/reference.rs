@@ -152,16 +152,40 @@ impl ReferenceStore for SqliteStore {
         Ok(refs)
     }
 
-    async fn get_backlinks(&self, _entity_id: &EntityId) -> Result<Vec<StoredReference>> {
-        todo!("Implement in 3.6.6")
+    async fn get_backlinks(&self, entity_id: &EntityId) -> Result<Vec<StoredReference>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
+             FROM references WHERE to_entity_id = ?1
+             ORDER BY created_at DESC"
+        )?;
+
+        let refs = stmt
+            .query_map(params![entity_id.as_str()], parse_reference)?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(refs)
     }
 
     async fn get_backlinks_by_type(
         &self,
-        _entity_id: &EntityId,
-        _relation_type: &RelationType,
+        entity_id: &EntityId,
+        relation_type: &RelationType,
     ) -> Result<Vec<StoredReference>> {
-        todo!("Implement in 3.6.6")
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, from_entity_id, to_entity_id, relation_type, context, created_at
+             FROM references WHERE to_entity_id = ?1 AND relation_type = ?2
+             ORDER BY created_at DESC"
+        )?;
+
+        let refs = stmt
+            .query_map(params![entity_id.as_str(), relation_type.as_str()], parse_reference)?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(refs)
     }
 
     async fn reference_exists(

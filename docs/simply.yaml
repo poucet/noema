@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.6"
 feature_name: "Cross-references"
-task: "3.6.6"
-task_name: "Implement get_backlinks"
+task: "3.6.7"
+task_name: "Unit tests for references"
 
 # Completed
 completed_features:
