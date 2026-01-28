@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 
 // Submodules with trait implementations
 mod asset;
+mod collection;
 mod conversation;
 mod document;
 mod entity;
@@ -29,6 +30,7 @@ mod user;
 
 // Re-export init_schema functions for use in SqliteStore::init_schema
 pub(crate) use asset::init_schema as init_asset_schema;
+pub(crate) use collection::init_schema as init_collection_schema;
 pub(crate) use conversation::init_schema as init_conversation_schema;
 pub(crate) use document::init_schema as init_document_schema;
 pub(crate) use entity::init_schema as init_entity_schema;
@@ -90,6 +92,7 @@ impl SqliteStore {
         init_document_schema(&conn)?;
         init_text_schema(&conn)?;
         init_reference_schema(&conn)?;
+        init_collection_schema(&conn)?;
         Ok(())
     }
 }

@@ -19,7 +19,7 @@ Phase 3 establishes the **Unified Content Model** - separating immutable content
 | ✅ | P1 | 3.6 | Cross-references | Links between any entities with backlinks |
 | ⬜ | P1 | 3.5 | Collections | Tree organization with tags and fields |
 | ⬜ | P2 | 3.7 | Temporal queries | Time-based activity summaries for LLM context |
-| ⬜ | P2 | 3.45 | Manual testing | End-of-phase verification checkpoint |
+| ⬜ | P2 | 3.8 | Manual testing | End-of-phase verification checkpoint |
 
 Status: ⬜ todo, 🔄 in-progress, ✅ done, 🚫 blocked, ⏸️ deferred
 
@@ -256,19 +256,19 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.4.9 | ⚡ Implement promote_from_message |
 | ✅ | 3.4.10 | ✅ Unit tests for document structure (in memory store) |
 
-### 3.45 Manual Testing Checkpoint (7 tasks)
+### 3.8 Manual Testing Checkpoint (7 tasks)
 
-**Goal**: Consolidated manual verification of 3.3, 3.3b, 3.4, and 3.6 before continuing to Collections.
+**Goal**: Consolidated manual verification of all Phase 3 features.
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.45.1 | ✅ User: Verify can see all alternatives, select any one (from 3.3.F6) |
-| ⬜ | 3.45.2 | 🔧 User: SQL verify views, view_selections, entities have correct data (from 3.3.F7) |
-| ⬜ | 3.45.3 | ✅ User: Fresh install E2E - all conversation features work (from 3.3.F8) |
-| ⬜ | 3.45.4 | ✅ User: Entity layer - views are entities, forks use relations (from 3.3.F9) |
-| ⬜ | 3.45.5 | ✅ User: Verify subconversation runs, result appears in parent (from 3.3b.5) |
-| ⬜ | 3.45.6 | ✅ User: Document CRUD - create, tabs, revisions work in app |
-| ⬜ | 3.45.7 | ✅ User: Cross-references - create refs, verify backlinks work |
+| ⬜ | 3.8.1 | ✅ User: Verify can see all alternatives, select any one (from 3.3.F6) |
+| ⬜ | 3.8.2 | 🔧 User: SQL verify views, view_selections, entities have correct data (from 3.3.F7) |
+| ⬜ | 3.8.3 | ✅ User: Fresh install E2E - all conversation features work (from 3.3.F8) |
+| ⬜ | 3.8.4 | ✅ User: Entity layer - views are entities, forks use relations (from 3.3.F9) |
+| ⬜ | 3.8.5 | ✅ User: Verify subconversation runs, result appears in parent (from 3.3b.5) |
+| ⬜ | 3.8.6 | ✅ User: Document CRUD - create, tabs, revisions work in app |
+| ⬜ | 3.8.7 | ✅ User: Cross-references - create refs, verify backlinks work |
 
 ---
 
@@ -277,7 +277,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | Status | # | Task |
 |--------|---|------|
 | ✅ | 3.5.1 | 🏗️ Define Collection, Item, View types |
-| ⬜ | 3.5.2 | 📦 Add collections table migration |
+| ✅ | 3.5.2 | 📦 Add collections table migration |
 | ⬜ | 3.5.3 | 📦 Add collection_items table migration |
 | ⬜ | 3.5.4 | 📦 Add item_fields table migration |
 | ⬜ | 3.5.5 | 📦 Add item_tags table migration |
