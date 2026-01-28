@@ -11,6 +11,7 @@ pub mod document;
 pub mod entity;
 pub mod reference;
 pub mod stored;
+pub mod temporal;
 pub mod user;
 
 // Re-exports for convenience
@@ -29,4 +30,5 @@ pub use collection::{
 };
 pub use reference::{EntityRef, Reference};
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
+pub use temporal::{ActivitySummary, ContentKind, ContentPreview, TemporalEntity, TemporalQuery};
 pub use user::User;
