@@ -3,10 +3,10 @@ version: "0.2"
 phase: "03"
 
 # Current Progress
-feature: "3.45"
-feature_name: "Manual Testing Checkpoint"
-task: "3.45.1"
-task_name: "Verify can see all alternatives, select any one"
+feature: "3.5"
+feature_name: "Collections"
+task: "3.5.1"
+task_name: "Define Collection, Item, View types"
 
 # Completed
 completed_features:
