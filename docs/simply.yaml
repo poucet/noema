@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.6"
 feature_name: "Cross-references"
-task: "3.6.4"
-task_name: "Implement create and delete"
+task: "3.6.5"
+task_name: "Implement get_outgoing"
 
 # Completed
 completed_features:
