@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.5"
 feature_name: "Collections"
-task: "3.5.1"
-task_name: "Define Collection, Item, View types"
+task: "3.5.2"
+task_name: "Add collections table migration"
 
 # Completed
 completed_features:

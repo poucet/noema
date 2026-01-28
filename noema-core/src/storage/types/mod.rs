@@ -4,6 +4,7 @@
 
 pub mod asset;
 pub mod blob;
+pub mod collection;
 pub mod content_block;
 pub mod conversation;
 pub mod document;
@@ -22,6 +23,10 @@ pub use conversation::{
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
 pub use entity::{Entity, EntityRelation, EntityType, RelationType};
+pub use collection::{
+    Collection, CollectionItem, CollectionView, FieldDefinition, FieldType,
+    ItemTarget, ViewConfig, ViewType,
+};
 pub use reference::{EntityRef, Reference};
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
 pub use user::User;

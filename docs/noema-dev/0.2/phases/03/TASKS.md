@@ -276,7 +276,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.5.1 | 🏗️ Define Collection, Item, View types |
+| ✅ | 3.5.1 | 🏗️ Define Collection, Item, View types |
 | ⬜ | 3.5.2 | 📦 Add collections table migration |
 | ⬜ | 3.5.3 | 📦 Add collection_items table migration |
 | ⬜ | 3.5.4 | 📦 Add item_fields table migration |
