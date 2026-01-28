@@ -8,6 +8,7 @@ pub mod content_block;
 pub mod conversation;
 pub mod document;
 pub mod entity;
+pub mod reference;
 pub mod stored;
 pub mod user;
 
@@ -21,5 +22,6 @@ pub use conversation::{
 };
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
 pub use entity::{Entity, EntityRelation, EntityType, RelationType};
+pub use reference::{EntityRef, Reference};
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
 pub use user::User;

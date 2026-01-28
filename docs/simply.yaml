@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.6"
 feature_name: "Cross-references"
-task: "3.6.1"
-task_name: "Define Reference and EntityRef types"
+task: "3.6.2"
+task_name: "Add references table migration"
 
 # Completed
 completed_features:
