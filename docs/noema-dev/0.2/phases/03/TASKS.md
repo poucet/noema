@@ -305,7 +305,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 
 | Status | # | Task |
 |--------|---|------|
-| ⬜ | 3.7.1 | 📦 Add temporal indexes to tables |
+| ✅ | 3.7.1 | 📦 Add temporal indexes to tables |
 | ⬜ | 3.7.2 | 🏗️ Define TemporalStore trait |
 | ⬜ | 3.7.3 | ⚡ Implement query_by_time_range |
 | ⬜ | 3.7.4 | ⚡ Implement get_activity_summary |

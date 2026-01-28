@@ -5,8 +5,8 @@ phase: "03"
 # Current Progress
 feature: "3.7"
 feature_name: "Temporal queries"
-task: "3.7.1"
-task_name: "Add temporal indexes to tables"
+task: "3.7.2"
+task_name: "Define TemporalStore trait"
 
 # Completed
 completed_features:
