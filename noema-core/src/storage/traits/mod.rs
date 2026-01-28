@@ -4,6 +4,7 @@
 
 mod asset;
 mod blob;
+mod collection;
 mod conversation;
 mod document;
 mod entity;
@@ -14,6 +15,7 @@ mod user;
 
 pub use asset::{AssetStore, StoredAsset};
 pub use blob::BlobStore;
+pub use collection::{CollectionStore, ItemField, StoredCollection, StoredCollectionItem, StoredCollectionView, StoredItemField};
 pub use conversation::{ConversationStore, StoredConversation};
 pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use entity::{EntityStore, StoredEntity};
@@ -62,6 +64,8 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Entity: EntityStore + Send + Sync;
     /// Reference storage (cross-references between entities)
     type Reference: ReferenceStore + Send + Sync;
+    /// Collection storage (organizing entities into collections)
+    type Collection: CollectionStore + Send + Sync;
 }
 
 use std::sync::Arc;
@@ -100,4 +104,6 @@ pub trait Stores<S: StorageTypes>: Send + Sync {
     fn entity(&self) -> Arc<S::Entity>;
     /// Cross-reference storage
     fn reference(&self) -> Arc<S::Reference>;
+    /// Collection storage
+    fn collection(&self) -> Arc<S::Collection>;
 }

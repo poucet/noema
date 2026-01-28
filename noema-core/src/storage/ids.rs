@@ -116,6 +116,8 @@ define_id!(RevisionId, "Unique identifier for a tab revision");
 // Collections
 define_id!(CollectionId, "Unique identifier for a collection");
 define_id!(CollectionItemId, "Unique identifier for a collection item");
+define_id!(CollectionViewId, "Unique identifier for a collection view");
+define_id!(ItemFieldId, "Unique identifier for a field on a collection item");
 
 // References
 define_id!(ReferenceId, "Unique identifier for a cross-reference");

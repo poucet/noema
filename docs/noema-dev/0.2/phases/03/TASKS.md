@@ -282,7 +282,7 @@ Main:  Turn 1 → Turn 2 (ToolCall: spawn_agent)
 | ✅ | 3.5.4 | 📦 Add item_fields table migration |
 | ✅ | 3.5.5 | 📦 Add item_tags table migration |
 | ✅ | 3.5.6 | 📦 Add collection_views table migration |
-| ⬜ | 3.5.7 | 🏗️ Define CollectionStore trait |
+| ✅ | 3.5.7 | 🏗️ Define CollectionStore trait |
 | ⬜ | 3.5.8 | ⚡ Implement collection CRUD |
 | ⬜ | 3.5.9 | ⚡ Implement item management |
 | ⬜ | 3.5.10 | ⚡ Implement field and tag operations |
