@@ -238,10 +238,8 @@ pub enum ResolvedContent {
 /// Content as received from UI, before storage processing
 ///
 /// This is what Tauri/UI sends when the user submits a message.
-/// Session converts this to `StoredContent` by:
-/// - Storing text in content_blocks → TextRef
-/// - Storing base64 image/audio in blob storage → AssetRef
-/// - Passing through document refs and existing asset refs
+/// Converted to `ContentBlock` for pending messages, then stored
+/// during `Session::commit()` via `StorageCoordinator::add_message()`.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum InputContent {
@@ -268,6 +266,45 @@ pub enum InputContent {
         #[serde(rename = "mimeType")]
         mime_type: String,
     },
+}
+
+impl InputContent {
+    /// Convert to a ContentBlock for use in pending messages.
+    ///
+    /// Most variants convert directly without any I/O. `AssetRef` resolves
+    /// the existing asset data (read-only) so the block is ready for the LLM.
+    pub async fn into_content_block<R: ContentResolver>(
+        self,
+        resolver: &R,
+    ) -> Result<ContentBlock> {
+        match self {
+            InputContent::Text { text } => Ok(ContentBlock::Text { text }),
+            InputContent::Image { data, mime_type } => Ok(ContentBlock::Image { data, mime_type }),
+            InputContent::Audio { data, mime_type } => Ok(ContentBlock::Audio { data, mime_type }),
+            InputContent::DocumentRef { id } => Ok(ContentBlock::DocumentRef {
+                id: id.to_string(),
+            }),
+            InputContent::AssetRef {
+                asset_id,
+                mime_type,
+            } => {
+                // Already stored — resolve to get binary data for the LLM
+                let (data, _) = resolver.get_asset(&asset_id).await?;
+                let encoded = STANDARD.encode(&data);
+                if mime_type.starts_with("audio/") {
+                    Ok(ContentBlock::Audio {
+                        data: encoded,
+                        mime_type,
+                    })
+                } else {
+                    Ok(ContentBlock::Image {
+                        data: encoded,
+                        mime_type,
+                    })
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
