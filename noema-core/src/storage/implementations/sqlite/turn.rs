@@ -573,7 +573,7 @@ fn insert_message_content(
             } => {
                 conn.execute(
                     "INSERT INTO message_content (id, message_id, sequence_number, content_type, asset_id, mime_type)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         content_id,
                         message_id,
