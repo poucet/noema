@@ -47,10 +47,11 @@ export async function clearHistory(): Promise<void> {
 }
 
 export async function setModel(
+  conversationId: string,
   modelId: string,
   provider: string
 ): Promise<string> {
-  return invoke<string>("set_model", { modelId, provider });
+  return invoke<string>("set_model", { conversationId, modelId, provider });
 }
 
 export async function listModels(): Promise<ModelInfo[]> {

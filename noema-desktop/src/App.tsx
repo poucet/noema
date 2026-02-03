@@ -488,7 +488,7 @@ function App() {
 
   const handleSelectModel = async (modelId: string, provider: string) => {
     try {
-      await tauri.setModel(modelId, provider);
+      await tauri.setModel(currentConversationId, modelId, provider);
       setCurrentModelId(`${provider}/${modelId}`);
     } catch (err) {
       appLog.error("Select model error", String(err));
