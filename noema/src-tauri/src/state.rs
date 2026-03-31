@@ -2,73 +2,24 @@
 
 use simply_audio::BrowserAudioController;
 use simply_audio::VoiceCoordinator;
-use simply_daemon::types::{
-    ConversationId, FsBlobStore, McpRegistry, SqliteStore,
-    StorageCoordinator, StorageTypes, Stores, UserId,
-};
 use simply_daemon::embedded::EmbeddedDaemon;
+use simply_daemon::storage::SqliteStorage;
+use simply_daemon::types::ConversationId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
 
-pub struct AppStorage;
-
-impl StorageTypes for AppStorage {
-    type Blob = FsBlobStore;
-    type Asset = SqliteStore;
-    type Text = SqliteStore;
-    type Turn = SqliteStore;
-    type User = SqliteStore;
-    type Document = SqliteStore;
-    type Entity = SqliteStore;
-    type Reference = SqliteStore;
-    type Collection = SqliteStore;
-}
-
-pub struct AppStores {
-    sqlite: Arc<SqliteStore>,
-    blob: Arc<FsBlobStore>,
-}
-
-impl AppStores {
-    pub fn new(sqlite: Arc<SqliteStore>, blob: Arc<FsBlobStore>) -> Self {
-        Self { sqlite, blob }
-    }
-}
-
-impl Stores<AppStorage> for AppStores {
-    fn turn(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn user(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn document(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn blob(&self) -> Arc<FsBlobStore> { self.blob.clone() }
-    fn asset(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn text(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn entity(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn reference(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn collection(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-}
-
-pub type AppCoordinator = StorageCoordinator<AppStorage>;
-pub type AppDaemon = EmbeddedDaemon<AppStorage>;
+pub type AppDaemon = EmbeddedDaemon<SqliteStorage>;
 
 pub struct AppState {
-    /// Storage stores — needed by gdocs/mcp commands that bypass the daemon
-    stores: OnceCell<AppStores>,
-    /// Storage coordinator — needed by gdocs commands
-    pub coordinator: OnceCell<Arc<AppCoordinator>>,
-    /// The daemon — primary API for sessions, conversations, models
+    /// The daemon — primary API for everything
     pub daemon: OnceCell<Arc<AppDaemon>>,
-    /// MCP registry — shared between daemon and MCP config commands
-    pub mcp_registry: OnceCell<Arc<Mutex<McpRegistry>>>,
-    pub user_id: Mutex<UserId>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
     pub voice_conversation: Mutex<Option<ConversationId>>,
     pub processing: Mutex<HashMap<ConversationId, bool>>,
-    /// Active event forwarder tasks per session
     pub forwarders: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub pending_oauth_states: Mutex<HashMap<String, String>>,
     pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
-    pub init_lock: std::sync::Mutex<bool>,
 }
 
 impl AppState {
@@ -76,40 +27,22 @@ impl AppState {
         let pending_states = load_pending_oauth_states().unwrap_or_default();
 
         Self {
-            stores: OnceCell::new(),
-            coordinator: OnceCell::new(),
             daemon: OnceCell::new(),
-            mcp_registry: OnceCell::new(),
-            user_id: Mutex::new(UserId::new()),
             voice_coordinator: Mutex::new(None),
             voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),
             forwarders: Mutex::new(HashMap::new()),
             pending_oauth_states: Mutex::new(pending_states),
             browser_audio_controller: Mutex::new(None),
-            init_lock: std::sync::Mutex::new(false),
         }
-    }
-
-    /// Direct store access (for gdocs/mcp commands that bypass the daemon)
-    pub fn get_stores(&self) -> Result<&AppStores, String> {
-        self.stores.get().ok_or_else(|| "Storage not initialized".to_string())
-    }
-
-    pub fn init_stores(&self, stores: AppStores) -> Result<(), String> {
-        self.stores.set(stores).map_err(|_| "Stores already initialized".to_string())
-    }
-
-    pub fn get_coordinator(&self) -> Result<Arc<AppCoordinator>, String> {
-        self.coordinator.get().cloned().ok_or_else(|| "Storage not initialized".to_string())
     }
 
     pub fn get_daemon(&self) -> Result<Arc<AppDaemon>, String> {
         self.daemon.get().cloned().ok_or_else(|| "Daemon not initialized".to_string())
     }
 
-    pub fn get_mcp_registry(&self) -> Result<Arc<Mutex<McpRegistry>>, String> {
-        self.mcp_registry.get().cloned().ok_or_else(|| "MCP registry not initialized".to_string())
+    pub fn is_initialized(&self) -> bool {
+        self.daemon.get().is_some()
     }
 
     pub async fn is_processing(&self, conversation_id: &ConversationId) -> bool {

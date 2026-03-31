@@ -11,6 +11,7 @@
 pub mod api;
 pub mod embedded;
 pub mod mcp;
+pub mod storage;
 
 /// Re-exported types for clients.
 pub use api::types as types;
