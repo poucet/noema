@@ -8,6 +8,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------
 // Identifiers
@@ -157,6 +158,14 @@ pub struct SessionInfo {
 // Voice types
 // ---------------------------------------------------------------------------
 
+/// A frame of audio data. PCM format details (sample rate, channels) are
+/// negotiated at voice_connect time.
+#[derive(Debug, Clone)]
+pub struct AudioFrame {
+    /// Raw PCM samples (f32, mono, 16kHz by convention).
+    pub samples: Vec<f32>,
+}
+
 /// Voice session state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VoiceState {
@@ -164,6 +173,25 @@ pub enum VoiceState {
     Listening,
     Processing,
     Speaking,
+}
+
+/// Events from the daemon's voice pipeline back to the client.
+#[derive(Debug, Clone)]
+pub enum VoiceEvent {
+    /// Daemon detected speech and transcribed it.
+    Transcription(String),
+    /// TTS audio to play on the client's output device.
+    AudioOut(AudioFrame),
+    /// Voice pipeline state changed.
+    StateChanged(VoiceState),
+}
+
+/// Handle returned by `voice_connect`. Dropping it disconnects the voice session.
+pub struct VoiceHandle {
+    /// Send mic audio into the daemon's STT pipeline.
+    pub audio_in: mpsc::Sender<AudioFrame>,
+    /// Receive transcriptions and TTS audio from the daemon.
+    pub events: mpsc::Receiver<VoiceEvent>,
 }
 
 // ---------------------------------------------------------------------------
@@ -245,13 +273,14 @@ pub trait DaemonApi: Send + Sync {
 
     // -- Voice ---------------------------------------------------------------
 
-    /// Start a voice session (STT listening). Audio transport is platform-specific
-    /// and handled outside this API — this controls the daemon-side pipeline.
-    async fn voice_start(&self, session_id: &str) -> anyhow::Result<()>;
-
-    /// Stop the voice session.
-    async fn voice_stop(&self, session_id: &str) -> anyhow::Result<()>;
-
-    /// Get current voice state for a session.
-    async fn voice_state(&self, session_id: &str) -> anyhow::Result<VoiceState>;
+    /// Connect a voice stream to a session. Returns a handle with:
+    /// - `audio_in`: send mic PCM frames into the daemon's STT pipeline
+    /// - `events`: receive transcriptions, TTS audio frames, and state changes
+    ///
+    /// The client is responsible for platform-specific audio capture/playback
+    /// (CPAL on desktop, songbird on Discord, WebRTC in browser) and converting
+    /// to/from the common PCM format. The daemon handles STT, LLM, and TTS.
+    ///
+    /// Drop the handle to disconnect voice.
+    async fn voice_connect(&self, session_id: &str) -> anyhow::Result<VoiceHandle>;
 }
