@@ -1125,7 +1125,7 @@ CREATE TABLE agent_templates (
 
 ## Extension Points
 
-UCM provides hooks for future systems (temporality, dynamic content, automation) without coupling to specific implementations. See [HOOK_SYSTEM.md](HOOK_SYSTEM.md) for the full design.
+UCM provides hooks for future systems (temporality, dynamic content, automation) without coupling to specific implementations. See [v1.0 DESIGN.md — Event & Intent System](../../v1.0/DESIGN.md#event--intent-system) for the current design (supersedes the original [Hook System](obsolete/HOOK_SYSTEM.md)).
 
 ### EP-1: Event Emission
 

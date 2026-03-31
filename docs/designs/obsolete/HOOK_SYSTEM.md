@@ -1,8 +1,13 @@
 # Hook System
 
-**Status:** Draft
+**Status:** Superseded
 **Created:** 2026-01-10
+**Superseded by:** [v1.0 DESIGN.md — Event & Intent System](../../v1.0/DESIGN.md#event--intent-system)
 **Related:** [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md)
+
+---
+
+> **Note:** This design has been superseded by the Event & Intent System in the v1.0 Simply Platform design. The core ideas (content-driven events, extensible event types, pattern→action binding) evolved into a more capable system with compiled Action ASTs, compound triggers, late-binding expressions, and multi-platform event sources. This document is preserved for historical context.
 
 ---
 

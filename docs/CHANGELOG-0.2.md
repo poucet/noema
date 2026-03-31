@@ -141,5 +141,5 @@ UI for documents, references, and subconversations also deferred.
 ## Design Documents
 
 - [designs/UNIFIED_CONTENT_MODEL.md](designs/UNIFIED_CONTENT_MODEL.md) - Detailed UCM specification
-- [designs/HOOK_SYSTEM.md](designs/HOOK_SYSTEM.md) - Event-driven automation (future)
-- [designs/ARCHITECTURE.md](designs/ARCHITECTURE.md) - System architecture
+- [designs/obsolete/HOOK_SYSTEM.md](designs/obsolete/HOOK_SYSTEM.md) - Event-driven automation (superseded by Event & Intent System)
+- [designs/obsolete/ARCHITECTURE-0.2.md](designs/obsolete/ARCHITECTURE-0.2.md) - Noema 0.2 architecture
