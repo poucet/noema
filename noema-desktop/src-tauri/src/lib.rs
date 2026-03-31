@@ -185,25 +185,6 @@ pub fn run() {
             commands::chat::get_model_name,
             commands::chat::get_favorite_models,
             commands::chat::toggle_favorite_model,
-            // Turn/Span commands (Phase 3 UCM)
-            commands::chat::get_turn_alternates,
-            commands::chat::get_span_messages,
-            commands::chat::list_conversation_views, // Returns forks of this conversation
-            commands::chat::fork_conversation,
-            commands::chat::select_span,
-            // Subconversation commands
-            commands::chat::spawn_subconversation,
-            commands::chat::get_parent_conversation,
-            commands::chat::list_subconversations,
-            commands::chat::get_subconversation_result,
-            commands::chat::link_subconversation_result,
-            // Fork commands
-            commands::chat::list_forked_conversations,
-            // Cross-reference commands
-            commands::chat::create_reference,
-            commands::chat::delete_reference,
-            commands::chat::get_entity_references,
-            commands::chat::get_entity_backlinks,
             // Voice commands
             commands::voice::is_voice_available,
             commands::voice::download_voice_model,
