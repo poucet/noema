@@ -1,0 +1,58 @@
+# Design 1: Simply Platform — Rust Unification
+
+**Status**: planned
+**Features:** [FEATURES.md](FEATURES.md)
+**Roadmap:** [ROADMAP.md](ROADMAP.md)
+**Architecture:** [designs/ARCHITECTURE.md](../designs/ARCHITECTURE.md)
+
+---
+
+## Problem
+
+Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) are converging on the same needs — LLM orchestration, MCP tools, voice pipeline, storage — but implemented independently in different languages. This creates:
+
+1. **Duplicated core logic** — both projects implement LLM provider abstraction, MCP integration, agent orchestration, and voice processing separately.
+2. **Python voice limitations** — Python's Discord ecosystem lags on DAVE (Discord Audio Visual Encryption) protocol support, blocking reliable STT/TTS in voice channels.
+3. **Platform lock-in** — Lumina's features are locked to Discord/Python. Noema's are locked to desktop/Tauri. Neither can easily extend to new platforms.
+4. **Storage contention** — if both share data, two separate processes writing to the same SQLite is fragile.
+5. **Maintenance burden** — maintaining two codebases with overlapping concerns in two languages.
+
+## Goals
+
+- **Unify Noema and Lumina** into a single Rust workspace where they share a common core and differ only in presentation layer.
+- **Shared core service** (`simply-core`) that owns LLM, MCP, voice, agent orchestration, and storage — runs as a long-lived daemon process.
+- **Lumina as a crate** in the Noema workspace — a Discord bot (serenity + songbird) that connects to the core service.
+- **Voice provider abstraction** in the core (starting with Voxtral/Mistral) — usable by both Noema (desktop mic via CPAL) and Lumina (Discord via songbird).
+- **Architecture supports future platforms** (Telegram, WhatsApp, WebRTC/meet) without building them in v1.
+
+## Non-goals (v1)
+
+- Telegram, WhatsApp, or other messaging platform integrations.
+- `simply-chris.ai/meet` WebRTC product (architecture supports it, doesn't build it).
+- Unified command macro (single annotation for both Discord + MCP) — use serenity's native `#[command]` and separate MCP tool definitions.
+- Google services integration migration.
+- Full feature parity with Python Lumina — v1 focuses on Discord text commands + voice with DAVE.
+
+---
+
+## Resolved Questions
+
+1. **Core service protocol** — Hybrid: MCP for agent-facing ops (tool calls), gRPC for platform-facing ops (storage, voice streaming, identity). See [ARCHITECTURE.md](../designs/ARCHITECTURE.md#core-service-communication).
+2. **Storage model** — Lumina features map onto UCM primitives. No separate databases. See [ARCHITECTURE.md](../designs/ARCHITECTURE.md#features-on-ucm--content-as-convention).
+3. **Command system** — Separate: serenity `#[command]` for Discord, separate MCP tool definitions. No unified macro.
+
+## Open Questions
+
+1. **Repo name** — `simply-platform`? `simply`? `simply-ai`? Keep `noema` for now since that's the GitHub repo?
+2. **Songbird DAVE status** — need to verify songbird's current DAVE protocol support. If incomplete, may need to contribute upstream or work around.
+3. **Config unification** — Noema uses encrypted API key storage. Lumina uses `.env`. Converge on one approach?
+4. **UCM schema extensions** — do we need new entity/document types or metadata fields to support Lumina features (schedules, access control)? Or do existing UCM primitives cover it?
+5. **Core service lifecycle** — does simply-core start independently (systemd/launchd), or does the first client (Noema or Lumina) spawn it?
+
+---
+
+## Related
+
+- Supersedes: Praxis CRUD side-car design (Python-era, no longer applicable)
+- Architecture: [designs/ARCHITECTURE.md](../designs/ARCHITECTURE.md)
+- Post-v1 Roadmap: [FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md)
