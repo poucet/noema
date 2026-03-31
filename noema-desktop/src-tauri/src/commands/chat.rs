@@ -18,13 +18,26 @@ use crate::types::{
 };
 
 /// Spawn a task that forwards DaemonEvents from a session broadcast to Tauri UI events.
-fn spawn_event_forwarder(
+/// If a forwarder already exists for this session, it's aborted and replaced.
+async fn spawn_event_forwarder(
     app: AppHandle,
     state: Arc<AppState>,
     conversation_id: ConversationId,
     mut rx: broadcast::Receiver<DaemonEvent>,
 ) {
-    tokio::spawn(async move {
+    let key = conversation_id.as_str().to_string();
+
+    // Abort existing forwarder if any
+    {
+        let mut forwarders = state.forwarders.lock().await;
+        if let Some(old) = forwarders.remove(&key) {
+            old.abort();
+        }
+    }
+
+    let state_inner = Arc::clone(&state);
+    let handle = tokio::spawn(async move {
+        let state = state_inner;
         loop {
             match rx.recv().await {
                 Ok(event) => match event {
@@ -85,6 +98,8 @@ fn spawn_event_forwarder(
             }
         }
     });
+
+    state.forwarders.lock().await.insert(key, handle);
 }
 
 /// Get current messages in the conversation
@@ -234,7 +249,7 @@ pub async fn load_conversation(
         .await
         .map_err(|e| format!("Failed to load conversation: {}", e))?;
 
-    spawn_event_forwarder(app, state.inner().clone(), conversation_id.clone(), rx);
+    spawn_event_forwarder(app, state.inner().clone(), conversation_id.clone(), rx).await;
 
     Ok(daemon
         .get_messages(&session_id)
@@ -270,7 +285,7 @@ pub async fn new_conversation(
         .await
         .map_err(|e| format!("Failed to create session: {}", e))?;
 
-    spawn_event_forwarder(app, state.inner().clone(), conv_id.clone(), rx);
+    spawn_event_forwarder(app, state.inner().clone(), conv_id.clone(), rx).await;
 
     Ok(conv_id.as_str().to_string())
 }

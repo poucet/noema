@@ -71,6 +71,8 @@ pub struct AppState {
     pub voice_conversation: Mutex<Option<ConversationId>>,
     /// Maps conversation ID to processing state
     pub processing: Mutex<HashMap<ConversationId, bool>>,
+    /// Active event forwarder tasks per session — abort on close/replace
+    pub forwarders: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     /// Maps OAuth state parameter to server ID for pending OAuth flows
     pub pending_oauth_states: Mutex<HashMap<String, String>>,
     pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
@@ -91,6 +93,7 @@ impl AppState {
             voice_coordinator: Mutex::new(None),
             voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),
+            forwarders: Mutex::new(HashMap::new()),
             pending_oauth_states: Mutex::new(pending_states),
             browser_audio_controller: Mutex::new(None),
             init_lock: std::sync::Mutex::new(false),
