@@ -35,7 +35,7 @@ See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the full communicati
 | `noema-core/llm/` | `simply-core/llm/` | Stays as sub-crate of core (no extraction) |
 | `noema-core/src/storage/` | `simply-daemon/src/storage/` | Move to daemon crate |
 | `noema-audio/` | `simply-audio/` | Rename |
-| `noema-mcp-core/` | merge into `simply-core/src/mcp/` | Merge |
+| `noema-mcp-core/` | merge into `simply-daemon/src/mcp/` | Merge — daemon concern (storage, sessions, agent orchestration) |
 | *(new)* | `simply-daemon/` | New crate — daemon binary |
 | `noema-desktop/` | `noema-desktop/` | No change |
 | `noema-ext/` | `noema-ext/` | No change |
@@ -46,7 +46,7 @@ See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the full communicati
 - [ ] Rename `noema-core/` → `simply-core/`, update `Cargo.toml` package name + all workspace references
 - [ ] Move storage code out of `simply-core` → `simply-daemon/src/storage/`
 - [ ] Rename `noema-audio/` → `simply-audio/`, update references
-- [ ] Merge `noema-mcp-core/` into `simply-core/src/mcp/`, remove standalone crate
+- [ ] Merge `noema-mcp-core/` into `simply-daemon/src/mcp/`, remove standalone crate
 - [ ] Create `simply-daemon/` crate (initially just re-exports, wires core + storage)
 - [ ] Update workspace `Cargo.toml` members list
 - [ ] Verify `noema-desktop` builds with restructured dependencies
