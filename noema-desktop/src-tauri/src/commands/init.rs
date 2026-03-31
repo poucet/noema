@@ -1,12 +1,12 @@
 //! Application initialization command
 
 use config::PathManager;
-use noema_core::mcp::{start_auto_connect, ServerStatus};
-use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::storage::traits::UserStore;
-use noema_core::storage::{FsBlobStore, SqliteStore, Stores};
+use simply_core::mcp::{start_auto_connect, ServerStatus};
+use simply_core::storage::coordinator::StorageCoordinator;
+use simply_core::storage::traits::UserStore;
+use simply_core::storage::{FsBlobStore, SqliteStore, Stores};
 use crate::state::AppStorage;
-use noema_core::McpRegistry;
+use simply_core::McpRegistry;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -14,7 +14,7 @@ use crate::commands::chat::start_event_receiver_loop;
 use crate::core_server::{self, CoreServerState};
 use crate::logging::log_message;
 use crate::state::AppState;
-use noema_core::storage::DocumentResolver;
+use simply_core::storage::DocumentResolver;
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {

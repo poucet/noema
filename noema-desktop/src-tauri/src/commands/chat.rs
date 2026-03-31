@@ -1,10 +1,10 @@
 //! Chat-related Tauri commands
 
 use llm::{Role, create_model, list_all_models};
-use noema_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
-use noema_core::storage::{DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
-use noema_core::storage::ids::{ConversationId, TurnId, SpanId};
-use noema_core::storage::traits::ReferenceStore;
+use simply_core::{ConversationManager, ManagerEvent, ToolConfig as CoreToolConfig};
+use simply_core::storage::{DocumentResolver, EntityStore, EntityType, InputContent, Session, StorageTypes, Stores, TurnStore};
+use simply_core::storage::ids::{ConversationId, TurnId, SpanId};
+use simply_core::storage::traits::ReferenceStore;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -933,7 +933,7 @@ pub async fn edit_message(
     content: Vec<DisplayInputContent>,
     tool_config: Option<ToolConfig>,
 ) -> Result<EditMessageResponse, String> {
-    use noema_core::storage::OriginKind;
+    use simply_core::storage::OriginKind;
 
     if content.is_empty() {
         return Err("Message must have content".to_string());
@@ -1066,7 +1066,7 @@ pub async fn create_reference(
     relation_type: Option<String>,
     context: Option<String>,
 ) -> Result<String, String> {
-    use noema_core::storage::{ids::EntityId, types::RelationType};
+    use simply_core::storage::{ids::EntityId, types::RelationType};
 
     let stores = state.get_stores()?;
 
@@ -1094,7 +1094,7 @@ pub async fn delete_reference(
     state: State<'_, Arc<AppState>>,
     reference_id: String,
 ) -> Result<bool, String> {
-    use noema_core::storage::ids::ReferenceId;
+    use simply_core::storage::ids::ReferenceId;
 
     let stores = state.get_stores()?;
     let ref_id = ReferenceId::from_string(reference_id);
@@ -1112,7 +1112,7 @@ pub async fn get_entity_references(
     state: State<'_, Arc<AppState>>,
     entity_id: String,
 ) -> Result<Vec<ReferenceInfo>, String> {
-    use noema_core::storage::ids::EntityId;
+    use simply_core::storage::ids::EntityId;
 
     let stores = state.get_stores()?;
     let id = EntityId::from_string(entity_id);
@@ -1142,7 +1142,7 @@ pub async fn get_entity_backlinks(
     state: State<'_, Arc<AppState>>,
     entity_id: String,
 ) -> Result<Vec<ReferenceInfo>, String> {
-    use noema_core::storage::ids::EntityId;
+    use simply_core::storage::ids::EntityId;
 
     let stores = state.get_stores()?;
     let id = EntityId::from_string(entity_id);

@@ -10,8 +10,8 @@ path = "src/lib.rs"
 
 [dependencies]
 # Internal crates
-noema-core = { path = "../noema-core" }
-llm = { path = "../noema-core/llm" }
+simply-core = { path = "../simply-core" }
+llm = { path = "../simply-core/llm" }
 
 # MCP protocol
 rmcp = { version = "0.9", features = ["server", "transport-streamable-http-server"] }

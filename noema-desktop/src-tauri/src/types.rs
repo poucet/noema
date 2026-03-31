@@ -1,7 +1,7 @@
 //! Types for frontend communication
 
 use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
-use noema_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId};
+use simply_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -32,7 +32,7 @@ pub struct ConversationInfo {
 impl ConversationInfo {
     /// Create from StoredEntity with turn count
     pub fn from_entity(
-        entity: &noema_core::storage::StoredEntity,
+        entity: &simply_core::storage::StoredEntity,
         turn_count: usize,
     ) -> Self {
         Self {
@@ -223,9 +223,9 @@ impl From<&ToolResultContent> for DisplayToolResultContent {
 }
 
 // Session ResolvedContent/ResolvedMessage -> Display types
-impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
-    fn from(content: &noema_core::storage::ResolvedContent) -> Self {
-        use noema_core::storage::ResolvedContent;
+impl From<&simply_core::storage::ResolvedContent> for DisplayContent {
+    fn from(content: &simply_core::storage::ResolvedContent) -> Self {
+        use simply_core::storage::ResolvedContent;
         match content {
             ResolvedContent::Text { text } => DisplayContent::Text(text.clone()),
             ResolvedContent::Asset {
@@ -260,8 +260,8 @@ impl From<&noema_core::storage::ResolvedContent> for DisplayContent {
     }
 }
 
-impl From<&noema_core::storage::ResolvedMessage> for DisplayMessage {
-    fn from(msg: &noema_core::storage::ResolvedMessage) -> Self {
+impl From<&simply_core::storage::ResolvedMessage> for DisplayMessage {
+    fn from(msg: &simply_core::storage::ResolvedMessage) -> Self {
         Self {
             role: Role::from(msg.role),
             content: msg.content.iter().map(DisplayContent::from).collect(),
@@ -357,7 +357,7 @@ pub struct ReferencedDocument {
 /// Input content block from frontend - structured content for user messages.
 /// This preserves the exact position of document references and attachments inline with text.
 ///
-/// This is the TypeScript-facing type that mirrors `noema_core::storage::InputContent`.
+/// This is the TypeScript-facing type that mirrors `simply_core::storage::InputContent`.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
@@ -393,9 +393,9 @@ pub enum DisplayInputContent {
     },
 }
 
-impl From<DisplayInputContent> for noema_core::storage::InputContent {
+impl From<DisplayInputContent> for simply_core::storage::InputContent {
     fn from(block: DisplayInputContent) -> Self {
-        use noema_core::storage::InputContent;
+        use simply_core::storage::InputContent;
         match block {
             DisplayInputContent::Text { text } => InputContent::Text { text },
             DisplayInputContent::DocumentRef { id } => InputContent::DocumentRef { id },

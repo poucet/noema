@@ -1,7 +1,7 @@
 //! MCP (Model Context Protocol) server commands
 
-use noema_core::mcp::{spawn_retry_task, ServerStatus};
-use noema_core::{AuthMethod, ServerConfig};
+use simply_core::mcp::{spawn_retry_task, ServerStatus};
+use simply_core::{AuthMethod, ServerConfig};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 

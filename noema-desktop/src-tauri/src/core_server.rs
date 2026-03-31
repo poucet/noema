@@ -4,12 +4,12 @@
 //! as an ephemeral server in the MCP registry.
 //!
 //! The server is stateless - context is injected via the enricher callback
-//! in McpAgent (see manager.rs create_noema_core_enricher).
+//! in McpAgent (see manager.rs create_simply_core_enricher).
 
 use crate::logging::log_message;
 use crate::state::AppCoordinator;
-use noema_core::storage::DocumentResolver;
-use noema_core::McpRegistry;
+use simply_core::storage::DocumentResolver;
+use simply_core::McpRegistry;
 use noema_mcp_core::{NoemaCoreServer, ServerHandle};
 use std::sync::Arc;
 use tokio::sync::Mutex;

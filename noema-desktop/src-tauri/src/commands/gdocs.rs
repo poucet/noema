@@ -5,8 +5,8 @@
 
 use base64::Engine as _;
 use config::PathManager;
-use noema_core::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
-use noema_core::storage::{Document, DocumentSource, DocumentStore, DocumentTab, StoredEditable, Stores, UserStore};
+use simply_core::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
+use simply_core::storage::{Document, DocumentSource, DocumentStore, DocumentTab, StoredEditable, Stores, UserStore};
 use noema_mcp_gdocs::GoogleDocsClient;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

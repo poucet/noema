@@ -2,11 +2,11 @@
 
 use noema_audio::BrowserAudioController;
 use noema_audio::VoiceCoordinator;
-use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::storage::ids::{ConversationId, UserId};
-use noema_core::storage::traits::StorageTypes;
-use noema_core::storage::{FsBlobStore, SqliteStore, Stores};
-use noema_core::{ConversationManager, ManagerEvent, McpRegistry};
+use simply_core::storage::coordinator::StorageCoordinator;
+use simply_core::storage::ids::{ConversationId, UserId};
+use simply_core::storage::traits::StorageTypes;
+use simply_core::storage::{FsBlobStore, SqliteStore, Stores};
+use simply_core::{ConversationManager, ManagerEvent, McpRegistry};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, OnceCell};

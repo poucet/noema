@@ -3,18 +3,18 @@
 //! This server is stateless - the agent enriches tool calls with context
 //! (conversation_id, turn_id, etc) before forwarding to this server.
 
-use noema_core::agents::{ExecutionContext, McpAgent, ToolEnricher};
-use noema_core::mcp::{McpRegistry, McpToolRegistry};
-use noema_core::storage::coordinator::StorageCoordinator;
-use noema_core::storage::document_resolver::DocumentResolver;
-use noema_core::storage::ids::{ConversationId, SpanId, TurnId, UserId};
-use noema_core::storage::session::Session;
-use noema_core::storage::traits::StorageTypes;
-use noema_core::manager::CommitMode;
-use noema_core::{Agent, ConversationContext};
+use simply_core::agents::{ExecutionContext, McpAgent, ToolEnricher};
+use simply_core::mcp::{McpRegistry, McpToolRegistry};
+use simply_core::storage::coordinator::StorageCoordinator;
+use simply_core::storage::document_resolver::DocumentResolver;
+use simply_core::storage::ids::{ConversationId, SpanId, TurnId, UserId};
+use simply_core::storage::session::Session;
+use simply_core::storage::traits::StorageTypes;
+use simply_core::manager::CommitMode;
+use simply_core::{Agent, ConversationContext};
 
 /// Create an enricher that injects execution context for noema-core tools.
-fn create_noema_core_enricher() -> ToolEnricher {
+fn create_simply_core_enricher() -> ToolEnricher {
     Arc::new(|tool_name, args, context| {
         if tool_name == "spawn_agent" {
             match args {
@@ -157,7 +157,7 @@ impl<S: StorageTypes> CoordinatorOps for ConcreteCoordinator<S> {
             5, // Lower max iterations for subconversations
             document_resolver,
             execution_context,
-            create_noema_core_enricher(),
+            create_simply_core_enricher(),
         );
 
         // Save model id before move

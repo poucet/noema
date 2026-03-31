@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use noema_core::{Agent, SimpleAgent};
+//! use simply_core::{Agent, SimpleAgent};
 //!
 //! let agent = SimpleAgent::new();
 //! let messages = agent.execute(&context, &model).await?;
