@@ -1,0 +1,32 @@
+[package]
+name = "simply-daemon"
+version.workspace = true
+edition.workspace = true
+description = "Simply platform daemon — trait-based API with in-process and remote implementations"
+
+[lib]
+name = "simply_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simply-daemon"
+path = "src/main.rs"
+
+[dependencies]
+# Internal crates
+simply-core = { path = "../simply-core", features = ["sqlite"] }
+llm = { path = "../simply-core/llm" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+
+# Error handling
+anyhow = "1"
