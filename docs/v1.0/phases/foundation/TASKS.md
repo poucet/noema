@@ -65,8 +65,8 @@
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 2.1 | ⬜ | `DaemonApi` trait: define the core API surface | P0 | M |
-| 2.2 | ⬜ | In-process implementation of `DaemonApi` | P0 | M |
+| 2.1 | ✅ | `DaemonApi` trait: define the core API surface | P0 | M |
+| 2.2 | 🔄 | In-process implementation of `DaemonApi` | P0 | M |
 | 2.3 | ⬜ | Wire Noema desktop to use in-process daemon | P0 | L |
 | 2.4 | ⬜ | Session manager: in-memory state, ephemeral + persistent modes | P0 | M |
 | 2.5 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
