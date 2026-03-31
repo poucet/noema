@@ -1,5 +1,5 @@
 [package]
-name = "noema-desktop"
+name = "noema"
 version.workspace = true
 edition.workspace = true
 description = "Noema AI Chat Application"

@@ -9,15 +9,15 @@ case "${1:-dev}" in
   dev)
     export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
     : > "$NOEMA_LOG_FILE"
-    cd "$REPO_ROOT/noema-desktop" && npm run tauri dev
+    cd "$REPO_ROOT/noema" && npm run tauri dev
     ;;
   build)
-    cd "$REPO_ROOT/noema-desktop" && npm run tauri build
-    echo "Binaries: $REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/"
+    cd "$REPO_ROOT/noema" && npm run tauri build
+    echo "Binaries: $REPO_ROOT/noema/src-tauri/target/release/bundle/"
     ;;
   install)
-    cd "$REPO_ROOT/noema-desktop" && npm run tauri build
-    open "$REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
+    cd "$REPO_ROOT/noema" && npm run tauri build
+    open "$REPO_ROOT/noema/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
     ;;
   nuke)
     DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/noema"

@@ -6,13 +6,13 @@ A local-first AI platform built in Rust. A shared daemon (`simply-daemon`) provi
 
 ```bash
 # Install frontend dependencies (first time only)
-cd noema-desktop && npm install && cd ..
+cd noema && npm install && cd ..
 
 # Run Noema desktop
 bin/noema
 
 # Or equivalently
-cd noema-desktop && npm run tauri dev
+cd noema && npm run tauri dev
 ```
 
 ### API Keys
@@ -32,7 +32,7 @@ export GEMINI_API_KEY="..."
 | `simply-core/llm` | LLM abstraction with provider implementations |
 | `simply-daemon` | Daemon — storage, sessions, MCP server, DaemonApi trait |
 | `simply-audio` | Audio — Whisper STT, CPAL backend, voice coordination |
-| `noema-desktop` | Tauri 2 desktop app (Rust backend + React/TypeScript frontend) |
+| `noema` | Tauri 2 desktop app (Rust backend + React/TypeScript frontend) |
 | `noema-ext` | Extension utilities (PDF extraction) |
 | `noema-mcp-gdocs` | Standalone MCP server for Google Docs |
 | `commands` | Command framework with proc-macro support |
