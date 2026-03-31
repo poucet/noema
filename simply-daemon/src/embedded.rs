@@ -17,7 +17,7 @@ use simply_core::storage::ids::{ConversationId, UserId};
 use simply_core::storage::session::Session;
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_core::storage::DocumentResolver;
-use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender, ToolConfig};
+use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender};
 
 use crate::api::*;
 
@@ -177,6 +177,14 @@ where
         }
     }
 
+    async fn close_all_sessions(&self) -> anyhow::Result<()> {
+        let mut sessions = self.sessions.lock().await;
+        let count = sessions.len();
+        sessions.clear();
+        tracing::info!(count, "all sessions closed");
+        Ok(())
+    }
+
     async fn seed_context(
         &self,
         _session_id: &str,
@@ -217,40 +225,14 @@ where
             .get(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
 
-        // Convert ContentBlocks to InputContent
-        let content = message
-            .content
-            .into_iter()
-            .map(|block| match block {
-                ContentBlock::Text(text) => {
-                    simply_core::storage::content::InputContent::Text(text)
-                }
-                ContentBlock::Image { data, .. } => {
-                    simply_core::storage::content::InputContent::Text(
-                        format!("[image: {} bytes]", data.len()),
-                    )
-                }
-                ContentBlock::File { name, .. } => {
-                    simply_core::storage::content::InputContent::Text(
-                        format!("[file: {name}]"),
-                    )
-                }
-            })
-            .collect();
-
-        // Map tool filter
-        let tool_config = match message.tool_filter {
-            Some(filter) => ToolConfig {
-                enabled: true,
-                server_ids: filter.server_ids,
-                tool_names: filter.tool_names,
-            },
-            None => ToolConfig::all_enabled(),
-        };
+        let tool_config = message
+            .tool_filter
+            .map(|f| f.into_tool_config())
+            .unwrap_or_else(simply_core::ToolConfig::all_enabled);
 
         // Fire-and-forget — the manager runs in a background task and emits
         // events through the event_tx channel.
-        managed.manager.send_message(content, tool_config);
+        managed.manager.send_message(message.content, tool_config);
 
         // Return an empty vec for now. The real events flow through
         // take_event_receiver(). A future streaming API will replace this.
@@ -278,12 +260,34 @@ where
         Ok(())
     }
 
+    // -- Assets --------------------------------------------------------------
+
+    async fn upload_asset(
+        &self,
+        data: Vec<u8>,
+        media_type: &str,
+    ) -> anyhow::Result<simply_core::storage::ids::AssetId> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let b64 = STANDARD.encode(&data);
+        self.coordinator.store_asset(&b64, media_type).await
+    }
+
     // -- MCP tools -----------------------------------------------------------
 
     async fn register_mcp(&self, registration: McpRegistration) -> anyhow::Result<()> {
+        let config = simply_core::ServerConfig {
+            name: registration.name.clone(),
+            url: registration.endpoint,
+            auth: simply_core::AuthMethod::None,
+            auth_token: None,
+            auto_connect: true,
+            auto_retry: false,
+            use_well_known: false,
+        };
         let mut registry = self.mcp_registry.lock().await;
-        registry.register_ephemeral(registration.name.clone(), registration.endpoint);
-        tracing::info!(name = %registration.name, "MCP service registered");
+        registry.add_server(registration.name.clone(), config);
+        registry.connect(&registration.name).await?;
+        tracing::info!(name = %registration.name, "MCP service registered and connected");
         Ok(())
     }
 

@@ -8,6 +8,8 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use simply_core::storage::InputContent;
+use simply_core::ToolConfig;
 use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------
@@ -16,28 +18,6 @@ use tokio::sync::mpsc;
 
 /// Opaque session identifier (maps to a UCM ConversationId for persistent sessions).
 pub type SessionId = String;
-
-// ---------------------------------------------------------------------------
-// Content types — multimodal from day one
-// ---------------------------------------------------------------------------
-
-/// A block of content within a message. Messages are composed of one or more blocks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ContentBlock {
-    /// Plain text.
-    Text(String),
-    /// Image (inline base64 or blob reference).
-    Image {
-        media_type: String,
-        /// Base64-encoded data or a blob hash for daemon-stored content.
-        data: String,
-    },
-    /// File attachment (blob reference).
-    File {
-        name: String,
-        blob_hash: String,
-    },
-}
 
 // ---------------------------------------------------------------------------
 // Client → Daemon messages
@@ -74,9 +54,12 @@ impl Default for CreateSessionOptions {
 }
 
 /// A user message sent to a session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Content uses `InputContent` from simply-core — supports inline text/images/audio
+/// (daemon stores them in UCM) and asset refs (already stored via `upload_asset`).
+#[derive(Debug, Clone)]
 pub struct UserMessage {
-    pub content: Vec<ContentBlock>,
+    pub content: Vec<InputContent>,
     /// Which MCP tools to enable for this turn. None = all.
     pub tool_filter: Option<ToolFilter>,
 }
@@ -88,11 +71,25 @@ pub struct ToolFilter {
     pub tool_names: Option<Vec<String>>,
 }
 
+impl ToolFilter {
+    /// Convert to a simply-core `ToolConfig`.
+    pub fn into_tool_config(self) -> ToolConfig {
+        ToolConfig {
+            enabled: true,
+            server_ids: self.server_ids,
+            tool_names: self.tool_names,
+        }
+    }
+}
+
 /// Context seed message — replay history into a session (e.g., Discord channel messages).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Seeds can have any role — Lumina replays both user and assistant messages
+/// from Discord history so the daemon has full conversational context.
+#[derive(Debug, Clone)]
 pub struct SeedMessage {
-    pub role: String,
-    pub content: Vec<ContentBlock>,
+    pub role: llm::Role,
+    pub content: Vec<InputContent>,
 }
 
 /// MCP service registration from a client.
@@ -125,7 +122,7 @@ pub enum DaemonEvent {
     /// Partial text from the assistant (streaming).
     TextDelta(String),
     /// Non-text content from the assistant.
-    ContentBlock(ContentBlock),
+    Content(InputContent),
     /// The agent wants to call a tool.
     ToolCall {
         id: String,
@@ -218,6 +215,10 @@ pub trait DaemonApi: Send + Sync {
     /// Destroy a session and free its memory. Persistent data in UCM is not deleted.
     async fn close_session(&self, session_id: &str) -> anyhow::Result<()>;
 
+    /// Close all sessions. Called on client disconnect to prevent memory leaks.
+    /// For the WebSocket case, the server calls this when a connection drops.
+    async fn close_all_sessions(&self) -> anyhow::Result<()>;
+
     /// Replay context into a session (e.g., Lumina re-sending Discord history).
     async fn seed_context(
         &self,
@@ -254,6 +255,19 @@ pub trait DaemonApi: Send + Sync {
     /// Truncate conversation history to before a specific turn.
     /// Pass None to clear all history.
     async fn truncate(&self, session_id: &str, before_turn: Option<&str>) -> anyhow::Result<()>;
+
+    // -- Assets --------------------------------------------------------------
+
+    /// Upload binary content to the daemon's blob store.
+    ///
+    /// Returns an `AssetId` that can be used in `InputContent::AssetRef`
+    /// when sending messages. This lets clients pre-upload large binaries
+    /// instead of inlining base64 on every message.
+    async fn upload_asset(
+        &self,
+        data: Vec<u8>,
+        media_type: &str,
+    ) -> anyhow::Result<simply_core::storage::ids::AssetId>;
 
     // -- MCP tools -----------------------------------------------------------
 

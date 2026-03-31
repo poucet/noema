@@ -28,6 +28,9 @@ serde_json = "1"
 # Logging
 tracing = "0.1"
 
+# Encoding
+base64 = "0.22"
+
 # Error handling
 anyhow = "1"
 

@@ -5156,6 +5156,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "http-body-util",
  "hyper",
  "hyper-util",
