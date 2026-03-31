@@ -42,7 +42,7 @@ llm = { path = "../../simply-core/llm" }
 config = { path = "../../config" }
 simply-audio = { path = "../../simply-audio", features = ["browser"] }
 noema-ext = { path = "../../noema-ext" }
-noema-mcp-core = { path = "../../noema-mcp-core" }
+simply-daemon = { path = "../../simply-daemon" }
 noema-mcp-gdocs = { path = "../../noema-mcp-gdocs" }
 thiserror = "2.0.17"
 

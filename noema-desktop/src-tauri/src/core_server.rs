@@ -1,6 +1,6 @@
 //! Embedded Noema Core MCP server management
 //!
-//! Starts the noema-mcp-core server in-process and registers it
+//! Starts the MCP server in-process and registers it
 //! as an ephemeral server in the MCP registry.
 //!
 //! The server is stateless - context is injected via the enricher callback
@@ -10,7 +10,7 @@ use crate::logging::log_message;
 use crate::state::AppCoordinator;
 use simply_core::storage::DocumentResolver;
 use simply_core::McpRegistry;
-use noema_mcp_core::{NoemaCoreServer, ServerHandle};
+use simply_daemon::mcp::{NoemaCoreServer, ServerHandle, start_server};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -63,7 +63,7 @@ pub async fn start_core_server(
     );
 
     // Start the server on a random port
-    let handle = noema_mcp_core::start_server(server)
+    let handle = start_server(server)
         .await
         .map_err(|e| format!("Failed to start Noema Core server: {}", e))?;
 

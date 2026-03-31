@@ -30,3 +30,12 @@ tracing = "0.1"
 
 # Error handling
 anyhow = "1"
+
+# MCP protocol
+rmcp = { version = "0.9", features = ["server", "transport-streamable-http-server"] }
+
+# HTTP server (for MCP server hosting)
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower-service = "0.3"
+http-body-util = "0.1"
