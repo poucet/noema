@@ -8,7 +8,6 @@ import { FavoriteModelChips } from "./components/FavoriteModelChips";
 import { Settings } from "./components/Settings";
 import { DocumentPanel } from "./components/DocumentPanel";
 import { ViewSelector } from "./components/ViewSelector";
-import { EditMessageModal } from "./components/EditMessageModal";
 import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock, ToolConfig } from "./generated";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
@@ -44,17 +43,8 @@ function App() {
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   // Document selected in the documents activity (shown in main panel)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  // Fork management - lists conversations forked from current one
-  const [forks, setForks] = useState<tauri.ForkInfo[]>([]);
-  // Prefilled input text (used when forking from a user message to let them edit and resend)
-  const [prefilledInput, setPrefilledInput] = useState<string>("");
   // Tools enabled state - controls whether MCP tools are sent to the model
   const [toolsEnabled, setToolsEnabled] = useState<boolean>(true);
-  // Edit message modal state
-  const [editingMessage, setEditingMessage] = useState<{
-    turnId: string;
-    text: string;
-  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -134,8 +124,6 @@ function App() {
             convId = convos[0].id;
             const msgs = await tauri.loadConversation(convId);
             setMessages(Array.isArray(msgs) ? msgs : []);
-            const convForks = await tauri.listConversationForks(convId);
-            setForks(convForks);
             setCurrentConversationId(convId);
             conversationLoaded = true;
           } catch (err) {
@@ -149,7 +137,6 @@ function App() {
           convId = await tauri.newConversation();
           setCurrentConversationId(convId);
           setMessages([]);
-          setForks([]);
         }
 
         // Load models in background
@@ -346,11 +333,6 @@ function App() {
     try {
       setError(null);
 
-      // Clear any prefilled text after sending
-      if (prefilledInput) {
-        setPrefilledInput("");
-      }
-
       // Check if we have multiple models selected for parallel comparison
       if (selectedModelsForComparison.length >= 2) {
         // Clear any previous comparison results
@@ -483,95 +465,6 @@ function App() {
     }
   };
 
-  // Fork handler - creates a new conversation forked at the given turn
-  const handleFork = async (turnId: string, role: "user" | "assistant", userText?: string) => {
-    appLog.info(`Forking at turn: turnId=${turnId}, role=${role}`);
-    try {
-      setError(null);
-      const newConversationId = await tauri.forkConversation(currentConversationId, turnId);
-      appLog.info(`Created fork: conversationId=${newConversationId}`);
-      // Load the forked conversation
-      const msgs = await tauri.loadConversation(newConversationId);
-      setCurrentConversationId(newConversationId);
-      setMessages(Array.isArray(msgs) ? msgs : []);
-      // Load forks for the new conversation
-      const convForks = await tauri.listConversationForks(newConversationId);
-      setForks(convForks);
-      // Refresh conversation list to include the fork
-      const convos = await tauri.listConversations();
-      setConversations(convos);
-      // For user messages, prefill the input with their original text so they can edit and resend
-      if (role === "user" && userText) {
-        setPrefilledInput(userText);
-      }
-    } catch (err) {
-      appLog.error("Fork error", String(err));
-      setError(String(err));
-    }
-  };
-
-  // Switch to a forked conversation
-  const handleSwitchToFork = async (forkConversationId: string) => {
-    appLog.info(`Switching to fork: ${forkConversationId}`);
-    await handleSelectConversation(forkConversationId);
-  };
-
-  // Clear prefilled input (used after forking when user wants to cancel the edit)
-  const handleClearPrefill = () => {
-    setPrefilledInput("");
-  };
-
-  // Regenerate response at a specific turn
-  const handleRegenerate = async (turnId: string) => {
-    try {
-      setError(null);
-      setIsLoading(true);
-      await tauri.regenerateResponse(currentConversationId, turnId);
-    } catch (err) {
-      appLog.error("Regenerate error", String(err));
-      setError(String(err));
-      setIsLoading(false);
-    }
-  };
-
-  // Open edit modal for a user message
-  const handleEdit = (turnId: string, currentText: string) => {
-    setEditingMessage({ turnId, text: currentText });
-  };
-
-  // Submit edited message - creates a fork with new content and triggers AI response
-  const handleEditSubmit = async (newText: string) => {
-    if (!editingMessage) return;
-
-    try {
-      setError(null);
-      setIsLoading(true);
-
-      const content: InputContentBlock[] = [{ type: "text", text: newText }];
-      const toolConfig: ToolConfig = { enabled: toolsEnabled, serverIds: null, toolNames: null };
-      const result = await tauri.editMessage(currentConversationId, editingMessage.turnId, content, toolConfig);
-
-      // Switch to the new forked conversation
-      setCurrentConversationId(result.newConversationId);
-      setMessages(result.messages);
-
-      // Refresh forks list for the new conversation
-      const convForks = await tauri.listConversationForks(result.newConversationId);
-      setForks(convForks);
-
-      // Refresh conversation list to include the fork
-      const convos = await tauri.listConversations();
-      setConversations(convos);
-
-      // Close the modal (AI response will stream in via events)
-      setEditingMessage(null);
-    } catch (err) {
-      appLog.error("Edit message error", String(err));
-      setIsLoading(false);
-      setError(String(err));
-    }
-  };
-
   // Retry initialization after setup
   const retryInit = async () => {
     setError(null);
@@ -688,15 +581,6 @@ function App() {
         <Settings onClose={() => setShowSettings(false)} />
       )}
 
-      {/* Edit Message Modal */}
-      {editingMessage && (
-        <EditMessageModal
-          initialText={editingMessage.text}
-          onSubmit={handleEditSubmit}
-          onCancel={() => setEditingMessage(null)}
-        />
-      )}
-
       {/* Document Panel */}
       {activeDocumentId && (
         <DocumentPanel
@@ -713,39 +597,6 @@ function App() {
             <h1 className="text-lg font-semibold text-foreground">
               Noema
             </h1>
-            {/* Privacy toggle for current conversation */}
-            {activeActivity === "conversations" && (
-              <button
-                onClick={handleTogglePrivate}
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors ${
-                  isConversationPrivate
-                    ? "bg-amber-900/50 text-amber-300 hover:bg-amber-900/70"
-                    : "bg-gray-700/50 text-gray-400 hover:bg-gray-700/70"
-                }`}
-                title={isConversationPrivate
-                  ? "Private: Will warn before using cloud models"
-                  : "Not private: Click to mark as private"
-                }
-              >
-                {isConversationPrivate ? (
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                  </svg>
-                ) : (
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-                  </svg>
-                )}
-                <span>{isConversationPrivate ? "Private" : "Not Private"}</span>
-              </button>
-            )}
-            {/* Fork selector - shown when conversation has forks */}
-            {activeActivity === "conversations" && forks.length > 0 && (
-              <ViewSelector
-                forks={forks}
-                onSwitchToFork={handleSwitchToFork}
-              />
-            )}
           </div>
           {activeActivity === "conversations" && (
             <ModelSelector
@@ -799,9 +650,6 @@ function App() {
                         message={msg}
                         onDocumentClick={setActiveDocumentId}
                         onSwitchAlternate={handleSwitchAlternate}
-                        onFork={handleFork}
-                        onRegenerate={handleRegenerate}
-                        onEdit={handleEdit}
                       />
                     ))}
                     {streamingMessage && !isParallelMode && (
@@ -938,8 +786,6 @@ function App() {
               voiceStatus={voice.status}
               voiceBufferedCount={voice.bufferedCount}
               onToggleVoice={voice.toggle}
-              prefilledText={prefilledInput}
-              onClearPrefill={handleClearPrefill}
               toolsEnabled={toolsEnabled}
               onToggleTools={handleToggleTools}
               modelHasVision={currentModelHasVision()}
