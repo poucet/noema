@@ -2,17 +2,16 @@
 
 use config::PathManager;
 use simply_core::mcp::{start_auto_connect, ServerStatus};
-use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::traits::UserStore;
-use simply_core::storage::{FsBlobStore, SqliteStore, Stores};
-use simply_core::McpRegistry;
 use simply_daemon::embedded::EmbeddedDaemon;
-use crate::state::{AppStorage, AppStores};
+use crate::state::{
+    AppState, AppStorage, AppStores, FsBlobStore, McpRegistry, SqliteStore,
+    StorageCoordinator, Stores,
+};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::logging::log_message;
-use crate::state::AppState;
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {

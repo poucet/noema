@@ -8,7 +8,7 @@ mod state;
 mod types;
 
 use config::PathManager;
-use simply_core::storage::types::BlobHash;
+use simply_daemon::types::BlobHash;
 use tauri::http::Response;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;

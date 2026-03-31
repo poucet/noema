@@ -1,10 +1,37 @@
-//! Shared types used across multiple daemon API traits.
+//! Shared types — both daemon API types and re-exported simply-core/llm types.
+//!
+//! Clients (Noema, Lumina) should import from here or `simply_daemon::types`,
+//! not from simply-core or llm directly.
 
 use serde::{Deserialize, Serialize};
-use crate::types::ConversationId;
 
 // ---------------------------------------------------------------------------
-// Identifiers
+// Re-exported IDs
+// ---------------------------------------------------------------------------
+
+pub use simply_core::storage::ids::{
+    AssetId, ConversationId, DocumentId, EntityId, RevisionId, SpanId, TabId, TurnId, UserId,
+};
+
+// ---------------------------------------------------------------------------
+// Re-exported storage types
+// ---------------------------------------------------------------------------
+
+pub use simply_core::storage::{
+    InputContent, ResolvedContent, ResolvedMessage,
+    Entity, EntityType,
+    Document, DocumentSource, DocumentTab, StoredEditable,
+};
+pub use simply_core::storage::types::BlobHash;
+
+// ---------------------------------------------------------------------------
+// Re-exported LLM types
+// ---------------------------------------------------------------------------
+
+pub use llm::{ChatMessage, ContentBlock, ModelCapability, ModelInfo, Role, ToolResultContent};
+
+// ---------------------------------------------------------------------------
+// Daemon-specific types
 // ---------------------------------------------------------------------------
 
 /// Opaque session identifier.
@@ -27,17 +54,13 @@ impl std::fmt::Display for SessionId {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
-
 /// Events streamed from the daemon to session subscribers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DaemonEvent {
     SessionReady { session_id: SessionId },
-    UserMessage(llm::ChatMessage),
+    UserMessage(ChatMessage),
     TextDelta(String),
-    AssistantContent(llm::ContentBlock),
+    AssistantContent(ContentBlock),
     ToolCall {
         id: String,
         name: String,
@@ -58,10 +81,6 @@ pub struct InboundEvent {
     pub event_type: String,
     pub payload: serde_json::Value,
 }
-
-// ---------------------------------------------------------------------------
-// Conversation info (used by ConversationApi)
-// ---------------------------------------------------------------------------
 
 /// Information about a stored conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]

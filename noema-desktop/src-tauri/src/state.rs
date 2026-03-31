@@ -2,19 +2,18 @@
 
 use simply_audio::BrowserAudioController;
 use simply_audio::VoiceCoordinator;
-use simply_core::storage::coordinator::StorageCoordinator;
-use simply_core::storage::ids::{ConversationId, UserId};
-use simply_core::storage::traits::StorageTypes;
-use simply_core::storage::{FsBlobStore, SqliteStore, Stores};
-use simply_core::McpRegistry;
+use simply_daemon::types::{ConversationId, UserId};
 use simply_daemon::embedded::EmbeddedDaemon;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
 
-// ============================================================================
-// App Storage Types - Define once via StorageTypes
-// ============================================================================
+// Storage type aliases — init.rs constructs these, state just holds the Arc.
+// gdocs/mcp commands need direct store access until those move to the daemon API.
+pub use simply_core::storage::coordinator::StorageCoordinator;
+pub use simply_core::storage::traits::StorageTypes;
+pub use simply_core::storage::{FsBlobStore, SqliteStore, Stores};
+pub use simply_core::McpRegistry;
 
 pub struct AppStorage;
 
@@ -57,26 +56,22 @@ pub type AppCoordinator = StorageCoordinator<AppStorage>;
 pub type AppDaemon = EmbeddedDaemon<AppStorage>;
 
 pub struct AppState {
-    /// All stores - initialized once at startup
+    /// Storage stores — needed by gdocs/mcp commands that bypass the daemon
     stores: OnceCell<AppStores>,
-    /// Storage coordinator - initialized once at startup
+    /// Storage coordinator — needed by gdocs commands
     pub coordinator: OnceCell<Arc<AppCoordinator>>,
-    /// The daemon — owns sessions, models, events
+    /// The daemon — primary API for sessions, conversations, models
     pub daemon: OnceCell<Arc<AppDaemon>>,
-    /// MCP registry (shared between daemon and MCP config commands)
+    /// MCP registry — shared between daemon and MCP config commands
     pub mcp_registry: OnceCell<Arc<Mutex<McpRegistry>>>,
-    /// Current user ID (from database)
     pub user_id: Mutex<UserId>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
     pub voice_conversation: Mutex<Option<ConversationId>>,
-    /// Maps conversation ID to processing state
     pub processing: Mutex<HashMap<ConversationId, bool>>,
-    /// Active event forwarder tasks per session — abort on close/replace
+    /// Active event forwarder tasks per session
     pub forwarders: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
-    /// Maps OAuth state parameter to server ID for pending OAuth flows
     pub pending_oauth_states: Mutex<HashMap<String, String>>,
     pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
-    /// Lock to prevent concurrent initialization (React StrictMode calls init twice)
     pub init_lock: std::sync::Mutex<bool>,
 }
 
@@ -100,63 +95,38 @@ impl AppState {
         }
     }
 
+    /// Direct store access (for gdocs/mcp commands that bypass the daemon)
     pub fn get_stores(&self) -> Result<&AppStores, String> {
-        self.stores
-            .get()
-            .ok_or_else(|| "Storage not initialized".to_string())
+        self.stores.get().ok_or_else(|| "Storage not initialized".to_string())
     }
 
     pub fn init_stores(&self, stores: AppStores) -> Result<(), String> {
-        self.stores
-            .set(stores)
-            .map_err(|_| "Stores already initialized".to_string())
+        self.stores.set(stores).map_err(|_| "Stores already initialized".to_string())
     }
 
     pub fn get_coordinator(&self) -> Result<Arc<AppCoordinator>, String> {
-        self.coordinator
-            .get()
-            .cloned()
-            .ok_or_else(|| "Storage not initialized".to_string())
+        self.coordinator.get().cloned().ok_or_else(|| "Storage not initialized".to_string())
     }
 
     pub fn get_daemon(&self) -> Result<Arc<AppDaemon>, String> {
-        self.daemon
-            .get()
-            .cloned()
-            .ok_or_else(|| "Daemon not initialized".to_string())
+        self.daemon.get().cloned().ok_or_else(|| "Daemon not initialized".to_string())
     }
 
     pub fn get_mcp_registry(&self) -> Result<Arc<Mutex<McpRegistry>>, String> {
-        self.mcp_registry
-            .get()
-            .cloned()
-            .ok_or_else(|| "MCP registry not initialized".to_string())
+        self.mcp_registry.get().cloned().ok_or_else(|| "MCP registry not initialized".to_string())
     }
 
     pub async fn is_processing(&self, conversation_id: &ConversationId) -> bool {
-        self.processing
-            .lock()
-            .await
-            .get(conversation_id)
-            .copied()
-            .unwrap_or(false)
+        self.processing.lock().await.get(conversation_id).copied().unwrap_or(false)
     }
 
     pub async fn set_processing(&self, conversation_id: &ConversationId, processing: bool) {
-        self.processing
-            .lock()
-            .await
-            .insert(conversation_id.clone(), processing);
+        self.processing.lock().await.insert(conversation_id.clone(), processing);
     }
 
     pub async fn is_voice_conversation_processing(&self) -> bool {
         if let Some(conv_id) = self.voice_conversation.lock().await.as_ref() {
-            self.processing
-                .lock()
-                .await
-                .get(conv_id)
-                .copied()
-                .unwrap_or(false)
+            self.processing.lock().await.get(conv_id).copied().unwrap_or(false)
         } else {
             false
         }
@@ -168,9 +138,7 @@ impl AppState {
 }
 
 impl Default for AppState {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 pub fn get_oauth_states_path() -> Option<std::path::PathBuf> {

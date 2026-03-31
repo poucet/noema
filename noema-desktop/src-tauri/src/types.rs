@@ -1,7 +1,9 @@
 //! Types for frontend communication
 
-use llm::{ChatMessage, ContentBlock, Role, ToolResultContent};
-use simply_core::storage::ids::{AssetId, ConversationId, DocumentId, SpanId, TurnId};
+use simply_daemon::types::{
+    AssetId, ChatMessage, ContentBlock, ConversationId, DocumentId, Role, SpanId,
+    ToolResultContent, TurnId,
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -228,9 +230,9 @@ impl From<&ToolResultContent> for DisplayToolResultContent {
 }
 
 // Session ResolvedContent/ResolvedMessage -> Display types
-impl From<&simply_core::storage::ResolvedContent> for DisplayContent {
-    fn from(content: &simply_core::storage::ResolvedContent) -> Self {
-        use simply_core::storage::ResolvedContent;
+impl From<&simply_daemon::types::ResolvedContent> for DisplayContent {
+    fn from(content: &simply_daemon::types::ResolvedContent) -> Self {
+        use simply_daemon::types::ResolvedContent;
         match content {
             ResolvedContent::Text { text } => DisplayContent::Text(text.clone()),
             ResolvedContent::Asset {
@@ -265,8 +267,8 @@ impl From<&simply_core::storage::ResolvedContent> for DisplayContent {
     }
 }
 
-impl From<&simply_core::storage::ResolvedMessage> for DisplayMessage {
-    fn from(msg: &simply_core::storage::ResolvedMessage) -> Self {
+impl From<&simply_daemon::types::ResolvedMessage> for DisplayMessage {
+    fn from(msg: &simply_daemon::types::ResolvedMessage) -> Self {
         Self {
             role: Role::from(msg.role),
             content: msg.content.iter().map(DisplayContent::from).collect(),
@@ -362,7 +364,7 @@ pub struct ReferencedDocument {
 /// Input content block from frontend - structured content for user messages.
 /// This preserves the exact position of document references and attachments inline with text.
 ///
-/// This is the TypeScript-facing type that mirrors `simply_core::storage::InputContent`.
+/// This is the TypeScript-facing type that mirrors `simply_daemon::types::InputContent`.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
@@ -398,9 +400,9 @@ pub enum DisplayInputContent {
     },
 }
 
-impl From<DisplayInputContent> for simply_core::storage::InputContent {
+impl From<DisplayInputContent> for simply_daemon::types::InputContent {
     fn from(block: DisplayInputContent) -> Self {
-        use simply_core::storage::InputContent;
+        use simply_daemon::types::InputContent;
         match block {
             DisplayInputContent::Text { text } => InputContent::Text { text },
             DisplayInputContent::DocumentRef { id } => InputContent::DocumentRef { id },
