@@ -121,8 +121,8 @@ pub enum DaemonEvent {
     SessionReady { session_id: SessionId },
     /// Partial text from the assistant (streaming).
     TextDelta(String),
-    /// Non-text content from the assistant.
-    Content(InputContent),
+    /// Content block from the assistant (complete, non-streaming).
+    AssistantContent(llm::ContentBlock),
     /// The agent wants to call a tool.
     ToolCall {
         id: String,
