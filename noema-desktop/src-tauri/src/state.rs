@@ -2,18 +2,14 @@
 
 use simply_audio::BrowserAudioController;
 use simply_audio::VoiceCoordinator;
-use simply_daemon::types::{ConversationId, UserId};
+use simply_daemon::types::{
+    ConversationId, FsBlobStore, McpRegistry, SqliteStore,
+    StorageCoordinator, StorageTypes, Stores, UserId,
+};
 use simply_daemon::embedded::EmbeddedDaemon;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
-
-// Storage type aliases — init.rs constructs these, state just holds the Arc.
-// gdocs/mcp commands need direct store access until those move to the daemon API.
-pub use simply_core::storage::coordinator::StorageCoordinator;
-pub use simply_core::storage::traits::StorageTypes;
-pub use simply_core::storage::{FsBlobStore, SqliteStore, Stores};
-pub use simply_core::McpRegistry;
 
 pub struct AppStorage;
 

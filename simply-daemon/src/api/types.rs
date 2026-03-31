@@ -21,14 +21,25 @@ pub use simply_core::storage::{
     InputContent, ResolvedContent, ResolvedMessage,
     Entity, EntityType,
     Document, DocumentSource, DocumentTab, StoredEditable,
+    DocumentStore, Stores, UserStore,
+    FsBlobStore, SqliteStore,
 };
 pub use simply_core::storage::types::BlobHash;
+pub use simply_core::storage::coordinator::StorageCoordinator;
+pub use simply_core::storage::traits::StorageTypes;
 
 // ---------------------------------------------------------------------------
 // Re-exported LLM types
 // ---------------------------------------------------------------------------
 
 pub use llm::{ChatMessage, ContentBlock, ModelCapability, ModelInfo, Role, ToolResultContent};
+
+// ---------------------------------------------------------------------------
+// Re-exported MCP config types
+// ---------------------------------------------------------------------------
+
+pub use simply_core::{AuthMethod, McpRegistry, ServerConfig};
+pub use simply_core::mcp::{ServerStatus, spawn_retry_task, start_auto_connect};
 
 // ---------------------------------------------------------------------------
 // Daemon-specific types

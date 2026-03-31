@@ -1,7 +1,6 @@
 //! MCP (Model Context Protocol) server commands
 
-use simply_core::mcp::{spawn_retry_task, ServerStatus};
-use simply_core::{AuthMethod, ServerConfig};
+use simply_daemon::types::{spawn_retry_task, AuthMethod, ServerConfig, ServerStatus};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 

@@ -1,13 +1,12 @@
 //! Application initialization command
 
 use config::PathManager;
-use simply_core::mcp::{start_auto_connect, ServerStatus};
-use simply_core::storage::traits::UserStore;
 use simply_daemon::embedded::EmbeddedDaemon;
-use crate::state::{
-    AppState, AppStorage, AppStores, FsBlobStore, McpRegistry, SqliteStore,
-    StorageCoordinator, Stores,
+use simply_daemon::types::{
+    start_auto_connect, FsBlobStore, McpRegistry, ServerStatus, SqliteStore,
+    StorageCoordinator, Stores, UserStore,
 };
+use crate::state::{AppState, AppStorage, AppStores};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
