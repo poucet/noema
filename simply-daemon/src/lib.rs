@@ -9,4 +9,5 @@
 //! - **Remote** (future) — calls go over WebSocket to a standalone daemon process.
 
 pub mod api;
+pub mod embedded;
 pub mod mcp;
