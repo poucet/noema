@@ -8,15 +8,15 @@
 
 ## Stage 1 — Workspace Restructure
 
-| # | Task | Priority | Size | Status |
-|---|------|----------|------|--------|
-| 1.1 | Rename `noema-core/` → `simply-core/`, update `Cargo.toml` package name + all workspace refs | P0 | S | todo |
-| 1.2 | Move storage code out of `simply-core/` → `simply-daemon/src/storage/` | P0 | M | todo |
-| 1.3 | Rename `noema-audio/` → `simply-audio/`, update references | P0 | S | todo |
-| 1.4 | Merge `noema-mcp-core/` into `simply-daemon/src/mcp/`, remove standalone crate | P0 | M | todo |
-| 1.5 | Create `simply-daemon/` crate (binary, wires core + storage) | P0 | S | todo |
-| 1.6 | Update workspace `Cargo.toml` members list | P0 | S | todo |
-| 1.7 | Verify `noema-desktop` builds with restructured deps | P0 | S | todo |
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 1.1 | ✅ | Rename `noema-core/` → `simply-core/`, update `Cargo.toml` package name + all workspace refs | P0 | S |
+| 1.2 | ⬜ | Move storage code out of `simply-core/` → `simply-daemon/src/storage/` | P0 | M |
+| 1.3 | ⬜ | Rename `noema-audio/` → `simply-audio/`, update references | P0 | S |
+| 1.4 | ⬜ | Merge `noema-mcp-core/` into `simply-daemon/src/mcp/`, remove standalone crate | P0 | M |
+| 1.5 | ⬜ | Create `simply-daemon/` crate (binary, wires core + storage) | P0 | S |
+| 1.6 | ⬜ | Update workspace `Cargo.toml` members list | P0 | S |
+| 1.7 | ⬜ | Verify `noema-desktop` builds with restructured deps | P0 | S |
 
 ### Task Details
 
@@ -64,17 +64,17 @@
 
 ## Stage 2 — Daemon
 
-| # | Task | Priority | Size | Status |
-|---|------|----------|------|--------|
-| 2.1 | Daemon binary: startup, config loading, graceful shutdown | P0 | M | todo |
-| 2.2 | WebSocket server: session management, JSON message types | P0 | L | todo |
-| 2.3 | REST server: `/events`, `/register`, `/health` endpoints | P0 | M | todo |
-| 2.4 | Session manager: in-memory state, ephemeral + persistent modes | P0 | M | todo |
-| 2.5 | Peer registry: connected clients, global MCP tool registry | P0 | M | todo |
-| 2.6 | MCP client: connect to action services, discover tools | P1 | M | todo |
-| 2.7 | UCM storage ownership: single-writer, no SQLite contention | P0 | M | todo |
-| 2.8 | Noema frontend: connect to daemon via WebSocket for chat | P0 | L | todo |
-| 2.9 | Daemon lifecycle: startup approach decision + implementation | P0 | S | todo |
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 2.1 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
+| 2.2 | ⬜ | WebSocket server: session management, JSON message types | P0 | L |
+| 2.3 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P0 | M |
+| 2.4 | ⬜ | Session manager: in-memory state, ephemeral + persistent modes | P0 | M |
+| 2.5 | ⬜ | Peer registry: connected clients, global MCP tool registry | P0 | M |
+| 2.6 | ⬜ | MCP client: connect to action services, discover tools | P1 | M |
+| 2.7 | ⬜ | UCM storage ownership: single-writer, no SQLite contention | P0 | M |
+| 2.8 | ⬜ | Noema frontend: connect to daemon via WebSocket for chat | P0 | L |
+| 2.9 | ⬜ | Daemon lifecycle: startup approach decision + implementation | P0 | S |
 
 ### Task Details
 
