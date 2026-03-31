@@ -1,98 +1,56 @@
-# Noema
+# Simply Platform
 
-A local-first AI assistant built as a native desktop application. Noema provides a rich conversation interface with support for multiple LLM providers, document management, audio processing, and an extensible tool system via the Model Context Protocol (MCP).
+A local-first AI platform built in Rust. A shared daemon (`simply-daemon`) provides LLM orchestration, MCP tools, storage, and voice — with Noema (desktop) and Lumina (Discord bot) as clients.
 
-## Features
-
-- **Multi-provider LLM support** — Claude, OpenAI, Gemini, Mistral, and Ollama (local)
-- **Local-first architecture** — All data stays on your device; cloud is opt-in
-- **Conversation forking** — Branch conversations at any turn with view-based navigation
-- **Alternative responses** — Compare outputs from different models at the same turn
-- **Document management** — Multi-tab documents with revision history
-- **Content-addressable storage** — Immutable content blocks with origin tracking
-- **MCP tool system** — Extensible agent capabilities via Model Context Protocol
-- **Audio support** — Speech-to-text via Whisper
-- **Google Docs integration** — MCP server for Google Docs access
-
-## Architecture
-
-Noema follows a three-layer data model:
-
-| Layer | Purpose | Examples |
-|-------|---------|---------|
-| **Content** | Immutable data | Text blocks, binary assets, blob storage |
-| **Structure** | Mutable organization | Turns, spans, messages, views, documents, tabs |
-| **Identity** | Addressable entities | @mentions, naming, entity relationships |
-
-### Workspace Crates
-
-| Crate | Description |
-|-------|-------------|
-| `noema-desktop` | Tauri 2 desktop app (Rust backend + React/TypeScript frontend) |
-| `noema-core` | Core library — agents, storage, conversation management |
-| `noema-core/llm` | LLM abstraction layer with provider implementations |
-| `noema-audio` | Audio processing (Whisper STT, CPAL backend) |
-| `noema-ext` | Extension utilities (PDF extraction, document parsing) |
-| `noema-mcp-core` | MCP server exposing internal tools |
-| `noema-mcp-gdocs` | MCP server for Google Docs integration |
-| `commands` | Command framework with proc-macro support |
-| `config` | Configuration, path management, API key encryption |
-
-## Tech Stack
-
-- **Backend:** Rust (edition 2021), Tokio async runtime
-- **Frontend:** React, TypeScript, Tailwind CSS, Vite
-- **Desktop:** Tauri 2
-- **Database:** SQLite
-- **Protocols:** MCP (Model Context Protocol) via rmcp
-
-## Prerequisites
-
-- [Rust](https://rustup.rs/) (stable)
-- [Node.js](https://nodejs.org/) and npm
-- [Tauri CLI](https://v2.tauri.app/start/prerequisites/)
-
-## Getting Started
+## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/simply/noema.git
-cd noema
-
-# Install frontend dependencies
+# Install frontend dependencies (first time only)
 cd noema-desktop && npm install && cd ..
 
-# Run in development mode
-bin/noema gui
+# Run Noema desktop
+bin/noema
 
-# Build for release
-bin/noema build
+# Or equivalently
+cd noema-desktop && npm run tauri dev
 ```
-
-### CLI Commands
-
-```
-bin/noema gui       Run the Tauri dev server
-bin/noema build     Build release binaries
-bin/noema install   Build and open the macOS installer
-bin/noema nuke      Reset all local data
-```
-
-## Configuration
 
 ### API Keys
-
-Set provider API keys as environment variables:
 
 ```bash
 export CLAUDE_API_KEY="..."
 export OPENAI_API_KEY="..."
 export GEMINI_API_KEY="..."
+# Ollama runs locally — no key needed
 ```
 
-Ollama runs locally and requires no API key.
+## Workspace
 
-### Data Directory
+| Crate | Description |
+|-------|-------------|
+| `simply-core` | Library — LLM providers, MCP client, agent orchestration |
+| `simply-core/llm` | LLM abstraction with provider implementations |
+| `simply-daemon` | Daemon — storage, sessions, MCP server, DaemonApi trait |
+| `simply-audio` | Audio — Whisper STT, CPAL backend, voice coordination |
+| `noema-desktop` | Tauri 2 desktop app (Rust backend + React/TypeScript frontend) |
+| `noema-ext` | Extension utilities (PDF extraction) |
+| `noema-mcp-gdocs` | Standalone MCP server for Google Docs |
+| `commands` | Command framework with proc-macro support |
+| `config` | Configuration, path management, API key encryption |
+
+## Architecture
+
+See [docs/v1.0/GOAL.md](docs/v1.0/GOAL.md) for the full design and [docs/v1.0/ROADMAP.md](docs/v1.0/ROADMAP.md) for the implementation plan.
+
+## Other Commands
+
+```
+bin/noema build     Build release binaries
+bin/noema install   Build and open the macOS installer
+bin/noema nuke      Reset all local data
+```
+
+## Data Directory
 
 Noema stores data in `~/.local/share/noema/`:
 

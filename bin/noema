@@ -1,162 +1,36 @@
 #!/bin/bash
-# noema CLI helper with subcommands
-
+# noema — run the Noema desktop app
 set -e
 
-# Get the script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ============================================================================
-# Subcommands
-# ============================================================================
-
-
-noema_gui() {
-    # Use a local log file that gets cleared on each run
-    local LOG_FILE="$REPO_ROOT/noema.log"
-
-    # Clear the log file
-    : > "$LOG_FILE"
-
-    echo "Traffic log: $LOG_FILE"
-
-    # Export the log file path as an environment variable
-    export NOEMA_LOG_FILE="$LOG_FILE"
-
-    cd "$REPO_ROOT/noema-desktop" && npm run tauri dev "$@"
-}
-
-noema_build() {
-    echo "Building Tauri GUI..."
+case "${1:-dev}" in
+  dev)
+    export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
+    : > "$NOEMA_LOG_FILE"
+    cd "$REPO_ROOT/noema-desktop" && npm run tauri dev
+    ;;
+  build)
     cd "$REPO_ROOT/noema-desktop" && npm run tauri build
-    echo ""
-    echo "Binaries available at:"
-    echo "  $REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/"
-}
-
-noema_install() {
-    echo "Building Noema..."
+    echo "Binaries: $REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/"
+    ;;
+  install)
     cd "$REPO_ROOT/noema-desktop" && npm run tauri build
-
-    echo "Opening Noema installer..."
     open "$REPO_ROOT/noema-desktop/src-tauri/target/release/bundle/dmg/Noema_0.1.0_aarch64.dmg"
-}
-
-noema_nuke() {
-    local DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/noema"
-    local DB_PATH="$DATA_DIR/database/noema.db"
-    local BLOB_DIR="$DATA_DIR/blob_storage"
-
-    echo "This will DELETE all Noema data:"
-    echo "  Database: $DB_PATH"
-    echo "  Blobs:    $BLOB_DIR"
-    echo ""
-
+    ;;
+  nuke)
+    DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/noema"
+    echo "This will DELETE all Noema data in $DATA_DIR"
     read -p "Are you sure? (y/N) " -n 1 -r
-    echo ""
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if [ -f "$DB_PATH" ]; then
-            rm -f "$DB_PATH"
-            echo "Deleted database: $DB_PATH"
-        else
-            echo "Database not found: $DB_PATH"
-        fi
-
-        if [ -d "$BLOB_DIR" ]; then
-            rm -rf "$BLOB_DIR"
-            echo "Deleted blobs directory: $BLOB_DIR"
-        else
-            echo "Blobs directory not found: $BLOB_DIR"
-        fi
-
-        echo ""
-        echo "Nuke complete. Run 'noema gui' to start fresh."
-    else
-        echo "Aborted."
-    fi
-}
-
-noema_help() {
-    cat <<EOF
-Noema CLI Helper
-
-Usage: noema <command> [options]
-
-Commands:
-  gui                 Run the Tauri GUI (React + web)
-  build               Build release binaries
-  install             Open the macOS installer (.dmg)
-  nuke                Delete all Noema data (database and blobs)
-  help                Show this help message
-
-Environment Variables:
-  OPENAI_BASE_URL           OpenAI API base URL
-  CLAUDE_BASE_URL           Claude API base URL
-  GEMINI_BASE_URL           Gemini API base URL
-  OLLAMA_BASE_URL           Ollama API base URL
-  OPENAI_API_KEY            OpenAI API key
-  CLAUDE_API_KEY            Claude/Anthropic API key
-  GEMINI_API_KEY            Gemini API key
-
-Examples:
-  # Run the Tauri GUI
-  noema gui
-
-EOF
-}
-
-# ============================================================================
-# Main command dispatcher
-# ============================================================================
-
-# Export list of available commands (for meta-wrapper discovery)
-noema_commands() {
-    echo "gui build install nuke help"
-}
-
-# ============================================================================
-# Completion Support
-# ============================================================================
-
-noema_complete() {
-    local position="$1"
-    shift
-    local -a words=("$@")
-
-    # Position 1: complete subcommand
-    if [ "$position" -eq 1 ]; then
-        noema_commands
-        return
-    fi
-
-    # Position 2+: complete arguments based on subcommand
-    local subcommand="${words[0]}"
-
-    case "$subcommand" in
-    esac
-}
-
-# Main entry point when called directly
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-    cmd="${1:-gui}"
-    shift || true
-
-    case "$cmd" in
-        commands)
-            noema_commands
-            ;;
-        complete)
-            noema_complete "$@"
-            ;;
-        gui|build|install|nuke|help)
-            "noema_$cmd" "$@"
-            ;;
-        *)
-            echo "Unknown command: $cmd"
-            echo "Run 'noema help' for usage"
-            exit 1
-            ;;
-    esac
-fi
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] && rm -rf "$DATA_DIR/database" "$DATA_DIR/blob_storage" && echo "Done." || echo "Aborted."
+    ;;
+  *)
+    echo "Usage: noema [dev|build|install|nuke]"
+    echo "  dev      Run Tauri dev server (default)"
+    echo "  build    Build release binaries"
+    echo "  install  Build and open macOS installer"
+    echo "  nuke     Delete all local data"
+    ;;
+esac
