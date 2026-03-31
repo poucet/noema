@@ -3,7 +3,7 @@
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P2
 **Complexity:** M
-**Depends on:** Foundation, Content, Events complete. Voice not required.
+**Depends on:** Content, Events complete. Voice not required.
 
 ---
 

@@ -3,8 +3,8 @@
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P0 (core motivation for the rewrite)
 **Complexity:** XL
-**Depends on:** Foundation complete
-**Note:** Voice library (2.1) has no dependency on Foundation or Content/Events — can be built early. Integration (2.3+) requires the core service.
+**Depends on:** Lumina complete
+**Note:** Voice library (Stage 1) has no dependency on Lumina or Content/Events — can be built early. Integration (Stage 3+) requires the core service.
 
 ---
 

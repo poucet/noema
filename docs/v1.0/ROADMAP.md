@@ -8,28 +8,22 @@
 
 ## Overview
 
-v1.0 is organized into phases. After the Foundation, Content and Events run **in parallel** — orthogonal workstreams that converge when intents are stored as UCM documents. Voice is added on top once the core platform is solid and testable via Discord text. Discord Polish finishes remaining features.
+v1.0 is organized into phases. Foundation restructures the workspace and extracts the core service. Lumina adds the minimal Discord bot. After that, Content, Events, Voice, and Discord run **in parallel** as independent workstreams.
 
 Each phase has its own detailed roadmap in `phases/`.
 
 ```
-Foundation (sequential)
-  Crate rename → core service extraction → Lumina crate → shared LLM
-
-Content Platform  ──────────►  Events & Intents
-  MCP tools + doc CRUD  ╲       Event bus + timer
-  Frontmatter queries  feeds    Action AST + service registry
-                        into    Platform events (Discord text)
-                          ╱     LLM-compiled intents
-                         ▼      Conditions + workflow
-              Intents stored as UCM documents
-
-Voice
-  simply-voice crate + Voxtral
-  Desktop voice → core service → Discord (songbird) → RTC
-
-Discord Polish
-  Remaining Lumina cogs, embeds, admin, rich UI
+Foundation (sequential)               Lumina (sequential)
+  Crate rename → core service    →      Lumina crate → shared LLM chat
+                                                │
+                    ┌───────────────┬────────────┼────────────────┐
+                    ▼               ▼            ▼                ▼
+              Content          Events         Voice           Discord
+              MCP + docs       Event bus      simply-voice    Remaining cogs
+              Frontmatter      Intents        Desktop + CPAL  Embeds, admin
+                    │          AST + registry  Songbird + DAVE
+                    └──feeds──►Platform events
+                               Conditions
 ```
 
 ---
@@ -38,30 +32,31 @@ Discord Polish
 
 | Phase | Name | Priority | Complexity | Depends On | Roadmap |
 |-------|------|----------|------------|------------|---------|
-| **Foundation** | Workspace + core service | P0 | L | — | [phases/foundation/](phases/foundation/ROADMAP.md) |
-| **Content** | MCP, document CRUD, frontmatter | P0 | M | Foundation | [phases/content/](phases/content/ROADMAP.md) |
-| **Events** | Event bus, intents, workflow | P1 | XL | Foundation, soft on Content | [phases/events/](phases/events/ROADMAP.md) |
-| **Voice** | Voice pipeline, all backends | P0 | XL | Foundation | [phases/voice/](phases/voice/ROADMAP.md) |
-| **Discord** | Remaining cogs, rich UI | P2 | M | Foundation, Content, Events | [phases/discord/](phases/discord/ROADMAP.md) |
+| **Foundation** | Crate renames + core service | P0 | L | — | [phases/foundation/](phases/foundation/ROADMAP.md) |
+| **Lumina** | Minimal Discord bot + shared LLM | P0 | M | Foundation | [phases/lumina/](phases/lumina/ROADMAP.md) |
+| **Content** | MCP, document CRUD, frontmatter | P0 | M | Lumina | [phases/content/](phases/content/ROADMAP.md) |
+| **Events** | Event bus, intents, workflow | P1 | XL | Lumina, soft on Content | [phases/events/](phases/events/ROADMAP.md) |
+| **Voice** | Voice pipeline, all backends | P0 | XL | Lumina | [phases/voice/](phases/voice/ROADMAP.md) |
+| **Discord** | Remaining cogs, rich UI | P2 | M | Content, Events | [phases/discord/](phases/discord/ROADMAP.md) |
 
 ---
 
 ## Parallelization
 
 ```
-Timeline ──────────────────────────────────────────────────────────────────────►
+Timeline ──────────────────────────────────────────────────────────────────────────►
 
-Foundation  ██████████████████████████
+Foundation  ██████████████
 
-Content                               ██████████████████
-                                                │
-Events                                ██████████████████████████████████
-                                                  Stages 3+4
-                                                  parallel
+Lumina                    ██████████████
 
-Voice                                                      ████████████████████████
+Content                                  ██████████████████
 
-Discord                                                                    ████████
+Events                                   ██████████████████████████████████
+
+Voice                                    ████████████████████████
+
+Discord                                                            ████████████████
 ```
 
-**Maximum parallelism:** Content and Events run as independent work streams after Foundation. Voice library can optionally start early since it's a standalone crate with no core service dependency.
+**Maximum parallelism:** After Lumina, four workstreams can advance independently. Voice library can optionally start during Lumina since it's a standalone crate with no core service dependency.

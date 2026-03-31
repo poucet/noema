@@ -3,7 +3,7 @@
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P0 — foundation for intents (Events phase) and all content features.
 **Complexity:** M
-**Depends on:** Foundation complete
+**Depends on:** Lumina complete
 **Parallel with:** Events phase. Events soft-depends on Content for intent document storage.
 
 ---

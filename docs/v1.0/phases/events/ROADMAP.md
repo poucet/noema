@@ -3,7 +3,7 @@
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P1
 **Complexity:** XL
-**Depends on:** Foundation complete
+**Depends on:** Lumina complete
 **Soft dependency:** Content phase (frontmatter-aware document queries for intent storage)
 **Parallel with:** Content phase
 
