@@ -1,8 +1,7 @@
 //! Chat-related Tauri commands
 
 use simply_daemon::api::{
-    ConversationApi, ConversationInfo as DaemonConversationInfo,
-    DaemonEvent, SessionApi, SessionId, ModelApi, UserMessage,
+    ConversationApi, DaemonEvent, SessionApi, SessionId, ModelApi, UserMessage,
     ToolFilter as DaemonToolFilter,
 };
 use simply_daemon::types::{ConversationId, InputContent};
@@ -203,13 +202,7 @@ pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInf
     Ok(all
         .into_iter()
         .filter(|m| m.definition.has_capability(&simply_daemon::types::ModelCapability::Text))
-        .map(|m| ModelInfo {
-            id: m.definition.id.clone(),
-            display_name: m.definition.name().to_string(),
-            provider: m.id.provider.clone(),
-            capabilities: m.definition.capabilities.iter().map(|c| format!("{:?}", c)).collect(),
-            context_window: m.definition.context_window,
-        })
+        .map(ModelInfo::from)
         .collect())
 }
 
@@ -223,15 +216,7 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
         .await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
-    Ok(convos
-        .into_iter()
-        .map(|c| ConversationInfo {
-            id: c.id,
-            name: c.name,
-            message_count: c.message_count,
-            created_at: c.created_at,
-        })
-        .collect())
+    Ok(convos.into_iter().map(ConversationInfo::from).collect())
 }
 
 /// Load a conversation (creating a daemon session for it)

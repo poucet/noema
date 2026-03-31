@@ -16,6 +16,18 @@ pub struct ModelInfo {
     pub context_window: Option<u32>,
 }
 
+impl From<simply_daemon::types::ModelInfo> for ModelInfo {
+    fn from(m: simply_daemon::types::ModelInfo) -> Self {
+        Self {
+            id: m.definition.id.clone(),
+            display_name: m.definition.name().to_string(),
+            provider: m.id.provider,
+            capabilities: m.definition.capabilities.iter().map(|c| format!("{:?}", c)).collect(),
+            context_window: m.definition.context_window,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
@@ -25,6 +37,17 @@ pub struct ConversationInfo {
     pub name: Option<String>,
     pub message_count: usize,
     pub created_at: i64,
+}
+
+impl From<simply_daemon::api::ConversationInfo> for ConversationInfo {
+    fn from(c: simply_daemon::api::ConversationInfo) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            message_count: c.message_count,
+            created_at: c.created_at,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
