@@ -3125,49 +3125,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
 
 [[package]]
-name = "noema-audio"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "cpal",
- "dirs",
- "llm",
- "noema-core",
- "tokio",
- "tracing",
- "whisper-rs",
-]
-
-[[package]]
-name = "noema-core"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "askama",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "config",
- "futures",
- "hex",
- "llm",
- "rmcp",
- "rusqlite",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml 0.9.8",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "noema-desktop"
 version = "0.3.0"
 dependencies = [
@@ -3177,16 +3134,16 @@ dependencies = [
  "dirs",
  "futures",
  "llm",
- "noema-audio",
- "noema-core",
  "noema-ext",
- "noema-mcp-core",
  "noema-mcp-gdocs",
  "regex",
  "reqwest",
  "rmcp",
  "serde",
  "serde_json",
+ "simply-audio",
+ "simply-core",
+ "simply-daemon",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",
@@ -3217,25 +3174,6 @@ dependencies = [
  "lopdf",
  "pdf-extract",
  "pdfium-render",
-]
-
-[[package]]
-name = "noema-mcp-core"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "http-body-util",
- "hyper",
- "hyper-util",
- "llm",
- "noema-core",
- "rmcp",
- "serde",
- "serde_json",
- "tokio",
- "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -5168,6 +5106,68 @@ name = "simd-adler32"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
+
+[[package]]
+name = "simply-audio"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "cpal",
+ "dirs",
+ "llm",
+ "simply-core",
+ "tokio",
+ "tracing",
+ "whisper-rs",
+]
+
+[[package]]
+name = "simply-core"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "askama",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "config",
+ "futures",
+ "hex",
+ "llm",
+ "rmcp",
+ "rusqlite",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "toml 0.9.8",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "simply-daemon"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "llm",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "simply-core",
+ "tokio",
+ "tower-service",
+ "tracing",
+]
 
 [[package]]
 name = "siphasher"
