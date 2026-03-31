@@ -5,19 +5,86 @@ use simply_core::storage::{EntityStore, EntityType, InputContent, StorageTypes, 
 use simply_core::storage::ids::{ConversationId, TurnId, SpanId};
 use simply_core::storage::traits::ReferenceStore;
 use simply_daemon::api::{
-    CreateSessionOptions, SessionApi, SessionId, ModelApi, UserMessage,
+    CreateSessionOptions, DaemonEvent, SessionApi, SessionId, ModelApi, UserMessage,
     ToolFilter as DaemonToolFilter,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::sync::broadcast;
 
 use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{
     AlternateInfo, ConversationInfo, DisplayMessage, DisplayInputContent,
+    ErrorEvent, MessageCompleteEvent, StreamingMessageEvent,
     ModelInfo, ToolConfig,
 };
+
+/// Spawn a task that forwards DaemonEvents from a session broadcast to Tauri UI events.
+fn spawn_event_forwarder(
+    app: AppHandle,
+    state: Arc<AppState>,
+    conversation_id: ConversationId,
+    mut rx: broadcast::Receiver<DaemonEvent>,
+) {
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => match event {
+                    DaemonEvent::AssistantContent(block) => {
+                        state.set_processing(&conversation_id, true).await;
+                        let content = vec![crate::types::DisplayContent::from(&block)];
+                        let msg = DisplayMessage {
+                            role: llm::Role::Assistant,
+                            content,
+                            turn_id: None,
+                            span_id: None,
+                            alternates: None,
+                        };
+                        let _ = app.emit("streaming_message", StreamingMessageEvent {
+                            conversation_id: conversation_id.clone(),
+                            message: msg,
+                        });
+                    }
+                    DaemonEvent::TurnComplete => {
+                        // Re-fetch all messages for the complete event
+                        let daemon = match state.get_daemon() {
+                            Ok(d) => d,
+                            Err(_) => break,
+                        };
+                        let session_id = SessionId::new(conversation_id.as_str());
+                        let messages = daemon
+                            .get_messages(&session_id)
+                            .await
+                            .unwrap_or_default()
+                            .iter()
+                            .map(DisplayMessage::from)
+                            .collect();
+                        let _ = app.emit("message_complete", MessageCompleteEvent {
+                            conversation_id: conversation_id.clone(),
+                            messages,
+                        });
+                        state.set_processing(&conversation_id, false).await;
+                    }
+                    DaemonEvent::Error(err) => {
+                        log_message(&format!("DAEMON ERROR [{}]: {}", conversation_id.as_str(), err));
+                        let _ = app.emit("error", ErrorEvent {
+                            conversation_id: conversation_id.clone(),
+                            error: err,
+                        });
+                        state.set_processing(&conversation_id, false).await;
+                    }
+                    _ => {}
+                },
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    log_message(&format!("Event forwarder lagged {} events for {}", n, conversation_id.as_str()));
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
 
 /// Enrich messages with alternate span information for each turn
 async fn enrich_with_alternates<S: StorageTypes, T: Stores<S>>(
@@ -246,6 +313,7 @@ pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<C
 /// Load a conversation (creating a daemon session for it)
 #[tauri::command]
 pub async fn load_conversation(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
@@ -254,10 +322,13 @@ pub async fn load_conversation(
     let session_id = SessionId::new(conversation_id.as_str());
 
     // Resume session (loads from storage if not already open, returns existing if open)
-    let (_info, _rx) = daemon
+    let (_info, rx) = daemon
         .resume_session(&session_id)
         .await
         .map_err(|e| format!("Failed to load conversation: {}", e))?;
+
+    // Forward daemon events to Tauri UI
+    spawn_event_forwarder(app, state.inner().clone(), conversation_id.clone(), rx);
 
     let messages: Vec<DisplayMessage> = daemon
         .get_messages(&session_id)
@@ -274,6 +345,7 @@ pub async fn load_conversation(
 /// Create a new conversation
 #[tauri::command]
 pub async fn new_conversation(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     name: Option<String>,
 ) -> Result<String, String> {
@@ -292,12 +364,14 @@ pub async fn new_conversation(
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
-    // Create a daemon session for it
+    // Create a daemon session and start event forwarding
     let session_id = SessionId::new(conv_id.as_str());
-    daemon
+    let (_info, rx) = daemon
         .resume_session(&session_id)
         .await
         .map_err(|e| format!("Failed to create session: {}", e))?;
+
+    spawn_event_forwarder(app, state.inner().clone(), conv_id.clone(), rx);
 
     Ok(conv_id.as_str().to_string())
 }
