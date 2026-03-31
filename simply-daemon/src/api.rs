@@ -120,9 +120,11 @@ pub struct SeedMessage {
 pub enum DaemonEvent {
     /// Session is ready.
     SessionReady { session_id: SessionId },
+    /// User message was added to the session.
+    UserMessage(llm::ChatMessage),
     /// Partial text from the assistant (streaming).
     TextDelta(String),
-    /// Content block from the assistant.
+    /// Content block from the assistant (streaming).
     AssistantContent(llm::ContentBlock),
     /// The agent is calling a tool.
     ToolCall {

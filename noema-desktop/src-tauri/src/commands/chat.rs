@@ -17,7 +17,7 @@ use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{
     AlternateInfo, ConversationInfo, DisplayMessage, DisplayInputContent,
-    ErrorEvent, MessageCompleteEvent, StreamingMessageEvent,
+    ErrorEvent, MessageCompleteEvent, StreamingMessageEvent, UserMessageEvent,
     ModelInfo, ToolConfig,
 };
 
@@ -32,6 +32,12 @@ fn spawn_event_forwarder(
         loop {
             match rx.recv().await {
                 Ok(event) => match event {
+                    DaemonEvent::UserMessage(msg) => {
+                        let _ = app.emit("user_message", crate::types::UserMessageEvent {
+                            conversation_id: conversation_id.clone(),
+                            message: DisplayMessage::from(&msg),
+                        });
+                    }
                     DaemonEvent::AssistantContent(block) => {
                         state.set_processing(&conversation_id, true).await;
                         let content = vec![crate::types::DisplayContent::from(&block)];

@@ -128,7 +128,7 @@ where
         event: ManagerEvent,
     ) -> Vec<DaemonEvent> {
         match event {
-            ManagerEvent::UserMessageAdded(_) => vec![],
+            ManagerEvent::UserMessageAdded(msg) => vec![DaemonEvent::UserMessage(msg)],
             ManagerEvent::StreamingMessage(msg) => {
                 msg.payload.content.into_iter().map(DaemonEvent::AssistantContent).collect()
             }
