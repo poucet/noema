@@ -195,4 +195,5 @@ Only features with **active behavior** (event processing, intent execution, iden
 | [obsolete/ARCHITECTURE-0.2.md](obsolete/ARCHITECTURE-0.2.md) | Previous Noema 0.2 architecture |
 | [obsolete/HOOK_SYSTEM.md](obsolete/HOOK_SYSTEM.md) | Previous hook system design (superseded by Agentic System) |
 | [../FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md) | Future feature roadmap |
-| [../v1.0/DESIGN.md](../v1.0/DESIGN.md) | v1.0 migration plan and implementation stages |
+| [../v1.0/GOAL.md](../v1.0/GOAL.md) | v1.0 design goals and decisions |
+| [../v1.0/ROADMAP.md](../v1.0/ROADMAP.md) | v1.0 phased implementation roadmap |

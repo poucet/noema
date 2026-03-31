@@ -1,6 +1,6 @@
 # Simply Platform — Post-v1 Roadmap
 
-Features beyond the v1.0 scope. For v1.0 implementation stages, see [v1.0/DESIGN.md](v1.0/DESIGN.md). For architecture, see [designs/ARCHITECTURE.md](designs/ARCHITECTURE.md).
+Features beyond the v1.0 scope. For v1.0 goals, see [v1.0/GOAL.md](v1.0/GOAL.md). For architecture, see [designs/ARCHITECTURE.md](designs/ARCHITECTURE.md).
 
 ---
 

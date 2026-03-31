@@ -2,7 +2,7 @@
 
 **Status:** Superseded
 **Created:** 2026-01-10
-**Superseded by:** [v1.0 DESIGN.md — Event & Intent System](../../v1.0/DESIGN.md#event--intent-system)
+**Superseded by:** [ARCHITECTURE.md — Event & Intent System](../ARCHITECTURE.md#event--intent-system)
 **Related:** [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md)
 
 ---

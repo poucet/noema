@@ -373,7 +373,7 @@ template: "Good morning! What's on your mind today?"
 | Document | Purpose |
 |----------|---------|
 | [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md) | Detailed UCM design, feature requirements |
-| [obsolete/HOOK_SYSTEM.md](obsolete/HOOK_SYSTEM.md) | ~~Hook system~~ (superseded by [v1.0 Event & Intent System](../../v1.0/DESIGN.md#event--intent-system)) |
+| [obsolete/HOOK_SYSTEM.md](obsolete/HOOK_SYSTEM.md) | ~~Hook system~~ (superseded by [Event & Intent System](../ARCHITECTURE.md#event--intent-system)) |
 | [STORAGE.md](../STORAGE.md) | UCM database schema reference |
 | [FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md) | Future feature roadmap |
 
