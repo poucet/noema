@@ -40,7 +40,7 @@ rmcp = { version = "0.9.1", features = ["client"] }
 simply-core = { path = "../../simply-core", features = ["sqlite"] }
 llm = { path = "../../simply-core/llm" }
 config = { path = "../../config" }
-noema-audio = { path = "../../noema-audio", features = ["browser"] }
+simply-audio = { path = "../../simply-audio", features = ["browser"] }
 noema-ext = { path = "../../noema-ext" }
 noema-mcp-core = { path = "../../noema-mcp-core" }
 noema-mcp-gdocs = { path = "../../noema-mcp-gdocs" }
@@ -52,4 +52,4 @@ dirs = "6.0"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
-native-audio = ["noema-audio/backend-cpal"]
+native-audio = ["simply-audio/backend-cpal"]

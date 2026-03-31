@@ -1,11 +1,11 @@
 //! Voice-related Tauri commands
 
-use noema_audio::{
+use simply_audio::{
     create_browser_backend, VoiceAgent, VoiceCoordinator,
 };
 
 #[cfg(feature = "native-audio")]
-use noema_audio::StreamingAudioCapture;
+use simply_audio::StreamingAudioCapture;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use std::path::PathBuf;

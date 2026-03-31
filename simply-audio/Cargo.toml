@@ -1,5 +1,5 @@
 [package]
-name = "noema-audio"
+name = "simply-audio"
 version.workspace = true
 edition.workspace = true
 

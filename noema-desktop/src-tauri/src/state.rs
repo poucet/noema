@@ -1,7 +1,7 @@
 //! Application state management
 
-use noema_audio::BrowserAudioController;
-use noema_audio::VoiceCoordinator;
+use simply_audio::BrowserAudioController;
+use simply_audio::VoiceCoordinator;
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::ids::{ConversationId, UserId};
 use simply_core::storage::traits::StorageTypes;
