@@ -12,5 +12,5 @@ pub mod api;
 pub mod embedded;
 pub mod mcp;
 
-/// Re-exported types for clients. Import from `simply_daemon::types` or `simply_daemon::api`.
+/// Re-exported types for clients.
 pub use api::types as types;

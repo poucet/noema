@@ -3,12 +3,12 @@
 use config::PathManager;
 use simply_daemon::embedded::EmbeddedDaemon;
 use simply_daemon::types::{
-    start_auto_connect, FsBlobStore, McpRegistry, ServerStatus, SqliteStore,
+    FsBlobStore, McpRegistry, SqliteStore,
     StorageCoordinator, Stores, UserStore,
 };
 use crate::state::{AppState, AppStorage, AppStores};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::logging::log_message;
 
@@ -65,16 +65,13 @@ async fn do_init(app: AppHandle, state: Arc<AppState>) -> Result<String, String>
     let model_name = init_daemon(&state).await?;
     log_message(&format!("Daemon initialized with model: {}", model_name));
 
-    // Start auto-connect for user-configured MCP servers (runs in background)
-    let mcp_registry = state.get_mcp_registry().map_err(|e| e.to_string())?;
-    start_mcp_auto_connect(app.clone(), mcp_registry).await;
-    log_message("MCP auto-connect started");
-
     Ok(model_name)
 }
 
-/// Initialize the daemon — creates EmbeddedDaemon with storage, model, MCP registry
+/// Initialize the daemon — creates EmbeddedDaemon with storage and MCP registry
 async fn init_daemon(state: &AppState) -> Result<String, String> {
+    use simply_daemon::api::ModelApi;
+
     let coordinator = state.get_coordinator()?;
     let stores = state.get_stores()?;
     let user_id = state.user_id.lock().await.clone();
@@ -84,69 +81,27 @@ async fn init_daemon(state: &AppState) -> Result<String, String> {
     let registry_arc = Arc::new(tokio::sync::Mutex::new(registry));
     let _ = state.mcp_registry.set(registry_arc.clone());
 
-    // Resolve default model
-    const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
-    let settings = config::Settings::load();
-    let model_id = settings
-        .default_model
-        .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
+    let stores_arc = Arc::new(AppStores::new(stores.turn(), stores.blob()));
 
-    let model = llm::create_model(&model_id)
-        .map_err(|e| format!("Failed to create model: {}", e))?;
+    let daemon = EmbeddedDaemon::new(
+        coordinator,
+        stores_arc,
+        registry_arc,
+        user_id,
+    )
+    .await
+    .map_err(|e| format!("Failed to create daemon: {}", e))?;
 
+    let model_id = daemon.default_model_id().await;
     let model_display_name = model_id
         .split('/')
         .last()
         .unwrap_or(&model_id)
         .to_string();
 
-    // Create the stores Arc for the daemon (wraps AppStores)
-    let stores_arc: Arc<dyn Stores<AppStorage>> = Arc::new(AppStores::new(
-        stores.turn(), // SqliteStore Arc
-        stores.blob(), // FsBlobStore Arc
-    ));
-
-    let daemon = EmbeddedDaemon::new(
-        coordinator,
-        stores_arc,
-        registry_arc,
-        model,
-        model_id,
-        user_id,
-    )
-    .await
-    .map_err(|e| format!("Failed to create daemon: {}", e))?;
-
     let _ = state.daemon.set(daemon);
 
     Ok(model_display_name)
-}
-
-/// Start auto-connect for all configured MCP servers
-async fn start_mcp_auto_connect(app: AppHandle, mcp_registry: Arc<tokio::sync::Mutex<McpRegistry>>) {
-    let app_handle = app.clone();
-    let on_status_change: Arc<dyn Fn(&str, &ServerStatus) + Send + Sync> =
-        Arc::new(move |server_id: &str, status: &ServerStatus| {
-            let status_str = match status {
-                ServerStatus::Disconnected => "disconnected".to_string(),
-                ServerStatus::Connected => "connected".to_string(),
-                ServerStatus::Retrying { attempt } => format!("retrying:{}", attempt),
-                ServerStatus::RetryStopped { last_error } => format!("stopped:{}", last_error),
-            };
-
-            log_message(&format!("MCP server '{}' status: {}", server_id, status_str));
-
-            let _ = app_handle.emit(
-                "mcp_server_status",
-                serde_json::json!({
-                    "server_id": server_id,
-                    "status": status_str,
-                }),
-            );
-        });
-
-    let count = start_auto_connect(mcp_registry, Some(on_status_change)).await;
-    log_message(&format!("Started auto-connect for {} MCP servers", count));
 }
 
 async fn init_storage(state: &AppState) -> Result<(), String> {

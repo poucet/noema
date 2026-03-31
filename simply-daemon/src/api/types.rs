@@ -32,7 +32,10 @@ pub use simply_core::storage::traits::StorageTypes;
 // Re-exported LLM types
 // ---------------------------------------------------------------------------
 
-pub use llm::{ChatMessage, ContentBlock, ModelCapability, ModelInfo, Role, ToolResultContent};
+pub use llm::{
+    ChatMessage, ContentBlock, ModelCapability, ModelInfo, ProviderInfo, Role, ToolResultContent,
+    list_providers,
+};
 
 // ---------------------------------------------------------------------------
 // Re-exported MCP config types

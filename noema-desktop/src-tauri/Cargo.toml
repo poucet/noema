@@ -37,8 +37,6 @@ regex = "1"
 rmcp = { version = "0.9.1", features = ["client"] }
 
 # Local workspace dependencies
-simply-core = { path = "../../simply-core", features = ["sqlite"] }
-llm = { path = "../../simply-core/llm" }
 config = { path = "../../config" }
 simply-audio = { path = "../../simply-audio", features = ["browser"] }
 noema-ext = { path = "../../noema-ext" }

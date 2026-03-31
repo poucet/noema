@@ -80,6 +80,7 @@ pub async fn store_asset(
     mime_type: String,
 ) -> Result<AssetId, String> {
     use simply_daemon::api::AssetApi;
+    use base64::Engine;
 
     let daemon = state.get_daemon()?;
     let bytes = base64::engine::general_purpose::STANDARD

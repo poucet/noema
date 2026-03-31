@@ -1,7 +1,7 @@
 //! Settings commands
 
 use config::Settings;
-use llm::registry::list_providers;
+use simply_daemon::types::list_providers;
 use std::collections::HashMap;
 use ts_rs::TS;
 

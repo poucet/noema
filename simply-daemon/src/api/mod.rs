@@ -14,7 +14,7 @@ mod asset;
 mod mcp;
 mod model;
 mod voice;
-mod types;
+pub mod types;
 
 pub use session::*;
 pub use conversation::*;

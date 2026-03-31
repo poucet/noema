@@ -1,8 +1,7 @@
 //! Persistent conversation entity management.
 
 use async_trait::async_trait;
-use crate::types::ConversationId;
-use super::types::ConversationInfo;
+use super::types::{ConversationId, ConversationInfo};
 
 /// CRUD on stored conversations.
 ///

@@ -43,13 +43,10 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     stores: Arc<dyn Stores<S>>,
     mcp_registry: Arc<Mutex<McpRegistry>>,
     sessions: Mutex<HashMap<SessionId, ManagedSession<S>>>,
-    model: Mutex<Arc<dyn ChatModel + Send + Sync>>,
-    model_id: Mutex<String>,
+    /// Default model ID — used when sessions don't specify one.
+    default_model_id: Mutex<String>,
     user_id: UserId,
-    /// Shared channel that all ConversationManagers send to.
-    /// A dispatcher task routes events to per-session broadcast senders.
     manager_event_tx: SharedEventSender,
-    /// Handle to the embedded MCP server (daemon tools like spawn_agent).
     _mcp_server_handle: Mutex<Option<ServerHandle>>,
 }
 
@@ -61,10 +58,12 @@ where
         coordinator: Arc<StorageCoordinator<S>>,
         stores: Arc<dyn Stores<S>>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
-        model: Arc<dyn ChatModel + Send + Sync>,
-        model_id: String,
         user_id: UserId,
     ) -> anyhow::Result<Arc<Self>> {
+        const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
+        let default_model_id = config::Settings::load()
+            .default_model
+            .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
         let (manager_event_tx, manager_event_rx) = mpsc::unbounded_channel();
 
         // Start the daemon's MCP server (exposes tools like spawn_agent)
@@ -89,14 +88,19 @@ where
             stores,
             mcp_registry,
             sessions: Mutex::new(HashMap::new()),
-            model: Mutex::new(model),
-            model_id: Mutex::new(model_id),
+            default_model_id: Mutex::new(default_model_id.to_string()),
             user_id,
             manager_event_tx,
             _mcp_server_handle: Mutex::new(Some(server_handle)),
         });
 
         Self::spawn_event_dispatcher(Arc::clone(&daemon), manager_event_rx);
+
+        // Auto-connect configured MCP servers in background
+        {
+            let registry = Arc::clone(&daemon.mcp_registry);
+            simply_core::mcp::start_auto_connect(registry, None).await;
+        }
 
         Ok(daemon)
     }
@@ -194,11 +198,11 @@ where
         let session_id = SessionId::new(conversation_id.as_str());
         let persistence = options.persistence.unwrap_or(Persistence::Persistent);
 
-        let model = self.model.lock().await.clone();
         let model_id = match options.model_id {
             Some(id) => id,
-            None => self.model_id.lock().await.clone(),
+            None => self.default_model_id.lock().await.clone(),
         };
+        let model = llm::create_model(&model_id)?;
 
         let session = Session::new(Arc::clone(&self.coordinator), conversation_id);
         let manager = self.build_manager(session, model, model_id.clone());
@@ -235,8 +239,8 @@ where
         let conversation_id = ConversationId::from_string(session_id.as_str());
         let session = Session::open(Arc::clone(&self.coordinator), conversation_id).await?;
 
-        let model = self.model.lock().await.clone();
-        let model_id = self.model_id.lock().await.clone();
+        let model_id = self.default_model_id.lock().await.clone();
+        let model = llm::create_model(&model_id)?;
         let manager = self.build_manager(session, model, model_id.clone());
         let info = Self::make_session_info(session_id, Persistence::Persistent, model_id);
 
@@ -520,14 +524,18 @@ where
         Ok(all_models)
     }
 
+    async fn list_providers(&self) -> Vec<llm::ProviderInfo> {
+        llm::list_providers().to_vec()
+    }
+
     async fn default_model_id(&self) -> String {
-        self.model_id.lock().await.clone()
+        self.default_model_id.lock().await.clone()
     }
 
     async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> {
-        let new_model = llm::create_model(model_id)?;
-        *self.model.lock().await = new_model;
-        *self.model_id.lock().await = model_id.to_string();
+        // Validate the model ID is valid
+        let _ = llm::create_model(model_id)?;
+        *self.default_model_id.lock().await = model_id.to_string();
         Ok(())
     }
 }
