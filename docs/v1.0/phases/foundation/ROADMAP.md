@@ -39,7 +39,6 @@ See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the full communicati
 | *(new)* | `simply-daemon/` | New crate — daemon binary |
 | `noema-desktop/` | `noema-desktop/` | No change |
 | `noema-ext/` | `noema-ext/` | No change |
-| `noema-ui/` | `noema-ui/` | No change (frontend) |
 | `noema-mcp-gdocs/` | — | Deferred (Google integration is post-v1) |
 
 **Tasks:**
