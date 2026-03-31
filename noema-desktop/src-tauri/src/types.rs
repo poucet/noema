@@ -24,25 +24,7 @@ pub struct ConversationInfo {
     pub id: ConversationId,
     pub name: Option<String>,
     pub message_count: usize,
-    /// Whether this conversation is marked as private (warns before using cloud models)
-    pub is_private: bool,
     pub created_at: i64,
-}
-
-impl ConversationInfo {
-    /// Create from StoredEntity with turn count
-    pub fn from_entity(
-        entity: &simply_core::storage::StoredEntity,
-        turn_count: usize,
-    ) -> Self {
-        Self {
-            id: entity.id.clone(),
-            name: entity.name.clone(),
-            message_count: turn_count,
-            is_private: entity.is_private,
-            created_at: entity.created_at,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -50,14 +50,6 @@ function App() {
   const [prefilledInput, setPrefilledInput] = useState<string>("");
   // Tools enabled state - controls whether MCP tools are sent to the model
   const [toolsEnabled, setToolsEnabled] = useState<boolean>(true);
-  // Conversation privacy state - warns before using cloud models with private conversations
-  const [isConversationPrivate, setIsConversationPrivate] = useState<boolean>(false);
-  // Privacy warning dialog state
-  const [privacyWarning, setPrivacyWarning] = useState<{
-    show: boolean;
-    pendingContent: InputContentBlock[];
-    pendingToolConfig?: ToolConfig;
-  }>({ show: false, pendingContent: [] });
   // Edit message modal state
   const [editingMessage, setEditingMessage] = useState<{
     turnId: string;
@@ -80,29 +72,6 @@ function App() {
 
   const handleToggleTools = () => {
     setToolsEnabled((prev) => !prev);
-  };
-
-  const handleTogglePrivate = async () => {
-    if (!currentConversationId) return;
-    const newPrivate = !isConversationPrivate;
-    try {
-      await tauri.setConversationPrivate(currentConversationId, newPrivate);
-      setIsConversationPrivate(newPrivate);
-      // Refresh conversation list to show updated privacy status
-      const convos = await tauri.listConversations();
-      setConversations(convos);
-    } catch (err) {
-      appLog.error("Toggle private error", String(err));
-      setError(String(err));
-    }
-  };
-
-  // Check if current model is private (local) by looking at capabilities
-  const isCurrentModelPrivate = (): boolean => {
-    const currentModelObj = models.find(
-      (m) => m.displayName === currentModel || m.id === currentModel
-    );
-    return currentModelObj?.capabilities.includes("Private") ?? false;
   };
 
   // Check if current model supports vision (image input)
@@ -163,8 +132,6 @@ function App() {
           // Try to load the most recent conversation
           try {
             convId = convos[0].id;
-            const isPrivate = await tauri.getConversationPrivate(convId);
-            setIsConversationPrivate(isPrivate);
             const msgs = await tauri.loadConversation(convId);
             setMessages(Array.isArray(msgs) ? msgs : []);
             const convForks = await tauri.listConversationForks(convId);
@@ -182,7 +149,6 @@ function App() {
           convId = await tauri.newConversation();
           setCurrentConversationId(convId);
           setMessages([]);
-          setIsConversationPrivate(false);
           setForks([]);
         }
 
@@ -376,19 +342,9 @@ function App() {
     };
   }, []);
 
-  const handleSendMessage = async (content: InputContentBlock[], toolConfig?: ToolConfig, skipPrivacyCheck?: boolean) => {
+  const handleSendMessage = async (content: InputContentBlock[], toolConfig?: ToolConfig) => {
     try {
       setError(null);
-
-      // Check if we need to show privacy warning (private conversation + cloud model)
-      if (!skipPrivacyCheck && isConversationPrivate && !isCurrentModelPrivate()) {
-        setPrivacyWarning({
-          show: true,
-          pendingContent: content,
-          pendingToolConfig: toolConfig,
-        });
-        return;
-      }
 
       // Clear any prefilled text after sending
       if (prefilledInput) {
@@ -433,12 +389,6 @@ function App() {
       const msgs = await tauri.loadConversation(id);
       setCurrentConversationId(id);
       setMessages(Array.isArray(msgs) ? msgs : []);
-      // Load privacy status for this conversation
-      const isPrivate = await tauri.getConversationPrivate(id);
-      setIsConversationPrivate(isPrivate);
-      // Load forks for this conversation
-      const convForks = await tauri.listConversationForks(id);
-      setForks(convForks);
     } catch (err) {
       appLog.error("Select conversation error", String(err));
       setError(String(err));
@@ -736,46 +686,6 @@ function App() {
       {/* Settings Modal */}
       {showSettings && (
         <Settings onClose={() => setShowSettings(false)} />
-      )}
-
-      {/* Privacy Warning Dialog */}
-      {privacyWarning.show && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-lg p-6 max-w-md mx-4 shadow-xl border border-gray-700">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="bg-amber-900/50 p-2 rounded-full">
-                <svg className="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <h2 className="text-lg font-semibold text-foreground">Privacy Warning</h2>
-            </div>
-            <p className="text-muted mb-6">
-              This conversation is marked as <span className="text-amber-300 font-medium">private</span>, but you're using a <span className="text-blue-300 font-medium">cloud model</span>. Your message will be sent to an external provider.
-            </p>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => {
-                  // Send anyway
-                  handleSendMessage(privacyWarning.pendingContent, privacyWarning.pendingToolConfig, true);
-                  setPrivacyWarning({ show: false, pendingContent: [] });
-                }}
-                className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-medium transition-colors"
-              >
-                Send Anyway
-              </button>
-              <button
-                onClick={() => setPrivacyWarning({ show: false, pendingContent: [] })}
-                className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg font-medium transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-            <p className="text-xs text-muted mt-4 text-center">
-              Tip: Switch to a local model (marked with a green lock) to keep your data private.
-            </p>
-          </div>
-        </div>
       )}
 
       {/* Edit Message Modal */}

@@ -259,7 +259,6 @@ pub async fn load_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
-    let stores = state.get_stores()?;
     let daemon = state.get_daemon()?;
     let session_id = SessionId::new(conversation_id.as_str());
 
@@ -280,7 +279,6 @@ pub async fn load_conversation(
         .map(DisplayMessage::from)
         .collect();
 
-    let messages = enrich_with_alternates(messages, stores, &conversation_id).await;
     Ok(messages)
 }
 
@@ -361,47 +359,6 @@ pub async fn rename_conversation(
         .update_entity(&conversation_id, &entity)
         .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
-}
-
-/// Get whether the current conversation is marked as private
-#[tauri::command]
-pub async fn get_conversation_private(
-    state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
-) -> Result<bool, String> {
-    let stores = state.get_stores()?;
-    let entity = stores
-        .entity()
-        .get_entity(&conversation_id)
-        .await
-        .map_err(|e| format!("Failed to get conversation: {}", e))?
-        .ok_or_else(|| "Conversation not found".to_string())?;
-    Ok(entity.is_private)
-}
-
-/// Set whether a conversation is marked as private
-#[tauri::command]
-pub async fn set_conversation_private(
-    state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
-    is_private: bool,
-) -> Result<(), String> {
-    let stores = state.get_stores()?;
-
-    let mut entity = stores
-        .entity()
-        .get_entity(&conversation_id)
-        .await
-        .map_err(|e| format!("Failed to get conversation: {}", e))?
-        .ok_or_else(|| "Conversation not found".to_string())?;
-
-    entity.is_private = is_private;
-
-    stores
-        .entity()
-        .update_entity(&conversation_id, &entity)
-        .await
-        .map_err(|e| format!("Failed to set conversation privacy: {}", e))
 }
 
 /// Get current model name
