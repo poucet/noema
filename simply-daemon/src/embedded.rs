@@ -368,6 +368,77 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// ConversationApi
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl<S: StorageTypes> ConversationApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
+    async fn create_conversation(&self, name: Option<&str>) -> anyhow::Result<ConversationId> {
+        self.coordinator
+            .create_conversation(&self.user_id, name)
+            .await
+    }
+
+    async fn list_conversations(&self) -> anyhow::Result<Vec<ConversationInfo>> {
+        use simply_core::storage::{EntityStore, EntityType, TurnStore};
+
+        let entities = self.stores
+            .entity()
+            .list_entities(&self.user_id, Some(&EntityType::conversation()))
+            .await?;
+
+        let mut result = Vec::with_capacity(entities.len());
+        for entity in entities {
+            let turn_count = self.stores
+                .turn()
+                .get_turn_count(&entity.id)
+                .await
+                .unwrap_or(0);
+            result.push(ConversationInfo {
+                id: entity.id.clone(),
+                name: entity.name.clone(),
+                message_count: turn_count,
+                created_at: entity.created_at,
+            });
+        }
+        Ok(result)
+    }
+
+    async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
+        use simply_core::storage::EntityStore;
+
+        // Close session if open
+        let session_id = SessionId::new(conversation_id.as_str());
+        let _ = self.close_session(&session_id).await;
+
+        self.stores
+            .entity()
+            .delete_entity(conversation_id)
+            .await
+    }
+
+    async fn rename_conversation(&self, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()> {
+        use simply_core::storage::EntityStore;
+
+        let mut entity = self.stores
+            .entity()
+            .get_entity(conversation_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("conversation not found: {conversation_id}"))?;
+
+        entity.name = if name.trim().is_empty() { None } else { Some(name.to_string()) };
+
+        self.stores
+            .entity()
+            .update_entity(conversation_id, &entity)
+            .await
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AssetApi
 // ---------------------------------------------------------------------------
 
