@@ -9,9 +9,7 @@
 
 ## Goal
 
-Lumina exists in the workspace as a Discord bot that uses `simply-core` with a Discord-backed `ExecutionContext` — the Discord channel *is* the conversation history. This establishes the second platform so all subsequent phases can be tested cross-platform.
-
-Lumina can optionally connect to `simply-service` for features that need persistent storage (documents, events), but the basic chat path goes directly through `simply-core`.
+Lumina exists in the workspace as a Discord bot that connects to simply-daemon via WebSocket. It seeds conversation context from Discord channel history, registers Discord MCP tools, and delegates all agent work to the daemon. No dependency on simply-core.
 
 ---
 
@@ -19,15 +17,15 @@ Lumina can optionally connect to `simply-service` for features that need persist
 
 ### Stage 1 — Lumina Crate
 
-**Goal:** Minimal Lumina bot exists in the workspace, connects to Discord, responds to commands.
+**Goal:** Minimal Lumina bot exists in the workspace, connects to Discord and simply-daemon.
 
 **Complexity:** S
 
 **Tasks:**
 - [ ] Add `lumina/` crate to workspace `Cargo.toml`
 - [ ] Basic `main.rs`: serenity bot, connect to Discord gateway
+- [ ] WebSocket client to simply-daemon
 - [ ] Two slash commands: `/ping` (health check), `/chat` (echo for now)
-- [ ] Lumina depends on `simply-core` as a library
 - [ ] Config: Discord bot token loading (`.env` or shared config approach)
 
 **Verify:**
@@ -38,20 +36,21 @@ Lumina can optionally connect to `simply-service` for features that need persist
 
 ### Stage 2 — Shared LLM Chat
 
-**Goal:** Lumina chats with an LLM using `simply-core` agent with a Discord-backed execution context.
+**Goal:** Lumina chats with an LLM by sending messages to simply-daemon, which runs the agent.
 
 **Complexity:** M
 
 **Tasks:**
-- [ ] Implement Discord-backed `ExecutionContext` — channel messages as conversation history
-- [ ] Lumina's `/chat` command creates a conversation, calls the agent, streams response to Discord
+- [ ] On `/chat`, Lumina opens a session (ephemeral by default) with simply-daemon
+- [ ] Seeds context from recent Discord channel messages (rolling window of last N)
+- [ ] Sends user message, receives streamed agent response, posts to Discord
+- [ ] Registers Discord MCP tools so the agent can interact with Discord
 - [ ] Port ChatCog basics: message handling, response formatting as Discord embeds
-- [ ] Single provider first (Claude)
-- [ ] Verify Noema still works through simply-service with UCM-backed context
+- [ ] Verify Noema still works through simply-daemon with persistent sessions
 
 **Verify:**
 - Lumina: `/chat hello` → LLM response appears in Discord.
-- Noema: Chat still works through simply-service — same LLM providers, different context backing.
+- Noema: Chat still works through simply-daemon.
 
 ---
 

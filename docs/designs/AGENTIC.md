@@ -41,11 +41,13 @@ Event sources are **open and extensible**. The core provides built-in sources; p
 | **Conversation** | `conversation.turn_produced`, `conversation.completed` | Built-in |
 | **Intent lifecycle** | `intent.fired`, `intent.completed`, `intent.failed` | Built-in |
 | **Document** | `document.created`, `document.updated`, `document.deleted` | Built-in |
+| **Service lifecycle** | `service.connected`, `service.disconnected`, `service.tools_changed` | Built-in |
+| **Client lifecycle** | `client.connected`, `client.disconnected` | Built-in |
 | **Discord** | `discord.member_joined`, `discord.message`, `discord.reaction` | Lumina |
 | **WebRTC** | `rtc.user_joined`, `rtc.user_left`, `rtc.session_started` | /meet |
 | **User-defined** | Any custom event name | Runtime |
 
-Platform-specific sources are registered when the platform connects to simply-core. The core doesn't need to know about Discord — it just sees events with typed payloads.
+Platform-specific sources are registered when the platform connects to simply-daemon. The daemon doesn't need to know about Discord — it just sees events with typed payloads. Service/client lifecycle events are emitted automatically by the daemon when peers connect or disconnect.
 
 ---
 

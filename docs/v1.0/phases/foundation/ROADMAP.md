@@ -8,14 +8,16 @@
 
 ## Goal
 
-Restructure the workspace to match the target architecture: separate `simply-core` (library: LLM + MCP + agent) from `simply-service` (daemon: storage + gRPC + events). All crate renames and structural moves happen here so that parallel work streams don't collide with moving code.
+Restructure the workspace to match the target architecture: separate `simply-core` (library: LLM + MCP + agent) from `simply-daemon` (the hub: storage + WebSocket/REST/MCP + events). All crate renames and structural moves happen here so that parallel work streams don't collide with moving code.
 
 Python Lumina remains operational throughout — no big bang cutover.
 
 ### Key architectural distinction
 
-- **simply-core** — platform-agnostic library crate. LLM providers, MCP server/client, agent orchestration with a trait-based `ExecutionContext`. Knows nothing about storage backends or transport protocols.
-- **simply-service** — the daemon. Wires simply-core with UCM storage (providing a UCM-backed `ExecutionContext`), gRPC API, and later event bus / voice pipeline. Noema connects as a client.
+- **simply-core** — library crate, internal to simply-daemon. LLM providers, MCP server/client, agent orchestration. No external crate depends on it.
+- **simply-daemon** — the hub. Wires simply-core with UCM storage, WebSocket server (rich clients), REST server (triggers), MCP client (action services), session management, and later event bus / voice pipeline.
+
+See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the full communication protocol.
 
 ---
 
@@ -23,7 +25,7 @@ Python Lumina remains operational throughout — no big bang cutover.
 
 ### Stage 1 — Workspace Restructure
 
-**Goal:** Rename crates and separate core library from service daemon per [ARCHITECTURE.md](../../../designs/ARCHITECTURE.md).
+**Goal:** Rename crates and separate core library from daemon per [ARCHITECTURE.md](../../../designs/ARCHITECTURE.md).
 
 **Complexity:** M
 
@@ -31,10 +33,10 @@ Python Lumina remains operational throughout — no big bang cutover.
 |---------|--------|--------|
 | `noema-core/` | `simply-core/` | Rename — becomes the library crate (agent, MCP, LLM) |
 | `noema-core/llm/` | `simply-core/llm/` | Stays as sub-crate of core (no extraction) |
-| `noema-core/src/storage/` | `simply-service/src/storage/` | Move to service crate |
+| `noema-core/src/storage/` | `simply-daemon/src/storage/` | Move to daemon crate |
 | `noema-audio/` | `simply-audio/` | Rename |
 | `noema-mcp-core/` | merge into `simply-core/src/mcp/` | Merge |
-| *(new)* | `simply-service/` | New crate — daemon binary |
+| *(new)* | `simply-daemon/` | New crate — daemon binary |
 | `noema-desktop/` | `noema-desktop/` | No change |
 | `noema-ext/` | `noema-ext/` | No change |
 | `noema-ui/` | `noema-ui/` | No change (frontend) |
@@ -42,11 +44,10 @@ Python Lumina remains operational throughout — no big bang cutover.
 
 **Tasks:**
 - [ ] Rename `noema-core/` → `simply-core/`, update `Cargo.toml` package name + all workspace references
-- [ ] Extract `ExecutionContext` as a trait in `simply-core` (currently a concrete struct tied to storage IDs)
-- [ ] Move storage code out of `simply-core` → `simply-service/src/storage/`
+- [ ] Move storage code out of `simply-core` → `simply-daemon/src/storage/`
 - [ ] Rename `noema-audio/` → `simply-audio/`, update references
 - [ ] Merge `noema-mcp-core/` into `simply-core/src/mcp/`, remove standalone crate
-- [ ] Create `simply-service/` crate (initially just re-exports, wires core + storage)
+- [ ] Create `simply-daemon/` crate (initially just re-exports, wires core + storage)
 - [ ] Update workspace `Cargo.toml` members list
 - [ ] Verify `noema-desktop` builds with restructured dependencies
 
@@ -54,23 +55,27 @@ Python Lumina remains operational throughout — no big bang cutover.
 
 ---
 
-### Stage 2 — Service Daemon
+### Stage 2 — Daemon
 
-**Goal:** `simply-service` runs as a daemon with gRPC API. Noema connects as a client.
+**Goal:** `simply-daemon` runs as a daemon. Noema connects as a client via WebSocket.
 
 **Complexity:** L
 
 **Tasks:**
-- [ ] `simply-service` binary: startup, config loading, graceful shutdown
-- [ ] UCM-backed `ExecutionContext` implementation in simply-service
-- [ ] gRPC server (tonic) with initial RPCs: `prompt`, `run_turn`, `list_models`
-- [ ] Noema's Tauri backend becomes a service client (refactor from direct embedding)
-- [ ] UCM storage owned by the service — single writer, no SQLite contention
-- [ ] Service lifecycle: decide startup approach (standalone daemon vs. first-client-spawns)
+- [ ] `simply-daemon` binary: startup, config loading, graceful shutdown
+- [ ] WebSocket server: session management, context seeding, message send/receive (JSON, Rust types)
+- [ ] REST server: `/events` (trigger inbound), `/register` (service registration), `/health`
+- [ ] Session manager: in-memory conversation state, ephemeral + persistent (UCM-backed) modes
+- [ ] Peer registry: track connected clients and services, global MCP tool registry
+- [ ] MCP client: connect to registered action services, discover tools
+- [ ] Noema's React frontend connects to daemon directly via WebSocket for chat
+- [ ] Noema's Tauri backend handles OS-level only (slash commands, file access)
+- [ ] UCM storage owned by the daemon — single writer, no SQLite contention
+- [ ] Daemon lifecycle: decide startup approach (standalone daemon vs. first-client-spawns)
 
 **Verify:**
-- Start simply-service, start Noema.
-- Chat works through the service.
+- Start simply-daemon, start Noema.
+- Chat works through WebSocket.
 
 ---
 

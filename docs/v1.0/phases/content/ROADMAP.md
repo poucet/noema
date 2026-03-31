@@ -10,7 +10,7 @@
 
 ## Goal
 
-Agent can call MCP tools through the core service. Documents with frontmatter conventions work as the universal content primitive. Cross-platform CRUD — create in Noema, query from Lumina, and vice versa.
+Agent can call MCP tools through simply-daemon. Documents with frontmatter conventions work as the universal content primitive. Cross-platform CRUD — create in Noema, query from Lumina, and vice versa.
 
 ---
 
@@ -18,18 +18,18 @@ Agent can call MCP tools through the core service. Documents with frontmatter co
 
 ### Stage 1 — MCP in Core
 
-**Goal:** MCP server/client runs inside `simply-core`, alongside the gRPC interface.
+**Goal:** MCP server/client runs inside simply-daemon (via simply-core). Agent can call tools, daemon can connect to external MCP action services.
 
 **Complexity:** M
 
 **Tasks:**
-- [ ] MCP server in `simply-core` — expose tools to agents
-- [ ] MCP client in `simply-core` — connect to external MCP servers
-- [ ] Agent tool calls route through core's MCP interface
-- [ ] MCP server config: register external servers (e.g., filesystem, custom tools)
-- [ ] Expose MCP alongside gRPC (agent-facing vs platform-facing split per ARCHITECTURE.md)
+- [ ] MCP server in simply-core — expose built-in tools to agents
+- [ ] MCP client in simply-core — connect to external MCP action services
+- [ ] Agent tool calls route through the daemon's global MCP tool registry
+- [ ] Dynamic service registration: `POST /register` with MCP endpoint → daemon connects
+- [ ] MCP server config via UCM documents (`type: mcp_server`) for persistent registrations
 
-**Verify:** Agent can call a tool via MCP through the core service from both Noema and Lumina.
+**Verify:** Agent can call a tool via MCP through the daemon from both Noema and Lumina.
 
 ---
 
@@ -43,7 +43,7 @@ Agent can call MCP tools through the core service. Documents with frontmatter co
 - [ ] Implement frontmatter parsing + indexing in UCM storage layer
 - [ ] Generic MCP tools: `create_document`, `query_documents`, `update_document`, `delete_document`
 - [ ] Frontmatter-aware query syntax: filter by `type`, `tags`, `done`, `due`, etc.
-- [ ] gRPC document service for platform clients
+- [ ] Document operations exposed as MCP tools (agent-facing) and WebSocket messages (client-facing)
 - [ ] Cross-platform test: create from one client, read from another
 
 **Verify:**

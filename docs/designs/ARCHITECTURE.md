@@ -23,48 +23,43 @@ Simply is a unified AI platform where Noema (desktop), Lumina (Discord), and fut
 ## Platform Architecture
 
 ```
-                              simply-core (library crate)
-                              ├─ LLM providers (Claude, OpenAI, Gemini, Mistral, Ollama)
-                              ├─ MCP server/client
-                              ├─ Agent orchestration
-                              └─ ExecutionContext trait ◄── pluggable conversation backing
-                                       │
-                    ┌──────────────────┼──────────────────────┐
-                    │                  │                      │
-              UCM-backed ctx    Discord-backed ctx      Future contexts
-                    │                  │
-              ┌─────▼─────┐    ┌──────▼──────┐
-              │  simply-   │    │   lumina     │    Future: /meet, Telegram, etc.
-              │  service   │    │  (serenity)  │    ├─ Platform gateway
-              │  (daemon)  │    ├─ Discord     │    └─ uses simply-core with
-              ├─ gRPC API  │    │  gateway     │       platform-specific context
-              ├─ UCM       │    ├─ Slash cmds  │
-              │  storage   │    ├─ Songbird    │
-              ├─ Event bus │    │  voice I/O   │
-              ├─ Intent    │    └──────────────┘
-              │  engine    │
-              ├─ Voice     │
-              │  pipeline  │
-              └────────────┘
-                    ▲
-                    │ gRPC
-              ┌─────┴─────┐
-              │  Noema     │
-              │  (Tauri)   │
-              ├─ UCM views │
-              ├─ Doc/tab   │
-              │  orchestr. │
-              ├─ Frontend  │
-              │  API (IPC) │
-              └────────────┘
+  Rich Clients (WebSocket + JSON)        Integration Services
+  ┌─────────────┐ ┌─────────────┐        ┌──────────────┐  ┌──────────┐
+  │ Noema       │ │ Lumina      │        │ github       │  │ shell    │
+  │ (Tauri)     │ │ (serenity)  │        │ watcher      │  │ script   │
+  │ React ──ws──┤ │ Discord ────┤        │ MCP ◄── daemon│  │          │
+  │ Tauri (IPC) │ │ Songbird    │        │ REST ──► daemon│ │ REST ──► │
+  └──────┬──────┘ └──────┬──────┘        └──────────────┘  └──────────┘
+         │ WebSocket      │ WebSocket     REST inbound ▲    REST ▲
+         │                │               MCP outbound │         │
+   ┌─────▼────────────────▼───────────────────────────▼──────────▼──┐
+   │                      simply-daemon                              │
+   ├─ WebSocket server — rich client sessions                       │
+   ├─ REST server — trigger events, service registration            │
+   ├─ MCP client — connects to registered action services           │
+   ├─ Session manager (in-memory, optionally UCM-backed)            │
+   ├─ Peer registry (clients + services, capabilities, liveness)    │
+   ├─ Global MCP tool registry (shared across all sessions)         │
+   ├─ simply-core (internal library)                                │
+   │   ├─ LLM providers (Claude, OpenAI, Gemini, Mistral, Ollama)  │
+   │   ├─ MCP server/client                                        │
+   │   └─ Agent orchestration                                      │
+   ├─ UCM storage (SQLite, blobs)                                   │
+   ├─ Event bus + intent engine                                     │
+   └─ Voice pipeline                                                │
+   └────────────────────────────────────────────────────────────────┘
 ```
 
 **Key distinctions:**
 
-- **simply-core** is a library crate: LLM providers, MCP, agent orchestration with a trait-based `ExecutionContext`. It knows nothing about storage backends or transport protocols.
-- **simply-service** is the daemon: wires simply-core with UCM storage, gRPC, event bus, intent engine, voice pipeline. Noema connects to it as a client.
-- **Lumina** uses simply-core directly with a Discord-backed execution context — the Discord channel *is* the conversation history. It can also connect to simply-service for storage/events when needed.
-- Presentation layers are NOT thin clients. Noema retains UCM management, document orchestration, and frontend API. Lumina owns Discord gateway, slash commands, and songbird audio I/O.
+- **simply-daemon** is the hub. Three interfaces: WebSocket (rich clients), REST (triggers), MCP outbound (action services). See [CORE_SERVICE.md](CORE_SERVICE.md) for the full protocol.
+- **simply-core** is a library crate internal to the daemon. LLM providers, MCP, agent orchestration. No external crate depends on it.
+- **Rich clients** (Noema, Lumina) connect via WebSocket + JSON. They seed conversation context, register MCP tools and event sources, and receive streamed agent responses. Noema's React frontend talks directly to the daemon — Tauri handles OS-level concerns only.
+- **Trigger services** push events via REST. As simple as a curl one-liner. No persistent connection needed.
+- **Action services** expose MCP servers. The daemon connects to them, discovers tools, and calls them when needed. Services register dynamically via REST.
+- **All MCP tools are globally shared.** A Droplets service registered from Noema is available to Lumina sessions too. Platform-specific tools (Discord actions) are also global — action routing defers if the platform is unavailable.
+- **Conversations are sessions** — ephemeral (in-memory) or persistent (UCM-backed), toggleable at runtime per conversation.
+- **Service lifecycle is an event source.** `service.connected`, `service.disconnected` flow into the intent engine like any other event.
 
 ---
 
@@ -73,18 +68,20 @@ Simply is a unified AI platform where Noema (desktop), Lumina (Discord), and fut
 ```
 simply-{name}/                     # Renamed from noema
 ├── Cargo.toml                     # Workspace manifest
-├── simply-core/                   # Core library: LLM + MCP + agent orchestration
+├── simply-core/                   # Internal library: LLM + MCP + agent (only simply-daemon depends on this)
 │   ├── src/
 │   │   ├── agent.rs               # Agent orchestration
-│   │   ├── context.rs             # ExecutionContext trait (pluggable conversation backing)
 │   │   ├── mcp/                   # MCP server/client
 │   │   └── llm/                   # LLM providers (Claude, OpenAI, Gemini, Mistral, Ollama)
 │   └── Cargo.toml
-├── simply-service/                # Daemon: wires core with storage, gRPC, events, voice
+├── simply-daemon/                # The hub: wires core with storage, WebSocket/REST/MCP, events, voice
 │   ├── src/
-│   │   ├── main.rs                # Service entry point
-│   │   ├── grpc.rs                # gRPC/Unix socket API
-│   │   ├── storage/               # UCM storage (SQLite, blobs) — ExecutionContext impl
+│   │   ├── main.rs                # Daemon entry point
+│   │   ├── ws.rs                  # WebSocket server (rich clients)
+│   │   ├── rest.rs                # REST server (triggers, registration)
+│   │   ├── sessions/              # Session manager (ephemeral + persistent)
+│   │   ├── registry.rs            # Peer registry + global MCP tool registry
+│   │   ├── storage/               # UCM storage (SQLite, blobs)
 │   │   ├── events/                # Event bus + intent engine
 │   │   └── voice/                 # Voice pipeline coordination
 │   └── Cargo.toml
@@ -101,17 +98,16 @@ simply-{name}/                     # Renamed from noema
 │   │   ├── browser_backend.rs     # Web audio (future)
 │   │   └── traits.rs              # Backend abstraction
 │   └── Cargo.toml
-├── lumina/                        # Discord bot — uses simply-core with Discord-backed context
+├── lumina/                        # Discord bot — WebSocket client to simply-daemon
 │   ├── src/
-│   │   ├── main.rs                # Entry point, service wiring
-│   │   ├── context.rs             # Discord-backed ExecutionContext impl
+│   │   ├── main.rs                # Entry point, WebSocket + Discord gateway setup
 │   │   ├── cogs/                  # Discord slash commands (serenity #[command])
 │   │   ├── voice/                 # Songbird integration, audio I/O bridge
-│   │   └── service_client.rs      # Optional client to simply-service for storage/events
+│   │   └── context.rs             # Seeds conversation context from Discord channel history
 │   └── Cargo.toml
 ├── noema-desktop/                 # Desktop presentation layer (Tauri)
-│   ├── src-tauri/                 # Rust backend — client to simply-service
-│   ├── src/                       # React frontend
+│   ├── src-tauri/                 # Rust backend — Tauri IPC for OS-level (slash cmds, file access)
+│   ├── src/                       # React frontend — WebSocket to simply-daemon for chat
 │   └── Cargo.toml
 ├── noema-ext/                     # Extensions (PDF, attachments)
 ├── commands/                      # Command framework
@@ -190,7 +186,7 @@ Pick up groceries for the team dinner
 **What still needs dedicated services:**
 
 ```
-simply-service/src/services/
+simply-daemon/src/services/
 ├── documents.rs      # Generic document CRUD with frontmatter-aware queries
 ├── events.rs         # Event bus — sources, routing, subscriptions
 ├── intents.rs        # Intent engine — matching, execution, chaining
@@ -211,7 +207,7 @@ Only features with **active behavior** (event processing, intent execution, iden
 | [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md) | UCM three-layer architecture (detailed specification) |
 | [STORAGE.md](STORAGE.md) | UCM database schema reference |
 | [AGENTIC.md](AGENTIC.md) | Event & Intent engine — triggers, Action AST, service registry, engine loop |
-| [CORE_SERVICE.md](CORE_SERVICE.md) | Core service communication — MCP + gRPC interfaces |
+| [CORE_SERVICE.md](CORE_SERVICE.md) | Daemon communication — WebSocket, REST, MCP interfaces |
 | [VOICE.md](VOICE.md) | Voice pipeline architecture — providers, backends, orchestration |
 | [obsolete/ARCHITECTURE-0.2.md](obsolete/ARCHITECTURE-0.2.md) | Previous Noema 0.2 architecture |
 | [obsolete/HOOK_SYSTEM.md](obsolete/HOOK_SYSTEM.md) | Previous hook system design (superseded by Agentic System) |

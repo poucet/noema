@@ -20,7 +20,7 @@ Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) are converging
 ## Goals
 
 - **Unify Noema and Lumina** into a single Rust workspace where they share a common core and differ only in presentation layer.
-- **Shared core service** (`simply-core`) that owns LLM, MCP, voice, agent orchestration, and storage — runs as a long-lived daemon process.
+- **Shared daemon** (`simply-daemon`) that owns LLM, MCP, voice, agent orchestration, and storage — runs as a long-lived process. `simply-core` is its internal library.
 - **Lumina as a crate** in the Noema workspace — a Discord bot (serenity + songbird) that connects to the core service.
 - **Voice provider abstraction** in the core (starting with Voxtral/Mistral) — usable by both Noema (desktop mic via CPAL) and Lumina (Discord via songbird).
 - **Architecture supports future platforms** (Telegram, WhatsApp, WebRTC/meet) without building them in v1.
@@ -37,7 +37,7 @@ Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) are converging
 
 ## Resolved Questions
 
-1. **Core service protocol** — Hybrid: MCP for agent-facing ops (tool calls), gRPC for platform-facing ops (storage, voice streaming, identity). See [ARCHITECTURE.md](../designs/ARCHITECTURE.md#core-service-communication).
+1. **Core service protocol** — Three interfaces: WebSocket + JSON for rich clients (Noema, Lumina), REST for trigger services, MCP outbound for action services. See [CORE_SERVICE.md](../designs/CORE_SERVICE.md).
 2. **Storage model** — Lumina features map onto UCM primitives. No separate databases. See [ARCHITECTURE.md](../designs/ARCHITECTURE.md#features-on-ucm--content-as-convention).
 3. **Command system** — Separate: serenity `#[command]` for Discord, separate MCP tool definitions. No unified macro.
 

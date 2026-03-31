@@ -52,7 +52,7 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 - [ ] Action handlers: `forward`, `update_document`, `call_service`
 - [ ] Service registry trait with transport adapters
 - [ ] MCP transport adapter (wraps MCP servers as services)
-- [ ] gRPC transport adapter (wraps core's own services)
+- [ ] Internal transport adapter (wraps daemon's own services)
 - [ ] Register core itself + external MCP servers as services
 
 **Verify:**
@@ -73,7 +73,7 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 - [ ] Lumina registers Discord event source with core on connect
 - [ ] Discord events emit into bus: `discord.member_joined`, `discord.message`, `discord.reaction`
 - [ ] Noema registers desktop events if applicable (e.g., app focus, idle detection)
-- [ ] Event source registration protocol (gRPC: platforms register their sources at startup)
+- [ ] Event source registration protocol (clients register via WebSocket, services via REST)
 
 **Verify:**
 - New member joins Discord → `discord.member_joined` event → intent fires → welcome message posted (no LLM needed).
