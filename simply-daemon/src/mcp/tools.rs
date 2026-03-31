@@ -59,11 +59,11 @@ struct SpawnAgentArgs {
 /// MCP Server exposing Noema's core capabilities.
 /// Stateless - context is passed in tool arguments by the agent.
 #[derive(Clone)]
-pub struct NoemaCoreServer {
-    inner: Arc<NoemaCoreServerInner>,
+pub struct DaemonMcpServer {
+    inner: Arc<DaemonMcpServerInner>,
 }
 
-struct NoemaCoreServerInner {
+struct DaemonMcpServerInner {
     coordinator: Arc<dyn CoordinatorOps>,
     mcp_registry: Arc<Mutex<McpRegistry>>,
     document_resolver: Arc<dyn DocumentResolver>,
@@ -171,15 +171,15 @@ impl<S: StorageTypes> CoordinatorOps for ConcreteCoordinator<S> {
     }
 }
 
-impl NoemaCoreServer {
-    /// Create a new NoemaCoreServer (stateless, shared across conversations)
+impl DaemonMcpServer {
+    /// Create a new DaemonMcpServer (stateless, shared across conversations)
     pub fn new<S: StorageTypes + 'static>(
         coordinator: Arc<StorageCoordinator<S>>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         document_resolver: Arc<dyn DocumentResolver>,
     ) -> Self {
         Self {
-            inner: Arc::new(NoemaCoreServerInner {
+            inner: Arc::new(DaemonMcpServerInner {
                 coordinator: Arc::new(ConcreteCoordinator { coordinator }),
                 mcp_registry,
                 document_resolver,
@@ -359,7 +359,7 @@ impl NoemaCoreServer {
     }
 }
 
-impl ServerHandler for NoemaCoreServer {
+impl ServerHandler for DaemonMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,

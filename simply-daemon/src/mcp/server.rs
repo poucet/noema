@@ -1,6 +1,6 @@
-//! MCP HTTP server — hosts the NoemaCoreServer over Streamable HTTP.
+//! MCP HTTP server — hosts the DaemonMcpServer over Streamable HTTP.
 
-use super::tools::NoemaCoreServer;
+use super::tools::DaemonMcpServer;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use rmcp::transport::streamable_http_server::{
@@ -37,7 +37,7 @@ impl ServerHandle {
 }
 
 /// Start the noema-core MCP server on a random port
-pub async fn start_server(server: NoemaCoreServer) -> anyhow::Result<ServerHandle> {
+pub async fn start_server(server: DaemonMcpServer) -> anyhow::Result<ServerHandle> {
     start_server_on("127.0.0.1", 0, server).await
 }
 
@@ -45,7 +45,7 @@ pub async fn start_server(server: NoemaCoreServer) -> anyhow::Result<ServerHandl
 pub async fn start_server_on(
     host: &str,
     port: u16,
-    server: NoemaCoreServer,
+    server: DaemonMcpServer,
 ) -> anyhow::Result<ServerHandle> {
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
 

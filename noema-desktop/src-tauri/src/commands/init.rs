@@ -5,21 +5,17 @@ use simply_core::mcp::{start_auto_connect, ServerStatus};
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::traits::UserStore;
 use simply_core::storage::{FsBlobStore, SqliteStore, Stores};
-use crate::state::AppStorage;
 use simply_core::McpRegistry;
+use simply_daemon::embedded::EmbeddedDaemon;
+use crate::state::{AppStorage, AppStores};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::commands::chat::start_event_receiver_loop;
-use crate::core_server::{self, CoreServerState};
 use crate::logging::log_message;
 use crate::state::AppState;
-use simply_core::storage::DocumentResolver;
 
 #[tauri::command]
 pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    // Check and set init flag atomically using std::sync::Mutex
-    // We need to drop the guard before any .await points
     let already_initialized = {
         let mut init_guard = state
             .init_lock
@@ -29,25 +25,19 @@ pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result
         if *init_guard {
             true
         } else {
-            // Mark as initializing BEFORE we start - this prevents the race
             *init_guard = true;
             false
         }
-    }; // Guard dropped here
+    };
 
     if already_initialized {
-        // Don't await anything here - just return empty string
-        // The first init will complete and set the real model name
-        // The UI will update when it gets the real response
         return Ok(String::new());
     }
 
-    // Run initialization, resetting the lock on error so retry is possible
     let state_arc = state.inner().clone();
     match do_init(app, state_arc).await {
         Ok(result) => Ok(result),
         Err(e) => {
-            // Reset the lock so user can retry after fixing the issue
             if let Ok(mut guard) = state.init_lock.lock() {
                 *guard = false;
             }
@@ -59,7 +49,6 @@ pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result
 async fn do_init(app: AppHandle, state: Arc<AppState>) -> Result<String, String> {
     log_message("Starting app initialization");
 
-    // Load config first so env vars are available
     init_config()?;
     log_message("Config loaded");
 
@@ -75,73 +64,68 @@ async fn do_init(app: AppHandle, state: Arc<AppState>) -> Result<String, String>
     })?;
     log_message("User initialized");
 
-    // Initialize default model name (no engine yet - created when conversation is loaded)
-    let model_name = init_default_model(&state).await?;
-    log_message(&format!("Default model set: {}", model_name));
+    let model_name = init_daemon(&state).await?;
+    log_message(&format!("Daemon initialized with model: {}", model_name));
 
-    // Initialize MCP registry (global, not per-conversation)
-    let mcp_registry = init_mcp(&state)?;
-    log_message("MCP registry loaded");
-
-    // Start embedded Noema Core MCP server (provides spawn_agent tool)
-    start_core_server(&app, &state, mcp_registry.clone()).await;
-
-    // Start auto-connect for MCP servers (runs in background)
+    // Start auto-connect for user-configured MCP servers (runs in background)
+    let mcp_registry = state.get_mcp_registry().map_err(|e| e.to_string())?;
     start_mcp_auto_connect(app.clone(), mcp_registry).await;
     log_message("MCP auto-connect started");
-
-    // Start the shared event receiver loop (listens for events from all managers)
-    start_event_receiver_loop(app, state).await;
-    log_message("Event receiver loop started");
 
     Ok(model_name)
 }
 
-/// Start the embedded Noema Core MCP server
-async fn start_core_server(
-    app: &AppHandle,
-    state: &AppState,
-    mcp_registry: Arc<tokio::sync::Mutex<McpRegistry>>,
-) {
-    let core_state = app.state::<CoreServerState>();
+/// Initialize the daemon — creates EmbeddedDaemon with storage, model, MCP registry
+async fn init_daemon(state: &AppState) -> Result<String, String> {
+    let coordinator = state.get_coordinator()?;
+    let stores = state.get_stores()?;
+    let user_id = state.user_id.lock().await.clone();
 
-    // Get coordinator and document resolver
-    let coordinator = match state.get_coordinator() {
-        Ok(c) => c,
-        Err(e) => {
-            log_message(&format!("Failed to get coordinator for core server: {}", e));
-            return;
-        }
-    };
+    // Initialize MCP registry
+    let registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
+    let registry_arc = Arc::new(tokio::sync::Mutex::new(registry));
+    let _ = state.mcp_registry.set(registry_arc.clone());
 
-    let stores = match state.get_stores() {
-        Ok(s) => s,
-        Err(e) => {
-            log_message(&format!("Failed to get stores for core server: {}", e));
-            return;
-        }
-    };
-    let document_resolver: Arc<dyn DocumentResolver> = stores.document();
+    // Resolve default model
+    const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
+    let settings = config::Settings::load();
+    let model_id = settings
+        .default_model
+        .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
 
-    match core_server::start_core_server(
-        &core_state,
+    let model = llm::create_model(&model_id)
+        .map_err(|e| format!("Failed to create model: {}", e))?;
+
+    let model_display_name = model_id
+        .split('/')
+        .last()
+        .unwrap_or(&model_id)
+        .to_string();
+
+    // Create the stores Arc for the daemon (wraps AppStores)
+    let stores_arc: Arc<dyn Stores<AppStorage>> = Arc::new(AppStores::new(
+        stores.turn(), // SqliteStore Arc
+        stores.blob(), // FsBlobStore Arc
+    ));
+
+    let daemon = EmbeddedDaemon::new(
         coordinator,
-        mcp_registry,
-        document_resolver,
-    ).await {
-        Ok(url) => {
-            log_message(&format!("Noema Core MCP server started at {}", url));
-        }
-        Err(e) => {
-            log_message(&format!("Failed to start Noema Core server: {}", e));
-        }
-    }
+        stores_arc,
+        registry_arc,
+        model,
+        model_id,
+        user_id,
+    )
+    .await
+    .map_err(|e| format!("Failed to create daemon: {}", e))?;
+
+    let _ = state.daemon.set(daemon);
+
+    Ok(model_display_name)
 }
 
 /// Start auto-connect for all configured MCP servers
 async fn start_mcp_auto_connect(app: AppHandle, mcp_registry: Arc<tokio::sync::Mutex<McpRegistry>>) {
-
-    // Create callback that emits events to frontend
     let app_handle = app.clone();
     let on_status_change: Arc<dyn Fn(&str, &ServerStatus) + Send + Sync> =
         Arc::new(move |server_id: &str, status: &ServerStatus| {
@@ -154,7 +138,6 @@ async fn start_mcp_auto_connect(app: AppHandle, mcp_registry: Arc<tokio::sync::M
 
             log_message(&format!("MCP server '{}' status: {}", server_id, status_str));
 
-            // Emit event to frontend
             let _ = app_handle.emit(
                 "mcp_server_status",
                 serde_json::json!({
@@ -182,18 +165,12 @@ async fn init_storage(state: &AppState) -> Result<(), String> {
     std::fs::create_dir_all(&blob_dir)
         .map_err(|e| format!("Failed to create blob storage dir: {}", e))?;
 
-    // Create blob store
     let blob_store = Arc::new(FsBlobStore::new(blob_dir));
-
-    // Create the SQL store (implements multiple traits)
     let sqlite_store = SqliteStore::open(&db_path)
         .map_err(|e| format!("Failed to open database: {}", e))?;
     let sqlite_store = Arc::new(sqlite_store);
 
-    // Store the stores for direct access by commands
-    let stores = crate::state::AppStores::new(sqlite_store, blob_store);
-
-    // Create storage coordinator from stores
+    let stores = AppStores::new(sqlite_store, blob_store);
     let coordinator = Arc::new(StorageCoordinator::<AppStorage>::from_stores(&stores));
     let _ = state.coordinator.set(coordinator);
 
@@ -210,16 +187,13 @@ async fn init_user(state: &AppState) -> Result<(), String> {
     let stores = state.get_stores()?;
     let user_store = stores.user();
 
-    // First check if user email is explicitly configured in settings
     let settings = config::Settings::load();
     let user = if let Some(email) = settings.user_email {
-        // User has configured a specific email - get or create that user
         user_store
             .get_or_create_user_by_email(&email)
             .await
             .map_err(|e| format!("Failed to get/create user: {}", e))?
     } else {
-        // No email configured - use smart selection logic
         let users = user_store
             .list_users()
             .await
@@ -227,18 +201,15 @@ async fn init_user(state: &AppState) -> Result<(), String> {
 
         match users.len() {
             0 => {
-                // No users exist - create default user
                 user_store
                     .get_or_create_default_user()
                     .await
                     .map_err(|e| format!("Failed to create default user: {}", e))?
             }
             1 => {
-                // Exactly one user - use that user
                 users.into_iter().next().unwrap()
             }
             _ => {
-                // Multiple users - need user to select
                 let emails: Vec<String> = users.iter().map(|u| u.email.clone()).collect();
                 return Err(format!("MULTIPLE_USERS:{}", emails.join(",")));
             }
@@ -247,34 +218,4 @@ async fn init_user(state: &AppState) -> Result<(), String> {
 
     *state.user_id.lock().await = user.id;
     Ok(())
-}
-
-/// Initialize MCP registry (global, shared across all engines)
-fn init_mcp(state: &AppState) -> Result<Arc<tokio::sync::Mutex<McpRegistry>>, String> {
-    let registry = McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()));
-    let registry_arc = Arc::new(tokio::sync::Mutex::new(registry));
-
-    let _ = state.mcp_registry.set(registry_arc.clone());
-    Ok(registry_arc)
-}
-
-/// Initialize default model settings (no engine created yet)
-async fn init_default_model(state: &AppState) -> Result<String, String> {
-    const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
-
-    let settings = config::Settings::load();
-    let model_id = settings
-        .default_model
-        .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
-
-    let model_display_name = model_id
-        .split('/')
-        .last()
-        .unwrap_or(&model_id)
-        .to_string();
-
-    *state.model_id.lock().await = model_id;
-    *state.model_name.lock().await = model_display_name.clone();
-
-    Ok(model_display_name)
 }

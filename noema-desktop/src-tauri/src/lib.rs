@@ -1,7 +1,7 @@
 //! Tauri bridge for Noema - connects React frontend to noema-core
 
 mod commands;
-mod core_server;
+
 mod logging;
 mod oauth_callback;
 mod state;
@@ -146,7 +146,6 @@ pub fn run() {
             }
         }))
         .manage(app_state.clone())
-        .manage(core_server::CoreServerState::default())
         .setup(|app| {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
@@ -190,10 +189,8 @@ pub fn run() {
             commands::chat::get_turn_alternates,
             commands::chat::get_span_messages,
             commands::chat::list_conversation_views, // Returns forks of this conversation
-            commands::chat::regenerate_response,
             commands::chat::fork_conversation,
             commands::chat::select_span,
-            commands::chat::edit_message,
             // Subconversation commands
             commands::chat::spawn_subconversation,
             commands::chat::get_parent_conversation,

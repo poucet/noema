@@ -7,4 +7,4 @@ pub mod server;
 pub mod tools;
 
 pub use server::{start_server, start_server_on, ServerHandle};
-pub use tools::NoemaCoreServer;
+pub use tools::DaemonMcpServer;

@@ -20,6 +20,7 @@ use simply_core::storage::DocumentResolver;
 use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender};
 
 use crate::api::*;
+use crate::mcp::{DaemonMcpServer, ServerHandle, start_server};
 
 // ---------------------------------------------------------------------------
 // Session bookkeeping
@@ -48,21 +49,41 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     /// Shared channel that all ConversationManagers send to.
     /// A dispatcher task routes events to per-session broadcast senders.
     manager_event_tx: SharedEventSender,
+    /// Handle to the embedded MCP server (daemon tools like spawn_agent).
+    _mcp_server_handle: Mutex<Option<ServerHandle>>,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
 where
     S::Document: DocumentResolver,
 {
-    pub fn new(
+    pub async fn new(
         coordinator: Arc<StorageCoordinator<S>>,
         stores: Arc<dyn Stores<S>>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
         model: Arc<dyn ChatModel + Send + Sync>,
         model_id: String,
         user_id: UserId,
-    ) -> Arc<Self> {
+    ) -> anyhow::Result<Arc<Self>> {
         let (manager_event_tx, manager_event_rx) = mpsc::unbounded_channel();
+
+        // Start the daemon's MCP server (exposes tools like spawn_agent)
+        let document_resolver: Arc<dyn DocumentResolver> = stores.document();
+        let mcp_server = DaemonMcpServer::new(
+            Arc::clone(&coordinator),
+            Arc::clone(&mcp_registry),
+            document_resolver,
+        );
+        let server_handle = start_server(mcp_server).await?;
+        let server_url = server_handle.url();
+
+        // Register and connect the MCP server in the registry
+        {
+            let mut registry = mcp_registry.lock().await;
+            registry.register_ephemeral("daemon-tools".to_string(), server_url);
+            registry.connect("daemon-tools").await?;
+        }
+
         let daemon = Arc::new(Self {
             coordinator,
             stores,
@@ -72,12 +93,12 @@ where
             model_id: Mutex::new(model_id),
             user_id,
             manager_event_tx,
+            _mcp_server_handle: Mutex::new(Some(server_handle)),
         });
 
-        // Spawn the event dispatcher — routes ManagerEvents to per-session broadcasts
         Self::spawn_event_dispatcher(Arc::clone(&daemon), manager_event_rx);
 
-        daemon
+        Ok(daemon)
     }
 
     /// Background task: receives (ConversationId, ManagerEvent) from all managers
