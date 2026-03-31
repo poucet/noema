@@ -68,6 +68,7 @@
 | 2.1 | ✅ | `DaemonApi` trait: define the core API surface | P0 | M |
 | 2.2 | ✅ | In-process implementation of `DaemonApi` | P0 | M |
 | 2.3 | ✅ | Wire Noema desktop to use in-process daemon | P0 | L |
+| 2.3.1 | ⬜ | Decouple Noema from simply-core/llm — only use daemon traits; rename `noema-desktop` → `noema` | P0 | L |
 | 2.4 | ⬜ | Session manager: in-memory state, ephemeral + persistent modes | P0 | M |
 | 2.5 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
 | 2.6 | ⬜ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
@@ -94,6 +95,13 @@
 - Replace Noema's direct simply-core usage with `DaemonApi` calls
 - Use the in-process implementation — same binary, no separate process
 - Validates the API surface is complete before building WebSocket layer
+
+**2.3.1 — Decouple Noema from simply-core/llm**
+- Noema's Cargo.toml should only depend on `simply-daemon`, not `simply-core` or `llm`
+- Expand daemon API traits to cover all operations Noema uses (entity CRUD, turn/span queries, forking, cross-references)
+- Re-export types from `simply-daemon` that Noema needs (ConversationId, DisplayMessage types, etc.)
+- Rename `noema-desktop/` → `noema/`, update workspace Cargo.toml and all references
+- The daemon is the single API boundary — Noema never reaches into core internals
 
 **2.4 — Session manager**
 - `simply-daemon/src/session/` module
