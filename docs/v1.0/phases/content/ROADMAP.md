@@ -1,10 +1,10 @@
-# Phase 1A: Content Platform
+# Content Platform
 
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
-**Priority:** P0 — foundation for intents (Phase 1B) and all content features.
+**Priority:** P0 — foundation for intents (Events phase) and all content features.
 **Complexity:** M
-**Depends on:** Phase 0 complete
-**Parallel with:** Phase 1B (events & intents). 1B soft-depends on 1A.2 for intent document storage.
+**Depends on:** Foundation complete
+**Parallel with:** Events phase. Events soft-depends on Content for intent document storage.
 
 ---
 
@@ -16,7 +16,7 @@ Agent can call MCP tools through the core service. Documents with frontmatter co
 
 ## Stages
 
-### 1A.1 — MCP in Core
+### Stage 1 — MCP in Core
 
 **Goal:** MCP server/client runs inside `simply-core`, alongside the gRPC interface.
 
@@ -33,7 +33,7 @@ Agent can call MCP tools through the core service. Documents with frontmatter co
 
 ---
 
-### 1A.2 — Document CRUD + Frontmatter Queries
+### Stage 2 — Document CRUD + Frontmatter Queries
 
 **Goal:** Generic document operations with frontmatter-aware queries. The foundation that todos, notes, intents, and all other content types build on.
 
@@ -52,7 +52,7 @@ Agent can call MCP tools through the core service. Documents with frontmatter co
 
 ---
 
-### 1A.3 — Content Conventions
+### Stage 3 — Content Conventions
 
 **Goal:** Port todo/note frontmatter conventions. Thin Lumina commands that call core.
 
@@ -74,7 +74,7 @@ Agent can call MCP tools through the core service. Documents with frontmatter co
 ## Dependencies
 
 ```
-1A.1 → 1A.2 → 1A.3 (sequential within track)
+Stage 1 → Stage 2 → Stage 3 (sequential)
 ```
 
-Phase 1B (events) can start in parallel. 1B.1 needs basic document storage for intent documents — can use simple storage initially, then migrate to frontmatter-aware queries when 1A.2 lands.
+Events phase can start in parallel. Events Stage 1 needs basic document storage for intent documents — can use simple storage initially, then migrate to frontmatter-aware queries when Content Stage 2 lands.

@@ -1,4 +1,4 @@
-# Phase 0: Foundation
+# Foundation
 
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P0 — everything else depends on this.

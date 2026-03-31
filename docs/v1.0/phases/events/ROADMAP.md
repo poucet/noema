@@ -1,11 +1,11 @@
-# Phase 1B: Events & Intents
+# Events & Intents
 
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P1
 **Complexity:** XL
-**Depends on:** Phase 0 complete
-**Soft dependency:** Phase 1A.2 (frontmatter-aware document queries for intent storage)
-**Parallel with:** Phase 1A (content platform)
+**Depends on:** Foundation complete
+**Soft dependency:** Content phase (frontmatter-aware document queries for intent storage)
+**Parallel with:** Content phase
 
 ---
 
@@ -19,7 +19,7 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 
 ## Stages
 
-### 1B.1 — Event Bus + Timer Source
+### Stage 1 — Event Bus + Timer Source
 
 **Goal:** Basic event system with timer-based intents.
 
@@ -40,7 +40,7 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 
 ---
 
-### 1B.2 — Full Action AST + Service Registry
+### Stage 2 — Full Action AST + Service Registry
 
 **Goal:** Late binding works. Service calls are protocol-agnostic.
 
@@ -61,13 +61,13 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 
 ---
 
-### 1B.3 — Platform Event Sources
+### Stage 3 — Platform Event Sources
 
 **Goal:** Discord events flow into the event bus. Platform-agnostic event routing.
 
 **Complexity:** M
 
-*Can run in parallel with 1B.4.*
+*Can run in parallel with Stage 4.*
 
 **Tasks:**
 - [ ] Lumina registers Discord event source with core on connect
@@ -80,13 +80,13 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 
 ---
 
-### 1B.4 — LLM-Compiled Intents
+### Stage 4 — LLM-Compiled Intents
 
 **Goal:** Users describe intents in natural language, LLM compiles them to AST frontmatter.
 
 **Complexity:** M
 
-*Can run in parallel with 1B.3.*
+*Can run in parallel with Stage 3.*
 
 **Tasks:**
 - [ ] MCP tool for intent creation: `create_intent(description)` → LLM → AST frontmatter
@@ -101,7 +101,7 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 
 ---
 
-### 1B.5 — Conditions + Workflow
+### Stage 5 — Conditions + Workflow
 
 **Goal:** Multi-step workflows with conditions, chaining, and multi-agent orchestration.
 
@@ -124,9 +124,9 @@ See [ARCHITECTURE.md — Event & Intent System](../../../designs/ARCHITECTURE.md
 ## Dependencies
 
 ```
-1B.1 → 1B.2 → 1B.3 ──→ 1B.5
-                ↘       ↗
-              1B.4 ────
+Stage 1 → Stage 2 → Stage 3 ──→ Stage 5
+                      ↘          ↗
+                    Stage 4 ────
 ```
 
-1B.3 (platform events) and 1B.4 (LLM compilation) can run in parallel after 1B.2. Both feed into 1B.5 (conditions + workflow).
+Stage 3 (platform events) and Stage 4 (LLM compilation) can run in parallel after Stage 2. Both feed into Stage 5 (conditions + workflow).

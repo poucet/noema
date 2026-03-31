@@ -1,9 +1,9 @@
-# Phase 3: Discord Polish
+# Discord Polish
 
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P2
 **Complexity:** M
-**Depends on:** Phases 0, 1A, 1B complete. Phase 2 not required.
+**Depends on:** Foundation, Content, Events complete. Voice not required.
 
 ---
 
@@ -15,7 +15,7 @@ Feature parity for remaining Lumina cogs that weren't covered in earlier phases.
 
 ## Stages
 
-### 3.1 — Admin + Access Control
+### Stage 1 — Admin + Access Control
 
 **Goal:** Port admin commands. Access control via UCM documents.
 
@@ -31,7 +31,7 @@ Feature parity for remaining Lumina cogs that weren't covered in earlier phases.
 
 ---
 
-### 3.2 — Rich Discord UI
+### Stage 2 — Rich Discord UI
 
 **Goal:** Commands return rich embeds, interactive components.
 
@@ -47,14 +47,14 @@ Feature parity for remaining Lumina cogs that weren't covered in earlier phases.
 
 ---
 
-### 3.3 — Server Management
+### Stage 3 — Server Management
 
 **Goal:** Server-level features from Python Lumina.
 
 **Complexity:** S
 
 **Tasks:**
-- [ ] Welcome messages (ties into Phase 1B platform events — may already work)
+- [ ] Welcome messages (ties into Events phase platform events — may already work)
 - [ ] Member tracking
 - [ ] `/server` commands for configuration
 
@@ -62,7 +62,7 @@ Feature parity for remaining Lumina cogs that weren't covered in earlier phases.
 
 ---
 
-### 3.4 — Utilities
+### Stage 4 — Utilities
 
 **Goal:** Remaining minor cogs and cleanup.
 
@@ -79,4 +79,4 @@ Feature parity for remaining Lumina cogs that weren't covered in earlier phases.
 
 ## Dependencies
 
-Stages within Phase 3 are largely independent and can be worked in any order. 3.3 may partially overlap with Phase 1B.3 (platform events) if welcome messages are already handled by intents.
+Stages are largely independent and can be worked in any order. Stage 3 may partially overlap with Events Stage 3 (platform events) if welcome messages are already handled by intents.
