@@ -11,12 +11,11 @@
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
 | 1.1 | ✅ | Rename `noema-core/` → `simply-core/`, update `Cargo.toml` package name + all workspace refs | P0 | S |
-| 1.2 | ⬜ | Move storage code out of `simply-core/` → `simply-daemon/src/storage/` | P0 | M |
-| 1.3 | ⬜ | Rename `noema-audio/` → `simply-audio/`, update references | P0 | S |
+| 1.2 | ✅ | Rename `noema-audio/` → `simply-audio/`, update references | P0 | S |
+| 1.3 | ⬜ | Create `simply-daemon/` crate (binary, wires core + storage) | P0 | S |
 | 1.4 | ⬜ | Merge `noema-mcp-core/` into `simply-daemon/src/mcp/`, remove standalone crate | P0 | M |
-| 1.5 | ⬜ | Create `simply-daemon/` crate (binary, wires core + storage) | P0 | S |
-| 1.6 | ⬜ | Update workspace `Cargo.toml` members list | P0 | S |
-| 1.7 | ⬜ | Verify `noema-desktop` builds with restructured deps | P0 | S |
+| 1.5 | ⬜ | Update workspace `Cargo.toml` members list | P0 | S |
+| 1.6 | ⬜ | Verify `noema-desktop` builds with restructured deps | P0 | S |
 
 ### Task Details
 
@@ -27,16 +26,16 @@
 - Update all `use noema_core::` → `use simply_core::` across workspace
 - Update all `path = "../noema-core"` dependency paths
 
-**1.2 — Move storage to daemon**
-- Move `simply-core/src/storage/` → `simply-daemon/src/storage/`
-- Update `simply-core` to remove storage module
-- Re-export or adjust imports in `simply-daemon`
-- Storage includes: coordinator, session, traits, document_resolver, ids
-
-**1.3 — Rename noema-audio → simply-audio**
+**1.2 — Rename noema-audio → simply-audio**
 - Rename directory `noema-audio/` → `simply-audio/`
 - Update `Cargo.toml` package name to `simply-audio`
 - Update workspace references and dependent crates
+
+**1.3 — Create simply-daemon crate**
+- New binary crate at `simply-daemon/`
+- Depends on `simply-core` for LLM, MCP protocol, agent types
+- Owns storage, MCP server, session management
+- Initially a skeleton that compiles
 
 **1.4 — Merge noema-mcp-core into simply-daemon**
 - Move `noema-mcp-core/src/tools.rs` → `simply-daemon/src/mcp/tools.rs`
@@ -44,18 +43,12 @@
 - Remove `noema-mcp-core/` crate from workspace
 - Update imports to use daemon-local paths
 
-**1.5 — Create simply-daemon crate**
-- New binary crate at `simply-daemon/`
-- Depends on `simply-core` for LLM, MCP protocol, agent types
-- Owns storage, MCP server, session management
-- Initially a skeleton that compiles
-
-**1.6 — Update workspace Cargo.toml**
+**1.5 — Update workspace Cargo.toml**
 - Remove old member paths (`noema-core`, `noema-audio`, `noema-mcp-core`)
 - Add new member paths (`simply-core`, `simply-audio`, `simply-daemon`)
 - Verify workspace resolver and default-members
 
-**1.7 — Verify noema-desktop builds**
+**1.6 — Verify noema-desktop builds**
 - Update `noema-desktop/src-tauri/Cargo.toml` deps to point to renamed crates
 - Ensure `cargo check --workspace` passes
 - Confirm desktop app still launches against new structure
@@ -75,6 +68,7 @@
 | 2.7 | ⬜ | UCM storage ownership: single-writer, no SQLite contention | P0 | M |
 | 2.8 | ⬜ | Noema frontend: connect to daemon via WebSocket for chat | P0 | L |
 | 2.9 | ⬜ | Daemon lifecycle: startup approach decision + implementation | P0 | S |
+| 2.10 | ⬜ | Move storage from `simply-core` → `simply-daemon` | P0 | M |
 
 ### Task Details
 
@@ -130,15 +124,23 @@
 - Implement chosen approach
 - Document startup/shutdown behavior
 
+**2.10 — Move storage from simply-core → simply-daemon**
+- Move `simply-core/src/storage/` → `simply-daemon/src/storage/`
+- Update `simply-core` to remove storage module
+- Re-export or adjust imports in `simply-daemon`
+- Storage includes: coordinator, session, traits, document_resolver, ids
+- Deferred from Stage 1 — easier once daemon is wired up and verifiable
+
 ---
 
 ## Dependencies
 
 ```
-1.5 (create daemon) → 1.2 (move storage) → 1.4 (merge mcp-core)
 1.1 (rename core) ─┐
-1.3 (rename audio) ─┤→ 1.6 (update workspace) → 1.7 (verify desktop)
-1.5 (create daemon) ─┘
+1.2 (rename audio) ─┤→ 1.5 (update workspace) → 1.6 (verify desktop)
+1.3 (create daemon) ─┤
+1.4 (merge mcp-core) ┘
 
 Stage 1 → Stage 2 (sequential)
+2.10 (move storage) depends on daemon being wired up (2.1–2.8)
 ```
