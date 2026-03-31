@@ -8,6 +8,7 @@ mod state;
 mod types;
 
 use config::PathManager;
+use simply_daemon::api::AssetApi;
 use simply_daemon::types::BlobHash;
 use tauri::http::Response;
 use tauri::Manager;
@@ -44,20 +45,18 @@ async fn handle_asset_request(
     }
     let blob_hash: BlobHash = BlobHash::from_str(blob_hash).unwrap();
 
-    // Get coordinator from app state
-    let coordinator = match app_state.get_coordinator() {
-        Ok(c) => c,
+    let daemon = match app_state.get_daemon() {
+        Ok(d) => d,
         Err(_) => {
             return Response::builder()
                 .status(500)
                 .header("Content-Type", "text/plain")
-                .body("Storage not initialized".as_bytes().to_vec())
+                .body("Daemon not initialized".as_bytes().to_vec())
                 .unwrap();
         }
     };
 
-    // Fetch blob directly by hash
-    let data = match coordinator.get_blob(&blob_hash).await {
+    let data = match daemon.get_blob(&blob_hash).await {
         Ok(data) => data,
         Err(_) => {
             return Response::builder()

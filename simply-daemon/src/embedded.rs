@@ -452,6 +452,10 @@ where
         let b64 = STANDARD.encode(&data);
         self.coordinator.store_asset(&b64, media_type).await
     }
+
+    async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<Vec<u8>> {
+        self.coordinator.get_blob(hash).await
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -79,10 +79,15 @@ pub async fn store_asset(
     data: String,      // base64 encoded
     mime_type: String,
 ) -> Result<AssetId, String> {
-    let coordinator = state.get_coordinator()?;
+    use simply_daemon::api::AssetApi;
 
-    coordinator
-        .store_asset(&data, &mime_type)
+    let daemon = state.get_daemon()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Failed to decode data: {}", e))?;
+
+    daemon
+        .store_asset(bytes, &mime_type)
         .await
         .map_err(|e| format!("Failed to store asset: {}", e))
 }
