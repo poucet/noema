@@ -14,7 +14,7 @@
 | 1.2 | ✅ | Rename `noema-audio/` → `simply-audio/`, update references | P0 | S |
 | 1.3 | ✅ | Create `simply-daemon/` crate with `DaemonApi` trait | P0 | S |
 | 1.4 | ✅ | Merge `noema-mcp-core/` into `simply-daemon/src/mcp/`, remove standalone crate | P0 | M |
-| 1.5 | ⬜ | Update workspace `Cargo.toml` members list | P0 | S |
+| 1.5 | ✅ | Update workspace `Cargo.toml` members list | P0 | S |
 | 1.6 | ⬜ | Verify `noema-desktop` builds with restructured deps | P0 | S |
 
 ### Task Details
