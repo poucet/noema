@@ -1,4 +1,4 @@
-//! In-process implementation of [`DaemonApi`].
+//! In-process implementation of the daemon API traits.
 //!
 //! `EmbeddedDaemon` hosts the full daemon logic inside the calling process —
 //! no networking, no separate binary. This is the first (and simplest)
@@ -8,13 +8,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 use llm::ChatModel;
 
 use simply_core::storage::coordinator::StorageCoordinator;
-use simply_core::storage::ids::{ConversationId, UserId};
-use simply_core::storage::session::Session;
+use simply_core::storage::ids::{AssetId, ConversationId, UserId};
+use simply_core::storage::session::{ResolvedMessage, Session};
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_core::storage::DocumentResolver;
 use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender};
@@ -28,6 +28,8 @@ use crate::api::*;
 struct ManagedSession<S: StorageTypes> {
     info: SessionInfo,
     manager: ConversationManager<S>,
+    /// Per-session broadcast sender — subscribers get a receiver from this.
+    event_broadcast: broadcast::Sender<DaemonEvent>,
 }
 
 // ---------------------------------------------------------------------------
@@ -35,9 +37,6 @@ struct ManagedSession<S: StorageTypes> {
 // ---------------------------------------------------------------------------
 
 /// In-process daemon — all operations are direct Rust calls, no networking.
-///
-/// Generic over `StorageTypes` so callers choose the storage backend
-/// (e.g. `AppStorage` with SQLite in Noema, `MemoryStorage` in tests).
 pub struct EmbeddedDaemon<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
     stores: Arc<dyn Stores<S>>,
@@ -46,19 +45,15 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     model: Mutex<Arc<dyn ChatModel + Send + Sync>>,
     model_id: Mutex<String>,
     user_id: UserId,
-    event_tx: SharedEventSender,
-    /// Receiver end — caller takes this once to consume events.
-    event_rx: Mutex<Option<mpsc::UnboundedReceiver<(ConversationId, ManagerEvent)>>>,
+    /// Shared channel that all ConversationManagers send to.
+    /// A dispatcher task routes events to per-session broadcast senders.
+    manager_event_tx: SharedEventSender,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
 where
     S::Document: DocumentResolver,
 {
-    /// Create a new in-process daemon.
-    ///
-    /// `stores` must implement `Stores<S>` where `S::Document` implements
-    /// `DocumentResolver` (SQLite satisfies this automatically).
     pub fn new(
         coordinator: Arc<StorageCoordinator<S>>,
         stores: Arc<dyn Stores<S>>,
@@ -66,9 +61,9 @@ where
         model: Arc<dyn ChatModel + Send + Sync>,
         model_id: String,
         user_id: UserId,
-    ) -> Self {
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        Self {
+    ) -> Arc<Self> {
+        let (manager_event_tx, manager_event_rx) = mpsc::unbounded_channel();
+        let daemon = Arc::new(Self {
             coordinator,
             stores,
             mcp_registry,
@@ -76,69 +71,78 @@ where
             model: Mutex::new(model),
             model_id: Mutex::new(model_id),
             user_id,
-            event_tx,
-            event_rx: Mutex::new(Some(event_rx)),
+            manager_event_tx,
+        });
+
+        // Spawn the event dispatcher — routes ManagerEvents to per-session broadcasts
+        Self::spawn_event_dispatcher(Arc::clone(&daemon), manager_event_rx);
+
+        daemon
+    }
+
+    /// Background task: receives (ConversationId, ManagerEvent) from all managers
+    /// and forwards to the appropriate per-session broadcast channel.
+    fn spawn_event_dispatcher(
+        daemon: Arc<Self>,
+        mut rx: mpsc::UnboundedReceiver<(ConversationId, ManagerEvent)>,
+    ) {
+        tokio::spawn(async move {
+            while let Some((conversation_id, event)) = rx.recv().await {
+                let session_id = SessionId::new(conversation_id.as_str());
+                let sessions = daemon.sessions.lock().await;
+                if let Some(managed) = sessions.get(&session_id) {
+                    // Convert ManagerEvent → DaemonEvent and broadcast
+                    let daemon_events = Self::manager_event_to_daemon_events(&session_id, event);
+                    for daemon_event in daemon_events {
+                        // Ignore send errors (no active subscribers)
+                        let _ = managed.event_broadcast.send(daemon_event);
+                    }
+                }
+            }
+        });
+    }
+
+    fn manager_event_to_daemon_events(
+        session_id: &SessionId,
+        event: ManagerEvent,
+    ) -> Vec<DaemonEvent> {
+        match event {
+            ManagerEvent::UserMessageAdded(_) => vec![],
+            ManagerEvent::StreamingMessage(msg) => {
+                msg.payload.content.into_iter().map(DaemonEvent::AssistantContent).collect()
+            }
+            ManagerEvent::Complete(_) => vec![DaemonEvent::TurnComplete],
+            ManagerEvent::Error(err) => vec![DaemonEvent::Error(err)],
+            ManagerEvent::ModelChanged(_) => vec![],
+            ManagerEvent::Truncated(_) => vec![],
         }
     }
 
-    /// Take the event receiver. Can only be called once — the caller owns the
-    /// stream and is responsible for dispatching events to the UI or wherever.
-    pub async fn take_event_receiver(
+    fn build_manager(
         &self,
-    ) -> Option<mpsc::UnboundedReceiver<(ConversationId, ManagerEvent)>> {
-        self.event_rx.lock().await.take()
-    }
-
-    /// Get a clone of the event sender (for passing to subsystems).
-    pub fn event_sender(&self) -> SharedEventSender {
-        self.event_tx.clone()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// DaemonApi implementation
-// ---------------------------------------------------------------------------
-
-#[async_trait]
-impl<S: StorageTypes> DaemonApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
-{
-    // -- Session lifecycle ---------------------------------------------------
-
-    async fn create_session(&self, options: CreateSessionOptions) -> anyhow::Result<SessionId> {
-        let conversation_id = ConversationId::new();
-        let session_id = conversation_id.as_str().to_string();
-
-        let persistence = options.persistence.unwrap_or(Persistence::Persistent);
-
-        // Resolve model — use per-session override or daemon default
-        let model = self.model.lock().await.clone();
-        let model_id = match options.model_id {
-            Some(id) => id,
-            None => self.model_id.lock().await.clone(),
-        };
-
-        // Create the session and conversation manager
-        let session = Session::new(
-            Arc::clone(&self.coordinator),
-            conversation_id.clone(),
-        );
-
+        session: Session<S>,
+        model: Arc<dyn ChatModel + Send + Sync>,
+        model_id: String,
+    ) -> ConversationManager<S> {
         let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
-
-        let manager = ConversationManager::new(
+        ConversationManager::new(
             session,
             Arc::clone(&self.coordinator),
             model,
-            model_id.clone(),
+            model_id,
             Arc::clone(&self.mcp_registry),
             document_resolver,
             self.user_id.clone(),
-            self.event_tx.clone(),
-        );
+            self.manager_event_tx.clone(),
+        )
+    }
 
-        let info = SessionInfo {
+    fn make_session_info(
+        session_id: &SessionId,
+        persistence: Persistence,
+        model_id: String,
+    ) -> SessionInfo {
+        SessionInfo {
             id: session_id.clone(),
             persistence,
             model_id,
@@ -148,26 +152,100 @@ where
                     .unwrap_or_default();
                 format!("{}", now.as_secs())
             },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SessionApi
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl<S: StorageTypes> SessionApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
+    async fn create_session(
+        &self,
+        options: CreateSessionOptions,
+    ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
+        let conversation_id = ConversationId::new();
+        let session_id = SessionId::new(conversation_id.as_str());
+        let persistence = options.persistence.unwrap_or(Persistence::Persistent);
+
+        let model = self.model.lock().await.clone();
+        let model_id = match options.model_id {
+            Some(id) => id,
+            None => self.model_id.lock().await.clone(),
         };
+
+        let session = Session::new(Arc::clone(&self.coordinator), conversation_id);
+        let manager = self.build_manager(session, model, model_id.clone());
+        let info = Self::make_session_info(&session_id, persistence, model_id);
+
+        let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
 
         self.sessions.lock().await.insert(
             session_id.clone(),
-            ManagedSession { info, manager },
+            ManagedSession {
+                info: info.clone(),
+                manager,
+                event_broadcast: broadcast_tx,
+            },
         );
 
         tracing::info!(session_id = %session_id, "session created");
-        Ok(session_id)
+        Ok((info, broadcast_rx))
     }
 
-    async fn resume_session(&self, session_id: &str) -> anyhow::Result<SessionInfo> {
+    async fn resume_session(
+        &self,
+        session_id: &SessionId,
+    ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
+        // If already loaded, return info + new subscriber
+        {
+            let sessions = self.sessions.lock().await;
+            if let Some(managed) = sessions.get(session_id) {
+                return Ok((managed.info.clone(), managed.event_broadcast.subscribe()));
+            }
+        }
+
+        // Load from storage
+        let conversation_id = ConversationId::from_string(session_id.as_str());
+        let session = Session::open(Arc::clone(&self.coordinator), conversation_id).await?;
+
+        let model = self.model.lock().await.clone();
+        let model_id = self.model_id.lock().await.clone();
+        let manager = self.build_manager(session, model, model_id.clone());
+        let info = Self::make_session_info(session_id, Persistence::Persistent, model_id);
+
+        let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
+
+        self.sessions.lock().await.insert(
+            session_id.clone(),
+            ManagedSession {
+                info: info.clone(),
+                manager,
+                event_broadcast: broadcast_tx,
+            },
+        );
+
+        tracing::info!(session_id = %session_id, "session resumed from storage");
+        Ok((info, broadcast_rx))
+    }
+
+    async fn subscribe_session(
+        &self,
+        session_id: &SessionId,
+    ) -> anyhow::Result<broadcast::Receiver<DaemonEvent>> {
         let sessions = self.sessions.lock().await;
         let managed = sessions
             .get(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-        Ok(managed.info.clone())
+        Ok(managed.event_broadcast.subscribe())
     }
 
-    async fn close_session(&self, session_id: &str) -> anyhow::Result<()> {
+    async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()> {
         let removed = self.sessions.lock().await.remove(session_id);
         if removed.is_some() {
             tracing::info!(session_id = %session_id, "session closed");
@@ -187,10 +265,9 @@ where
 
     async fn seed_context(
         &self,
-        _session_id: &str,
+        _session_id: &SessionId,
         _messages: Vec<SeedMessage>,
     ) -> anyhow::Result<()> {
-        // TODO: convert SeedMessages to ChatMessages and add to session pending
         tracing::warn!("seed_context not yet implemented");
         Ok(())
     }
@@ -202,7 +279,7 @@ where
 
     async fn set_persistence(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         persistence: Persistence,
     ) -> anyhow::Result<()> {
         let mut sessions = self.sessions.lock().await;
@@ -213,13 +290,11 @@ where
         Ok(())
     }
 
-    // -- Conversation --------------------------------------------------------
-
     async fn send_message(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         message: UserMessage,
-    ) -> anyhow::Result<Vec<DaemonEvent>> {
+    ) -> anyhow::Result<()> {
         let sessions = self.sessions.lock().await;
         let managed = sessions
             .get(session_id)
@@ -230,50 +305,72 @@ where
             .map(|f| f.into_tool_config())
             .unwrap_or_else(simply_core::ToolConfig::all_enabled);
 
-        // Fire-and-forget — the manager runs in a background task and emits
-        // events through the event_tx channel.
         managed.manager.send_message(message.content, tool_config);
-
-        // Return an empty vec for now. The real events flow through
-        // take_event_receiver(). A future streaming API will replace this.
-        Ok(vec![])
-    }
-
-    async fn set_model(&self, session_id: &str, model_id: &str) -> anyhow::Result<()> {
-        // For now, just update the session info. Full model resolution
-        // (provider lookup, creating a ChatModel instance) will be added
-        // when we wire the model registry.
-        let mut sessions = self.sessions.lock().await;
-        let managed = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-        managed.info.model_id = model_id.to_string();
         Ok(())
     }
 
-    async fn truncate(&self, session_id: &str, _before_turn: Option<&str>) -> anyhow::Result<()> {
+    async fn get_messages(
+        &self,
+        session_id: &SessionId,
+    ) -> anyhow::Result<Vec<ResolvedMessage>> {
         let sessions = self.sessions.lock().await;
         let managed = sessions
             .get(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-        managed.manager.clear_history();
+        Ok(managed.manager.messages_for_display().await)
+    }
+
+    async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()> {
+        let new_model = llm::create_model(model_id)?;
+        let mut sessions = self.sessions.lock().await;
+        let managed = sessions
+            .get_mut(session_id)
+            .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
+        managed.manager.set_model(new_model, model_id.to_string());
+        managed.info.model_id = model_id.to_string();
         Ok(())
     }
 
-    // -- Assets --------------------------------------------------------------
+    async fn reload(&self, session_id: &SessionId) -> anyhow::Result<()> {
+        let sessions = self.sessions.lock().await;
+        let managed = sessions
+            .get(session_id)
+            .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
+        managed.manager.reload().await?;
+        Ok(())
+    }
 
-    async fn upload_asset(
-        &self,
-        data: Vec<u8>,
-        media_type: &str,
-    ) -> anyhow::Result<simply_core::storage::ids::AssetId> {
+    async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()> {
+        tracing::info!(event_type = %event.event_type, "inbound event received (not yet routed)");
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AssetApi
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl<S: StorageTypes> AssetApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
+    async fn store_asset(&self, data: Vec<u8>, media_type: &str) -> anyhow::Result<AssetId> {
         use base64::{engine::general_purpose::STANDARD, Engine};
         let b64 = STANDARD.encode(&data);
         self.coordinator.store_asset(&b64, media_type).await
     }
+}
 
-    // -- MCP tools -----------------------------------------------------------
+// ---------------------------------------------------------------------------
+// McpApi
+// ---------------------------------------------------------------------------
 
+#[async_trait]
+impl<S: StorageTypes> McpApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
     async fn register_mcp(&self, registration: McpRegistration) -> anyhow::Result<()> {
         let config = simply_core::ServerConfig {
             name: registration.name.clone(),
@@ -306,19 +403,49 @@ where
             .map(|(id, _)| id.to_string())
             .collect())
     }
+}
 
-    // -- Events --------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// ModelApi
+// ---------------------------------------------------------------------------
 
-    async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()> {
-        tracing::info!(event_type = %event.event_type, "inbound event received (not yet routed)");
-        // TODO: route events to appropriate session or handler
-        Ok(())
+#[async_trait]
+impl<S: StorageTypes> ModelApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
+    async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>> {
+        let mut all_models = Vec::new();
+        for (_provider_name, result) in llm::list_all_models().await {
+            if let Ok(models) = result {
+                all_models.extend(models);
+            }
+        }
+        Ok(all_models)
     }
 
-    // -- Voice ---------------------------------------------------------------
+    async fn default_model_id(&self) -> String {
+        self.model_id.lock().await.clone()
+    }
 
-    async fn voice_connect(&self, _session_id: &str) -> anyhow::Result<VoiceHandle> {
-        // Voice pipeline integration is a later task — stub with unconnected channels
+    async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> {
+        let new_model = llm::create_model(model_id)?;
+        *self.model.lock().await = new_model;
+        *self.model_id.lock().await = model_id.to_string();
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VoiceApi
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl<S: StorageTypes> VoiceApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
+    async fn voice_connect(&self, _session_id: &SessionId) -> anyhow::Result<VoiceHandle> {
         let (audio_tx, _audio_rx) = mpsc::channel(32);
         let (_voice_tx, voice_rx) = mpsc::channel(32);
         Ok(VoiceHandle {

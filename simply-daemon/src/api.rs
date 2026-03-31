@@ -1,145 +1,64 @@
-//! DaemonApi — the core trait that all daemon consumers depend on.
+//! DaemonApi — the core traits that all daemon consumers depend on.
 //!
-//! Noema, Lumina, and any future client use this trait. Whether the daemon
-//! runs in-process or as a separate service is a runtime/build decision,
-//! not a code decision.
+//! Split into focused traits:
+//! - [`SessionApi`] — session lifecycle, conversation, events
+//! - [`AssetApi`] — binary content upload
+//! - [`McpApi`] — MCP service registration and tool discovery
+//! - [`VoiceApi`] — voice pipeline
 //!
 //! See [CORE_SERVICE.md] for the full protocol specification.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use simply_core::storage::ids::AssetId;
+use simply_core::storage::session::ResolvedMessage;
 use simply_core::storage::InputContent;
 use simply_core::ToolConfig;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 // ---------------------------------------------------------------------------
 // Identifiers
 // ---------------------------------------------------------------------------
 
-/// Opaque session identifier (maps to a UCM ConversationId for persistent sessions).
-pub type SessionId = String;
+/// Opaque session identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SessionId(String);
+
+impl SessionId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 // ---------------------------------------------------------------------------
-// Client → Daemon messages
+// Session types
 // ---------------------------------------------------------------------------
 
 /// How a session should persist its data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Persistence {
-    /// In-memory only — lost on daemon restart. Lumina default (Discord is source of truth).
+    /// In-memory only — lost on daemon restart. Lumina default.
     Ephemeral,
     /// Backed by UCM storage. Noema default.
     Persistent,
 }
 
 /// Options when creating a new session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSessionOptions {
-    /// Persistence mode. Defaults per-platform if None.
     pub persistence: Option<Persistence>,
-    /// Optional system prompt to seed the session.
     pub system_prompt: Option<String>,
-    /// Initial model ID (e.g., "anthropic/claude-sonnet-4-20250514").
     pub model_id: Option<String>,
-}
-
-impl Default for CreateSessionOptions {
-    fn default() -> Self {
-        Self {
-            persistence: None,
-            system_prompt: None,
-            model_id: None,
-        }
-    }
-}
-
-/// A user message sent to a session.
-///
-/// Content uses `InputContent` from simply-core — supports inline text/images/audio
-/// (daemon stores them in UCM) and asset refs (already stored via `upload_asset`).
-#[derive(Debug, Clone)]
-pub struct UserMessage {
-    pub content: Vec<InputContent>,
-    /// Which MCP tools to enable for this turn. None = all.
-    pub tool_filter: Option<ToolFilter>,
-}
-
-/// Filter which tools the agent can use for a turn.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolFilter {
-    pub server_ids: Option<Vec<String>>,
-    pub tool_names: Option<Vec<String>>,
-}
-
-impl ToolFilter {
-    /// Convert to a simply-core `ToolConfig`.
-    pub fn into_tool_config(self) -> ToolConfig {
-        ToolConfig {
-            enabled: true,
-            server_ids: self.server_ids,
-            tool_names: self.tool_names,
-        }
-    }
-}
-
-/// Context seed message — replay history into a session (e.g., Discord channel messages).
-///
-/// Seeds can have any role — Lumina replays both user and assistant messages
-/// from Discord history so the daemon has full conversational context.
-#[derive(Debug, Clone)]
-pub struct SeedMessage {
-    pub role: llm::Role,
-    pub content: Vec<InputContent>,
-}
-
-/// MCP service registration from a client.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpRegistration {
-    /// Unique name for this MCP service.
-    pub name: String,
-    /// MCP endpoint URL.
-    pub endpoint: String,
-}
-
-/// An event pushed into the daemon.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InboundEvent {
-    /// Event type (e.g., "github.pr_opened", "timer.fired").
-    pub event_type: String,
-    /// Arbitrary event payload.
-    pub payload: serde_json::Value,
-}
-
-// ---------------------------------------------------------------------------
-// Daemon → Client events
-// ---------------------------------------------------------------------------
-
-/// Events streamed back from the daemon during a conversation turn.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DaemonEvent {
-    /// Session was created or resumed.
-    SessionReady { session_id: SessionId },
-    /// Partial text from the assistant (streaming).
-    TextDelta(String),
-    /// Content block from the assistant (complete, non-streaming).
-    AssistantContent(llm::ContentBlock),
-    /// The agent wants to call a tool.
-    ToolCall {
-        id: String,
-        name: String,
-        arguments: serde_json::Value,
-    },
-    /// Tool call completed with a result.
-    ToolResult {
-        id: String,
-        result: serde_json::Value,
-    },
-    /// Turn is complete — includes resolved messages with turn IDs.
-    TurnComplete,
-    /// An intent/event notification targeting this client.
-    EventNotification(InboundEvent),
-    /// Something went wrong.
-    Error(String),
 }
 
 /// Information about a session.
@@ -152,14 +71,103 @@ pub struct SessionInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Message types
+// ---------------------------------------------------------------------------
+
+/// A user message sent to a session.
+///
+/// Content uses `InputContent` from simply-core — supports inline text/images/audio
+/// (stored in UCM by the daemon) and asset refs (pre-uploaded via `AssetApi`).
+#[derive(Debug, Clone)]
+pub struct UserMessage {
+    pub content: Vec<InputContent>,
+    pub tool_filter: Option<ToolFilter>,
+}
+
+/// Filter which tools the agent can use for a turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolFilter {
+    pub server_ids: Option<Vec<String>>,
+    pub tool_names: Option<Vec<String>>,
+}
+
+impl ToolFilter {
+    pub fn into_tool_config(self) -> ToolConfig {
+        ToolConfig {
+            enabled: true,
+            server_ids: self.server_ids,
+            tool_names: self.tool_names,
+        }
+    }
+}
+
+/// Context seed message — replay history into a session.
+///
+/// Seeds can have any role — Lumina replays both user and assistant messages
+/// from Discord history so the daemon has full conversational context.
+#[derive(Debug, Clone)]
+pub struct SeedMessage {
+    pub role: llm::Role,
+    pub content: Vec<InputContent>,
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+/// Events streamed from the daemon to session subscribers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DaemonEvent {
+    /// Session is ready.
+    SessionReady { session_id: SessionId },
+    /// Partial text from the assistant (streaming).
+    TextDelta(String),
+    /// Content block from the assistant.
+    AssistantContent(llm::ContentBlock),
+    /// The agent is calling a tool.
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    /// Tool call completed.
+    ToolResult {
+        id: String,
+        result: serde_json::Value,
+    },
+    /// Turn is complete.
+    TurnComplete,
+    /// Inbound event notification.
+    EventNotification(InboundEvent),
+    /// Error.
+    Error(String),
+}
+
+/// An event pushed into the daemon (trigger interface).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InboundEvent {
+    pub event_type: String,
+    pub payload: serde_json::Value,
+}
+
+// ---------------------------------------------------------------------------
+// MCP types
+// ---------------------------------------------------------------------------
+
+/// MCP service registration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpRegistration {
+    pub name: String,
+    pub endpoint: String,
+}
+
+// ---------------------------------------------------------------------------
 // Voice types
 // ---------------------------------------------------------------------------
 
-/// A frame of audio data. PCM format details (sample rate, channels) are
-/// negotiated at voice_connect time.
+/// A frame of audio data (PCM f32, mono, 16kHz by convention).
 #[derive(Debug, Clone)]
 pub struct AudioFrame {
-    /// Raw PCM samples (f32, mono, 16kHz by convention).
     pub samples: Vec<f32>,
 }
 
@@ -172,129 +180,135 @@ pub enum VoiceState {
     Speaking,
 }
 
-/// Events from the daemon's voice pipeline back to the client.
+/// Events from the daemon's voice pipeline.
 #[derive(Debug, Clone)]
 pub enum VoiceEvent {
-    /// Daemon detected speech and transcribed it.
     Transcription(String),
-    /// TTS audio to play on the client's output device.
     AudioOut(AudioFrame),
-    /// Voice pipeline state changed.
     StateChanged(VoiceState),
 }
 
-/// Handle returned by `voice_connect`. Dropping it disconnects the voice session.
+/// Handle returned by `voice_connect`. Drop to disconnect.
 pub struct VoiceHandle {
-    /// Send mic audio into the daemon's STT pipeline.
     pub audio_in: mpsc::Sender<AudioFrame>,
-    /// Receive transcriptions and TTS audio from the daemon.
     pub events: mpsc::Receiver<VoiceEvent>,
 }
 
 // ---------------------------------------------------------------------------
-// The trait
+// Traits
 // ---------------------------------------------------------------------------
 
-/// The core API surface of the Simply daemon.
-///
-/// All methods are async — both in-process and remote implementations may do I/O.
-/// Clients (Noema, Lumina) depend on this trait, never on a concrete implementation.
+/// Session lifecycle, conversation, and event streaming.
 #[async_trait]
-pub trait DaemonApi: Send + Sync {
-    // -- Session lifecycle ---------------------------------------------------
+pub trait SessionApi: Send + Sync {
+    /// Create a new session. Returns the ID, info, and an event stream.
+    async fn create_session(
+        &self,
+        options: CreateSessionOptions,
+    ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
-    /// Create a new conversation session.
-    async fn create_session(&self, options: CreateSessionOptions) -> anyhow::Result<SessionId>;
+    /// Resume an existing session from storage. Returns info and an event stream.
+    async fn resume_session(
+        &self,
+        session_id: &SessionId,
+    ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
-    /// Resume an existing session (e.g., after Noema restart).
-    /// Returns the session info if it exists, or an error if the session is gone.
-    /// For persistent sessions, this reloads from UCM storage.
-    /// For ephemeral sessions, the client must re-seed via `seed_context`.
-    async fn resume_session(&self, session_id: &str) -> anyhow::Result<SessionInfo>;
+    /// Subscribe to an already-open session's events (multiple listeners).
+    async fn subscribe_session(
+        &self,
+        session_id: &SessionId,
+    ) -> anyhow::Result<broadcast::Receiver<DaemonEvent>>;
 
-    /// Destroy a session and free its memory. Persistent data in UCM is not deleted.
-    async fn close_session(&self, session_id: &str) -> anyhow::Result<()>;
+    /// Close a session and free its memory.
+    async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()>;
 
-    /// Close all sessions. Called on client disconnect to prevent memory leaks.
-    /// For the WebSocket case, the server calls this when a connection drops.
+    /// Close all sessions (client disconnect cleanup).
     async fn close_all_sessions(&self) -> anyhow::Result<()>;
 
-    /// Replay context into a session (e.g., Lumina re-sending Discord history).
+    /// Replay context into a session (e.g., Discord history).
     async fn seed_context(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         messages: Vec<SeedMessage>,
     ) -> anyhow::Result<()>;
 
     /// List active sessions.
     async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>>;
 
-    /// Change persistence mode for a session (ephemeral ↔ persistent).
+    /// Change persistence mode.
     async fn set_persistence(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         persistence: Persistence,
     ) -> anyhow::Result<()>;
 
-    // -- Conversation --------------------------------------------------------
-
-    /// Send a user message. Returns a stream of DaemonEvents.
-    ///
-    /// The returned Vec is a simplification — a real streaming impl would use
-    /// a channel or async stream. Good enough for the in-process skeleton;
-    /// the remote impl will use proper streaming.
+    /// Send a user message. Events arrive on the session's broadcast receiver.
     async fn send_message(
         &self,
-        session_id: &str,
+        session_id: &SessionId,
         message: UserMessage,
-    ) -> anyhow::Result<Vec<DaemonEvent>>;
+    ) -> anyhow::Result<()>;
+
+    /// Get messages for display (resolved content with turn IDs).
+    async fn get_messages(
+        &self,
+        session_id: &SessionId,
+    ) -> anyhow::Result<Vec<ResolvedMessage>>;
 
     /// Change the model for a session.
-    async fn set_model(&self, session_id: &str, model_id: &str) -> anyhow::Result<()>;
+    async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()>;
 
-    /// Truncate conversation history to before a specific turn.
-    /// Pass None to clear all history.
-    async fn truncate(&self, session_id: &str, before_turn: Option<&str>) -> anyhow::Result<()>;
+    /// Reload messages from storage (e.g., after span selection change).
+    async fn reload(&self, session_id: &SessionId) -> anyhow::Result<()>;
 
-    // -- Assets --------------------------------------------------------------
+    /// Push an inbound event into the daemon.
+    async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()>;
+}
 
-    /// Upload binary content to the daemon's blob store.
-    ///
-    /// Returns an `AssetId` that can be used in `InputContent::AssetRef`
-    /// when sending messages. This lets clients pre-upload large binaries
-    /// instead of inlining base64 on every message.
-    async fn upload_asset(
-        &self,
-        data: Vec<u8>,
-        media_type: &str,
-    ) -> anyhow::Result<simply_core::storage::ids::AssetId>;
+/// Binary asset upload.
+#[async_trait]
+pub trait AssetApi: Send + Sync {
+    /// Upload binary content. Returns an `AssetId` for use in `InputContent::AssetRef`.
+    async fn store_asset(&self, data: Vec<u8>, media_type: &str) -> anyhow::Result<AssetId>;
+}
 
-    // -- MCP tools -----------------------------------------------------------
-
-    /// Register an MCP service. Tools become available to all sessions globally.
+/// MCP service registration and tool discovery.
+#[async_trait]
+pub trait McpApi: Send + Sync {
+    /// Register an MCP service. Tools become globally available.
     async fn register_mcp(&self, registration: McpRegistration) -> anyhow::Result<()>;
 
     /// Unregister an MCP service.
     async fn unregister_mcp(&self, name: &str) -> anyhow::Result<()>;
 
-    /// List all registered MCP tools across all services.
+    /// List all registered MCP tool servers.
     async fn list_tools(&self) -> anyhow::Result<Vec<String>>;
-
-    // -- Events --------------------------------------------------------------
-
-    /// Push an event into the daemon (trigger interface).
-    async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()>;
-
-    // -- Voice ---------------------------------------------------------------
-
-    /// Connect a voice stream to a session. Returns a handle with:
-    /// - `audio_in`: send mic PCM frames into the daemon's STT pipeline
-    /// - `events`: receive transcriptions, TTS audio frames, and state changes
-    ///
-    /// The client is responsible for platform-specific audio capture/playback
-    /// (CPAL on desktop, songbird on Discord, WebRTC in browser) and converting
-    /// to/from the common PCM format. The daemon handles STT, LLM, and TTS.
-    ///
-    /// Drop the handle to disconnect voice.
-    async fn voice_connect(&self, session_id: &str) -> anyhow::Result<VoiceHandle>;
 }
+
+/// Model listing and management.
+#[async_trait]
+pub trait ModelApi: Send + Sync {
+    /// List available models from all providers.
+    async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>>;
+
+    /// Get the current default model ID.
+    async fn default_model_id(&self) -> String;
+
+    /// Set the default model for new sessions.
+    async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()>;
+}
+
+/// Voice pipeline.
+#[async_trait]
+pub trait VoiceApi: Send + Sync {
+    /// Connect a voice stream to a session.
+    ///
+    /// Client handles platform audio (CPAL/songbird/WebRTC),
+    /// daemon handles STT/LLM/TTS. Drop the handle to disconnect.
+    async fn voice_connect(&self, session_id: &SessionId) -> anyhow::Result<VoiceHandle>;
+}
+
+/// Convenience super-trait combining all daemon APIs.
+pub trait DaemonApi: SessionApi + AssetApi + McpApi + ModelApi + VoiceApi {}
+
+impl<T: SessionApi + AssetApi + McpApi + ModelApi + VoiceApi> DaemonApi for T {}
