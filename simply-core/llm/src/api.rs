@@ -446,6 +446,7 @@ mod tests {
             id: "call_123".to_string(),
             name: "search".to_string(),
             arguments: serde_json::json!({"query": "test"}),
+            extra: serde_json::Value::Null,
         };
 
         let payload = ChatPayload::with_tool_calls(
@@ -495,6 +496,7 @@ mod tests {
             id: "call_456".to_string(),
             name: "calculator".to_string(),
             arguments: serde_json::json!({"a": 5, "b": 3}),
+            extra: serde_json::Value::Null,
         };
 
         let payload = ChatPayload::with_tool_calls(
@@ -564,6 +566,7 @@ mod tests {
             id: "call_abc".to_string(),
             name: "test_tool".to_string(),
             arguments: serde_json::json!({"key": "value"}),
+            extra: serde_json::Value::Null,
         };
 
         let block = ContentBlock::ToolCall(tool_call);
@@ -611,6 +614,7 @@ mod tests {
                 id: "call_1".to_string(),
                 name: "tool1".to_string(),
                 arguments: serde_json::json!({}),
+                extra: serde_json::Value::Null,
             }),
             ContentBlock::Text {
                 text: "Text after tool".to_string(),

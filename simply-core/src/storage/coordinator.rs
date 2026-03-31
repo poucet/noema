@@ -837,6 +837,7 @@ mod tests {
             id: "call-1".to_string(),
             name: "test_tool".to_string(),
             arguments: serde_json::json!({"key": "value"}),
+            extra: serde_json::Value::Null,
         };
         let block = ContentBlock::ToolCall(tool_call.clone());
 
