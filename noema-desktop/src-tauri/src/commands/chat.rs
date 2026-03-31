@@ -1,11 +1,11 @@
 //! Chat-related Tauri commands
 
-use simply_core::storage::{EntityStore, EntityType, InputContent, Stores};
-use simply_core::storage::ids::ConversationId;
 use simply_daemon::api::{
+    ConversationApi, ConversationInfo as DaemonConversationInfo,
     DaemonEvent, SessionApi, SessionId, ModelApi, UserMessage,
     ToolFilter as DaemonToolFilter,
 };
+use simply_daemon::types::{ConversationId, InputContent};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::broadcast;
@@ -30,7 +30,7 @@ fn spawn_event_forwarder(
             match rx.recv().await {
                 Ok(event) => match event {
                     DaemonEvent::UserMessage(msg) => {
-                        let _ = app.emit("user_message", crate::types::UserMessageEvent {
+                        let _ = app.emit("user_message", UserMessageEvent {
                             conversation_id: conversation_id.clone(),
                             message: DisplayMessage::from(&msg),
                         });
@@ -39,7 +39,7 @@ fn spawn_event_forwarder(
                         state.set_processing(&conversation_id, true).await;
                         let content = vec![crate::types::DisplayContent::from(&block)];
                         let msg = DisplayMessage {
-                            role: llm::Role::Assistant,
+                            role: simply_daemon::types::Role::Assistant,
                             content,
                             turn_id: None,
                             span_id: None,
@@ -51,7 +51,6 @@ fn spawn_event_forwarder(
                         });
                     }
                     DaemonEvent::TurnComplete => {
-                        // Re-fetch all messages for the complete event
                         let daemon = match state.get_daemon() {
                             Ok(d) => d,
                             Err(_) => break,
@@ -132,15 +131,13 @@ pub async fn send_message(
     let daemon = state.get_daemon()?;
     let session_id = SessionId::new(conversation_id.as_str());
 
-    let daemon_tool_filter = tool_config.map(|tc| DaemonToolFilter {
-        server_ids: tc.server_ids,
-        tool_names: tc.tool_names,
-    });
-
     daemon
         .send_message(&session_id, UserMessage {
             content: input_content,
-            tool_filter: daemon_tool_filter,
+            tool_filter: tool_config.map(|tc| DaemonToolFilter {
+                server_ids: tc.server_ids,
+                tool_names: tc.tool_names,
+            }),
         })
         .await
         .map_err(|e| format!("Failed to send message: {}", e))
@@ -177,7 +174,6 @@ pub async fn set_model(
         .await
         .map_err(|e| format!("Failed to set model: {}", e))?;
 
-    // Also update daemon default
     daemon
         .set_default_model(&full_model_id)
         .await
@@ -189,7 +185,6 @@ pub async fn set_model(
         .unwrap_or(&model_id)
         .to_string();
 
-    // Save as default model in settings
     let mut settings = config::Settings::load();
     settings.default_model = Some(full_model_id);
     if let Err(e) = settings.save() {
@@ -202,54 +197,41 @@ pub async fn set_model(
 /// List available models from all providers
 #[tauri::command]
 pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInfo>, String> {
-    use llm::ModelCapability;
-
     let daemon = state.get_daemon()?;
     let all = daemon.list_models().await.map_err(|e| format!("Failed to list models: {}", e))?;
 
-    let mut result = Vec::new();
-    for m in all {
-        if !m.definition.has_capability(&ModelCapability::Text) {
-            continue;
-        }
-        let capabilities: Vec<String> = m.definition.capabilities.iter().map(|c| format!("{:?}", c)).collect();
-        // Extract provider from model ID (format: "provider/model")
-        let provider = m.id.provider.clone();
-        result.push(ModelInfo {
+    Ok(all
+        .into_iter()
+        .filter(|m| m.definition.has_capability(&simply_daemon::types::ModelCapability::Text))
+        .map(|m| ModelInfo {
             id: m.definition.id.clone(),
             display_name: m.definition.name().to_string(),
-            provider,
-            capabilities,
+            provider: m.id.provider.clone(),
+            capabilities: m.definition.capabilities.iter().map(|c| format!("{:?}", c)).collect(),
             context_window: m.definition.context_window,
-        });
-    }
-
-    Ok(result)
+        })
+        .collect())
 }
 
 /// List all conversations for the current user
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
-    let stores = state.get_stores()?;
-    let user_id = state.user_id.lock().await.clone();
+    let daemon = state.get_daemon()?;
 
-    let entities = stores
-        .entity()
-        .list_entities(&user_id, Some(&EntityType::conversation()))
+    let convos = daemon
+        .list_conversations()
         .await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
 
-    let mut result = Vec::with_capacity(entities.len());
-    for entity in entities {
-        let turn_count = stores
-            .turn()
-            .get_turn_count(&entity.id)
-            .await
-            .unwrap_or(0);
-        result.push(ConversationInfo::from_entity(&entity, turn_count));
-    }
-
-    Ok(result)
+    Ok(convos
+        .into_iter()
+        .map(|c| ConversationInfo {
+            id: c.id,
+            name: c.name,
+            message_count: c.message_count,
+            created_at: c.created_at,
+        })
+        .collect())
 }
 
 /// Load a conversation (creating a daemon session for it)
@@ -262,24 +244,20 @@ pub async fn load_conversation(
     let daemon = state.get_daemon()?;
     let session_id = SessionId::new(conversation_id.as_str());
 
-    // Resume session (loads from storage if not already open, returns existing if open)
     let (_info, rx) = daemon
         .resume_session(&session_id)
         .await
         .map_err(|e| format!("Failed to load conversation: {}", e))?;
 
-    // Forward daemon events to Tauri UI
     spawn_event_forwarder(app, state.inner().clone(), conversation_id.clone(), rx);
 
-    let messages: Vec<DisplayMessage> = daemon
+    Ok(daemon
         .get_messages(&session_id)
         .await
         .map_err(|e| format!("Failed to get messages: {}", e))?
         .iter()
         .map(DisplayMessage::from)
-        .collect();
-
-    Ok(messages)
+        .collect())
 }
 
 /// Create a new conversation
@@ -289,22 +267,18 @@ pub async fn new_conversation(
     state: State<'_, Arc<AppState>>,
     name: Option<String>,
 ) -> Result<String, String> {
-    let coordinator = state.get_coordinator()?;
     let daemon = state.get_daemon()?;
-    let user_id = state.user_id.lock().await.clone();
 
     let conversation_name = name.unwrap_or_else(|| {
         let now = chrono::Utc::now();
         format!("Chat {}", now.format("%b %d, %H:%M"))
     });
 
-    // Create the entity in storage
-    let conv_id = coordinator
-        .create_conversation(&user_id, Some(&conversation_name))
+    let conv_id = daemon
+        .create_conversation(Some(&conversation_name))
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
-    // Create a daemon session and start event forwarding
     let session_id = SessionId::new(conv_id.as_str());
     let (_info, rx) = daemon
         .resume_session(&session_id)
@@ -323,15 +297,8 @@ pub async fn delete_conversation(
     conversation_id: ConversationId,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    let session_id = SessionId::new(conversation_id.as_str());
-
-    // Close daemon session (ignore error if not loaded)
-    let _ = daemon.close_session(&session_id).await;
-
-    let stores = state.get_stores()?;
-    stores
-        .entity()
-        .delete_entity(&conversation_id)
+    daemon
+        .delete_conversation(&conversation_id)
         .await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
@@ -343,20 +310,9 @@ pub async fn rename_conversation(
     conversation_id: ConversationId,
     name: String,
 ) -> Result<(), String> {
-    let stores = state.get_stores()?;
-
-    let mut entity = stores
-        .entity()
-        .get_entity(&conversation_id)
-        .await
-        .map_err(|e| format!("Failed to get conversation: {}", e))?
-        .ok_or_else(|| "Conversation not found".to_string())?;
-
-    entity.name = if name.trim().is_empty() { None } else { Some(name) };
-
-    stores
-        .entity()
-        .update_entity(&conversation_id, &entity)
+    let daemon = state.get_daemon()?;
+    daemon
+        .rename_conversation(&conversation_id, &name)
         .await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
@@ -384,4 +340,3 @@ pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, Stri
     settings.save().map_err(|e| format!("Failed to save settings: {}", e))?;
     Ok(settings.favorite_models)
 }
-

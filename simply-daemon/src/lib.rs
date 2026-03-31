@@ -27,5 +27,5 @@ pub mod types {
     };
 
     // LLM types used by clients
-    pub use llm::{ChatMessage, ContentBlock, ModelInfo, Role, ToolResultContent};
+    pub use llm::{ChatMessage, ContentBlock, ModelCapability, ModelInfo, Role, ToolResultContent};
 }
