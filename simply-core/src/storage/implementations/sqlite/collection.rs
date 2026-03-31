@@ -778,9 +778,10 @@ mod tests {
     async fn setup_store_with_user() -> (SqliteStore, UserId) {
         let store = SqliteStore::in_memory().unwrap();
         let user_id = store
-            .create_user("test@example.com", "Test User")
+            .get_or_create_default_user()
             .await
-            .unwrap();
+            .unwrap()
+            .id;
         (store, user_id)
     }
 
