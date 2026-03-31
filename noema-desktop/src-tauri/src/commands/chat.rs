@@ -205,7 +205,7 @@ pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInf
         }
         let capabilities: Vec<String> = m.definition.capabilities.iter().map(|c| format!("{:?}", c)).collect();
         // Extract provider from model ID (format: "provider/model")
-        let provider = m.id.as_str().split('/').next().unwrap_or("unknown").to_string();
+        let provider = m.id.provider.clone();
         result.push(ModelInfo {
             id: m.definition.id.clone(),
             display_name: m.definition.name().to_string(),
