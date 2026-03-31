@@ -32,7 +32,7 @@ Foundation (sequential)               Lumina (sequential)
 
 | Phase | Name | Priority | Complexity | Depends On | Roadmap |
 |-------|------|----------|------------|------------|---------|
-| **Foundation** | Crate renames + core service | P0 | L | — | [phases/foundation/](phases/foundation/ROADMAP.md) |
+| **Foundation** | Crate renames + simply-service daemon | P0 | L | — | [phases/foundation/](phases/foundation/ROADMAP.md) |
 | **Lumina** | Minimal Discord bot + shared LLM | P0 | M | Foundation | [phases/lumina/](phases/lumina/ROADMAP.md) |
 | **Content** | MCP, document CRUD, frontmatter | P0 | M | Lumina | [phases/content/](phases/content/ROADMAP.md) |
 | **Events** | Event bus, intents, workflow | P1 | XL | Lumina, soft on Content | [phases/events/](phases/events/ROADMAP.md) |

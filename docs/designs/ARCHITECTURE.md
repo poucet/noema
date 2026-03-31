@@ -23,25 +23,48 @@ Simply is a unified AI platform where Noema (desktop), Lumina (Discord), and fut
 ## Platform Architecture
 
 ```
-Noema backend (Tauri)          Lumina (serenity)         Future: /meet, Telegram, etc.
-├─ UCM view management         ├─ Discord gateway        ├─ WebRTC / platform gateway
-├─ Document/tab orchestration  ├─ Slash commands          ├─ Platform-specific UI
-├─ Frontend API (Tauri IPC)    ├─ Songbird voice I/O     └─ calls simply-core ──┐
-├─ OAuth flows                 ├─ Channel management                            │
-└─ calls simply-core ──────┐   └─ calls simply-core ──┐                        │
-                           │                           │                        │
-                     ┌─────▼───────────────────────────▼────────────────────────▼──┐
-                     │                    simply-core service                       │
-                     ├─ LLM providers (Claude, OpenAI, Gemini, Mistral, Ollama)    │
-                     ├─ MCP server/client                                          │
-                     ├─ Voice pipeline (Voxtral STT/TTS, future: ElevenLabs, etc.) │
-                     ├─ Agent orchestration & context                               │
-                     ├─ Event bus + intent engine                                   │
-                     ├─ Storage (SQLite, blobs) — single writer                    │
-                     └─────────────────────────────────────────────────────────────┘
+                              simply-core (library crate)
+                              ├─ LLM providers (Claude, OpenAI, Gemini, Mistral, Ollama)
+                              ├─ MCP server/client
+                              ├─ Agent orchestration
+                              └─ ExecutionContext trait ◄── pluggable conversation backing
+                                       │
+                    ┌──────────────────┼──────────────────────┐
+                    │                  │                      │
+              UCM-backed ctx    Discord-backed ctx      Future contexts
+                    │                  │
+              ┌─────▼─────┐    ┌──────▼──────┐
+              │  simply-   │    │   lumina     │    Future: /meet, Telegram, etc.
+              │  service   │    │  (serenity)  │    ├─ Platform gateway
+              │  (daemon)  │    ├─ Discord     │    └─ uses simply-core with
+              ├─ gRPC API  │    │  gateway     │       platform-specific context
+              ├─ UCM       │    ├─ Slash cmds  │
+              │  storage   │    ├─ Songbird    │
+              ├─ Event bus │    │  voice I/O   │
+              ├─ Intent    │    └──────────────┘
+              │  engine    │
+              ├─ Voice     │
+              │  pipeline  │
+              └────────────┘
+                    ▲
+                    │ gRPC
+              ┌─────┴─────┐
+              │  Noema     │
+              │  (Tauri)   │
+              ├─ UCM views │
+              ├─ Doc/tab   │
+              │  orchestr. │
+              ├─ Frontend  │
+              │  API (IPC) │
+              └────────────┘
 ```
 
-**Key insight:** Presentation layers are NOT thin clients. Noema retains UCM management, document orchestration, and web-friendly frontend API. Lumina owns Discord gateway, slash commands, and songbird audio I/O. Each delegates *shared concerns* (LLM, voice, storage, MCP, events) to the core service.
+**Key distinctions:**
+
+- **simply-core** is a library crate: LLM providers, MCP, agent orchestration with a trait-based `ExecutionContext`. It knows nothing about storage backends or transport protocols.
+- **simply-service** is the daemon: wires simply-core with UCM storage, gRPC, event bus, intent engine, voice pipeline. Noema connects to it as a client.
+- **Lumina** uses simply-core directly with a Discord-backed execution context — the Discord channel *is* the conversation history. It can also connect to simply-service for storage/events when needed.
+- Presentation layers are NOT thin clients. Noema retains UCM management, document orchestration, and frontend API. Lumina owns Discord gateway, slash commands, and songbird audio I/O.
 
 ---
 
@@ -50,22 +73,20 @@ Noema backend (Tauri)          Lumina (serenity)         Future: /meet, Telegram
 ```
 simply-{name}/                     # Renamed from noema
 ├── Cargo.toml                     # Workspace manifest
-├── simply-core/                   # Shared core service (daemon)
+├── simply-core/                   # Core library: LLM + MCP + agent orchestration
 │   ├── src/
-│   │   ├── service.rs             # gRPC/Unix socket service API
 │   │   ├── agent.rs               # Agent orchestration
+│   │   ├── context.rs             # ExecutionContext trait (pluggable conversation backing)
 │   │   ├── mcp/                   # MCP server/client
-│   │   ├── storage/               # UCM storage (SQLite, blobs)
+│   │   └── llm/                   # LLM providers (Claude, OpenAI, Gemini, Mistral, Ollama)
+│   └── Cargo.toml
+├── simply-service/                # Daemon: wires core with storage, gRPC, events, voice
+│   ├── src/
+│   │   ├── main.rs                # Service entry point
+│   │   ├── grpc.rs                # gRPC/Unix socket API
+│   │   ├── storage/               # UCM storage (SQLite, blobs) — ExecutionContext impl
 │   │   ├── events/                # Event bus + intent engine
 │   │   └── voice/                 # Voice pipeline coordination
-│   └── Cargo.toml
-├── simply-llm/                    # LLM provider abstraction
-│   ├── src/
-│   │   ├── api.rs                 # Core types (ChatMessage, Role, ToolCall, etc.)
-│   │   ├── client.rs              # HTTP client
-│   │   ├── providers/             # Claude, OpenAI, Gemini, Mistral, Ollama
-│   │   ├── registry.rs            # Model registration
-│   │   └── tools.rs               # Tool definitions
 │   └── Cargo.toml
 ├── simply-voice/                  # Voice provider abstraction
 │   ├── src/
@@ -80,16 +101,16 @@ simply-{name}/                     # Renamed from noema
 │   │   ├── browser_backend.rs     # Web audio (future)
 │   │   └── traits.rs              # Backend abstraction
 │   └── Cargo.toml
-├── lumina/                        # Discord bot presentation layer
+├── lumina/                        # Discord bot — uses simply-core with Discord-backed context
 │   ├── src/
 │   │   ├── main.rs                # Entry point, service wiring
+│   │   ├── context.rs             # Discord-backed ExecutionContext impl
 │   │   ├── cogs/                  # Discord slash commands (serenity #[command])
 │   │   ├── voice/                 # Songbird integration, audio I/O bridge
-│   │   ├── mcp/                   # Lumina-specific MCP handlers
-│   │   └── core_client.rs         # Client to simply-core service
+│   │   └── service_client.rs      # Optional client to simply-service for storage/events
 │   └── Cargo.toml
 ├── noema-desktop/                 # Desktop presentation layer (Tauri)
-│   ├── src-tauri/                 # Rust backend
+│   ├── src-tauri/                 # Rust backend — client to simply-service
 │   ├── src/                       # React frontend
 │   └── Cargo.toml
 ├── noema-ext/                     # Extensions (PDF, attachments)
@@ -169,7 +190,7 @@ Pick up groceries for the team dinner
 **What still needs dedicated services:**
 
 ```
-simply-core/src/services/
+simply-service/src/services/
 ├── documents.rs      # Generic document CRUD with frontmatter-aware queries
 ├── events.rs         # Event bus — sources, routing, subscriptions
 ├── intents.rs        # Intent engine — matching, execution, chaining

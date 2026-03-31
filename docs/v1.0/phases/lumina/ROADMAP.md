@@ -9,7 +9,9 @@
 
 ## Goal
 
-Lumina exists in the workspace as a Discord bot that connects to the core service for LLM chat. This establishes the second platform so all subsequent phases can be tested cross-platform.
+Lumina exists in the workspace as a Discord bot that uses `simply-core` with a Discord-backed `ExecutionContext` — the Discord channel *is* the conversation history. This establishes the second platform so all subsequent phases can be tested cross-platform.
+
+Lumina can optionally connect to `simply-service` for features that need persistent storage (documents, events), but the basic chat path goes directly through `simply-core`.
 
 ---
 
@@ -25,7 +27,7 @@ Lumina exists in the workspace as a Discord bot that connects to the core servic
 - [ ] Add `lumina/` crate to workspace `Cargo.toml`
 - [ ] Basic `main.rs`: serenity bot, connect to Discord gateway
 - [ ] Two slash commands: `/ping` (health check), `/chat` (echo for now)
-- [ ] Lumina connects to `simply-core` as a client
+- [ ] Lumina depends on `simply-core` as a library
 - [ ] Config: Discord bot token loading (`.env` or shared config approach)
 
 **Verify:**
@@ -36,20 +38,20 @@ Lumina exists in the workspace as a Discord bot that connects to the core servic
 
 ### Stage 2 — Shared LLM Chat
 
-**Goal:** Both Noema and Lumina chat with an LLM using the same code path through the core service.
+**Goal:** Lumina chats with an LLM using `simply-core` agent with a Discord-backed execution context.
 
 **Complexity:** M
 
 **Tasks:**
-- [ ] Lumina's `/chat` command creates a conversation, calls the agent via core service, streams response to Discord
+- [ ] Implement Discord-backed `ExecutionContext` — channel messages as conversation history
+- [ ] Lumina's `/chat` command creates a conversation, calls the agent, streams response to Discord
 - [ ] Port ChatCog basics: message handling, response formatting as Discord embeds
 - [ ] Single provider first (Claude)
-- [ ] Conversation storage: both platforms use core service — single writer
+- [ ] Verify Noema still works through simply-service with UCM-backed context
 
 **Verify:**
 - Lumina: `/chat hello` → LLM response appears in Discord.
-- Noema: Same conversation works in desktop — same LLM path, same providers.
-- Create a conversation in one, see it in the other.
+- Noema: Chat still works through simply-service — same LLM providers, different context backing.
 
 ---
 
