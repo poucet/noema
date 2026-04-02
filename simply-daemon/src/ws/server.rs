@@ -40,6 +40,8 @@ pub struct ConnectionInfo {
     pub id: u64,
     pub addr: String,
     pub connected_at: String,
+    /// Client name (e.g. "noema", "lumina"). Set from the first RPC method prefix.
+    pub name: Option<String>,
 }
 
 /// Tracks active WebSocket connections. Shared with the REST admin page.
@@ -63,6 +65,7 @@ impl ConnectionTracker {
             id,
             addr: addr.to_string(),
             connected_at: Utc::now().to_rfc3339(),
+            name: None,
         };
         self.connections.lock().await.insert(id, info);
         id
@@ -70,6 +73,13 @@ impl ConnectionTracker {
 
     async fn remove(&self, id: u64) {
         self.connections.lock().await.remove(&id);
+    }
+
+    /// Set the client name for a connection (identified from first RPC call).
+    pub async fn set_name(&self, id: u64, name: String) {
+        if let Some(info) = self.connections.lock().await.get_mut(&id) {
+            info.name = Some(name);
+        }
     }
 
     /// List all active connections.
@@ -100,7 +110,7 @@ pub async fn start(dispatch: DispatchFn, port: u16) -> anyhow::Result<ServerHand
                             let tracker = tracker_clone.clone();
                             tokio::spawn(async move {
                                 let conn_id = tracker.add(addr).await;
-                                handle_connection(dispatch, stream).await;
+                                handle_connection(dispatch, stream, &tracker, conn_id).await;
                                 tracker.remove(conn_id).await;
                             });
                         }
@@ -134,7 +144,7 @@ impl ServerHandle {
 // Connection handler
 // ---------------------------------------------------------------------------
 
-async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream) {
+async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream, tracker: &ConnectionTracker, conn_id: u64) {
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
         Ok(ws) => ws,
         Err(e) => { tracing::error!(error = %e, "WS handshake failed"); return; }
@@ -150,6 +160,7 @@ async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream) 
         }
     });
 
+    let mut named = false;
     while let Some(msg) = ws_source.next().await {
         let msg = match msg {
             Ok(Message::Text(text)) => text.to_string(),
@@ -168,6 +179,14 @@ async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream) 
         let id = incoming.id.unwrap();
         let method = incoming.method.unwrap();
         let params = incoming.params;
+
+        // Identify client from the first RPC method's prefix (e.g. "session.create" → "session")
+        if !named {
+            if let Some(prefix) = method.split('.').next() {
+                tracker.set_name(conn_id, prefix.to_string()).await;
+                named = true;
+            }
+        }
 
         tracing::debug!(id, method = %method, "WS request");
         tracing::trace!(id, method = %method, params = %params, "WS request params");

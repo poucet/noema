@@ -55,13 +55,13 @@ impl WsConnection {
             Arc::new(Mutex::new(HashMap::new()));
         let session_senders: Arc<Mutex<HashMap<SessionId, broadcast::Sender<DaemonEvent>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let (state_tx, state_rx) = watch::channel(ConnectionState::Disconnected);
         let live: Arc<Mutex<Option<LiveConnection>>> = Arc::new(Mutex::new(None));
 
-        // Initial connect — fail if we can't reach the daemon at all
+        // Initial connect — fail if we can't reach the daemon at all.
+        // Initialize watch as Connected so the reconnect task doesn't race.
+        let (state_tx, state_rx) = watch::channel(ConnectionState::Connected);
         let initial = establish_connection(addr, Arc::clone(&pending), Arc::clone(&session_senders), Arc::clone(&live), state_tx.clone()).await?;
         *live.lock().await = Some(initial);
-        let _ = state_tx.send(ConnectionState::Connected);
 
         // Spawn reconnect task
         let reconnect_task = {

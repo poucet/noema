@@ -21,7 +21,7 @@
 <body>
 <h1>simply-daemon <span class="count" id="count"></span></h1>
 <table>
-  <thead><tr><th>ID</th><th>Address</th><th>Connected</th></tr></thead>
+  <thead><tr><th>ID</th><th>Client</th><th>Address</th><th>Connected</th></tr></thead>
   <tbody id="connections"></tbody>
 </table>
 <div class="actions">
@@ -37,10 +37,10 @@ async function loadConnections() {
     const count = document.getElementById('count');
     count.textContent = `(${conns.length} connection${conns.length === 1 ? '' : 's'})`;
     if (conns.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="3" class="empty">No active connections</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" class="empty">No active connections</td></tr>';
     } else {
       tbody.innerHTML = conns.map(c =>
-        `<tr><td>${c.id}</td><td>${c.addr}</td><td>${c.connected_at}</td></tr>`
+        `<tr><td>${c.id}</td><td>${c.name || '<span style="color:#555">unknown</span>'}</td><td>${c.addr}</td><td>${c.connected_at}</td></tr>`
       ).join('');
     }
   } catch (e) {
