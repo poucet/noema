@@ -2,17 +2,27 @@
 //!
 //! Connects to Discord via serenity and to simply-daemon via WebSocket.
 
+mod commands;
+
 use std::sync::Arc;
 
+use serenity::model::id::GuildId;
 use serenity::prelude::*;
 use simply_daemon::api::DaemonApi;
 use simply_daemon::RemoteDaemon;
 
 /// Key for storing the daemon connection in serenity's TypeMap.
-struct DaemonKey;
+pub struct DaemonKey;
 
 impl TypeMapKey for DaemonKey {
     type Value = Arc<dyn DaemonApi>;
+}
+
+/// Key for storing the Lumina config in serenity's TypeMap.
+pub struct ConfigKey;
+
+impl TypeMapKey for ConfigKey {
+    type Value = config::LuminaConfig;
 }
 
 #[tokio::main]
@@ -44,8 +54,11 @@ async fn main() -> anyhow::Result<()> {
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = Client::builder(token, intents)
-        .event_handler(Handler)
+        .event_handler(Handler {
+            guild_ids: lumina_cfg.discord.guild_ids.iter().map(|&id| GuildId::new(id)).collect(),
+        })
         .type_map_insert::<DaemonKey>(daemon)
+        .type_map_insert::<ConfigKey>(lumina_cfg)
         .await?;
 
     tracing::info!("lumina starting");
@@ -54,11 +67,31 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-struct Handler;
+struct Handler {
+    guild_ids: Vec<GuildId>,
+}
 
 #[serenity::async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, _ctx: Context, ready: serenity::model::gateway::Ready) {
+    async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
         tracing::info!(user = %ready.user.name, "connected to Discord");
+
+        // Register slash commands per guild
+        for &guild_id in &self.guild_ids {
+            if let Err(e) = guild_id
+                .set_commands(&ctx.http, commands::register())
+                .await
+            {
+                tracing::error!(guild_id = %guild_id, error = %e, "failed to register commands");
+            } else {
+                tracing::info!(guild_id = %guild_id, "registered slash commands");
+            }
+        }
+    }
+
+    async fn interaction_create(&self, ctx: Context, interaction: serenity::model::application::Interaction) {
+        if let serenity::model::application::Interaction::Command(cmd) = interaction {
+            commands::handle(&ctx, &cmd).await;
+        }
     }
 }
