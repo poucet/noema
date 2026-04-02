@@ -57,7 +57,9 @@ mod model {
         }
 
         let text = lines.join("\n");
-        reply_ephemeral(lx, cmd, &truncate(&text, 2000)).await
+        // Leave room for "Page x/y" footer
+        let pages = crate::paginator::paginate_text(&text, 1900);
+        crate::paginator::send_paginated(lx, cmd, &pages, std::time::Duration::from_secs(120)).await
     }
 
     #[sub_command(description = "Show current model for this channel")]
@@ -97,10 +99,6 @@ mod model {
             .collect();
 
         reply_ephemeral(lx, cmd, &lines.join("\n")).await
-    }
-
-    fn truncate(s: &str, max: usize) -> String {
-        if s.len() <= max { s.to_string() } else { format!("{}...", &s[..max - 3]) }
     }
 
     async fn reply_ephemeral(

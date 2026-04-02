@@ -19,6 +19,7 @@ simply-rpc = { path = "../simply-rpc" }
 serenity = { version = "0.12", default-features = false, features = [
     "cache",
     "client",
+    "collector",
     "gateway",
     "model",
     "rustls_backend",

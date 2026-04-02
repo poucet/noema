@@ -4,6 +4,7 @@
 
 mod chat;
 mod commands;
+pub mod paginator;
 
 use std::sync::Arc;
 
