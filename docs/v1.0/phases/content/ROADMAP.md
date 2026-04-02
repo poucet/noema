@@ -40,16 +40,18 @@ Agent can call MCP tools through simply-daemon. Documents with frontmatter conve
 **Complexity:** M
 
 **Tasks:**
+- [ ] `DocumentApi` trait on daemon — extract doc CRUD from Noema-only Tauri commands to a shared daemon RPC trait (like `ConversationApi`)
 - [ ] Implement frontmatter parsing + indexing in UCM storage layer
 - [ ] Named documents: wire entity slugs to documents so docs can be addressed by namespaced path (e.g. `lumina/system-prompt`) instead of raw UUIDs
 - [ ] Generic MCP tools: `create_document`, `query_documents`, `update_document`, `delete_document`
 - [ ] Frontmatter-aware query syntax: filter by `type`, `tags`, `done`, `due`, etc.
-- [ ] Document operations exposed as MCP tools (agent-facing) and WebSocket messages (client-facing)
+- [ ] Daemon web UI: lightweight markdown editor on the REST port for creating/editing documents without Noema
 - [ ] Cross-platform test: create from one client, read from another
 
 **Verify:**
 - Create a document with `type: todo` frontmatter via Noema, query it from Lumina.
 - Query documents by frontmatter fields (e.g., "all todos where done = false").
+- Edit a document via daemon web UI at `http://localhost:9801/docs`.
 
 ---
 
