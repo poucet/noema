@@ -67,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         .type_map_insert::<DaemonKey>(daemon)
         .type_map_insert::<ConfigKey>(lumina_cfg)
         .type_map_insert::<CommandRegistry>(registry)
+        .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new()))
         .await?;
 
     tracing::info!("lumina starting");

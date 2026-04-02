@@ -35,7 +35,6 @@ mod chat {
             .to_lowercase()
             .replace(' ', "-");
 
-        // Check for duplicate channel name in the category
         let guild_channels = guild_id.channels(&lx.http).await?;
         let existing = guild_channels
             .values()
@@ -50,7 +49,6 @@ mod chat {
             return Ok(());
         }
 
-        // Create the channel under the category
         let channel = guild_id
             .create_channel(
                 &lx.http,
@@ -60,7 +58,6 @@ mod chat {
             )
             .await?;
 
-        // Set permissions: deny @everyone, allow invoking user + bot
         let bot_id = lx.ctx.cache.current_user().id;
         let everyone_role = guild_id.everyone_role();
 
@@ -87,7 +84,6 @@ mod chat {
             .edit(&lx.http, EditChannel::new().permissions(overwrites))
             .await?;
 
-        // Welcome message
         channel
             .id
             .say(&lx.http, format!("Chat channel for <@{}>. Say anything and I'll respond!", cmd.user.id))
@@ -100,6 +96,70 @@ mod chat {
         );
         cmd.create_response(&lx.http, response).await?;
 
+        Ok(())
+    }
+
+    #[sub_command(description = "Pause bot responses in this channel")]
+    pub async fn pause(
+        lx: &LuminaContext,
+        cmd: &CommandInteraction,
+    ) -> anyhow::Result<()> {
+        let channel_id = cmd.channel_id;
+        let mut paused = lx.state.paused_channels.write().await;
+        if !paused.insert(channel_id) {
+            reply_ephemeral(lx, cmd, "Already paused.").await?;
+        } else {
+            reply_ephemeral(lx, cmd, "Paused. Use `/chat resume` to resume.").await?;
+        }
+        Ok(())
+    }
+
+    #[sub_command(description = "Resume bot responses in this channel")]
+    pub async fn resume(
+        lx: &LuminaContext,
+        cmd: &CommandInteraction,
+    ) -> anyhow::Result<()> {
+        let channel_id = cmd.channel_id;
+        let mut paused = lx.state.paused_channels.write().await;
+        if paused.remove(&channel_id) {
+            reply_ephemeral(lx, cmd, "Resumed.").await?;
+        } else {
+            reply_ephemeral(lx, cmd, "Not paused.").await?;
+        }
+        Ok(())
+    }
+
+    #[sub_command(description = "Set the LLM model")]
+    pub async fn model(
+        lx: &LuminaContext,
+        cmd: &CommandInteraction,
+        #[describe("Model ID (e.g. claude-sonnet-4-20250514)")] model_id: Option<String>,
+    ) -> anyhow::Result<()> {
+        use simply_daemon::api::ModelApi;
+        match model_id {
+            Some(id) => {
+                lx.daemon.set_default_model(&id).await?;
+                reply_ephemeral(lx, cmd, &format!("Model set to `{id}`")).await?;
+            }
+            None => {
+                let current = lx.daemon.default_model_id().await;
+                reply_ephemeral(lx, cmd, &format!("Current model: `{current}`")).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn reply_ephemeral(
+        lx: &LuminaContext,
+        cmd: &CommandInteraction,
+        content: &str,
+    ) -> anyhow::Result<()> {
+        let response = CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new()
+                .content(content)
+                .ephemeral(true),
+        );
+        cmd.create_response(&lx.http, response).await?;
         Ok(())
     }
 }

@@ -7,24 +7,48 @@
 mod chat;
 mod ping;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serenity::all::CommandInteraction;
 use serenity::builder::CreateCommand;
+use serenity::model::id::ChannelId;
 use serenity::prelude::*;
 use simply_daemon::api::DaemonApi;
+use tokio::sync::RwLock;
+
+// ---------------------------------------------------------------------------
+// Shared state
+// ---------------------------------------------------------------------------
+
+/// Shared mutable state across all handlers.
+pub struct SharedState {
+    pub paused_channels: RwLock<HashSet<ChannelId>>,
+}
+
+impl SharedState {
+    pub fn new() -> Self {
+        Self {
+            paused_channels: RwLock::new(HashSet::new()),
+        }
+    }
+}
+
+impl TypeMapKey for SharedState {
+    type Value = Arc<SharedState>;
+}
 
 // ---------------------------------------------------------------------------
 // LuminaContext — passed to every command handler
 // ---------------------------------------------------------------------------
 
-/// Rich context for command handlers. Bundles serenity context, daemon, and config.
+/// Rich context for command handlers. Bundles serenity context, daemon, config, and shared state.
 pub struct LuminaContext {
     pub ctx: Context,
     pub daemon: Arc<dyn DaemonApi>,
     pub config: config::LuminaConfig,
+    pub state: Arc<SharedState>,
 }
 
 impl LuminaContext {
@@ -33,10 +57,12 @@ impl LuminaContext {
         let data = ctx.data.read().await;
         let daemon = data.get::<crate::DaemonKey>().expect("DaemonKey missing").clone();
         let config = data.get::<crate::ConfigKey>().expect("ConfigKey missing").clone();
+        let state = data.get::<SharedState>().expect("SharedState missing").clone();
         Self {
             ctx: ctx.clone(),
             daemon,
             config,
+            state,
         }
     }
 }

@@ -3,7 +3,7 @@
 //! Processes messages in AI Chats category channels and @mentions,
 //! forwarding them to the daemon for LLM responses.
 
-use serenity::builder::GetMessages;
+use serenity::builder::{CreateEmbed, GetMessages};
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use simply_daemon::api::*;
@@ -12,10 +12,24 @@ use crate::commands::LuminaContext;
 
 const DEFAULT_HISTORY_LIMIT: u16 = 1000;
 
+// TODO: Load from UCM document (Content Stage 2)
+const SYSTEM_PROMPT: &str = "\
+You are Lumina, an intelligent AI assistant on Discord.
+
+When formatting your response:
+- For channel references: <#channel_id>
+- For user mentions: <@user_id>
+- For timestamps: <t:timestamp_seconds:R>
+
+Messages from users are prefixed with their Discord mention (e.g. '<@12345> says: hello').
+Use these mentions when referring to what someone said.
+
+Be helpful, concise, and conversational.";
+
 /// Handle an incoming message — checks if it should get an AI response,
 /// then processes it.
 pub async fn handle_message(lx: &LuminaContext, msg: &Message) {
-    if !should_respond(lx, msg) {
+    if !should_respond(lx, msg).await {
         return;
     }
 
@@ -40,11 +54,12 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let limit = lx.config.discord.history_limit.unwrap_or(DEFAULT_HISTORY_LIMIT);
     let history = load_channel_history(lx, msg.channel_id, bot_id.get(), limit).await?;
 
-    // 2. Create ephemeral session
+    // 2. Create ephemeral session with system prompt
     let (info, mut events) = lx
         .daemon
         .create_session(CreateSessionOptions {
             persistence: Some(Persistence::Ephemeral),
+            system_prompt: Some(SYSTEM_PROMPT.to_string()),
             ..Default::default()
         })
         .await?;
@@ -82,7 +97,6 @@ async fn load_channel_history(
     bot_user_id: u64,
     limit: u16,
 ) -> anyhow::Result<Vec<SeedMessage>> {
-    // Discord API caps at 100 per request, so we paginate
     let mut all_messages = Vec::new();
     let mut remaining = limit;
     let mut before = None;
@@ -104,22 +118,19 @@ async fn load_channel_history(
         all_messages.extend(batch);
     }
 
-    let messages = all_messages;
-
     // Discord returns newest-first, we need oldest-first
-    let mut seed: Vec<SeedMessage> = messages
+    let mut seed: Vec<SeedMessage> = all_messages
         .iter()
         .rev()
         .filter(|m| !m.content.is_empty())
         .map(|m| {
             let role = if m.author.id.get() == bot_user_id {
-                simply_daemon::api::types::Role::Assistant
+                Role::Assistant
             } else {
-                simply_daemon::api::types::Role::User
+                Role::User
             };
 
-            // Prefix user messages with their Discord mention for attribution
-            let text = if role == simply_daemon::api::types::Role::User {
+            let text = if role == Role::User {
                 format!("<@{}> says: {}", m.author.id, m.content)
             } else {
                 m.content.clone()
@@ -134,7 +145,7 @@ async fn load_channel_history(
 
     // Don't include the current message (it'll be sent separately)
     if let Some(last) = seed.last() {
-        if matches!(last.role, simply_daemon::api::types::Role::User) {
+        if matches!(last.role, Role::User) {
             seed.pop();
         }
     }
@@ -158,7 +169,6 @@ async fn stream_response(
             Ok(DaemonEvent::TextDelta(delta)) => {
                 text_buffer.push_str(&delta);
 
-                // Debounced edit: update Discord message at most every 500ms
                 if last_edit.elapsed() >= std::time::Duration::from_millis(500) {
                     let content = truncate_for_discord(&text_buffer);
                     match &mut discord_msg {
@@ -174,8 +184,20 @@ async fn stream_response(
                     last_edit = std::time::Instant::now();
                 }
             }
+            Ok(DaemonEvent::ToolCall { id: _, name, arguments }) => {
+                let args_str = truncate_for_discord(
+                    &serde_json::to_string_pretty(&arguments).unwrap_or_default(),
+                );
+                let embed = CreateEmbed::new()
+                    .title(format!("\u{1f527} Using: {name}"))
+                    .description(format!("```json\n{args_str}\n```"))
+                    .color(0x5865F2); // Discord blurple
+
+                msg.channel_id
+                    .send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed))
+                    .await?;
+            }
             Ok(DaemonEvent::TurnComplete) => {
-                // Final flush
                 if !text_buffer.is_empty() {
                     let content = truncate_for_discord(&text_buffer);
                     match &mut discord_msg {
@@ -193,7 +215,7 @@ async fn stream_response(
             Ok(DaemonEvent::Error(e)) => {
                 return Err(anyhow::anyhow!("daemon error: {e}"));
             }
-            Ok(_) => {} // ToolCall, ToolResult, etc. — ignore for now
+            Ok(_) => {}
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                 tracing::warn!(skipped = n, "event stream lagged");
             }
@@ -220,7 +242,12 @@ fn truncate_for_discord(text: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Check if the bot should respond to this message.
-fn should_respond(lx: &LuminaContext, msg: &Message) -> bool {
+async fn should_respond(lx: &LuminaContext, msg: &Message) -> bool {
+    // Check if channel is paused
+    if lx.state.paused_channels.read().await.contains(&msg.channel_id) {
+        return false;
+    }
+
     is_ai_chat_channel(lx, msg) || is_mentioned(lx, msg)
 }
 
