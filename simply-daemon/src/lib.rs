@@ -6,14 +6,17 @@
 //! Access is through the [`DaemonApi`] trait, which has two implementations:
 //! - **In-process** ([`embedded::EmbeddedDaemon`]) — linked directly into the
 //!   host binary (Noema, Lumina, tests). No networking.
-//! - **Remote** (future) — calls go over WebSocket to a standalone daemon process.
+//! - **Remote** ([`remote::RemoteDaemon`]) — calls go over WebSocket to a
+//!   standalone daemon process.
 
 #[macro_use] pub mod api;
 pub mod embedded;
 pub mod mcp;
 pub mod oauth;
+pub mod remote;
 pub mod storage;
 pub mod ws;
 
 /// Re-exported types for clients.
 pub use api::types as types;
+pub use remote::RemoteDaemon;

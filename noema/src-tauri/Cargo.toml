@@ -39,6 +39,7 @@ config = { path = "../../config" }
 simply-audio = { path = "../../simply-audio", features = ["browser"] }
 noema-ext = { path = "../../noema-ext" }
 simply-daemon = { path = "../../simply-daemon" }
+simply-rpc = { path = "../../simply-rpc" }
 noema-mcp-gdocs = { path = "../../noema-mcp-gdocs" }
 thiserror = "2.0.17"
 

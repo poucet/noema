@@ -34,6 +34,7 @@ pub trait RpcService: Send + Sync {
 /// For services with `Stream = ()` only.
 ///
 /// For stream-producing services, dispatch them individually before falling through to this.
+#[derive(Clone)]
 pub struct Dispatcher {
     services: HashMap<String, Arc<dyn RpcService<Stream = ()>>>,
 }

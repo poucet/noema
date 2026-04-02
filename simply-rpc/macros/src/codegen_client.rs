@@ -175,9 +175,19 @@ fn generate_client_body(
             }
         }
         ReturnKind::RawValue { .. } => {
+            // RawValue methods don't return Result, so we can't use ? — wrap everything in a closure
+            let params_for_raw = if method.params.is_empty() {
+                quote! { ::serde_json::Value::Null }
+            } else if method.params.len() == 1 {
+                let name = &method.params[0].name;
+                quote! { ::serde_json::to_value(#name).unwrap_or_default() }
+            } else {
+                // Multi-param: reuse the serialize struct but with unwrap
+                quote! { #rpc_params.unwrap_or_default() }
+            };
             quote! {
                 #serialize
-                self.rpc_call(#method_str, #rpc_params)
+                self.rpc_call(#method_str, #params_for_raw)
                     .await
                     .and_then(|r| ::serde_json::from_value(r).map_err(Into::into))
                     .unwrap_or_default()

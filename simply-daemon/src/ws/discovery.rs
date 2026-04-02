@@ -2,14 +2,17 @@
 //!
 //! - If a daemon is already running on the well-known port, connect to it.
 //! - Otherwise, start an embedded daemon + WS server and become the host.
+//!
+//! The caller provides the dispatch builder — discovery doesn't know
+//! which services exist.
 
 use std::sync::Arc;
 
 use crate::api::DaemonApi;
 use crate::embedded::EmbeddedDaemon;
+use crate::remote::RemoteDaemon;
 use crate::storage::SqliteStores;
 
-use super::client::RemoteDaemon;
 use super::server;
 
 const DEFAULT_DAEMON_PORT: u16 = 9800;
@@ -41,11 +44,17 @@ impl DaemonHandle {
 }
 
 /// Try to connect to an existing daemon. If none is running, start one.
-pub async fn connect_or_host(port: Option<u16>) -> anyhow::Result<DaemonHandle> {
+///
+/// `build_dispatch` is called only if we become the host — it wires up the
+/// daemon's services into a dispatch function for the WS server.
+pub async fn connect_or_host(
+    port: Option<u16>,
+    build_dispatch: impl FnOnce(Arc<dyn DaemonApi>) -> server::DispatchFn,
+) -> anyhow::Result<DaemonHandle> {
     let port = port.unwrap_or(DEFAULT_DAEMON_PORT);
     let addr = format!("127.0.0.1:{}", port);
 
-    // Try to connect with a short timeout — fail fast if nothing is listening
+    // Try to connect with a short timeout
     let connect_result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
         RemoteDaemon::connect(&addr),
@@ -56,7 +65,7 @@ pub async fn connect_or_host(port: Option<u16>) -> anyhow::Result<DaemonHandle> 
         Ok(Ok(remote)) => {
             tracing::info!(port, "Connected to existing daemon");
             return Ok(DaemonHandle::Remote {
-                daemon: remote as Arc<dyn DaemonApi>,
+                daemon: remote.into_daemon(),
             });
         }
         Ok(Err(e)) => {
@@ -75,7 +84,8 @@ pub async fn connect_or_host(port: Option<u16>) -> anyhow::Result<DaemonHandle> 
     let daemon = EmbeddedDaemon::new(stores).await?;
     let daemon: Arc<dyn DaemonApi> = daemon;
 
-    let server_handle = server::start(Arc::clone(&daemon), port).await?;
+    let dispatch = build_dispatch(Arc::clone(&daemon));
+    let server_handle = server::start(dispatch, port).await?;
 
     Ok(DaemonHandle::Host {
         daemon,

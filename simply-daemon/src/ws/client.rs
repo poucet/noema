@@ -1,4 +1,4 @@
-//! RemoteDaemon — implements `DaemonApi` over a WebSocket connection.
+//! WebSocket RPC client — transport implementation for RemoteDaemon.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,8 +14,8 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::api::*;
 use super::protocol::*;
 
-/// A daemon client that talks to a remote daemon over WebSocket.
-pub struct RemoteDaemon {
+/// Internal WS connection state. RemoteDaemon delegates to this.
+pub(crate) struct WsConnection {
     write_tx: mpsc::Sender<String>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
     session_senders: Arc<Mutex<HashMap<SessionId, broadcast::Sender<DaemonEvent>>>>,
@@ -24,9 +24,9 @@ pub struct RemoteDaemon {
     _writer: JoinHandle<()>,
 }
 
-impl RemoteDaemon {
-    /// Connect to a running daemon at the given address.
-    pub async fn connect(addr: &str) -> anyhow::Result<Arc<Self>> {
+impl WsConnection {
+    /// Connect to a daemon at the given address.
+    pub async fn connect(addr: &str) -> anyhow::Result<Self> {
         let url = format!("ws://{}", addr);
         let (ws_stream, _) = tokio_tungstenite::connect_async(&url).await?;
         let (ws_sink, ws_source) = ws_stream.split();
@@ -37,7 +37,6 @@ impl RemoteDaemon {
         let session_senders: Arc<Mutex<HashMap<SessionId, broadcast::Sender<DaemonEvent>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        // Writer task
         let writer = tokio::spawn(async move {
             let mut sink = ws_sink;
             while let Some(text) = write_rx.recv().await {
@@ -47,7 +46,6 @@ impl RemoteDaemon {
             }
         });
 
-        // Reader task — dispatches responses and notifications
         let pending_clone = Arc::clone(&pending);
         let senders_clone = Arc::clone(&session_senders);
         let reader = tokio::spawn(async move {
@@ -95,35 +93,19 @@ impl RemoteDaemon {
             }
         });
 
-        Ok(Arc::new(Self {
+        Ok(Self {
             write_tx,
             pending,
             session_senders,
             next_id: AtomicU64::new(1),
             _reader: reader,
             _writer: writer,
-        }))
-    }
-
-    /// Register a local broadcast channel for a session.
-    async fn register_session(&self, session_id: &str) -> broadcast::Receiver<DaemonEvent> {
-        let sid = SessionId::new(session_id);
-        let mut senders = self.session_senders.lock().await;
-        if let Some(tx) = senders.get(&sid) {
-            return tx.subscribe();
-        }
-        let (tx, rx) = broadcast::channel(256);
-        senders.insert(sid, tx);
-        rx
+        })
     }
 }
 
-// ---------------------------------------------------------------------------
-// RpcClient implementation — the foundation for all generated trait impls
-// ---------------------------------------------------------------------------
-
 #[async_trait]
-impl RpcClient for RemoteDaemon {
+impl RpcClient for WsConnection {
     type Stream = broadcast::Receiver<DaemonEvent>;
 
     async fn rpc_call(
@@ -153,45 +135,18 @@ impl RpcClient for RemoteDaemon {
     }
 
     async fn register_stream(&self, id: &str) -> Self::Stream {
-        self.register_session(id).await
+        let sid = SessionId::new(id);
+        let mut senders = self.session_senders.lock().await;
+        if let Some(tx) = senders.get(&sid) {
+            return tx.subscribe();
+        }
+        let (tx, rx) = broadcast::channel(256);
+        senders.insert(sid, tx);
+        rx
     }
 
     async fn unregister_stream(&self, id: &str) {
         let sid = SessionId::new(id);
         self.session_senders.lock().await.remove(&sid);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Generated trait implementations — one line each
-// ---------------------------------------------------------------------------
-
-impl_remote_session_api!(RemoteDaemon);
-impl_remote_conversation_api!(RemoteDaemon);
-impl_remote_mcp_api!(RemoteDaemon);
-impl_remote_oauth_api!(RemoteDaemon);
-impl_remote_model_api!(RemoteDaemon);
-impl_remote_voice_api!(RemoteDaemon);
-
-// ---------------------------------------------------------------------------
-// AssetApi — manual impl (base64 encoding for Vec<u8>)
-// ---------------------------------------------------------------------------
-
-#[async_trait]
-impl AssetApi for RemoteDaemon {
-    async fn store_asset(&self, data: Vec<u8>, media_type: &str) -> anyhow::Result<AssetId> {
-        use base64::Engine;
-        #[derive(serde::Serialize)]
-        struct P<'a> { data: String, media_type: &'a str }
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-        let r = self.rpc_call("asset.store_asset", serde_json::to_value(&P { data: b64, media_type })?).await?;
-        Ok(serde_json::from_value(r)?)
-    }
-
-    async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<Vec<u8>> {
-        use base64::Engine;
-        let r = self.rpc_call("asset.get_blob", serde_json::to_value(hash)?).await?;
-        let b64: String = serde_json::from_value(r)?;
-        Ok(base64::engine::general_purpose::STANDARD.decode(&b64)?)
     }
 }

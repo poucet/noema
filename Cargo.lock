@@ -3147,6 +3147,7 @@ dependencies = [
  "serde_json",
  "simply-audio",
  "simply-daemon",
+ "simply-rpc",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",
