@@ -6,6 +6,7 @@ mod commands;
 
 use std::sync::Arc;
 
+use commands::CommandRegistry;
 use serenity::model::id::GuildId;
 use serenity::prelude::*;
 use simply_daemon::api::DaemonApi;
@@ -51,6 +52,10 @@ async fn main() -> anyhow::Result<()> {
     let daemon: Arc<dyn DaemonApi> = daemon.into_daemon();
     tracing::info!("connected to simply-daemon");
 
+    // Collect all auto-registered commands
+    let registry = CommandRegistry::collect();
+    tracing::info!(count = registry.len(), "commands registered");
+
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = Client::builder(token, intents)
@@ -59,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .type_map_insert::<DaemonKey>(daemon)
         .type_map_insert::<ConfigKey>(lumina_cfg)
+        .type_map_insert::<CommandRegistry>(registry)
         .await?;
 
     tracing::info!("lumina starting");
@@ -76,12 +82,13 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
         tracing::info!(user = %ready.user.name, "connected to Discord");
 
-        // Register slash commands per guild
+        let data = ctx.data.read().await;
+        let registry = data.get::<CommandRegistry>().expect("CommandRegistry missing");
+        let definitions = registry.definitions();
+        drop(data);
+
         for &guild_id in &self.guild_ids {
-            if let Err(e) = guild_id
-                .set_commands(&ctx.http, commands::register())
-                .await
-            {
+            if let Err(e) = guild_id.set_commands(&ctx.http, definitions.clone()).await {
                 tracing::error!(guild_id = %guild_id, error = %e, "failed to register commands");
             } else {
                 tracing::info!(guild_id = %guild_id, "registered slash commands");
@@ -91,7 +98,9 @@ impl EventHandler for Handler {
 
     async fn interaction_create(&self, ctx: Context, interaction: serenity::model::application::Interaction) {
         if let serenity::model::application::Interaction::Command(cmd) = interaction {
-            commands::handle(&ctx, &cmd).await;
+            let data = ctx.data.read().await;
+            let registry = data.get::<CommandRegistry>().expect("CommandRegistry missing");
+            registry.dispatch(&ctx, &cmd).await;
         }
     }
 }

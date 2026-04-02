@@ -35,3 +35,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
 anyhow = "1"
+
+# Auto-registration
+inventory = "0.3"
+
+# Async trait
+async-trait = "0.1"
