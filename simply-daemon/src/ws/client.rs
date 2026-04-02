@@ -122,12 +122,19 @@ impl RpcClient for WsConnection {
             method: method.to_string(),
             params,
         };
+
+        tracing::debug!(id, method, "WS client request");
+
         self.write_tx
             .send(serde_json::to_string(&request)?)
             .await
             .map_err(|_| anyhow::anyhow!("connection closed"))?;
 
         let response = rx.await.map_err(|_| anyhow::anyhow!("connection closed"))?;
+
+        let is_err = response.error.is_some();
+        tracing::debug!(id, method, error = is_err, "WS client response");
+
         match response.error {
             Some(e) => Err(anyhow::anyhow!(e.message)),
             None => Ok(response.result.unwrap_or(serde_json::Value::Null)),

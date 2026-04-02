@@ -107,7 +107,17 @@ async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream) 
         let method = incoming.method.unwrap();
         let params = incoming.params;
 
-        let response = dispatch(method, params, write_tx.clone()).await;
+        tracing::debug!(id, method = %method, "WS request");
+        tracing::trace!(id, method = %method, params = %params, "WS request params");
+
+        let mut response = dispatch(method.clone(), params, write_tx.clone()).await;
+        response.id = id; // Stamp the request ID on the response
+
+        let is_err = response.error.is_some();
+        tracing::debug!(id, method = %method, error = is_err, "WS response");
+        if is_err {
+            tracing::debug!(id, error = ?response.error, "WS response error");
+        }
 
         let text = serde_json::to_string(&response).unwrap_or_default();
         if write_tx.send(text).await.is_err() { break; }

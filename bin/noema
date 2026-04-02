@@ -5,15 +5,21 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_daemon::ws=debug,simply_core=info}"
+
 case "${1:-dev}" in
   dev)
     export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
+    export DAEMON_LOG_FILE="$REPO_ROOT/daemon.log"
     : > "$NOEMA_LOG_FILE"
+    : > "$DAEMON_LOG_FILE"
     cd "$REPO_ROOT/noema" && npm run tauri dev
     ;;
   daemon)
     # Start the standalone daemon (WS server on port 9800)
-    echo "Starting simply-daemon..."
+    export DAEMON_LOG_FILE="$REPO_ROOT/daemon.log"
+    : > "$DAEMON_LOG_FILE"
+    echo "Starting simply-daemon... (log: $DAEMON_LOG_FILE)"
     cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
     ;;
   split)
@@ -21,7 +27,9 @@ case "${1:-dev}" in
     export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
     : > "$NOEMA_LOG_FILE"
 
-    echo "Starting daemon in background..."
+    export DAEMON_LOG_FILE="$REPO_ROOT/daemon.log"
+    : > "$DAEMON_LOG_FILE"
+    echo "Starting daemon in background... (log: $DAEMON_LOG_FILE)"
     cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
     DAEMON_PID=$!
 
