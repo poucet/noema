@@ -13,7 +13,7 @@
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 1.1 | ⬜ | Add `lumina/` crate to workspace | P0 | S |
+| 1.1 | 🔄 | Add `lumina/` crate to workspace | P0 | S |
 | 1.2 | ⬜ | Basic main.rs: serenity bot, connect to Discord gateway | P0 | S |
 | 1.3 | ⬜ | Connect to simply-daemon via RemoteDaemon (WS client) | P0 | S |
 | 1.4 | ⬜ | Slash commands: `/ping`, `/chat` (echo) | P0 | S |

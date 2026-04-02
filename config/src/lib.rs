@@ -1,8 +1,10 @@
 pub mod crypto;
+pub mod lumina;
 pub mod paths;
 pub mod settings;
 
 pub use crypto::{decrypt_string, encrypt_string};
+pub use lumina::LuminaConfig;
 pub use paths::PathManager;
 pub use settings::Settings;
 

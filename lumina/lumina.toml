@@ -1,0 +1,7 @@
+# Lumina configuration
+#
+# Copy this file to ~/.local/share/noema/config/lumina.toml
+# and fill in your Discord bot token.
+
+[discord]
+bot_token = ""

@@ -99,6 +99,10 @@ impl PathManager {
         Self::models_dir().map(|d| d.join("ggml-base.en.bin"))
     }
 
+    pub fn lumina_config_path() -> Option<PathBuf> {
+        Self::config_subdir().map(|d| d.join("lumina.toml"))
+    }
+
     pub fn mcp_config_path() -> Option<PathBuf> {
         Self::config_dir().map(|d| d.join("mcp.toml"))
     }
