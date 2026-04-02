@@ -34,30 +34,30 @@
 | 2.5 | ⬜ | Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model` | P0 | M |
 | 2.6 | ⬜ | `on_message` listener for bot chat channels and @mentions | P0 | M |
 | 2.7 | ⬜ | Response formatting as Discord embeds | P0 | S |
-| 2.8 | ⬜ | Register Discord MCP tools for agent interaction | P1 | M |
 
 ---
 
-## Stage 3 — Admin & Access Control
+## Stage 3 — Discord MCP Service
+
+**Goal:** Lumina registers as an MCP service with the daemon, exposing Discord actions as tools. Noema (or any daemon client) can use Discord tools through the daemon.
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 3.1 | ⬜ | Lumina registers as MCP service with daemon on connect | P0 | M |
+| 3.2 | ⬜ | Discord MCP tools: send message, read channel history, react, list channels | P0 | M |
+| 3.3 | ⬜ | Verify: Noema agent can send Discord messages through daemon → Lumina | P0 | S |
+
+---
+
+## Stage 4 — Admin & Access Control
 
 **Goal:** Port admin commands and role-based access control.
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 3.1 | ⬜ | Port AdminCog: `/admin set-access`, `/admin list-access` | P1 | S |
-| 3.2 | ⬜ | Access level system (Full Access, Chat Only, No Access) | P1 | S |
-| 3.3 | ⬜ | Permission checks in command handlers | P1 | S |
-
----
-
-## Stage 4 — Todo & Notes
-
-**Goal:** Port task and note management commands.
-
-| # | | Task | Priority | Size |
-|---|---|------|----------|------|
-| 4.1 | ⬜ | Port TodoCog: `/todo add`, `list`, `done`, `undo`, `label`, `unlabel`, `delete`, `info` | P1 | M |
-| 4.2 | ⬜ | Port NoteCog: `/note take`, `list`, `view`, `edit`, `delete`, `tag`, `untag`, `search`, `quick` | P1 | M |
+| 4.1 | ⬜ | Port AdminCog: `/admin set-access`, `/admin list-access` | P1 | S |
+| 4.2 | ⬜ | Access level system (Full Access, Chat Only, No Access) | P1 | S |
+| 4.3 | ⬜ | Permission checks in command handlers | P1 | S |
 
 ---
 
@@ -158,3 +158,14 @@
 | 12.3 | ⬜ | `on_member_join` listener for welcome messages | P2 | S |
 | 12.4 | ⬜ | Port UtilityCog: `/export_messages` | P2 | S |
 | 12.5 | ⬜ | Rich Discord embeds and interactive components | P2 | M |
+
+---
+
+## Punted
+
+**Goal:** Deferred — these will be handled as UCM content conventions (Content Stage 3) rather than standalone Lumina stages.
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| — | ⏸️ | Port TodoCog: `/todo add`, `list`, `done`, `undo`, `label`, `unlabel`, `delete`, `info` | P2 | M |
+| — | ⏸️ | Port NoteCog: `/note take`, `list`, `view`, `edit`, `delete`, `tag`, `untag`, `search`, `quick` | P2 | M |

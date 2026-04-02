@@ -37,7 +37,6 @@ Port the full Python Lumina Discord bot to Rust. Lumina connects to simply-daemo
 - [ ] Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model`
 - [ ] `on_message` listener for bot chat channels and @mentions
 - [ ] Response formatting as Discord embeds
-- [ ] Register Discord MCP tools so the agent can interact with Discord
 
 **Verify:**
 - Lumina: `/chat hello` → LLM response appears in Discord.
@@ -45,7 +44,22 @@ Port the full Python Lumina Discord bot to Rust. Lumina connects to simply-daemo
 
 ---
 
-### Stage 3 — Admin & Access Control
+### Stage 3 — Discord MCP Service
+
+**Goal:** Lumina registers as an MCP service with the daemon, exposing Discord actions as tools. Any daemon client (Noema, other bots) can use Discord through the daemon.
+
+**Complexity:** M
+
+**Tasks:**
+- [ ] Lumina registers as MCP service with daemon on connect
+- [ ] Discord MCP tools: send message, read channel history, react, list channels
+- [ ] Verify: Noema agent can send Discord messages through daemon → Lumina
+
+**Verify:** From Noema, ask the agent to "post a message in #general" and it routes through daemon → Lumina MCP tools → Discord.
+
+---
+
+### Stage 4 — Admin & Access Control
 
 **Goal:** Port admin commands and role-based access control.
 
@@ -54,24 +68,9 @@ Port the full Python Lumina Discord bot to Rust. Lumina connects to simply-daemo
 **Tasks:**
 - [ ] Port AdminCog: `/admin set-access`, `/admin list-access`
 - [ ] Access level system (Full Access, Chat Only, No Access)
-- [ ] Role → access level mapping
 - [ ] Permission checks in command handlers
 
 **Verify:** Admin can manage role access levels via slash commands.
-
----
-
-### Stage 4 — Todo & Notes
-
-**Goal:** Port task and note management commands.
-
-**Complexity:** M
-
-**Tasks:**
-- [ ] Port TodoCog: `/todo add`, `/todo list`, `/todo done`, `/todo undo`, `/todo label`, `/todo unlabel`, `/todo delete`, `/todo info`
-- [ ] Port NoteCog: `/note take`, `/note list`, `/note view`, `/note edit`, `/note delete`, `/note tag`, `/note untag`, `/note search`, `/note quick`
-
-**Verify:** Users can create, manage, and search todos and notes via Discord.
 
 ---
 
@@ -199,11 +198,18 @@ Port the full Python Lumina Discord bot to Rust. Lumina connects to simply-daemo
 
 ---
 
+## Punted
+
+**Todo & Notes** — deferred to Content Stage 3 (UCM content conventions). These are thin wrappers over document CRUD with frontmatter, not standalone Lumina features.
+
+---
+
 ## Dependencies
 
 ```
-Stage 1 → Stage 2 (sequential, core chat first)
-Stage 2 → Stages 3-12 (parallel after chat works)
+Stage 1 → Stage 2 → Stage 3 (sequential: crate → chat → MCP service)
+Stage 3 → Stages 4-12 (parallel after MCP service works)
 Stage 6 depends on Voice phase (simply-voice crate)
 Stage 7 depends on Content phase (document storage)
+Todo/Notes punted to Content Stage 3
 ```
