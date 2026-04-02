@@ -79,6 +79,31 @@ impl AssetStore for SqliteStore {
         Ok(asset)
     }
 
+    async fn get_by_blob_hash(&self, hash: &crate::storage::types::BlobHash) -> Result<Option<Stored<AssetId, Asset>>> {
+        let conn = self.conn().lock().unwrap();
+        let asset = conn
+            .query_row(
+                "SELECT id, mime_type, size_bytes, is_private, created_at
+                 FROM assets WHERE blob_hash = ?1 LIMIT 1",
+                params![hash.as_str()],
+                |row| {
+                    let id_str: String = row.get(0)?;
+                    Ok(stored(
+                        AssetId::from_string(id_str),
+                        Asset {
+                            blob_hash: hash.clone(),
+                            mime_type: row.get(1)?,
+                            size_bytes: row.get(2)?,
+                            is_private: row.get::<_, i32>(3)? != 0,
+                        },
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .ok();
+        Ok(asset)
+    }
+
     async fn exists(&self, id: &AssetId) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
         let exists = conn

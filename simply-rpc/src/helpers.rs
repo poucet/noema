@@ -31,3 +31,23 @@ pub fn decode_base64(s: &str) -> anyhow::Result<Vec<u8>> {
         .decode(s)
         .map_err(|e| anyhow::anyhow!("invalid base64: {e}"))
 }
+
+/// Serde module for `Vec<u8>` ↔ base64 string.
+///
+/// Use with `#[serde(with = "simply_rpc::base64_bytes")]` on `Vec<u8>` fields
+/// so they serialize as base64 strings in JSON instead of number arrays.
+pub mod base64_bytes {
+    use base64::Engine;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(data: &Vec<u8>, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&base64::engine::general_purpose::STANDARD.encode(data))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(de)?;
+        base64::engine::general_purpose::STANDARD
+            .decode(&s)
+            .map_err(serde::de::Error::custom)
+    }
+}

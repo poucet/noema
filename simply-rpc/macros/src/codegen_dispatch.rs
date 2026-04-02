@@ -33,8 +33,15 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         .map(|m| {
             let name = &m.method_name;
             let hash = signature_hash(m);
+            let rest_get = m.rest_get;
+            let base64_return = m.base64_return;
             quote! {
-                ::simply_rpc::MethodMeta { name: #name, signature_hash: #hash }
+                ::simply_rpc::MethodMeta {
+                    name: #name,
+                    signature_hash: #hash,
+                    rest_get: #rest_get,
+                    base64_return: #base64_return,
+                }
             }
         })
         .collect();

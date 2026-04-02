@@ -1,7 +1,7 @@
 //! Lightweight HTTP REST server for the daemon.
 //!
-//! Runs alongside the WS server. Currently serves blob assets as
-//! HTTP GET with proper caching headers. Future: more REST endpoints.
+//! Auto-routes based on `#[rpc(rest_get)]` annotations in service metadata.
+//! No hardcoded API knowledge — routes are discovered from the Dispatcher.
 
 use std::sync::Arc;
 
@@ -73,100 +73,77 @@ async fn handle_request(
     dispatcher: &Dispatcher,
 ) -> Result<HyperResponse, std::convert::Infallible> {
     let path = req.uri().path().to_string();
-    let query = req.uri().query().map(|q| q.to_string());
 
     tracing::debug!(method = %req.method(), path = %path, "REST request");
 
-    // Route: GET /asset/{hash}?mime_type=X
-    if req.method() == hyper::Method::GET && path.starts_with("/asset/") {
-        let hash = &path["/asset/".len()..];
-        return Ok(handle_get_blob(hash, query.as_deref(), dispatcher).await);
+    if req.method() != hyper::Method::GET {
+        return Ok(error_response(StatusCode::METHOD_NOT_ALLOWED, "only GET supported"));
     }
 
-    // Route: POST /rpc/{method} — generic RPC over REST
-    if req.method() == hyper::Method::POST && path.starts_with("/rpc/") {
-        let method = &path["/rpc/".len()..];
-        let body = match http_body_util::BodyExt::collect(req.into_body()).await {
-            Ok(collected) => collected.to_bytes(),
-            Err(_) => return Ok(error_response(StatusCode::BAD_REQUEST, "invalid body")),
-        };
-        let params: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
-        let result = dispatcher.dispatch(method, params).await;
-        return Ok(rpc_response(result));
+    // Match path against rest_get methods from service metadata.
+    // Convention: GET /{prefix}/{param_value} → dispatches "{prefix}.{method_name}" with param_value
+    let segments: Vec<&str> = path.trim_start_matches('/').splitn(2, '/').collect();
+    if segments.len() != 2 || segments[0].is_empty() || segments[1].is_empty() {
+        return Ok(error_response(StatusCode::NOT_FOUND, "not found"));
     }
 
-    // 404 for everything else
-    Ok(error_response(StatusCode::NOT_FOUND, "not found"))
-}
+    let prefix = segments[0];
+    let param_value = segments[1];
 
-async fn handle_get_blob(
-    hash: &str,
-    query: Option<&str>,
-    dispatcher: &Dispatcher,
-) -> HyperResponse {
-    let params = serde_json::to_value(hash).unwrap_or_default();
-    let result = dispatcher.dispatch("asset.get_blob", params).await;
+    // Find a rest_get method matching this prefix
+    let rest_method = dispatcher.service_metas().into_iter()
+        .filter(|meta| meta.prefix == prefix)
+        .flat_map(|meta| meta.methods.iter())
+        .find(|m| m.rest_get);
+
+    let method_meta = match rest_method {
+        Some(m) => m,
+        None => return Ok(error_response(StatusCode::NOT_FOUND, "not found")),
+    };
+
+    // Dispatch: single param from the URL path
+    let params = serde_json::to_value(param_value).unwrap_or_default();
+    let result = dispatcher.dispatch(method_meta.name, params).await;
 
     match result {
         Ok(value) => {
-            // The value is a base64-encoded string (from #[rpc(base64_return)])
-            let b64: String = match serde_json::from_value(value) {
-                Ok(s) => s,
-                Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "invalid blob data"),
-            };
-            let data = match simply_rpc::decode_base64(&b64) {
-                Ok(d) => d,
-                Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "base64 decode error"),
-            };
+            // If response has "data" (base64) + "mime_type" fields, serve as raw bytes
+            if let (Some(data_val), Some(mime_val)) = (value.get("data"), value.get("mime_type")) {
+                let b64 = data_val.as_str().unwrap_or_default();
+                let mime_type = mime_val.as_str().unwrap_or("application/octet-stream");
+                let data = match simply_rpc::decode_base64(b64) {
+                    Ok(d) => d,
+                    Err(_) => return Ok(error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR, "base64 decode error",
+                    )),
+                };
 
-            let mime_type = query
-                .and_then(|q| {
-                    q.split('&')
-                        .find(|p| p.starts_with("mime_type="))
-                        .map(|p| urlencoding::decode(p.trim_start_matches("mime_type="))
-                            .unwrap_or_default()
-                            .into_owned())
-                })
-                .unwrap_or_else(|| "application/octet-stream".to_string());
-
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", mime_type)
-                .header("Content-Length", data.len().to_string())
-                .header("Cache-Control", "public, max-age=31536000, immutable")
-                .header("ETag", format!("\"{hash}\""))
-                .body(Full::new(hyper::body::Bytes::from(data)))
-                .unwrap()
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", mime_type)
+                    .header("Content-Length", data.len().to_string())
+                    .header("Cache-Control", "public, max-age=31536000, immutable")
+                    .header("ETag", format!("\"{param_value}\""))
+                    .body(Full::new(hyper::body::Bytes::from(data)))
+                    .unwrap())
+            } else {
+                // Return as JSON
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .body(Full::new(hyper::body::Bytes::from(
+                        serde_json::to_vec(&value).unwrap_or_default(),
+                    )))
+                    .unwrap())
+            }
         }
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") || msg.contains("No such file") {
-                error_response(StatusCode::NOT_FOUND, &format!("blob not found: {hash}"))
+                Ok(error_response(StatusCode::NOT_FOUND, &msg))
             } else {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg)
+                Ok(error_response(StatusCode::INTERNAL_SERVER_ERROR, &msg))
             }
-        }
-    }
-}
-
-fn rpc_response(result: simply_rpc::RpcResult) -> HyperResponse {
-    match result {
-        Ok(value) => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(Full::new(hyper::body::Bytes::from(
-                serde_json::to_vec(&value).unwrap_or_default(),
-            )))
-            .unwrap(),
-        Err(e) => {
-            let body = serde_json::json!({ "error": e.to_string() });
-            Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .header("Content-Type", "application/json")
-                .body(Full::new(hyper::body::Bytes::from(
-                    serde_json::to_vec(&body).unwrap_or_default(),
-                )))
-                .unwrap()
         }
     }
 }

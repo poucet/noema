@@ -25,6 +25,9 @@ pub trait AssetStore: Send + Sync {
     /// Get an asset by ID
     async fn get(&self, id: &AssetId) -> Result<Option<StoredAsset>>;
 
+    /// Get an asset by blob hash (reverse lookup)
+    async fn get_by_blob_hash(&self, hash: &crate::storage::types::BlobHash) -> Result<Option<StoredAsset>>;
+
     /// Check if an asset exists
     async fn exists(&self, id: &AssetId) -> Result<bool>;
 

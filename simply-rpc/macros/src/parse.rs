@@ -49,6 +49,8 @@ pub struct ParsedMethod {
     pub base64_params: Vec<String>,
     /// Whether the return value should be base64-encoded (`#[rpc(base64_return)]`).
     pub base64_return: bool,
+    /// Expose as HTTP GET endpoint (`#[rpc(rest_get)]`).
+    pub rest_get: bool,
     pub method_name: String,
     pub params: Vec<ParsedParam>,
     pub return_kind: ReturnKind,
@@ -89,6 +91,7 @@ impl ParsedTrait {
                 rpc_kind: rpc_attrs.kind,
                 base64_params: rpc_attrs.base64_params,
                 base64_return: rpc_attrs.base64_return,
+                rest_get: rpc_attrs.rest_get,
                 method_name,
                 params,
                 return_kind,
@@ -130,6 +133,7 @@ struct RpcAttrs {
     kind: RpcKind,
     base64_params: Vec<String>,
     base64_return: bool,
+    rest_get: bool,
 }
 
 /// Detect `#[rpc(...)]` attributes on a method.
@@ -140,6 +144,7 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
         kind: RpcKind::Normal,
         base64_params: Vec::new(),
         base64_return: false,
+        rest_get: false,
     };
 
     for attr in attrs {
@@ -156,6 +161,9 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
             }
             if tokens.contains("base64_return") {
                 result.base64_return = true;
+            }
+            if tokens.contains("rest_get") {
+                result.rest_get = true;
             }
             // Parse base64_param = "name" (can appear multiple times)
             // Simple token-level parsing: look for `base64_param = "..."` patterns

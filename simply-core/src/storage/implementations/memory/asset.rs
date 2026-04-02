@@ -50,6 +50,11 @@ impl AssetStore for MemoryAssetStore {
         Ok(assets.get(id).cloned())
     }
 
+    async fn get_by_blob_hash(&self, hash: &crate::storage::types::BlobHash) -> Result<Option<Stored<AssetId, Asset>>> {
+        let assets = self.assets.lock().unwrap();
+        Ok(assets.values().find(|a| a.blob_hash == *hash).cloned())
+    }
+
     async fn exists(&self, id: &AssetId) -> Result<bool> {
         Ok(self.assets.lock().unwrap().contains_key(id))
     }

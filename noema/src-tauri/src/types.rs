@@ -240,11 +240,7 @@ impl From<&simply_daemon::types::ResolvedContent> for DisplayContent {
                 mime_type,
                 ..
             } => DisplayContent::AssetRef {
-                url: format!(
-                    "noema-asset://localhost/{}?mime_type={}",
-                    blob_hash.as_str(),
-                    urlencoding::encode(mime_type)
-                ),
+                url: format!("noema-asset://localhost/{}", blob_hash.as_str()),
                 mime_type: mime_type.clone(),
             },
             ResolvedContent::Document { document_id, .. } => DisplayContent::DocumentRef {

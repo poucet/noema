@@ -492,8 +492,15 @@ where
         self.coordinator.store_asset(&b64, media_type).await
     }
 
-    async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<Vec<u8>> {
-        self.coordinator.get_blob(hash).await
+    async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<BlobResponse> {
+        use simply_core::storage::traits::AssetStore;
+        let data = self.coordinator.get_blob(hash).await?;
+        let mime_type = self.stores.asset()
+            .get_by_blob_hash(hash)
+            .await?
+            .map(|a| a.mime_type.clone())
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+        Ok(BlobResponse { data, mime_type })
     }
 }
 

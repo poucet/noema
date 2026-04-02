@@ -48,6 +48,13 @@ impl AssetStore for MockAssetStore {
         )))
     }
 
+    async fn get_by_blob_hash(&self, hash: &crate::storage::types::BlobHash) -> Result<Option<Stored<AssetId, Asset>>> {
+        let assets = self.assets.lock().unwrap();
+        Ok(assets.iter()
+            .find(|(_, a)| a.blob_hash == *hash)
+            .map(|(id, a)| stored(id.clone(), a.clone(), 0)))
+    }
+
     async fn exists(&self, id: &AssetId) -> Result<bool> {
         Ok(self.assets.lock().unwrap().contains_key(id))
     }

@@ -23,11 +23,10 @@ pub use commands::*;
 // Asset Protocol Handler
 // ============================================================================
 
-/// Handle requests to noema-asset://localhost/{blob_hash}?mime_type=X
+/// Handle requests to noema-asset://localhost/{blob_hash}
 ///
-/// Proxies to the daemon's REST endpoint at http://localhost:{rest_port}/asset/{hash}.
-/// The daemon handles caching headers. If the daemon isn't available (e.g. still
-/// initializing), falls back to a direct call.
+/// Proxies to the daemon's REST endpoint: GET /asset/{hash}
+/// The daemon returns raw bytes with correct Content-Type and cache headers.
 async fn handle_asset_request(
     request: &tauri::http::Request<Vec<u8>>,
     app_state: Arc<AppState>,
@@ -43,9 +42,7 @@ async fn handle_asset_request(
             .unwrap();
     }
 
-    let query = request.uri().query().unwrap_or("");
-
-    // Proxy to daemon REST endpoint
+    // Proxy to daemon REST endpoint — daemon returns raw bytes with correct Content-Type
     let base_url = match app_state.rest_base_url.get() {
         Some(url) => url.as_str(),
         None => {
@@ -56,7 +53,7 @@ async fn handle_asset_request(
                 .unwrap();
         }
     };
-    let url = format!("{base_url}/asset/{blob_hash}?{query}");
+    let url = format!("{base_url}/asset/{blob_hash}");
 
     match reqwest::get(&url).await {
         Ok(resp) => {
