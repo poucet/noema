@@ -160,7 +160,6 @@ async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream, 
         }
     });
 
-    let mut named = false;
     while let Some(msg) = ws_source.next().await {
         let msg = match msg {
             Ok(Message::Text(text)) => text.to_string(),
@@ -180,12 +179,17 @@ async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream, 
         let method = incoming.method.unwrap();
         let params = incoming.params;
 
-        // Identify client from the first RPC method's prefix (e.g. "session.create" → "session")
-        if !named {
-            if let Some(prefix) = method.split('.').next() {
-                tracker.set_name(conn_id, prefix.to_string()).await;
-                named = true;
-            }
+        // Built-in: client identification (not dispatched to services)
+        if method == "client.identify" {
+            let name = params.as_str()
+                .or_else(|| params.get("name").and_then(|v| v.as_str()))
+                .unwrap_or("unknown");
+            tracker.set_name(conn_id, name.to_string()).await;
+            tracing::info!(conn_id, name, "WS client identified");
+            let response = WsResponse::ok(id, serde_json::json!({ "ok": true }));
+            let text = serde_json::to_string(&response).unwrap_or_default();
+            if write_tx.send(text).await.is_err() { break; }
+            continue;
         }
 
         tracing::debug!(id, method = %method, "WS request");

@@ -7,9 +7,12 @@ use simply_daemon::types::ConversationId;
 use simply_daemon::ws::DaemonHandle;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, OnceCell};
 
 pub struct AppState {
+    /// Guards against concurrent init_app calls (React StrictMode)
+    pub initializing: AtomicBool,
     /// The daemon — primary API for everything (embedded or remote)
     pub daemon: OnceCell<Arc<dyn DaemonApi>>,
     /// Keeps the daemon handle alive (owns WS server if we're the host)
@@ -26,6 +29,7 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
+            initializing: AtomicBool::new(false),
             daemon: OnceCell::new(),
             _daemon_handle: OnceCell::new(),
             rest_base_url: OnceCell::new(),

@@ -17,6 +17,11 @@ pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result
         return Ok(String::new());
     }
 
+    // Prevent concurrent init (React StrictMode calls this twice)
+    if state.initializing.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Ok(String::new());
+    }
+
     let state_arc = state.inner().clone();
     do_init(app, state_arc).await
 }
@@ -63,6 +68,7 @@ fn service_builders() -> ServiceBuilders {
             Dispatcher::new()
                 .register(<dyn AssetApi>::service(daemon))
         }),
+        client_name: "noema".to_string(),
     }
 }
 

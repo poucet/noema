@@ -75,6 +75,8 @@ impl DaemonHandle {
 pub struct ServiceBuilders {
     pub ws_dispatch: Box<dyn FnOnce(Arc<dyn DaemonApi>) -> server::DispatchFn + Send>,
     pub rest_dispatcher: Box<dyn FnOnce(Arc<dyn DaemonApi>) -> Dispatcher + Send>,
+    /// Client name shown in admin dashboard (e.g. "noema", "lumina").
+    pub client_name: String,
 }
 
 /// Try to connect to an existing daemon. If none is running, start one.
@@ -88,7 +90,7 @@ pub async fn connect_or_host(
     // Try to connect with a short timeout
     let connect_result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        RemoteDaemon::connect(&addr),
+        RemoteDaemon::connect_as(&addr, &builders.client_name),
     )
     .await;
 

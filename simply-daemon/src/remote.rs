@@ -26,7 +26,14 @@ pub struct RemoteDaemon {
 impl RemoteDaemon {
     /// Connect to a running daemon at the given address.
     pub async fn connect(addr: &str) -> anyhow::Result<Arc<Self>> {
+        Self::connect_as(addr, "unknown").await
+    }
+
+    /// Connect and identify with a client name (shown in admin dashboard).
+    pub async fn connect_as(addr: &str, name: &str) -> anyhow::Result<Arc<Self>> {
         let conn = WsConnection::connect(addr).await?;
+        // Identify to the server (best-effort, don't fail on error)
+        let _ = conn.rpc_call("client.identify", serde_json::json!({ "name": name })).await;
         Ok(Arc::new(Self { conn }))
     }
 
