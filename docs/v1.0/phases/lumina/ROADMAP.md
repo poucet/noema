@@ -106,19 +106,17 @@ Port the full Python Lumina Discord bot to Rust. Lumina connects to simply-daemo
 
 ---
 
-### Stage 7 — Knowledge Base (RAG)
+### Stage 7 — Document Upload from Discord
 
-**Goal:** Port RAG document management and semantic search.
+**Goal:** Upload documents to UCM storage from Discord. RAG/search is a UCM-level concern — all content in storage is automatically indexed and searchable. Lumina just needs a way to get documents in.
 
-**Complexity:** M
+**Complexity:** S
 
 **Tasks:**
-- [ ] Port RAGCog: `/rag add_attachment`, `/rag add_document`
-- [ ] `/rag list`, `/rag remove`, `/rag update`, `/rag sync`, `/rag sync_all`
-- [ ] `/rag query` — semantic search
-- [ ] `/rag chat` — RAG-enhanced chat session
+- [ ] `/doc upload` — upload attachment or paste markdown into UCM storage
+- [ ] `/doc list`, `/doc view` — browse documents from Discord
 
-**Verify:** Documents can be ingested and queried via semantic search.
+**Verify:** Upload a file via Discord, find it via Noema or semantic search.
 
 ---
 

@@ -87,16 +87,14 @@
 
 ---
 
-## Stage 7 — Knowledge Base (RAG)
+## Stage 7 — Document Upload from Discord
 
-**Goal:** Port RAG document management and semantic search.
+**Goal:** Upload documents to UCM storage from Discord. RAG/search is a UCM-level concern, not Lumina-specific.
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 7.1 | ⬜ | Port RAGCog: `/rag add_attachment`, `/rag add_document` | P1 | M |
-| 7.2 | ⬜ | `/rag list`, `remove`, `update`, `sync`, `sync_all` | P1 | M |
-| 7.3 | ⬜ | `/rag query` — semantic search | P1 | M |
-| 7.4 | ⬜ | `/rag chat` — RAG-enhanced chat session | P1 | M |
+| 7.1 | ⬜ | `/doc upload` — upload attachment or paste markdown into UCM storage | P1 | M |
+| 7.2 | ⬜ | `/doc list`, `/doc view` — browse documents from Discord | P1 | S |
 
 ---
 
