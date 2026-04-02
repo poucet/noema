@@ -77,13 +77,17 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
         })
         .await?;
 
+    tracing::info!(session_id = %info.id, model = %info.model_id, "session created");
+
     // 3. Seed with channel history
     if !history.is_empty() {
+        tracing::debug!(count = history.len(), "seeding channel history");
         lx.daemon.seed_context(&info.id, history).await?;
     }
 
     // 4. Send the current message
     let user_text = format!("<@{}> says: {}", msg.author.id, msg.content);
+    tracing::debug!("sending message to daemon");
     lx.daemon
         .send_message(
             &info.id,
@@ -173,6 +177,7 @@ async fn stream_response(
     _session_id: &SessionId,
     events: &mut tokio::sync::broadcast::Receiver<DaemonEvent>,
 ) -> anyhow::Result<()> {
+    tracing::debug!("waiting for daemon events");
     let mut text_buffer = String::new();
     let mut discord_msg: Option<Message> = None;
     let mut last_edit = std::time::Instant::now();
@@ -180,6 +185,7 @@ async fn stream_response(
     loop {
         match events.recv().await {
             Ok(DaemonEvent::TextDelta(delta)) => {
+                tracing::debug!(len = delta.len(), "received text delta");
                 text_buffer.push_str(&delta);
 
                 if last_edit.elapsed() >= std::time::Duration::from_millis(500) {
@@ -256,6 +262,7 @@ async fn stream_response(
                     .await?;
             }
             Ok(DaemonEvent::TurnComplete) => {
+                tracing::debug!("turn complete");
                 if !text_buffer.is_empty() {
                     let content = truncate_for_discord(&text_buffer);
                     match &mut discord_msg {
@@ -271,13 +278,17 @@ async fn stream_response(
                 break;
             }
             Ok(DaemonEvent::Error(e)) => {
+                tracing::error!(error = %e, "daemon error event");
                 return Err(anyhow::anyhow!("daemon error: {e}"));
             }
-            Ok(_) => {}
+            Ok(event) => {
+                tracing::debug!(event = ?event, "received other event");
+            }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                 tracing::warn!(skipped = n, "event stream lagged");
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                tracing::warn!("event stream closed unexpectedly");
                 break;
             }
         }
