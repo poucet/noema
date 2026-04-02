@@ -112,7 +112,7 @@ async fn handle_request(
                 "status": "shutting_down",
             })));
         }
-        "/admin" | "/admin/" => {
+        "/" | "/admin" | "/admin/" => {
             return Ok(admin_page(tracker).await);
         }
         "/admin/api/connections" => {
