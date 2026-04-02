@@ -20,6 +20,8 @@ pub struct DiscordConfig {
     /// Guild IDs where slash commands are registered (guild-specific, not global)
     #[serde(default)]
     pub guild_ids: Vec<u64>,
+    /// Channel ID for bot status messages (online/offline)
+    pub status_channel_id: Option<u64>,
 }
 
 impl LuminaConfig {

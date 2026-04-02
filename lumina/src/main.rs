@@ -7,7 +7,7 @@ mod commands;
 use std::sync::Arc;
 
 use commands::CommandRegistry;
-use serenity::model::id::GuildId;
+use serenity::model::id::{ChannelId, GuildId};
 use serenity::prelude::*;
 use simply_daemon::api::DaemonApi;
 use simply_daemon::RemoteDaemon;
@@ -61,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
     let mut client = Client::builder(token, intents)
         .event_handler(Handler {
             guild_ids: lumina_cfg.discord.guild_ids.iter().map(|&id| GuildId::new(id)).collect(),
+            status_channel_id: lumina_cfg.discord.status_channel_id.map(ChannelId::new),
         })
         .type_map_insert::<DaemonKey>(daemon)
         .type_map_insert::<ConfigKey>(lumina_cfg)
@@ -75,12 +76,26 @@ async fn main() -> anyhow::Result<()> {
 
 struct Handler {
     guild_ids: Vec<GuildId>,
+    status_channel_id: Option<ChannelId>,
 }
 
 #[serenity::async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, _ctx: Context, ready: serenity::model::gateway::Ready) {
+    async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
         tracing::info!(user = %ready.user.name, "connected to Discord — use .sync to register commands");
+
+        if let Some(channel_id) = self.status_channel_id {
+            // Purge last message, then post status — mirrors Python Lumina behavior
+            if let Ok(messages) = channel_id.messages(&ctx.http, serenity::builder::GetMessages::new().limit(1)).await {
+                for msg in messages {
+                    let _ = msg.delete(&ctx.http).await;
+                }
+            }
+            let _ = channel_id.say(
+                &ctx.http,
+                format!("\u{1f7e2} Bot connected as <@{}>", ready.user.id),
+            ).await;
+        }
     }
 
     async fn message(&self, ctx: Context, msg: serenity::model::channel::Message) {
