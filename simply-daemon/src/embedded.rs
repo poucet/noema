@@ -205,6 +205,11 @@ where
         Ok(user.id)
     }
 
+    /// The OAuth callback redirect URI (stable port).
+    pub fn oauth_redirect_uri(&self) -> String {
+        self.oauth.redirect_uri()
+    }
+
     /// Access the MCP registry (for MCP config commands).
     pub fn mcp_registry(&self) -> &Arc<Mutex<McpRegistry>> {
         &self.mcp_registry

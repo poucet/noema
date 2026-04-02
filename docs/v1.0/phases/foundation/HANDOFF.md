@@ -19,9 +19,9 @@ Current state of Stage 2 (Daemon) and open decisions for the next session.
 - **2.6** — Daemon binary (startup, config, shutdown)
 - **2.7** — WebSocket server + remote DaemonApi (lets Lumina connect)
 
-## Blocked on design decision
+## Design in progress
 
-- **2.5** — DocumentApi + gdocs rewrite (see open design problem below)
+- **2.5** — DocumentApi + gdocs rewrite (see [ACTIONS.md](../../../designs/ACTIONS.md) — draft)
 
 ---
 
