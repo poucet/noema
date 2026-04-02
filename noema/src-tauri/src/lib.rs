@@ -7,12 +7,10 @@ mod state;
 mod types;
 
 use config::PathManager;
-use simply_daemon::api::AssetApi;
-use simply_daemon::types::BlobHash;
 use tauri::http::Response;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 pub use logging::{init_logging, log_message};
 pub use state::AppState;
@@ -25,13 +23,15 @@ pub use commands::*;
 // Asset Protocol Handler
 // ============================================================================
 
-/// Handle requests to noema-asset://localhost/{blob_hash}
-/// Returns the blob with proper caching headers
+/// Handle requests to noema-asset://localhost/{blob_hash}?mime_type=X
+///
+/// Proxies to the daemon's REST endpoint at http://localhost:{rest_port}/asset/{hash}.
+/// The daemon handles caching headers. If the daemon isn't available (e.g. still
+/// initializing), falls back to a direct call.
 async fn handle_asset_request(
     request: &tauri::http::Request<Vec<u8>>,
     app_state: Arc<AppState>,
 ) -> Response<Vec<u8>> {
-    // Parse blob_hash from path: /{blob_hash}
     let path = request.uri().path();
     let blob_hash = path.trim_start_matches('/');
 
@@ -42,51 +42,43 @@ async fn handle_asset_request(
             .body("Missing blob_hash".as_bytes().to_vec())
             .unwrap();
     }
-    let blob_hash: BlobHash = BlobHash::from_str(blob_hash).unwrap();
 
-    let daemon = match app_state.get_daemon() {
-        Ok(d) => d,
-        Err(_) => {
+    let query = request.uri().query().unwrap_or("");
+
+    // Proxy to daemon REST endpoint
+    let base_url = match app_state.rest_base_url.get() {
+        Some(url) => url.as_str(),
+        None => {
             return Response::builder()
-                .status(500)
+                .status(503)
                 .header("Content-Type", "text/plain")
                 .body("Daemon not initialized".as_bytes().to_vec())
                 .unwrap();
         }
     };
+    let url = format!("{base_url}/asset/{blob_hash}?{query}");
 
-    let data = match daemon.get_blob(&blob_hash).await {
-        Ok(data) => data,
-        Err(_) => {
-            return Response::builder()
-                .status(404)
-                .header("Content-Type", "text/plain")
-                .body(format!("Blob not found: {}", blob_hash.as_str()).into_bytes())
-                .unwrap();
+    match reqwest::get(&url).await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let mut builder = Response::builder().status(status);
+            // Forward cache headers from daemon
+            for (key, value) in resp.headers() {
+                if let Ok(v) = value.to_str() {
+                    builder = builder.header(key.as_str(), v);
+                }
+            }
+            let body = resp.bytes().await.unwrap_or_default().to_vec();
+            builder.body(body).unwrap()
         }
-    };
-
-    // Get mime_type from query param (provided by frontend)
-    let mime_type = request
-        .uri()
-        .query()
-        .and_then(|q| {
-            q.split('&')
-                .find(|p| p.starts_with("mime_type="))
-                .map(|p| urlencoding::decode(p.trim_start_matches("mime_type=")).unwrap_or_default().into_owned())
-        })
-        .unwrap_or_else(|| "application/octet-stream".to_string());
-
-    // Build response with caching headers
-    // Blobs are immutable (content-addressed), so we can cache forever
-    Response::builder()
-        .status(200)
-        .header("Content-Type", mime_type)
-        .header("Content-Length", data.len().to_string())
-        .header("Cache-Control", "public, max-age=31536000, immutable")
-        .header("ETag", format!("\"{}\"", blob_hash.as_str()))
-        .body(data)
-        .unwrap()
+        Err(e) => {
+            Response::builder()
+                .status(502)
+                .header("Content-Type", "text/plain")
+                .body(format!("Daemon REST unavailable: {e}").into_bytes())
+                .unwrap()
+        }
+    }
 }
 
 // ============================================================================

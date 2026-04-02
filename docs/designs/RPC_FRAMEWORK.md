@@ -2,6 +2,7 @@
 
 **Status:** Implemented
 **Crate:** `simply-rpc/` (+ `simply-rpc/macros/`)
+**Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 

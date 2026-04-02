@@ -3,26 +3,29 @@
 //! - If a daemon is already running on the well-known port, connect to it.
 //! - Otherwise, start an embedded daemon + WS server and become the host.
 //!
-//! The caller provides the dispatch builder — discovery doesn't know
-//! which services exist.
+//! The caller provides builders for the WS dispatch and REST dispatcher —
+//! discovery doesn't know which services exist.
 
 use std::sync::Arc;
+
+use simply_rpc::Dispatcher;
 
 use crate::api::DaemonApi;
 use crate::embedded::EmbeddedDaemon;
 use crate::remote::RemoteDaemon;
 use crate::storage::SqliteStores;
 
-use super::server;
+use super::{rest, server};
 
 const DEFAULT_DAEMON_PORT: u16 = 9800;
 
 /// Result of daemon discovery.
 pub enum DaemonHandle {
-    /// This process is hosting the daemon. Dropping shuts down the WS server.
+    /// This process is hosting the daemon. Dropping shuts down servers.
     Host {
         daemon: Arc<dyn DaemonApi>,
-        _server: server::ServerHandle,
+        _ws_server: server::ServerHandle,
+        _rest_server: rest::RestHandle,
     },
     /// Connected to a remote daemon.
     Remote {
@@ -43,13 +46,16 @@ impl DaemonHandle {
     }
 }
 
+/// Builders that the caller provides to wire up services.
+pub struct ServiceBuilders {
+    pub ws_dispatch: Box<dyn FnOnce(Arc<dyn DaemonApi>) -> server::DispatchFn + Send>,
+    pub rest_dispatcher: Box<dyn FnOnce(Arc<dyn DaemonApi>) -> Dispatcher + Send>,
+}
+
 /// Try to connect to an existing daemon. If none is running, start one.
-///
-/// `build_dispatch` is called only if we become the host — it wires up the
-/// daemon's services into a dispatch function for the WS server.
 pub async fn connect_or_host(
     port: Option<u16>,
-    build_dispatch: impl FnOnce(Arc<dyn DaemonApi>) -> server::DispatchFn,
+    builders: ServiceBuilders,
 ) -> anyhow::Result<DaemonHandle> {
     let port = port.unwrap_or(DEFAULT_DAEMON_PORT);
     let addr = format!("127.0.0.1:{}", port);
@@ -84,11 +90,16 @@ pub async fn connect_or_host(
     let daemon = EmbeddedDaemon::new(stores).await?;
     let daemon: Arc<dyn DaemonApi> = daemon;
 
-    let dispatch = build_dispatch(Arc::clone(&daemon));
-    let server_handle = server::start(dispatch, port).await?;
+    let ws_dispatch = (builders.ws_dispatch)(Arc::clone(&daemon));
+    let ws_server = server::start(ws_dispatch, port).await?;
+
+    let rest_port = port + 1;
+    let rest_dispatcher = (builders.rest_dispatcher)(Arc::clone(&daemon));
+    let rest_server = rest::start(rest_dispatcher, rest_port).await?;
 
     Ok(DaemonHandle::Host {
         daemon,
-        _server: server_handle,
+        _ws_server: ws_server,
+        _rest_server: rest_server,
     })
 }

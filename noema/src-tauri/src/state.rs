@@ -14,6 +14,8 @@ pub struct AppState {
     pub daemon: OnceCell<Arc<dyn DaemonApi>>,
     /// Keeps the daemon handle alive (owns WS server if we're the host)
     pub _daemon_handle: OnceCell<DaemonHandle>,
+    /// REST base URL for the daemon (e.g. "http://127.0.0.1:9801")
+    pub rest_base_url: OnceCell<String>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
     pub voice_conversation: Mutex<Option<ConversationId>>,
     pub processing: Mutex<HashMap<ConversationId, bool>>,
@@ -26,6 +28,7 @@ impl AppState {
         Self {
             daemon: OnceCell::new(),
             _daemon_handle: OnceCell::new(),
+            rest_base_url: OnceCell::new(),
             voice_coordinator: Mutex::new(None),
             voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),

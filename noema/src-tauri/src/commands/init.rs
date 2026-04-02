@@ -2,6 +2,7 @@
 
 use simply_daemon::api::*;
 use simply_daemon::ws;
+use simply_daemon::ws::discovery::ServiceBuilders;
 use simply_rpc::{Dispatcher, RpcService};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
@@ -27,12 +28,20 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     let settings = config::Settings::load();
     let port = settings.daemon_port;
 
-    let handle = ws::connect_or_host(port, build_dispatch)
+    let daemon_port = port.unwrap_or(9800);
+    let rest_port = daemon_port + 1;
+
+    let handle = ws::connect_or_host(port, service_builders())
         .await
         .map_err(|e| format!("Failed to initialize daemon: {}", e))?;
 
     let is_host = handle.is_host();
     let daemon = handle.daemon();
+
+    // Set the REST base URL — used by asset protocol handler and other REST clients.
+    // When remote, this points to wherever the daemon is running.
+    let rest_base_url = format!("http://127.0.0.1:{rest_port}");
+    let _ = state.rest_base_url.set(rest_base_url);
 
     let model_name = daemon.default_model_id().await;
     let _ = state.daemon.set(daemon);
@@ -46,8 +55,19 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     Ok(model_name)
 }
 
-/// Build the dispatch function — wires up all daemon services for the WS server.
-fn build_dispatch(daemon: Arc<dyn DaemonApi>) -> ws::server::DispatchFn {
+/// Service wiring — which APIs are exposed over WS and REST.
+fn service_builders() -> ServiceBuilders {
+    ServiceBuilders {
+        ws_dispatch: Box::new(build_ws_dispatch),
+        rest_dispatcher: Box::new(|daemon| {
+            Dispatcher::new()
+                .register(<dyn AssetApi>::service(daemon))
+        }),
+    }
+}
+
+/// Build the WS dispatch function.
+fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> ws::server::DispatchFn {
     let session_svc = <dyn SessionApi>::service(daemon.clone());
 
     let dispatcher = Dispatcher::new()

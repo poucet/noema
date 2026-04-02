@@ -44,13 +44,17 @@ async fn main() -> anyhow::Result<()> {
     let daemon = EmbeddedDaemon::new(stores).await?;
     let daemon: Arc<dyn DaemonApi> = daemon;
 
-    // Build dispatch — this is where we wire up which services are exposed
-    let dispatch = build_dispatch(Arc::clone(&daemon));
+    // WS server — per-connection state, handles streams
+    let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
+    let _ws_server = ws::server::start(ws_dispatch, port).await?;
 
-    // Start WebSocket server
-    let _ws_server = ws::server::start(dispatch, port).await?;
+    // REST server — stateless, shared across all clients
+    let rest_port = port + 1;
+    let rest_dispatcher = Dispatcher::new()
+        .register(<dyn AssetApi>::service(daemon.clone()));
+    let _rest_server = ws::rest::start(rest_dispatcher, rest_port).await?;
 
-    tracing::info!(ws_port = port, "daemon ready");
+    tracing::info!(ws_port = port, rest_port = rest_port, "daemon ready");
 
     // Wait for shutdown signal
     shutdown_signal().await;
@@ -62,11 +66,11 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Build the dispatch function — wires up all daemon services.
+/// Build the WS dispatch function — wires up all daemon services for WebSocket.
 ///
-/// SessionApi is dispatched separately (produces streams → event forwarders).
+/// SessionApi dispatched separately (produces streams → event forwarders).
 /// Everything else goes through a Dispatcher.
-fn build_dispatch(daemon: Arc<dyn DaemonApi>) -> ws::server::DispatchFn {
+fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> ws::server::DispatchFn {
     let session_svc = <dyn SessionApi>::service(daemon.clone());
 
     let dispatcher = Dispatcher::new()
