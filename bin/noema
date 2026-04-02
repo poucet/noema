@@ -1,5 +1,5 @@
 #!/bin/bash
-# noema — run the Noema desktop app
+# noema — run the Noema desktop app (optionally with a separate daemon)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,6 +10,44 @@ case "${1:-dev}" in
     export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
     : > "$NOEMA_LOG_FILE"
     cd "$REPO_ROOT/noema" && npm run tauri dev
+    ;;
+  daemon)
+    # Start the standalone daemon (WS server on port 9800)
+    echo "Starting simply-daemon..."
+    cd "$REPO_ROOT" && cargo run --bin simply-daemon
+    ;;
+  split)
+    # Start daemon in background, then Noema connecting to it
+    export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
+    : > "$NOEMA_LOG_FILE"
+
+    echo "Starting daemon in background..."
+    cd "$REPO_ROOT" && cargo run --bin simply-daemon &
+    DAEMON_PID=$!
+
+    # Wait for daemon to be ready
+    echo "Waiting for daemon on port 9800..."
+    for i in $(seq 1 30); do
+      if nc -z 127.0.0.1 9800 2>/dev/null; then
+        echo "Daemon ready (pid $DAEMON_PID)"
+        break
+      fi
+      sleep 0.5
+    done
+
+    if ! nc -z 127.0.0.1 9800 2>/dev/null; then
+      echo "Daemon failed to start"
+      kill $DAEMON_PID 2>/dev/null
+      exit 1
+    fi
+
+    # Start Noema (it will discover the running daemon via WS)
+    cd "$REPO_ROOT/noema" && npm run tauri dev
+
+    # Cleanup: stop daemon when Noema exits
+    echo "Stopping daemon..."
+    kill $DAEMON_PID 2>/dev/null
+    wait $DAEMON_PID 2>/dev/null
     ;;
   build)
     cd "$REPO_ROOT/noema" && npm run tauri build
@@ -27,8 +65,10 @@ case "${1:-dev}" in
     [[ $REPLY =~ ^[Yy]$ ]] && rm -rf "$DATA_DIR/database" "$DATA_DIR/blob_storage" && echo "Done." || echo "Aborted."
     ;;
   *)
-    echo "Usage: noema [dev|build|install|nuke]"
-    echo "  dev      Run Tauri dev server (default)"
+    echo "Usage: noema [dev|daemon|split|build|install|nuke]"
+    echo "  dev      Run Noema with embedded daemon (default)"
+    echo "  daemon   Run standalone daemon only (WS on port 9800)"
+    echo "  split    Run daemon + Noema separately (daemon in background)"
     echo "  build    Build release binaries"
     echo "  install  Build and open macOS installer"
     echo "  nuke     Delete all local data"
