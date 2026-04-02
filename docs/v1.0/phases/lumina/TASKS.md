@@ -32,8 +32,8 @@
 | 2.3 | ✅ | Load Discord channel history as conversation context (last N messages → daemon session) | P0 | M |
 | 2.4 | ✅ | Open daemon session, send message, stream response back with debounced edits | P0 | M |
 | 2.5 | 🚫 | System prompt from UCM: load by named doc (e.g. `lumina/system-prompt`), depends on Content Stage 2 | P0 | M |
-| 2.6 | 🔄 | `/chat pause`, `/chat resume`, `/chat model`, `/chat history_limit` | P0 | S |
-| 2.7 | 🔄 | Tool call display as Discord embeds | P1 | S |
+| 2.6 | ✅ | `/chat pause`, `/chat resume`, `/chat model`, `/chat history_limit` | P0 | S |
+| 2.7 | ✅ | Tool call display as Discord embeds | P1 | S |
 
 ---
 
