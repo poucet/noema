@@ -17,6 +17,7 @@ simply-rpc = { path = "../simply-rpc" }
 
 # Discord
 serenity = { version = "0.12", default-features = false, features = [
+    "cache",
     "client",
     "gateway",
     "model",

@@ -1,35 +1,21 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, FnArg, ItemFn, Lit, Meta, Pat, Type};
+use syn::{parse_macro_input, FnArg, ItemFn, ItemMod, Meta, Pat, Type};
+
+// ===========================================================================
+// #[slash_command] — standalone command from a function
+// ===========================================================================
 
 /// Derive a slash command from an async function.
-///
-/// Generates a struct, `SlashCommand` impl, and `inventory` registration.
-/// The first two parameters must be `ctx: &Context` and `cmd: &CommandInteraction`.
-/// Additional parameters become Discord command options.
-///
-/// # Attributes
-///
-/// - `description = "..."` — command description (required)
-/// - `#[describe("...")]` on parameters — option description (defaults to param name)
-///
-/// # Examples
 ///
 /// ```ignore
 /// #[slash_command(description = "Check if Lumina is alive")]
 /// async fn ping(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
-///     reply(&lx.ctx, cmd, "Pong!").await
-/// }
-///
-/// #[slash_command(description = "Set LLM model")]
-/// async fn model(
-///     lx: &LuminaContext,
-///     cmd: &CommandInteraction,
-///     #[describe("Model ID")] model_id: String,
-/// ) -> anyhow::Result<()> {
-///     lx.daemon.set_default_model(&model_id).await?;
-///     reply(&lx.ctx, cmd, &format!("Model set to {model_id}")).await
+///     cmd.create_response(&lx.http, CreateInteractionResponse::Message(
+///         CreateInteractionResponseMessage::new().content("Pong!"),
+///     )).await?;
+///     Ok(())
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -43,9 +29,52 @@ pub fn slash_command(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Attribute parsing
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// #[command_group] — command with subcommands from a module
+// ===========================================================================
+
+/// Derive a command group with subcommands from a module.
+///
+/// Functions inside the module marked with `#[sub_command]` become subcommands.
+///
+/// ```ignore
+/// #[command_group(description = "Chat management")]
+/// mod chat {
+///     use super::*;
+///
+///     #[sub_command(description = "Create a new chat channel")]
+///     pub async fn new(
+///         lx: &LuminaContext,
+///         cmd: &CommandInteraction,
+///         #[describe("Channel name")] channel_name: Option<String>,
+///     ) -> anyhow::Result<()> { ... }
+///
+///     #[sub_command(description = "Pause bot responses")]
+///     pub async fn pause(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> { ... }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn command_group(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attrs = parse_macro_input!(attr as CommandAttrs);
+    let module = parse_macro_input!(item as ItemMod);
+
+    match generate_command_group(attrs, module) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// Marker attribute for subcommands inside a `#[command_group]` module.
+/// Parsed by `#[command_group]`, not used standalone.
+#[proc_macro_attribute]
+pub fn sub_command(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Identity — the real work is done by #[command_group]
+    item
+}
+
+// ===========================================================================
+// Shared types
+// ===========================================================================
 
 struct CommandAttrs {
     description: String,
@@ -66,7 +95,10 @@ impl syn::parse::Parse for CommandAttrs {
                 "description" => description = Some(lit.value()),
                 "name" => name = Some(lit.value()),
                 other => {
-                    return Err(syn::Error::new(ident.span(), format!("unknown attribute `{other}`")))
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        format!("unknown attribute `{other}`"),
+                    ))
                 }
             }
 
@@ -81,10 +113,6 @@ impl syn::parse::Parse for CommandAttrs {
         Ok(Self { description, name })
     }
 }
-
-// ---------------------------------------------------------------------------
-// Parameter info
-// ---------------------------------------------------------------------------
 
 struct ParamInfo {
     name: String,
@@ -158,7 +186,6 @@ impl ParamType {
 }
 
 fn resolve_type(ty: &Type) -> syn::Result<(ParamType, bool)> {
-    // Check for Option<T>
     if let Type::Path(tp) = ty {
         let seg = tp.path.segments.last().unwrap();
         if seg.ident == "Option" {
@@ -194,7 +221,6 @@ fn get_describe_attr(attrs: &[syn::Attribute]) -> Option<String> {
         if attr.path().is_ident("describe") {
             if let Meta::List(list) = &attr.meta {
                 let tokens = list.tokens.to_string();
-                // Strip quotes
                 let trimmed = tokens.trim_matches('"');
                 return Some(trimmed.to_string());
             }
@@ -203,38 +229,23 @@ fn get_describe_attr(attrs: &[syn::Attribute]) -> Option<String> {
     None
 }
 
-// ---------------------------------------------------------------------------
-// Code generation
-// ---------------------------------------------------------------------------
+fn to_pascal_case(s: &str) -> String {
+    s.split('_')
+        .map(|seg| {
+            let mut c = seg.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect()
+}
 
-fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStream2> {
-    let fn_name = &func.sig.ident;
-    let cmd_name = attrs
-        .name
-        .unwrap_or_else(|| fn_name.to_string().replace('_', "-"));
-    let description = &attrs.description;
-
-    // PascalCase struct name from fn name
-    let struct_name = format_ident!(
-        "{}",
-        fn_name
-            .to_string()
-            .split('_')
-            .map(|s| {
-                let mut c = s.chars();
-                match c.next() {
-                    None => String::new(),
-                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                }
-            })
-            .collect::<String>()
-    );
-
-    // Parse parameters (skip first two: ctx, cmd)
+fn parse_params(func: &ItemFn) -> syn::Result<Vec<ParamInfo>> {
     let mut params = Vec::new();
     for (i, arg) in func.sig.inputs.iter().enumerate() {
         if i < 2 {
-            continue;
+            continue; // skip lx, cmd
         }
         if let FnArg::Typed(pat_type) = arg {
             let param_name = if let Pat::Ident(pi) = pat_type.pat.as_ref() {
@@ -255,9 +266,29 @@ fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStrea
             });
         }
     }
+    Ok(params)
+}
 
-    // Generate option registration
-    let option_registrations: Vec<TokenStream2> = params
+fn gen_option_registrations(params: &[ParamInfo]) -> Vec<TokenStream2> {
+    params
+        .iter()
+        .map(|p| {
+            let name = &p.name;
+            let desc = &p.description;
+            let opt_type = p.ty.option_type_tokens();
+            let required = p.required;
+            quote! {
+                .add_sub_option(
+                    serenity::builder::CreateCommandOption::new(#opt_type, #name, #desc)
+                        .required(#required)
+                )
+            }
+        })
+        .collect()
+}
+
+fn gen_top_level_option_registrations(params: &[ParamInfo]) -> Vec<TokenStream2> {
+    params
         .iter()
         .map(|p| {
             let name = &p.name;
@@ -271,10 +302,11 @@ fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStrea
                 )
             }
         })
-        .collect();
+        .collect()
+}
 
-    // Generate argument extraction
-    let arg_extractions: Vec<TokenStream2> = params
+fn gen_arg_extractions(params: &[ParamInfo]) -> Vec<TokenStream2> {
+    params
         .iter()
         .map(|p| {
             let var_name = format_ident!("{}", p.name);
@@ -282,42 +314,61 @@ fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStrea
             if p.required {
                 let err_msg = format!("missing required argument `{}`", p.name);
                 quote! {
-                    let #var_name = opts.iter().find_map(|opt| { #extract })
+                    let #var_name = __opts.iter().find_map(|opt| { #extract })
                         .ok_or_else(|| anyhow::anyhow!(#err_msg))?;
                 }
             } else {
                 quote! {
-                    let #var_name = opts.iter().find_map(|opt| { #extract });
+                    let #var_name = __opts.iter().find_map(|opt| { #extract });
                 }
             }
         })
-        .collect();
+        .collect()
+}
 
-    // Generate call arguments
-    let call_args: Vec<TokenStream2> = params
+fn gen_call_args(params: &[ParamInfo]) -> Vec<TokenStream2> {
+    params
         .iter()
         .map(|p| {
             let var_name = format_ident!("{}", p.name);
             quote! { #var_name }
         })
-        .collect();
+        .collect()
+}
 
-    // Strip #[describe(...)] attrs from the function params before emitting
-    let mut clean_func = func.clone();
-    for arg in clean_func.sig.inputs.iter_mut() {
+fn strip_describe_attrs(func: &mut ItemFn) {
+    for arg in func.sig.inputs.iter_mut() {
         if let FnArg::Typed(pat_type) = arg {
             pat_type.attrs.retain(|a| !a.path().is_ident("describe"));
         }
     }
+}
 
-    let has_args = !params.is_empty();
-    let opts_binding = if has_args {
-        quote! { let opts = cmd.data.options(); }
+// ===========================================================================
+// #[slash_command] codegen
+// ===========================================================================
+
+fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStream2> {
+    let fn_name = &func.sig.ident;
+    let cmd_name = attrs
+        .name
+        .unwrap_or_else(|| fn_name.to_string().replace('_', "-"));
+    let description = &attrs.description;
+    let struct_name = format_ident!("{}", to_pascal_case(&fn_name.to_string()));
+
+    let params = parse_params(&func)?;
+    let option_registrations = gen_top_level_option_registrations(&params);
+    let arg_extractions = gen_arg_extractions(&params);
+    let call_args = gen_call_args(&params);
+
+    let mut clean_func = func.clone();
+    strip_describe_attrs(&mut clean_func);
+
+    let opts_binding = if !params.is_empty() {
+        quote! { let __opts = cmd.data.options(); }
     } else {
         quote! {}
     };
-
-    let cmd_name_lit = &cmd_name;
 
     Ok(quote! {
         #clean_func
@@ -332,11 +383,11 @@ fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStrea
         #[async_trait::async_trait]
         impl crate::commands::SlashCommand for #struct_name {
             fn name(&self) -> &'static str {
-                #cmd_name_lit
+                #cmd_name
             }
 
             fn register(&self) -> serenity::builder::CreateCommand {
-                serenity::builder::CreateCommand::new(#cmd_name_lit)
+                serenity::builder::CreateCommand::new(#cmd_name)
                     .description(#description)
                     #(#option_registrations)*
             }
@@ -349,6 +400,153 @@ fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStrea
                 #opts_binding
                 #(#arg_extractions)*
                 #fn_name(lx, cmd, #(#call_args),*).await
+            }
+        }
+    })
+}
+
+// ===========================================================================
+// #[command_group] codegen
+// ===========================================================================
+
+struct SubCommandInfo {
+    fn_name: syn::Ident,
+    sub_name: String,
+    description: String,
+    params: Vec<ParamInfo>,
+}
+
+fn generate_command_group(attrs: CommandAttrs, module: ItemMod) -> syn::Result<TokenStream2> {
+    let mod_name = &module.ident;
+    let cmd_name = attrs
+        .name
+        .unwrap_or_else(|| mod_name.to_string().replace('_', "-"));
+    let description = &attrs.description;
+    let struct_name = format_ident!("{}", to_pascal_case(&mod_name.to_string()));
+
+    let items = module
+        .content
+        .as_ref()
+        .map(|(_, items)| items.as_slice())
+        .unwrap_or(&[]);
+
+    // Find all #[sub_command] functions
+    let mut sub_commands: Vec<SubCommandInfo> = Vec::new();
+    for item in items {
+        if let syn::Item::Fn(func) = item {
+            let sub_attr = func
+                .attrs
+                .iter()
+                .find(|a| a.path().is_ident("sub_command"));
+            if let Some(attr) = sub_attr {
+                let sub_attrs: CommandAttrs = attr.parse_args()?;
+                let params = parse_params(func)?;
+                let sub_name = sub_attrs
+                    .name
+                    .unwrap_or_else(|| func.sig.ident.to_string().replace('_', "-"));
+                sub_commands.push(SubCommandInfo {
+                    fn_name: func.sig.ident.clone(),
+                    sub_name,
+                    description: sub_attrs.description,
+                    params,
+                });
+            }
+        }
+    }
+
+    if sub_commands.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &module.ident,
+            "command_group requires at least one #[sub_command] function",
+        ));
+    }
+
+    // Emit cleaned module (strip #[sub_command] and #[describe] attrs)
+    let mut clean_module = module.clone();
+    if let Some((_, ref mut items)) = clean_module.content {
+        for item in items.iter_mut() {
+            if let syn::Item::Fn(func) = item {
+                func.attrs.retain(|a| !a.path().is_ident("sub_command"));
+                strip_describe_attrs(func);
+            }
+        }
+    }
+
+    // Generate subcommand option definitions for register()
+    let sub_options: Vec<TokenStream2> = sub_commands
+        .iter()
+        .map(|sc| {
+            let sub_name = &sc.sub_name;
+            let sub_desc = &sc.description;
+            let param_opts = gen_option_registrations(&sc.params);
+            quote! {
+                .add_option(
+                    serenity::builder::CreateCommandOption::new(
+                        serenity::all::CommandOptionType::SubCommand,
+                        #sub_name,
+                        #sub_desc,
+                    )
+                    #(#param_opts)*
+                )
+            }
+        })
+        .collect();
+
+    // Generate dispatch match arms for run()
+    let match_arms: Vec<TokenStream2> = sub_commands
+        .iter()
+        .map(|sc| {
+            let sub_name = &sc.sub_name;
+            let fn_name = &sc.fn_name;
+            let arg_extractions = gen_arg_extractions(&sc.params);
+            let call_args = gen_call_args(&sc.params);
+            quote! {
+                #sub_name => {
+                    if let serenity::all::ResolvedValue::SubCommand(ref __opts) = __sub.value {
+                        #(#arg_extractions)*
+                        #mod_name::#fn_name(lx, cmd, #(#call_args),*).await
+                    } else {
+                        Err(anyhow::anyhow!("expected subcommand value"))
+                    }
+                }
+            }
+        })
+        .collect();
+
+    Ok(quote! {
+        #clean_module
+
+        #[derive(Default)]
+        pub struct #struct_name;
+
+        ::inventory::submit!(crate::commands::CommandInit {
+            init: || Box::new(#struct_name),
+        });
+
+        #[async_trait::async_trait]
+        impl crate::commands::SlashCommand for #struct_name {
+            fn name(&self) -> &'static str {
+                #cmd_name
+            }
+
+            fn register(&self) -> serenity::builder::CreateCommand {
+                serenity::builder::CreateCommand::new(#cmd_name)
+                    .description(#description)
+                    #(#sub_options)*
+            }
+
+            async fn run(
+                &self,
+                lx: &crate::commands::LuminaContext,
+                cmd: &serenity::all::CommandInteraction,
+            ) -> anyhow::Result<()> {
+                let __opts = cmd.data.options();
+                let __sub = __opts.first()
+                    .ok_or_else(|| anyhow::anyhow!("missing subcommand"))?;
+                match __sub.name {
+                    #(#match_arms)*
+                    other => Err(anyhow::anyhow!("unknown subcommand `{other}`")),
+                }
             }
         }
     })
