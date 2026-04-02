@@ -242,7 +242,24 @@ where
         };
         let model = llm::create_model(&model_id)?;
 
-        let session = Session::new(Arc::clone(&self.coordinator), conversation_id);
+        let mut session = Session::new(Arc::clone(&self.coordinator), conversation_id);
+
+        // Seed with provided history
+        if !options.seed.is_empty() {
+            let seed_messages: Vec<llm::ChatMessage> = options.seed.into_iter().map(|sm| {
+                let blocks: Vec<llm::ContentBlock> = sm.content.into_iter().map(|c| match c {
+                    InputContent::Text { text } => llm::ContentBlock::Text { text },
+                    InputContent::Image { data, mime_type } => llm::ContentBlock::Image { data, mime_type },
+                    InputContent::Audio { data, mime_type } => llm::ContentBlock::Audio { data, mime_type },
+                    InputContent::DocumentRef { id } => llm::ContentBlock::DocumentRef { id: id.to_string() },
+                    InputContent::AssetRef { asset_id, mime_type } => llm::ContentBlock::DocumentRef { id: asset_id.to_string() },
+                }).collect();
+                llm::ChatMessage::new(sm.role, llm::ChatPayload::new(blocks))
+            }).collect();
+            tracing::debug!(count = seed_messages.len(), "seeding session with history");
+            session.seed(seed_messages);
+        }
+
         let manager = self.build_manager(session, model, model_id.clone());
         let info = Self::make_session_info(&session_id, persistence, model_id);
 

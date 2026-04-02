@@ -65,25 +65,20 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let limit = lx.config.discord.history_limit.unwrap_or(DEFAULT_HISTORY_LIMIT);
     let history = load_channel_history(lx, msg.channel_id, bot_id.get(), limit).await?;
 
-    // 2. Resolve model: in-memory override → channel topic → config default
+    // 2. Resolve model and create session with seed
     let model_id = resolve_model(lx, msg).await;
+    tracing::debug!(seed_count = history.len(), "creating session");
     let (info, mut events) = lx
         .daemon
         .create_session(CreateSessionOptions {
             persistence: Some(Persistence::Ephemeral),
             system_prompt: Some(SYSTEM_PROMPT.to_string()),
             model_id,
-            ..Default::default()
+            seed: history,
         })
         .await?;
 
     tracing::info!(session_id = %info.id, model = %info.model_id, "session created");
-
-    // 3. Seed with channel history
-    if !history.is_empty() {
-        tracing::debug!(count = history.len(), "seeding channel history");
-        lx.daemon.seed_context(&info.id, history).await?;
-    }
 
     // 4. Send the current message
     let user_text = format!("<@{}> says: {}", msg.author.id, msg.content);
@@ -187,24 +182,15 @@ async fn stream_response(
             Ok(DaemonEvent::TextDelta(delta)) => {
                 tracing::debug!(len = delta.len(), "received text delta");
                 text_buffer.push_str(&delta);
-
-                if last_edit.elapsed() >= std::time::Duration::from_millis(500) {
-                    let content = truncate_for_discord(&text_buffer);
-                    match &mut discord_msg {
-                        None => {
-                            discord_msg =
-                                Some(msg.channel_id.say(&lx.http, &content).await?);
-                        }
-                        Some(m) => {
-                            m.edit(&lx.http, serenity::builder::EditMessage::new().content(&content))
-                                .await?;
-                        }
-                    }
-                    last_edit = std::time::Instant::now();
-                }
+                flush_if_needed(lx, msg, &text_buffer, &mut discord_msg, &mut last_edit).await?;
             }
             Ok(DaemonEvent::AssistantContent(content_block)) => {
                 match content_block {
+                    ContentBlock::Text { text } => {
+                        tracing::debug!(len = text.len(), "received assistant text");
+                        text_buffer.push_str(&text);
+                        flush_if_needed(lx, msg, &text_buffer, &mut discord_msg, &mut last_edit).await?;
+                    }
                     ContentBlock::Image { data, mime_type } => {
                         let ext = match mime_type.as_str() {
                             "image/png" => "png",
@@ -294,6 +280,30 @@ async fn stream_response(
         }
     }
 
+    Ok(())
+}
+
+/// Flush text buffer to Discord if debounce interval has passed.
+async fn flush_if_needed(
+    lx: &LuminaContext,
+    msg: &Message,
+    text_buffer: &str,
+    discord_msg: &mut Option<Message>,
+    last_edit: &mut std::time::Instant,
+) -> anyhow::Result<()> {
+    if last_edit.elapsed() >= std::time::Duration::from_millis(500) {
+        let content = truncate_for_discord(text_buffer);
+        match discord_msg {
+            None => {
+                *discord_msg = Some(msg.channel_id.say(&lx.http, &content).await?);
+            }
+            Some(m) => {
+                m.edit(&lx.http, serenity::builder::EditMessage::new().content(&content))
+                    .await?;
+            }
+        }
+        *last_edit = std::time::Instant::now();
+    }
     Ok(())
 }
 

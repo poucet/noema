@@ -132,6 +132,13 @@ impl<S: StorageTypes> Session<S> {
         result
     }
 
+    /// Seed the session with pre-built chat messages (e.g. Discord channel history).
+    /// These go into the pending queue and are visible to the LLM but not persisted.
+    pub fn seed(&mut self, messages: Vec<ChatMessage>) {
+        self.pending.extend(messages);
+        self.llm_cache_valid = false;
+    }
+
     /// Clear the session cache (used when switching conversations)
     pub fn clear_cache(&mut self) {
         self.resolved_cache.clear();
