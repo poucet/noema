@@ -2,18 +2,18 @@
 
 use simply_audio::BrowserAudioController;
 use simply_audio::VoiceCoordinator;
-use simply_daemon::embedded::EmbeddedDaemon;
-use simply_daemon::storage::SqliteStorage;
+use simply_daemon::api::DaemonApi;
 use simply_daemon::types::ConversationId;
+use simply_daemon::ws::DaemonHandle;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OnceCell};
 
-pub type AppDaemon = EmbeddedDaemon<SqliteStorage>;
-
 pub struct AppState {
-    /// The daemon — primary API for everything
-    pub daemon: OnceCell<Arc<AppDaemon>>,
+    /// The daemon — primary API for everything (embedded or remote)
+    pub daemon: OnceCell<Arc<dyn DaemonApi>>,
+    /// Keeps the daemon handle alive (owns WS server if we're the host)
+    pub _daemon_handle: OnceCell<DaemonHandle>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
     pub voice_conversation: Mutex<Option<ConversationId>>,
     pub processing: Mutex<HashMap<ConversationId, bool>>,
@@ -25,6 +25,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             daemon: OnceCell::new(),
+            _daemon_handle: OnceCell::new(),
             voice_coordinator: Mutex::new(None),
             voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),
@@ -33,7 +34,7 @@ impl AppState {
         }
     }
 
-    pub fn get_daemon(&self) -> Result<Arc<AppDaemon>, String> {
+    pub fn get_daemon(&self) -> Result<Arc<dyn DaemonApi>, String> {
         self.daemon.get().cloned().ok_or_else(|| "Daemon not initialized".to_string())
     }
 
