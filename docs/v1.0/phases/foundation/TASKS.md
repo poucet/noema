@@ -36,6 +36,7 @@
 | 2.6 | ✅ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
 | 2.7 | ✅ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
 | 2.7.1 | ✅ | Smart discovery: `connect_or_host()`, Noema uses `Arc<dyn DaemonApi>` | P0 | M |
+| 2.7.2 | ⬜ | `daemon-rpc` proc macro: auto-generate WS server dispatch + client impls from trait definitions | P0 | M |
 | 2.8 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P1 | M |
 | 2.9 | ⬜ | Peer registry: connected clients, global MCP tool registry | P1 | M |
 | 2.10 | ⬜ | MCP client: connect to action services, discover tools | P2 | M |
@@ -77,11 +78,23 @@
 
 ---
 
+**2.7.2 — daemon-rpc proc macro**
+- Proc macro crate at `simply-daemon/macros/` (name: `daemon-rpc`)
+- `#[daemon_rpc("prefix")]` annotates a trait → auto-generates:
+  - Server dispatch function: `dispatch_{prefix}(daemon, id, method, params) -> Option<RpcResult>`
+  - Client impl macro: `impl_remote_{prefix}!(RemoteDaemon)`
+- Method name convention: `"{prefix}.{trait_method_name}"` — derived from the trait, never hand-written
+- Handles: `&str`→`String` deserialization, `Result<()>` vs `Result<T>` vs raw `T` returns, multi-param structs
+- `#[rpc(skip)]` for non-serializable methods (e.g. voice_connect)
+- Test harness with dummy traits for serialization round-trip verification
+- Full design: [MACRO_DESIGN.md](MACRO_DESIGN.md)
+
+---
+
 ## Dependencies
 
 ```
 Stage 2 (remaining):
-  2.4 (stable OAuth port) — independent, small
-  2.5 (DocumentApi) → 2.5.1 (rewrite gdocs.rs)
-  2.6 (daemon binary) → 2.7 (WebSocket + remote impl)
+  2.5 (DocumentApi) → 2.5.1 (rewrite gdocs.rs) — blocked on sidecar design
+  2.7.2 (daemon-rpc macro) — replaces hand-written WS dispatch
 ```
