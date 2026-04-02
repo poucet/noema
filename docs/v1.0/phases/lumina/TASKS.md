@@ -28,12 +28,13 @@
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
 | 2.1 | ⬜ | On `/chat`, open ephemeral session with daemon | P0 | M |
-| 2.2 | ⬜ | Seed context from recent Discord channel messages | P0 | M |
-| 2.3 | ⬜ | Send user message, receive streamed response, post to Discord | P0 | M |
-| 2.4 | ⬜ | Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model` | P0 | M |
-| 2.5 | ⬜ | `on_message` listener for bot chat channels and @mentions | P0 | M |
-| 2.6 | ⬜ | Response formatting as Discord embeds | P0 | S |
-| 2.7 | ⬜ | Register Discord MCP tools for agent interaction | P1 | M |
+| 2.2 | ⬜ | System prompt from UCM: configurable document ID loaded as system prompt | P0 | M |
+| 2.3 | ⬜ | Seed context from recent Discord channel messages | P0 | M |
+| 2.4 | ⬜ | Send user message, receive streamed response, post to Discord | P0 | M |
+| 2.5 | ⬜ | Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model` | P0 | M |
+| 2.6 | ⬜ | `on_message` listener for bot chat channels and @mentions | P0 | M |
+| 2.7 | ⬜ | Response formatting as Discord embeds | P0 | S |
+| 2.8 | ⬜ | Register Discord MCP tools for agent interaction | P1 | M |
 
 ---
 

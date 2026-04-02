@@ -31,6 +31,7 @@ Port the full Python Lumina Discord bot to Rust. Lumina connects to simply-daemo
 
 **Tasks:**
 - [ ] On `/chat`, Lumina opens a session (ephemeral by default) with simply-daemon
+- [ ] System prompt from UCM: configurable document ID loaded as system prompt (content-based, not hardcoded)
 - [ ] Seeds context from recent Discord channel messages (rolling window of last N)
 - [ ] Sends user message, receives streamed agent response, posts to Discord
 - [ ] Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model`
