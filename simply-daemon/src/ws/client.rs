@@ -33,7 +33,7 @@ impl RemoteDaemon {
         let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let session_senders: Arc<Mutex<HashMap<SessionId, broadcast::Sender<DaemonEvent>>>>> =
+        let session_senders: Arc<Mutex<HashMap<SessionId, broadcast::Sender<DaemonEvent>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
         // Writer task
