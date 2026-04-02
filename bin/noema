@@ -14,7 +14,7 @@ case "${1:-dev}" in
   daemon)
     # Start the standalone daemon (WS server on port 9800)
     echo "Starting simply-daemon..."
-    cd "$REPO_ROOT" && cargo run --bin simply-daemon
+    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
     ;;
   split)
     # Start daemon in background, then Noema connecting to it
@@ -22,7 +22,7 @@ case "${1:-dev}" in
     : > "$NOEMA_LOG_FILE"
 
     echo "Starting daemon in background..."
-    cd "$REPO_ROOT" && cargo run --bin simply-daemon &
+    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
     DAEMON_PID=$!
 
     # Wait for daemon to be ready
