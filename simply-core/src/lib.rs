@@ -18,6 +18,8 @@
 pub mod agent;
 pub mod agents;
 pub mod context;
+pub mod light_manager;
+pub mod light_session;
 pub mod manager;
 pub mod mcp;
 pub mod storage;
@@ -26,8 +28,10 @@ pub mod traffic_log;
 pub use agent::Agent;
 pub use agents::{McpAgent};
 pub use context::{ConversationContext, MessagesGuard};
+pub use light_manager::{NoStorage, SessionEventSender, SessionManager, StorageHook};
+pub use light_session::LightSession;
 
 // New manager API
-pub use manager::{CommitMode, ConversationManager, ManagerCommand, ManagerEvent, SharedEventSender, ToolConfig};
+pub use manager::{CommitMode, ConversationManager, ManagerCommand, ManagerEvent, SharedEventSender, ToolConfig, run_agent};
 
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, ServerConfig};

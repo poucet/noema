@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let daemon_addr = format!("127.0.0.1:{daemon_port}");
     tracing::info!(addr = %daemon_addr, "connecting to simply-daemon");
 
-    let daemon = RemoteDaemon::connect(&daemon_addr).await?;
+    let daemon = RemoteDaemon::connect_as(&daemon_addr, "lumina").await?;
     let daemon: Arc<dyn DaemonApi> = daemon.into_daemon();
     tracing::info!("connected to simply-daemon");
 

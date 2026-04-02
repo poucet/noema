@@ -269,6 +269,18 @@ pub enum InputContent {
 }
 
 impl InputContent {
+    /// Convert to a ContentBlock without any I/O. Returns `None` for
+    /// variants that require storage resolution (AssetRef).
+    pub fn into_content_block_inline(self) -> Option<ContentBlock> {
+        match self {
+            InputContent::Text { text } => Some(ContentBlock::Text { text }),
+            InputContent::Image { data, mime_type } => Some(ContentBlock::Image { data, mime_type }),
+            InputContent::Audio { data, mime_type } => Some(ContentBlock::Audio { data, mime_type }),
+            InputContent::DocumentRef { id } => Some(ContentBlock::DocumentRef { id: id.to_string() }),
+            InputContent::AssetRef { .. } => None, // Requires storage to resolve
+        }
+    }
+
     /// Convert to a ContentBlock for use in pending messages.
     ///
     /// Most variants convert directly without any I/O. `AssetRef` resolves

@@ -141,7 +141,6 @@ where
             ManagerEvent::Complete(_) => vec![DaemonEvent::TurnComplete],
             ManagerEvent::Error(err) => vec![DaemonEvent::Error(err)],
             ManagerEvent::ModelChanged(_) => vec![],
-            ManagerEvent::Truncated(_) => vec![],
         }
     }
 

@@ -73,6 +73,11 @@ pub trait ConversationContext: Send + Sync {
     /// Get pending messages (added but not yet committed)
     fn pending(&self) -> &[ChatMessage];
 
+    /// Optional system prompt for this conversation.
+    fn system_prompt(&self) -> Option<&str> {
+        None
+    }
+
     /// Commit pending messages to storage
     async fn commit(&mut self) -> Result<()>;
 }

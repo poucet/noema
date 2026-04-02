@@ -82,13 +82,11 @@ pub enum ManagerCommand {
         content: Vec<InputContent>,
         tool_config: ToolConfig,
     },
-    /// Run agent on current pending (used after truncate for regeneration)
+    /// Run agent on current pending (used for regeneration)
     RunAgent {
         tool_config: ToolConfig,
         commit_mode: CommitMode,
     },
-    /// Truncate context to before a specific turn (None = clear all)
-    Truncate(Option<TurnId>),
     /// Change the model (model_id should be in provider/model format)
     SetModel {
         model: Arc<dyn ChatModel + Send + Sync>,
@@ -109,8 +107,37 @@ pub enum ManagerEvent {
     Error(String),
     /// Model was changed
     ModelChanged(String),
-    /// Context was truncated
-    Truncated(Option<TurnId>),
+}
+
+// ============================================================================
+// Shared agent execution — used by both ConversationManager and LightManager
+// ============================================================================
+
+/// Run the agent against a conversation context.
+///
+/// Creates an McpAgent, executes against the session, returns Ok/Err.
+/// Callers handle event emission and storage.
+pub async fn run_agent<C: ConversationContext>(
+    session: &Arc<Mutex<C>>,
+    mcp_registry: &Arc<Mutex<McpRegistry>>,
+    document_resolver: &Arc<dyn DocumentResolver>,
+    model: &Arc<dyn ChatModel + Send + Sync>,
+    tool_config: ToolConfig,
+) -> Result<()> {
+    let tool_registry = McpToolRegistry::new(Arc::clone(mcp_registry));
+    let agent = McpAgent::new(
+        Arc::new(tool_registry),
+        10,
+        Arc::clone(document_resolver),
+        ExecutionContext::default(),
+    );
+
+    let mut sess = session.lock().await;
+    if tool_config.enabled {
+        agent.execute_stream(&mut *sess, model.clone()).await
+    } else {
+        agent.execute_stream_no_tools(&mut *sess, model.clone()).await
+    }
 }
 
 // ============================================================================
@@ -301,12 +328,6 @@ impl<S: StorageTypes> ConversationManager<S> {
                         commit_mode,
                         &event_tx,
                     ).await;
-                }
-
-                ManagerCommand::Truncate(turn_id) => {
-                    let mut sess = session.lock().await;
-                    sess.truncate(turn_id.as_ref());
-                    let _ = event_tx.send((conversation_id.clone(), ManagerEvent::Truncated(turn_id)));
                 }
 
                 ManagerCommand::SetModel { model: new_model, model_id: new_model_id } => {
@@ -503,26 +524,12 @@ impl<S: StorageTypes> ConversationManager<S> {
         let _ = self.cmd_tx.send(ManagerCommand::SendMessage { content, tool_config });
     }
 
-    /// Regenerate response at a turn
-    pub fn regenerate(&self, turn_id: TurnId, tool_config: ToolConfig) {
-        let _ = self.cmd_tx.send(ManagerCommand::Truncate(Some(turn_id.clone())));
-        let _ = self.cmd_tx.send(ManagerCommand::RunAgent {
-            tool_config,
-            commit_mode: CommitMode::AtTurn(turn_id),
-        });
-    }
-
     /// Run agent on current pending messages (for edit flow where session already has pending)
     pub fn run_agent(&self, tool_config: ToolConfig) {
         let _ = self.cmd_tx.send(ManagerCommand::RunAgent {
             tool_config,
             commit_mode: CommitMode::NewTurns,
         });
-    }
-
-    /// Clear all history
-    pub fn clear_history(&self) {
-        let _ = self.cmd_tx.send(ManagerCommand::Truncate(None));
     }
 
     /// Set the model (model_id should be in provider/model format)
