@@ -1,7 +1,8 @@
 //! Slash command registration and dispatch.
 //!
-//! Commands implement [`SlashCommand`] and register via [`register_command!`].
-//! No manual listing needed — `inventory` collects them at link time.
+//! Use `#[slash_command]` proc macro for stateless commands (auto-registers).
+//! Use `register_command!` for stateful commands that need custom constructors.
+//! No manual dispatch table — `inventory` collects them at link time.
 
 mod chat;
 mod ping;

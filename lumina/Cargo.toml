@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 # Internal crates
 config = { path = "../config" }
+lumina-macros = { path = "macros" }
 simply-daemon = { path = "../simply-daemon" }
 simply-rpc = { path = "../simply-rpc" }
 

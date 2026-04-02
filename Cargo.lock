@@ -2898,6 +2898,7 @@ dependencies = [
  "async-trait",
  "config",
  "inventory",
+ "lumina-macros",
  "serde",
  "serde_json",
  "serenity",
@@ -2906,6 +2907,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "lumina-macros"
+version = "0.3.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
 ]
 
 [[package]]

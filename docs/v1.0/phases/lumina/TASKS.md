@@ -23,17 +23,17 @@
 
 ## Stage 2 — LLM Chat
 
-**Goal:** Lumina chats with an LLM through the daemon.
+**Goal:** Lumina chats with an LLM through the daemon. Channel-based: `/chat new` creates a private channel, bot responds to all messages in "AI Chats" category or @mentions.
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 2.1 | ⬜ | On `/chat`, open ephemeral session with daemon | P0 | M |
-| 2.2 | ⬜ | System prompt from UCM: load by named doc (e.g. `lumina/system-prompt`), depends on Content Stage 2 named docs | P0 | M |
-| 2.3 | ⬜ | Seed context from recent Discord channel messages | P0 | M |
-| 2.4 | ⬜ | Send user message, receive streamed response, post to Discord | P0 | M |
-| 2.5 | ⬜ | Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model` | P0 | M |
-| 2.6 | ⬜ | `on_message` listener for bot chat channels and @mentions | P0 | M |
-| 2.7 | ⬜ | Response formatting as Discord embeds | P0 | S |
+| 2.1 | ⬜ | `/chat new [name]` — create private text channel under "AI Chats" category with permissions | P0 | M |
+| 2.2 | ⬜ | `on_message` listener: respond in AI Chats category channels and @mentions | P0 | M |
+| 2.3 | ⬜ | Load Discord channel history as conversation context (last N messages → daemon session) | P0 | M |
+| 2.4 | ⬜ | Open daemon session, send message, stream response back with debounced edits | P0 | M |
+| 2.5 | ⬜ | System prompt from UCM: load by named doc (e.g. `lumina/system-prompt`), depends on Content Stage 2 | P0 | M |
+| 2.6 | ⬜ | `/chat pause`, `/chat resume`, `/chat model`, `/chat history_limit` | P0 | S |
+| 2.7 | ⬜ | Tool call display as Discord embeds | P1 | S |
 
 ---
 
