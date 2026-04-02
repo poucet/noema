@@ -17,9 +17,8 @@ use simply_core::storage::ids::{AssetId, ConversationId, UserId};
 use simply_core::storage::session::{ResolvedMessage, Session};
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_core::storage::DocumentResolver;
-use simply_core::{ConversationManager, ManagerEvent, McpRegistry, NoStorage, SessionManager, SharedEventSender};
-use simply_core::light_manager::SessionEventSender;
-use simply_core::LightSession;
+use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender};
+use simply_core::{InMemoryContext, NoStorage, SessionEvent, SessionEventSender, SessionManager};
 
 use crate::api::*;
 use crate::mcp::{McpService, McpServiceConfig};
@@ -38,7 +37,7 @@ impl<S: StorageTypes> Manager<S> {
     fn send_message(&self, content: Vec<simply_core::storage::content::InputContent>, tool_config: simply_core::ToolConfig) {
         match self {
             Manager::Persistent(m) => m.send_message(content, tool_config),
-            Manager::Ephemeral(m) => m.send_message(content, tool_config),
+            Manager::Ephemeral(m) => m.send_message(content, tool_config.enabled),
         }
     }
 
@@ -51,10 +50,8 @@ impl<S: StorageTypes> Manager<S> {
 
     fn set_model(&mut self, model: Arc<dyn llm::ChatModel + Send + Sync>, model_id: String) {
         match self {
-            Manager::Persistent(m) => m.set_model(model, model_id),
-            Manager::Ephemeral(_) => {
-                // TODO: SessionManager model change
-            }
+            Manager::Persistent(m) => m.set_model(model, model_id.clone()),
+            Manager::Ephemeral(m) => m.set_model(model, model_id),
         }
     }
 
@@ -184,6 +181,23 @@ where
         }
     }
 
+    fn session_event_to_daemon_events(
+        _session_id: &SessionId,
+        event: SessionEvent,
+    ) -> Vec<DaemonEvent> {
+        match event {
+            SessionEvent::UserMessageAdded(msg) => vec![DaemonEvent::UserMessage(msg)],
+            SessionEvent::TextDelta(text) => vec![DaemonEvent::TextDelta(text)],
+            SessionEvent::ContentBlock(block) => vec![DaemonEvent::AssistantContent(block)],
+            SessionEvent::AssistantMessage(msg) => {
+                msg.payload.content.into_iter().map(DaemonEvent::AssistantContent).collect()
+            }
+            SessionEvent::TurnComplete { .. } => vec![DaemonEvent::TurnComplete],
+            SessionEvent::Error(err) => vec![DaemonEvent::Error(err)],
+            SessionEvent::ModelChanged(_) => vec![],
+        }
+    }
+
     fn convert_seed(seed: Vec<SeedMessage>) -> Vec<llm::ChatMessage> {
         seed.into_iter()
             .map(|sm| {
@@ -310,22 +324,22 @@ where
         let manager = match persistence {
             Persistence::Ephemeral => {
                 // Lightweight path: in-memory only, no storage
-                let mut light = LightSession::new();
+                let mut light = InMemoryContext::new();
                 if let Some(ref prompt) = options.system_prompt {
-                    light = LightSession::with_system_prompt(prompt.clone());
+                    light = InMemoryContext::with_system_prompt(prompt.clone());
                 }
                 if !seed_messages.is_empty() {
                     tracing::debug!(count = seed_messages.len(), "seeding ephemeral session");
                     light.seed(seed_messages);
                 }
 
-                let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<(String, ManagerEvent)>();
+                let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<(String, SessionEvent)>();
                 let broadcast_tx_clone = broadcast_tx.clone();
                 let sid = session_id.clone();
                 // Forward SessionManager events to the session broadcast channel
                 tokio::spawn(async move {
                     while let Some((_key, event)) = evt_rx.recv().await {
-                        let daemon_events = Self::manager_event_to_daemon_events(&sid, event);
+                        let daemon_events = Self::session_event_to_daemon_events(&sid, event);
                         for de in daemon_events {
                             let _ = broadcast_tx_clone.send(de);
                         }
@@ -336,7 +350,6 @@ where
                     session_id.as_str().to_string(),
                     light,
                     model,
-                    model_id,
                     Arc::clone(self.mcp.registry()),
                     self.stores.document(),
                     evt_tx,

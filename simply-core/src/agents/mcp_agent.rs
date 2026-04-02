@@ -11,6 +11,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use llm::{ChatMessage, ChatModel, ChatPayload, ChatRequest, ContentBlock, ToolResultContent};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// Function that enriches tool call arguments before execution.
 /// Takes (tool_name, arguments, execution_context) and returns enriched arguments.
@@ -24,6 +25,18 @@ pub type ToolEnricher =
 ///
 /// An optional enricher callback can inject execution context into specific
 /// tool calls (e.g., for noema-core tools that need conversation_id, turn_id, etc).
+/// Events emitted during streaming agent execution.
+#[derive(Debug, Clone)]
+pub enum AgentStreamEvent {
+    /// Text delta from LLM.
+    TextDelta(String),
+    /// Non-text content block (image, audio, tool call, etc.)
+    ContentBlock(ContentBlock),
+}
+
+/// Optional sink for streaming events during agent execution.
+pub type AgentStreamSink = mpsc::UnboundedSender<AgentStreamEvent>;
+
 pub struct McpAgent {
     tools: Arc<McpToolRegistry>,
     max_iterations: usize,
@@ -31,6 +44,7 @@ pub struct McpAgent {
     document_formatter: DocumentFormatter,
     execution_context: ExecutionContext,
     enricher: Option<ToolEnricher>,
+    stream_sink: Option<AgentStreamSink>,
 }
 
 impl McpAgent {
@@ -47,13 +61,11 @@ impl McpAgent {
             document_formatter: DocumentFormatter,
             execution_context,
             enricher: None,
+            stream_sink: None,
         }
     }
 
     /// Create an agent with a tool enricher callback.
-    ///
-    /// The enricher is called for every tool call and can modify arguments
-    /// (e.g., to inject execution context for specific tools).
     pub fn with_enricher(
         tools: Arc<McpToolRegistry>,
         max_iterations: usize,
@@ -68,7 +80,14 @@ impl McpAgent {
             document_formatter: DocumentFormatter,
             execution_context,
             enricher: Some(enricher),
+            stream_sink: None,
         }
+    }
+
+    /// Set a stream sink to receive text deltas and content blocks during execution.
+    pub fn with_stream_sink(mut self, sink: AgentStreamSink) -> Self {
+        self.stream_sink = Some(sink);
+        self
     }
 
     /// Get the execution context
@@ -252,10 +271,16 @@ impl Agent for McpAgent {
                 role = chunk.role;
                 for block in chunk.payload.content {
                     match block {
-                        ContentBlock::Text { text } => {
-                            accumulated_text.push_str(&text);
+                        ContentBlock::Text { ref text } => {
+                            if let Some(ref sink) = self.stream_sink {
+                                let _ = sink.send(AgentStreamEvent::TextDelta(text.clone()));
+                            }
+                            accumulated_text.push_str(text);
                         }
                         other => {
+                            if let Some(ref sink) = self.stream_sink {
+                                let _ = sink.send(AgentStreamEvent::ContentBlock(other.clone()));
+                            }
                             other_blocks.push(other);
                         }
                     }
