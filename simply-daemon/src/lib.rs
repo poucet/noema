@@ -15,10 +15,12 @@ pub mod embedded;
 pub mod mcp;
 pub mod oauth;
 pub mod remote;
+pub mod session;
 pub mod storage;
 pub mod ws;
 
 /// Re-exported types for clients.
 pub use api::types as types;
 pub use remote::RemoteDaemon;
+pub use session::DaemonSession;
 pub use ws::ConnectionState;

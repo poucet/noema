@@ -65,41 +65,34 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let limit = lx.config.discord.history_limit.unwrap_or(DEFAULT_HISTORY_LIMIT);
     let history = load_channel_history(lx, msg.channel_id, bot_id.get(), limit).await?;
 
-    // 2. Resolve model and create session with seed
+    // 2. Create session with seed and resolved model
     let model_id = resolve_model(lx, msg).await;
     tracing::debug!(seed_count = history.len(), "creating session");
-    let (info, mut events) = lx
-        .daemon
-        .create_session(CreateSessionOptions {
+    let mut session = simply_daemon::DaemonSession::create(
+        lx.daemon.clone(),
+        CreateSessionOptions {
             persistence: Some(Persistence::Ephemeral),
             system_prompt: Some(SYSTEM_PROMPT.to_string()),
             model_id,
             seed: history,
+        },
+    )
+    .await?;
+
+    tracing::info!(session_id = %session.id(), model = %session.model_id(), "session created");
+
+    // 3. Send the current message
+    let user_text = format!("<@{}> says: {}", msg.author.id, msg.content);
+    tracing::debug!("sending message to daemon");
+    session
+        .send(UserMessage {
+            content: vec![InputContent::Text { text: user_text }],
+            tool_filter: None,
         })
         .await?;
 
-    tracing::info!(session_id = %info.id, model = %info.model_id, "session created");
-
-    // 4. Send the current message
-    let user_text = format!("<@{}> says: {}", msg.author.id, msg.content);
-    tracing::debug!("sending message to daemon");
-    lx.daemon
-        .send_message(
-            &info.id,
-            UserMessage {
-                content: vec![InputContent::Text { text: user_text }],
-                tool_filter: None,
-            },
-        )
-        .await?;
-
-    // 5. Stream response back to Discord
-    stream_response(lx, msg, &info.id, &mut events).await?;
-
-    // 6. Close session
-    let _ = lx.daemon.close_session(&info.id).await;
-
-    Ok(())
+    // 4. Stream response back to Discord (session closes on drop)
+    stream_response(lx, msg, &mut session).await
 }
 
 /// Load recent channel messages and convert to seed messages for the daemon.
@@ -169,8 +162,7 @@ async fn load_channel_history(
 async fn stream_response(
     lx: &LuminaContext,
     msg: &Message,
-    _session_id: &SessionId,
-    events: &mut tokio::sync::broadcast::Receiver<DaemonEvent>,
+    session: &mut simply_daemon::DaemonSession,
 ) -> anyhow::Result<()> {
     tracing::debug!("waiting for daemon events");
     let mut text_buffer = String::new();
@@ -178,7 +170,7 @@ async fn stream_response(
     let mut last_edit = std::time::Instant::now();
 
     loop {
-        match events.recv().await {
+        match session.recv().await {
             Ok(DaemonEvent::TextDelta(delta)) => {
                 tracing::debug!(len = delta.len(), "received text delta");
                 text_buffer.push_str(&delta);

@@ -1,12 +1,13 @@
-2026-04-02T20:06:00.666038Z  INFO lumina: connecting to simply-daemon addr=127.0.0.1:9800
-2026-04-02T20:06:00.669004Z  INFO lumina: connected to simply-daemon
-2026-04-02T20:06:00.669091Z  INFO lumina: commands registered count=3
-2026-04-02T20:06:00.749136Z  INFO lumina: lumina starting
-2026-04-02T20:06:01.293729Z  INFO lumina: connected to Discord — use .sync to register commands user=lumina-dev
-2026-04-02T20:06:09.982362Z  INFO lumina::chat: processing chat message channel_id=1489352918967652463 author=simplychris.rl
-2026-04-02T20:06:10.738763Z  INFO lumina::chat: session created session_id=5b764654-631f-4e6f-b01b-e4e249ac1f4c model=gemini/models/gemini-2.5-flash
-2026-04-02T20:06:10.738794Z DEBUG lumina::chat: seeding channel history count=3
-2026-04-02T20:06:10.739104Z DEBUG lumina::chat: sending message to daemon
-2026-04-02T20:06:10.739268Z DEBUG lumina::chat: waiting for daemon events
-2026-04-02T20:06:10.741493Z DEBUG lumina::chat: received other event event=UserMessage(ChatMessage { role: User, payload: ChatPayload { content: [Text { text: "<@358478627270295563> says: hi" }] } })
-2026-04-02T20:06:11.766011Z DEBUG lumina::chat: turn complete
+2026-04-02T20:12:46.793272Z  INFO lumina: connecting to simply-daemon addr=127.0.0.1:9800
+2026-04-02T20:12:46.795864Z  INFO lumina: connected to simply-daemon
+2026-04-02T20:12:46.795941Z  INFO lumina: commands registered count=3
+2026-04-02T20:12:46.849652Z  INFO lumina: lumina starting
+2026-04-02T20:12:47.543407Z  INFO lumina: connected to Discord — use .sync to register commands user=lumina-dev
+2026-04-02T20:13:11.924558Z  INFO lumina::chat: processing chat message channel_id=1489352918967652463 author=simplychris.rl
+2026-04-02T20:13:12.360760Z DEBUG lumina::chat: creating session seed_count=1
+2026-04-02T20:13:12.362078Z  INFO lumina::chat: session created session_id=b645470e-9d14-40e9-bbbe-6ac0574d9070 model=gemini/models/gemini-2.5-flash
+2026-04-02T20:13:12.362106Z DEBUG lumina::chat: sending message to daemon
+2026-04-02T20:13:12.362362Z DEBUG lumina::chat: waiting for daemon events
+2026-04-02T20:13:12.364023Z DEBUG lumina::chat: received other event event=UserMessage(ChatMessage { role: User, payload: ChatPayload { content: [Text { text: "<@358478627270295563> says: hi" }] } })
+2026-04-02T20:13:13.036700Z DEBUG lumina::chat: received assistant text len=7
+2026-04-02T20:13:13.403190Z DEBUG lumina::chat: turn complete

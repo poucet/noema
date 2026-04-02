@@ -28,6 +28,8 @@ use crate::mcp::{McpService, McpServiceConfig};
 
 struct ManagedSession<S: StorageTypes> {
     info: SessionInfo,
+    /// Only set for persistent sessions (linked to storage).
+    conversation_id: Option<ConversationId>,
     manager: ConversationManager<S>,
     /// Per-session broadcast sender — subscribers get a receiver from this.
     event_broadcast: broadcast::Sender<DaemonEvent>,
@@ -43,6 +45,8 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     stores: Arc<dyn Stores<S>>,
     mcp: McpService,
     sessions: Mutex<HashMap<SessionId, ManagedSession<S>>>,
+    /// Maps conversation IDs to session IDs for event routing.
+    conv_to_session: Mutex<HashMap<ConversationId, SessionId>>,
     default_model_id: Mutex<String>,
     user_id: UserId,
     manager_event_tx: SharedEventSender,
@@ -89,6 +93,7 @@ where
             stores,
             mcp,
             sessions: Mutex::new(HashMap::new()),
+            conv_to_session: Mutex::new(HashMap::new()),
             default_model_id: Mutex::new(default_model_id.to_string()),
             user_id,
             manager_event_tx,
@@ -107,7 +112,12 @@ where
     ) {
         tokio::spawn(async move {
             while let Some((conversation_id, event)) = rx.recv().await {
-                let session_id = SessionId::new(conversation_id.as_str());
+                let conv_map = daemon.conv_to_session.lock().await;
+                let session_id = match conv_map.get(&conversation_id) {
+                    Some(sid) => sid.clone(),
+                    None => continue,
+                };
+                drop(conv_map);
                 let sessions = daemon.sessions.lock().await;
                 if let Some(managed) = sessions.get(&session_id) {
                     let daemon_events = Self::manager_event_to_daemon_events(&session_id, event);
@@ -233,7 +243,7 @@ where
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
         let conversation_id = ConversationId::new();
-        let session_id = SessionId::new(conversation_id.as_str());
+        let session_id = SessionId::generate();
         let persistence = options.persistence.unwrap_or(Persistence::Persistent);
 
         let model_id = match options.model_id {
@@ -242,7 +252,7 @@ where
         };
         let model = llm::create_model(&model_id)?;
 
-        let mut session = Session::new(Arc::clone(&self.coordinator), conversation_id);
+        let mut session = Session::new(Arc::clone(&self.coordinator), conversation_id.clone());
 
         // Seed with provided history
         if !options.seed.is_empty() {
@@ -265,10 +275,18 @@ where
 
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
 
+        let is_persistent = matches!(&persistence, Persistence::Persistent);
+        let conv_id_for_session = if is_persistent {
+            self.conv_to_session.lock().await.insert(conversation_id.clone(), session_id.clone());
+            Some(conversation_id)
+        } else {
+            None
+        };
         self.sessions.lock().await.insert(
             session_id.clone(),
             ManagedSession {
                 info: info.clone(),
+                conversation_id: conv_id_for_session,
                 manager,
                 event_broadcast: broadcast_tx,
             },
@@ -297,7 +315,7 @@ where
         }
 
         let conversation_id = ConversationId::from_string(session_id.as_str());
-        let session = Session::open(Arc::clone(&self.coordinator), conversation_id).await?;
+        let session = Session::open(Arc::clone(&self.coordinator), conversation_id.clone()).await?;
 
         let model_id = self.default_model_id.lock().await.clone();
         let model = llm::create_model(&model_id)?;
@@ -306,10 +324,12 @@ where
 
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
 
+        self.conv_to_session.lock().await.insert(conversation_id.clone(), session_id.clone());
         self.sessions.lock().await.insert(
             session_id.clone(),
             ManagedSession {
                 info: info.clone(),
+                conversation_id: Some(conversation_id),
                 manager,
                 event_broadcast: broadcast_tx,
             },
@@ -332,11 +352,15 @@ where
 
     async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()> {
         let removed = self.sessions.lock().await.remove(session_id);
-        if removed.is_some() {
-            tracing::info!(session_id = %session_id, "session closed");
-            Ok(())
-        } else {
-            anyhow::bail!("session not found: {session_id}")
+        match removed {
+            Some(managed) => {
+                if let Some(conv_id) = &managed.conversation_id {
+                    self.conv_to_session.lock().await.remove(conv_id);
+                }
+                tracing::info!(session_id = %session_id, "session closed");
+                Ok(())
+            }
+            None => anyhow::bail!("session not found: {session_id}"),
         }
     }
 
@@ -344,6 +368,7 @@ where
         let mut sessions = self.sessions.lock().await;
         let count = sessions.len();
         sessions.clear();
+        self.conv_to_session.lock().await.clear();
         tracing::info!(count, "all sessions closed");
         Ok(())
     }

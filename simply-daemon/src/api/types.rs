@@ -53,6 +53,12 @@ pub use simply_core::mcp::{ServerStatus, spawn_retry_task, start_auto_connect};
 pub struct SessionId(String);
 
 impl SessionId {
+    /// Generate a new unique session ID.
+    pub fn generate() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Create from an existing string (for deserialization / WS protocol).
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
