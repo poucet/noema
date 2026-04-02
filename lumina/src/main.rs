@@ -79,20 +79,43 @@ struct Handler {
 
 #[serenity::async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
-        tracing::info!(user = %ready.user.name, "connected to Discord");
+    async fn ready(&self, _ctx: Context, ready: serenity::model::gateway::Ready) {
+        tracing::info!(user = %ready.user.name, "connected to Discord — use .sync to register commands");
+    }
 
+    async fn message(&self, ctx: Context, msg: serenity::model::channel::Message) {
+        if msg.author.bot || !msg.content.starts_with('.') {
+            return;
+        }
+
+        // Owner-only prefix commands
         let data = ctx.data.read().await;
-        let registry = data.get::<CommandRegistry>().expect("CommandRegistry missing");
-        let definitions = registry.definitions();
-        drop(data);
+        let cfg = data.get::<ConfigKey>().expect("ConfigKey missing");
+        let is_owner = cfg.discord.owner_id.map_or(false, |id| msg.author.id.get() == id);
+        if !is_owner {
+            return;
+        }
 
-        for &guild_id in &self.guild_ids {
-            if let Err(e) = guild_id.set_commands(&ctx.http, definitions.clone()).await {
-                tracing::error!(guild_id = %guild_id, error = %e, "failed to register commands");
-            } else {
-                tracing::info!(guild_id = %guild_id, "registered slash commands");
+        match msg.content.as_str() {
+            ".sync" => {
+                let registry = data.get::<CommandRegistry>().expect("CommandRegistry missing");
+                let definitions = registry.definitions();
+                drop(data);
+
+                let mut ok = 0usize;
+                let mut fail = 0usize;
+                for &guild_id in &self.guild_ids {
+                    match guild_id.set_commands(&ctx.http, definitions.clone()).await {
+                        Ok(_) => ok += 1,
+                        Err(e) => {
+                            tracing::error!(guild_id = %guild_id, error = %e, "sync failed");
+                            fail += 1;
+                        }
+                    }
+                }
+                let _ = msg.reply(&ctx.http, format!("Synced commands to {ok} guild(s), {fail} failed.")).await;
             }
+            _ => {}
         }
     }
 
