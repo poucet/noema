@@ -6,7 +6,7 @@
 
 ---
 
-## Stage 1 — Workspace Restructure
+## Stage 1 — Workspace Restructure (Complete)
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
@@ -17,51 +17,11 @@
 | 1.5 | ✅ | Update workspace `Cargo.toml` members list | P0 | S |
 | 1.6 | ✅ | Verify `noema-desktop` builds with restructured deps | P0 | S |
 
-### Task Details
-
-**1.1 — Rename noema-core → simply-core**
-- Rename directory `noema-core/` → `simply-core/`
-- Update `Cargo.toml` package name to `simply-core`
-- Update `noema-core/llm/` → `simply-core/llm/`, package name to `simply-llm`
-- Update all `use noema_core::` → `use simply_core::` across workspace
-- Update all `path = "../noema-core"` dependency paths
-
-**1.2 — Rename noema-audio → simply-audio**
-- Rename directory `noema-audio/` → `simply-audio/`
-- Update `Cargo.toml` package name to `simply-audio`
-- Update workspace references and dependent crates
-
-**1.3 — Create simply-daemon crate**
-- Library + binary crate at `simply-daemon/`
-- `lib.rs` exposes a trait-based `DaemonApi` — the clean Rust interface
-- `main.rs` is the standalone daemon runner (one way to host it)
-- Depends on `simply-core` for LLM, MCP protocol, agent types
-- Initially a skeleton that compiles
-- **Key pattern:** Noema/Lumina depend on the trait, not on how it's hosted.
-  Two implementations planned:
-  - **In-process** — daemon linked directly into the binary (for testing, single-binary deploys)
-  - **Remote** — calls go over WebSocket to a separate daemon process
-  This lets Noema work against the daemon API immediately, before WebSocket is built.
-
-**1.4 — Merge noema-mcp-core into simply-daemon**
-- Move `noema-mcp-core/src/tools.rs` → `simply-daemon/src/mcp/tools.rs`
-- This code depends on StorageCoordinator, Session, agent orchestration — daemon concerns
-- Remove `noema-mcp-core/` crate from workspace
-- Update imports to use daemon-local paths
-
-**1.5 — Update workspace Cargo.toml**
-- Remove old member paths (`noema-core`, `noema-audio`, `noema-mcp-core`)
-- Add new member paths (`simply-core`, `simply-audio`, `simply-daemon`)
-- Verify workspace resolver and default-members
-
-**1.6 — Verify noema-desktop builds**
-- Update `noema-desktop/src-tauri/Cargo.toml` deps to point to renamed crates
-- Ensure `cargo check --workspace` passes
-- Confirm desktop app still launches against new structure
-
 ---
 
 ## Stage 2 — Daemon
+
+**Goal:** All logic in the daemon so Lumina can be built on top of the same API.
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
@@ -70,98 +30,65 @@
 | 2.3 | ✅ | Wire Noema desktop to use in-process daemon | P0 | L |
 | 2.3.1 | ✅ | Decouple Noema from simply-core/llm — only use daemon traits; rename `noema-desktop` → `noema` | P0 | L |
 | 2.3.2 | ✅ | Move MCP commands + OAuth flow into daemon (McpApi + OAuthApi) | P0 | M |
-| 2.3.3 | ⬜ | Move gdocs document operations into daemon DocumentApi | P1 | M |
-| 2.4 | ⬜ | Session manager: in-memory state, ephemeral + persistent modes | P0 | M |
-| 2.5 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
-| 2.6 | ⬜ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
-| 2.7 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P0 | M |
-| 2.8 | ⬜ | Peer registry: connected clients, global MCP tool registry | P0 | M |
-| 2.9 | ⬜ | MCP client: connect to action services, discover tools | P1 | M |
-| 2.10 | ⬜ | Move storage from `simply-core` → `simply-daemon` | P0 | M |
+| 2.4 | ⬜ | Stable OAuth callback port on daemon | P0 | S |
+| 2.5 | ⬜ | DocumentApi on daemon — store/index/query documents | P0 | M |
+| 2.5.1 | ⬜ | Rewrite Noema gdocs.rs as thin wrappers (Google API via `noema-mcp-gdocs`, storage via DocumentApi) | P0 | M |
+| 2.6 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
+| 2.7 | ⬜ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
+| 2.8 | ⬜ | Move storage from `simply-core` → `simply-daemon` | P0 | M |
+| 2.9 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P1 | M |
+| 2.10 | ⬜ | Peer registry: connected clients, global MCP tool registry | P1 | M |
+| 2.11 | ⬜ | MCP client: connect to action services, discover tools | P2 | M |
 
 ### Task Details
 
-**2.1 — DaemonApi trait**
-- Define the trait in `simply-daemon/src/api.rs`
-- Core operations: create_session, send_message, list_sessions, register_mcp, etc.
-- Async trait — both in-process and remote impls are async
-- Message/event types as plain Rust structs (serde-serializable for future WebSocket use)
+**2.4 — Stable OAuth callback port**
+- Currently `OAuthService` spins up a temporary callback server on a random port per flow
+- Daemon should start a single long-lived callback server on a configured port at startup
+- Port comes from config (`~/.config/simply/config.toml` → `oauth_callback_port`)
+- Enables predictable redirect URIs for Google OAuth console, cloud Lumina, etc.
+- Refactor `OAuthService` to accept a shared callback server rather than creating per-flow
 
-**2.2 — In-process implementation**
-- `simply-daemon/src/embedded.rs` — implements `DaemonApi` directly
-- Wires simply-core agent, MCP registry, storage coordinator in-process
-- No networking — pure Rust calls
-- This is the first way Noema/Lumina can use the daemon
+**2.5 — DocumentApi on daemon**
+- New trait in `api/document.rs`: `import_document`, `list_documents`, `get_document`, `delete_document`, `sync_document`, `get_document_content`
+- Daemon implementation uses `DocumentStore`/`StorageCoordinator` for persistence
+- Google-specific fetching stays in `noema-mcp-gdocs` crate (pure Google API client)
+- Daemon calls `GoogleDocsClient` to fetch, then stores via its own storage
+- This separation means Lumina can import docs without any Google-specific code in the daemon trait
 
-**2.3 — Wire Noema desktop to in-process daemon**
-- Replace Noema's direct simply-core usage with `DaemonApi` calls
-- Use the in-process implementation — same binary, no separate process
-- Validates the API surface is complete before building WebSocket layer
+**2.5.1 — Rewrite Noema gdocs.rs**
+- Noema gdocs commands become thin wrappers:
+  - Google API calls → `noema-mcp-gdocs::GoogleDocsClient` (fetching, listing)
+  - Storage/indexing → daemon `DocumentApi` (import, store, query)
+- Remove `stores()`/`coordinator()` escape hatches from `EmbeddedDaemon`
 
-**2.3.1 — Decouple Noema from simply-core/llm**
-- Noema's Cargo.toml should only depend on `simply-daemon`, not `simply-core` or `llm`
-- Expand daemon API traits to cover all operations Noema uses (entity CRUD, turn/span queries, forking, cross-references)
-- Re-export types from `simply-daemon` that Noema needs (ConversationId, DisplayMessage types, etc.)
-- Rename `noema-desktop/` → `noema/`, update workspace Cargo.toml and all references
-- The daemon is the single API boundary — Noema never reaches into core internals
-
-**2.4 — Session manager**
-- `simply-daemon/src/session/` module
-- In-memory conversation state
-- Ephemeral mode (no persistence) and persistent mode (UCM-backed)
-- Context seeding for new sessions
-
-**2.5 — Daemon binary**
+**2.6 — Daemon binary**
 - `simply-daemon/src/main.rs` with tokio runtime
 - Config loading from `~/.config/simply/` or env vars
 - Signal handling (SIGTERM, SIGINT) for graceful shutdown
 - Structured logging with tracing
+- Starts OAuth callback server, MCP server, auto-connect
 
-**2.6 — WebSocket server + remote DaemonApi**
+**2.7 — WebSocket server + remote DaemonApi**
 - `simply-daemon/src/ws/` — WebSocket server
 - `simply-daemon/src/remote.rs` — client-side `DaemonApi` impl over WebSocket
 - JSON message protocol per [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md)
-- Noema can swap in-process for remote without code changes
+- Noema/Lumina can swap in-process for remote without code changes
 
-**2.7 — REST server**
-- `simply-daemon/src/rest/` module
-- `POST /events` — trigger inbound events
-- `POST /register` — service registration
-- `GET /health` — health check
-
-**2.8 — Peer registry**
-- `simply-daemon/src/registry/` module
-- Track connected WebSocket clients and registered services
-- Global MCP tool registry (aggregate tools from all connected action services)
-
-**2.9 — MCP client**
-- `simply-daemon/src/mcp/client.rs`
-- Connect to registered action services as MCP client
-- Discover and cache available tools
-- Forward tool calls from agent to appropriate service
-
-**2.10 — Move storage from simply-core → simply-daemon**
+**2.8 — Move storage from simply-core → simply-daemon**
 - Move `simply-core/src/storage/` → `simply-daemon/src/storage/`
 - Update `simply-core` to remove storage module
 - Re-export or adjust imports in `simply-daemon`
-- Storage includes: coordinator, session, traits, document_resolver, ids
-- Deferred from Stage 1 — easier once daemon is wired up and verifiable
+- Deferred — easier once daemon is wired up and verifiable
 
 ---
 
 ## Dependencies
 
 ```
-Stage 1:
-  1.1 (rename core) ─┐
-  1.2 (rename audio) ─┤→ 1.5 (update workspace) → 1.6 (verify desktop)
-  1.3 (create daemon) ─┤
-  1.4 (merge mcp-core) ┘
-
-Stage 2:
-  2.1 (trait) → 2.2 (in-process impl) → 2.3 (wire Noema)
-  2.4 (sessions) feeds into 2.2
-  2.5 (binary) → 2.6 (WebSocket + remote impl) → 2.7 (REST) → 2.8 (registry)
-  2.9 (MCP client) after 2.8
-  2.10 (move storage) after 2.3 is validated
+Stage 2 (remaining):
+  2.4 (stable OAuth port) — independent, small
+  2.5 (DocumentApi) → 2.5.1 (rewrite gdocs.rs)
+  2.6 (daemon binary) → 2.7 (WebSocket + remote impl)
+  2.8 (move storage) — after 2.5.1 is validated
 ```
