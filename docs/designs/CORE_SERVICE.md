@@ -217,6 +217,34 @@ Sessions are the daemon's unit of conversation state. They live in memory and ar
 
 ---
 
+## Connection Resilience
+
+The daemon can restart independently of clients. Clients must handle disconnection gracefully and reconnect automatically.
+
+### Client Auto-Reconnect
+
+When a WebSocket connection drops, the client:
+
+1. Detects disconnection (WebSocket close / error)
+2. Enters reconnection loop with **exponential backoff** (e.g., 100ms → 200ms → 400ms → ... capped at 30s)
+3. On successful reconnect: re-registers MCP tools and event sources, resumes or re-seeds sessions
+4. UI shows connection status (disconnected / reconnecting / connected) — the client remains usable for local operations during disconnection
+
+### Daemon Statelessness Across Restarts
+
+The daemon does not assume clients stay connected across its own restarts. On startup:
+
+- UCM-backed sessions are reloadable from storage
+- Ephemeral sessions are lost — clients re-seed from their own state (Discord history, in-memory messages)
+- MCP tool registrations are re-established by clients on reconnect
+- The daemon does not persist WebSocket session state to disk
+
+### Ordering
+
+The client drives recovery. The daemon accepts fresh connections and treats reconnecting clients the same as new ones. Session resumption (matching a new connection to a prior session) uses session IDs, not connection identity.
+
+---
+
 ## Adding a New Rich Client
 
 Create a new crate that:
