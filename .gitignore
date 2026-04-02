@@ -4,6 +4,7 @@ target/
 .env
 .jj-workspaces
 models/
+daemon.log
 noema.log
 node_modules/
 TODO.md
