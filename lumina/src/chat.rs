@@ -168,20 +168,21 @@ async fn stream_response(
     let mut text_buffer = String::new();
     let mut discord_msg: Option<Message> = None;
     let mut last_edit = std::time::Instant::now();
+    let mut flushed_len = 0usize; // track what's been sent to Discord
 
     loop {
         match session.recv().await {
             Ok(DaemonEvent::TextDelta(delta)) => {
                 tracing::debug!(len = delta.len(), "received text delta");
                 text_buffer.push_str(&delta);
-                flush_if_needed(lx, msg, &text_buffer, &mut discord_msg, &mut last_edit).await?;
+                flushed_len = flush_if_needed(lx, msg, &text_buffer, flushed_len, &mut discord_msg, &mut last_edit).await?;
             }
             Ok(DaemonEvent::AssistantContent(content_block)) => {
                 match content_block {
                     ContentBlock::Text { text } => {
                         tracing::debug!(len = text.len(), "received assistant text");
                         text_buffer.push_str(&text);
-                        flush_if_needed(lx, msg, &text_buffer, &mut discord_msg, &mut last_edit).await?;
+                        flushed_len = flush_if_needed(lx, msg, &text_buffer, flushed_len, &mut discord_msg, &mut last_edit).await?;
                     }
                     ContentBlock::Image { data, mime_type } => {
                         let ext = match mime_type.as_str() {
@@ -241,7 +242,8 @@ async fn stream_response(
             }
             Ok(DaemonEvent::TurnComplete) => {
                 tracing::debug!("turn complete");
-                if !text_buffer.is_empty() {
+                // Only flush if there's new content since last flush
+                if text_buffer.len() > flushed_len {
                     let content = truncate_for_discord(&text_buffer);
                     match &mut discord_msg {
                         None => {
@@ -276,27 +278,30 @@ async fn stream_response(
 }
 
 /// Flush text buffer to Discord if debounce interval has passed.
+/// Returns the length of text that has been flushed.
 async fn flush_if_needed(
     lx: &LuminaContext,
     msg: &Message,
     text_buffer: &str,
+    flushed_len: usize,
     discord_msg: &mut Option<Message>,
     last_edit: &mut std::time::Instant,
-) -> anyhow::Result<()> {
-    if last_edit.elapsed() >= std::time::Duration::from_millis(500) {
-        let content = truncate_for_discord(text_buffer);
-        match discord_msg {
-            None => {
-                *discord_msg = Some(msg.channel_id.say(&lx.http, &content).await?);
-            }
-            Some(m) => {
-                m.edit(&lx.http, serenity::builder::EditMessage::new().content(&content))
-                    .await?;
-            }
-        }
-        *last_edit = std::time::Instant::now();
+) -> anyhow::Result<usize> {
+    if text_buffer.len() <= flushed_len || last_edit.elapsed() < std::time::Duration::from_millis(500) {
+        return Ok(flushed_len);
     }
-    Ok(())
+    let content = truncate_for_discord(text_buffer);
+    match discord_msg {
+        None => {
+            *discord_msg = Some(msg.channel_id.say(&lx.http, &content).await?);
+        }
+        Some(m) => {
+            m.edit(&lx.http, serenity::builder::EditMessage::new().content(&content))
+                .await?;
+        }
+    }
+    *last_edit = std::time::Instant::now();
+    Ok(text_buffer.len())
 }
 
 fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
