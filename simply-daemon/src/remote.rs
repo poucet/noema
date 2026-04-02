@@ -8,14 +8,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use simply_rpc::RpcClient;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::api::*;
 use crate::ws::client::WsConnection;
+use crate::ws::ConnectionState;
 
 /// A daemon client that talks to a remote daemon over WebSocket.
 ///
 /// Implements all `DaemonApi` traits via generated RPC dispatch.
+/// Reconnects automatically with exponential backoff when the daemon restarts.
 /// Construct with `RemoteDaemon::connect(addr)`.
 pub struct RemoteDaemon {
     conn: WsConnection,
@@ -31,6 +33,16 @@ impl RemoteDaemon {
     /// Convert to a trait object. Use this when you need `Arc<dyn DaemonApi>`.
     pub fn into_daemon(self: Arc<Self>) -> Arc<dyn DaemonApi> {
         self
+    }
+
+    /// Current connection state.
+    pub fn connection_state(&self) -> ConnectionState {
+        self.conn.connection_state()
+    }
+
+    /// Watch connection state changes (for UI status indicators).
+    pub fn watch_connection_state(&self) -> watch::Receiver<ConnectionState> {
+        self.conn.watch_state()
     }
 }
 

@@ -20,3 +20,4 @@ pub mod ws;
 /// Re-exported types for clients.
 pub use api::types as types;
 pub use remote::RemoteDaemon;
+pub use ws::ConnectionState;

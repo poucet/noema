@@ -10,11 +10,14 @@ use std::sync::Arc;
 
 use simply_rpc::Dispatcher;
 
+use tokio::sync::watch;
+
 use crate::api::DaemonApi;
 use crate::embedded::EmbeddedDaemon;
 use crate::remote::RemoteDaemon;
 use crate::storage::SqliteStores;
 
+use super::client::ConnectionState;
 use super::{rest, server};
 
 const DEFAULT_DAEMON_PORT: u16 = 9800;
@@ -29,9 +32,10 @@ pub enum DaemonHandle {
         /// Fires when `/kill` is called on the REST API.
         kill_rx: Option<tokio::sync::mpsc::Receiver<()>>,
     },
-    /// Connected to a remote daemon.
+    /// Connected to a remote daemon. Reconnects automatically on disconnect.
     Remote {
         daemon: Arc<dyn DaemonApi>,
+        remote: Arc<RemoteDaemon>,
     },
 }
 
@@ -45,6 +49,25 @@ impl DaemonHandle {
 
     pub fn is_host(&self) -> bool {
         matches!(self, DaemonHandle::Host { .. })
+    }
+
+    /// Current connection state. Host is always connected.
+    pub fn connection_state(&self) -> ConnectionState {
+        match self {
+            DaemonHandle::Host { .. } => ConnectionState::Connected,
+            DaemonHandle::Remote { remote, .. } => remote.connection_state(),
+        }
+    }
+
+    /// Watch connection state changes. Host never changes.
+    pub fn watch_connection_state(&self) -> watch::Receiver<ConnectionState> {
+        match self {
+            DaemonHandle::Host { .. } => {
+                let (_, rx) = watch::channel(ConnectionState::Connected);
+                rx
+            }
+            DaemonHandle::Remote { remote, .. } => remote.watch_connection_state(),
+        }
     }
 }
 
@@ -72,9 +95,8 @@ pub async fn connect_or_host(
     match connect_result {
         Ok(Ok(remote)) => {
             tracing::info!(port, "Connected to existing daemon");
-            return Ok(DaemonHandle::Remote {
-                daemon: remote.into_daemon(),
-            });
+            let daemon = Arc::clone(&remote) as Arc<dyn DaemonApi>;
+            return Ok(DaemonHandle::Remote { daemon, remote });
         }
         Ok(Err(e)) => {
             tracing::debug!(port, error = %e, "No daemon at port, will start embedded");
