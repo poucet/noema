@@ -41,35 +41,44 @@ impl DaemonHandle {
 }
 
 /// Try to connect to an existing daemon. If none is running, start one.
-///
-/// Uses `daemon_port` from config (default 9800).
 pub async fn connect_or_host(port: Option<u16>) -> anyhow::Result<DaemonHandle> {
     let port = port.unwrap_or(DEFAULT_DAEMON_PORT);
     let addr = format!("127.0.0.1:{}", port);
 
-    // Try to connect to existing daemon
-    match RemoteDaemon::connect(&addr).await {
-        Ok(remote) => {
+    // Try to connect with a short timeout — fail fast if nothing is listening
+    let connect_result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        RemoteDaemon::connect(&addr),
+    )
+    .await;
+
+    match connect_result {
+        Ok(Ok(remote)) => {
             tracing::info!(port, "Connected to existing daemon");
-            Ok(DaemonHandle::Remote {
+            return Ok(DaemonHandle::Remote {
                 daemon: remote as Arc<dyn DaemonApi>,
-            })
+            });
+        }
+        Ok(Err(e)) => {
+            tracing::debug!(port, error = %e, "No daemon at port, will start embedded");
         }
         Err(_) => {
-            // No daemon running — start one
-            tracing::info!(port, "No daemon found, starting embedded daemon + WS server");
-
-            config::load_env_file();
-            let stores = Arc::new(SqliteStores::open()?);
-            let daemon = EmbeddedDaemon::new(stores).await?;
-            let daemon: Arc<dyn DaemonApi> = daemon;
-
-            let server_handle = server::start(Arc::clone(&daemon), port).await?;
-
-            Ok(DaemonHandle::Host {
-                daemon,
-                _server: server_handle,
-            })
+            tracing::debug!(port, "Connect timed out, will start embedded");
         }
     }
+
+    // No daemon running — start one
+    tracing::info!(port, "Starting embedded daemon + WS server");
+
+    config::load_env_file();
+    let stores = Arc::new(SqliteStores::open()?);
+    let daemon = EmbeddedDaemon::new(stores).await?;
+    let daemon: Arc<dyn DaemonApi> = daemon;
+
+    let server_handle = server::start(Arc::clone(&daemon), port).await?;
+
+    Ok(DaemonHandle::Host {
+        daemon,
+        _server: server_handle,
+    })
 }
