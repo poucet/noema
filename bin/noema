@@ -15,48 +15,15 @@ case "${1:-dev}" in
     : > "$DAEMON_LOG_FILE"
     cd "$REPO_ROOT/noema" && npm run tauri dev
     ;;
-  daemon)
-    # Start the standalone daemon (WS server on port 9800)
-    export DAEMON_LOG_FILE="$REPO_ROOT/daemon.log"
-    : > "$DAEMON_LOG_FILE"
-    echo "Starting simply-daemon... (log: $DAEMON_LOG_FILE)"
-    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
-    ;;
   split)
     # Start daemon in background, then Noema connecting to it
-    export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
-    : > "$NOEMA_LOG_FILE"
+    "$SCRIPT_DIR/daemon" start
 
-    export DAEMON_LOG_FILE="$REPO_ROOT/daemon.log"
-    : > "$DAEMON_LOG_FILE"
-    echo "Starting daemon in background... (log: $DAEMON_LOG_FILE)"
-    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
-    DAEMON_PID=$!
-
-    # Kill daemon on exit (Ctrl+C, SIGTERM, or normal exit)
-    cleanup() {
-      echo "Stopping daemon (pid $DAEMON_PID)..."
-      kill $DAEMON_PID 2>/dev/null
-      wait $DAEMON_PID 2>/dev/null
-    }
+    cleanup() { "$SCRIPT_DIR/daemon" stop; }
     trap cleanup EXIT INT TERM
 
-    # Wait for daemon to be ready
-    echo "Waiting for daemon on port 9800..."
-    for i in $(seq 1 30); do
-      if nc -z 127.0.0.1 9800 2>/dev/null; then
-        echo "Daemon ready (pid $DAEMON_PID)"
-        break
-      fi
-      sleep 0.5
-    done
-
-    if ! nc -z 127.0.0.1 9800 2>/dev/null; then
-      echo "Daemon failed to start"
-      exit 1
-    fi
-
-    # Start Noema (it will discover the running daemon via WS)
+    export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
+    : > "$NOEMA_LOG_FILE"
     cd "$REPO_ROOT/noema" && npm run tauri dev
     ;;
   build)
@@ -75,9 +42,8 @@ case "${1:-dev}" in
     [[ $REPLY =~ ^[Yy]$ ]] && rm -rf "$DATA_DIR/database" "$DATA_DIR/blob_storage" && echo "Done." || echo "Aborted."
     ;;
   *)
-    echo "Usage: noema [dev|daemon|split|build|install|nuke]"
+    echo "Usage: noema [dev|split|build|install|nuke]"
     echo "  dev      Run Noema with embedded daemon (default)"
-    echo "  daemon   Run standalone daemon only (WS on port 9800)"
     echo "  split    Run daemon + Noema separately (daemon in background)"
     echo "  build    Build release binaries"
     echo "  install  Build and open macOS installer"

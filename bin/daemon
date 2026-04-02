@@ -1,0 +1,113 @@
+#!/bin/bash
+# daemon — manage the simply-daemon process
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PIDFILE="$REPO_ROOT/.daemon.pid"
+DAEMON_PORT="${DAEMON_PORT:-9800}"
+
+export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_core=info}"
+export DAEMON_LOG_FILE="${DAEMON_LOG_FILE:-$REPO_ROOT/daemon.log}"
+
+daemon_is_running() {
+  nc -z 127.0.0.1 "$DAEMON_PORT" 2>/dev/null
+}
+
+daemon_start_bg() {
+  if daemon_is_running; then
+    echo "Daemon already running on port $DAEMON_PORT"
+    return 0
+  fi
+
+  : > "$DAEMON_LOG_FILE"
+  echo "Starting daemon... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
+  cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
+  local pid=$!
+  echo "$pid" > "$PIDFILE"
+
+  echo "Waiting for daemon on port $DAEMON_PORT..."
+  for i in $(seq 1 30); do
+    if daemon_is_running; then
+      echo "Daemon ready (pid $pid)"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "Daemon failed to start"
+  kill "$pid" 2>/dev/null
+  rm -f "$PIDFILE"
+  return 1
+}
+
+daemon_stop() {
+  # Try pidfile first
+  if [ -f "$PIDFILE" ]; then
+    local pid
+    pid=$(cat "$PIDFILE")
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "Stopping daemon (pid $pid)..."
+      kill "$pid"
+      wait "$pid" 2>/dev/null || true
+      rm -f "$PIDFILE"
+      echo "Daemon stopped"
+      return 0
+    fi
+    rm -f "$PIDFILE"
+  fi
+
+  # Fallback: use the REST /kill endpoint
+  if daemon_is_running; then
+    local rest_port=$((DAEMON_PORT + 1))
+    echo "Sending /kill to daemon on port $rest_port..."
+    curl -sf "http://127.0.0.1:$rest_port/kill" >/dev/null 2>&1 || true
+    sleep 1
+    if ! daemon_is_running; then
+      echo "Daemon stopped"
+      return 0
+    fi
+  fi
+
+  echo "No daemon running"
+}
+
+case "${1:-status}" in
+  start)
+    daemon_start_bg
+    ;;
+  run)
+    # Run in foreground (blocking)
+    if daemon_is_running; then
+      echo "Daemon already running on port $DAEMON_PORT"
+      exit 1
+    fi
+    : > "$DAEMON_LOG_FILE"
+    echo "Starting daemon in foreground... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
+    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
+    ;;
+  stop|kill)
+    daemon_stop
+    ;;
+  restart)
+    daemon_stop
+    sleep 1
+    daemon_start_bg
+    ;;
+  status)
+    if daemon_is_running; then
+      echo "Daemon running on port $DAEMON_PORT"
+      [ -f "$PIDFILE" ] && echo "  pid: $(cat "$PIDFILE")"
+    else
+      echo "Daemon not running"
+    fi
+    ;;
+  *)
+    echo "Usage: daemon [start|run|stop|restart|status]"
+    echo "  start    Start daemon in background (default: status)"
+    echo "  run      Start daemon in foreground"
+    echo "  stop     Stop the daemon"
+    echo "  restart  Stop + start"
+    echo "  status   Check if daemon is running"
+    ;;
+esac
