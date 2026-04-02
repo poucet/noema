@@ -17,7 +17,9 @@ use simply_core::storage::ids::{AssetId, ConversationId, UserId};
 use simply_core::storage::session::{ResolvedMessage, Session};
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_core::storage::DocumentResolver;
-use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender};
+use simply_core::{ConversationManager, ManagerEvent, McpRegistry, NoStorage, SessionManager, SharedEventSender};
+use simply_core::light_manager::SessionEventSender;
+use simply_core::LightSession;
 
 use crate::api::*;
 use crate::mcp::{McpService, McpServiceConfig};
@@ -26,11 +28,49 @@ use crate::mcp::{McpService, McpServiceConfig};
 // Session bookkeeping
 // ---------------------------------------------------------------------------
 
+/// Wraps either a persistent ConversationManager or an ephemeral SessionManager.
+enum Manager<S: StorageTypes> {
+    Persistent(ConversationManager<S>),
+    Ephemeral(SessionManager),
+}
+
+impl<S: StorageTypes> Manager<S> {
+    fn send_message(&self, content: Vec<simply_core::storage::content::InputContent>, tool_config: simply_core::ToolConfig) {
+        match self {
+            Manager::Persistent(m) => m.send_message(content, tool_config),
+            Manager::Ephemeral(m) => m.send_message(content, tool_config),
+        }
+    }
+
+    async fn messages_for_display(&self) -> Vec<ResolvedMessage> {
+        match self {
+            Manager::Persistent(m) => m.messages_for_display().await,
+            Manager::Ephemeral(_) => vec![],
+        }
+    }
+
+    fn set_model(&mut self, model: Arc<dyn llm::ChatModel + Send + Sync>, model_id: String) {
+        match self {
+            Manager::Persistent(m) => m.set_model(model, model_id),
+            Manager::Ephemeral(_) => {
+                // TODO: SessionManager model change
+            }
+        }
+    }
+
+    async fn reload(&self) -> anyhow::Result<()> {
+        match self {
+            Manager::Persistent(m) => m.reload().await,
+            Manager::Ephemeral(_) => Ok(()),
+        }
+    }
+}
+
 struct ManagedSession<S: StorageTypes> {
     info: SessionInfo,
     /// Only set for persistent sessions (linked to storage).
     conversation_id: Option<ConversationId>,
-    manager: ConversationManager<S>,
+    manager: Manager<S>,
     /// Per-session broadcast sender — subscribers get a receiver from this.
     event_broadcast: broadcast::Sender<DaemonEvent>,
 }
@@ -144,6 +184,19 @@ where
         }
     }
 
+    fn convert_seed(seed: Vec<SeedMessage>) -> Vec<llm::ChatMessage> {
+        seed.into_iter()
+            .map(|sm| {
+                let blocks: Vec<llm::ContentBlock> = sm
+                    .content
+                    .into_iter()
+                    .filter_map(|c| c.into_content_block_inline())
+                    .collect();
+                llm::ChatMessage::new(sm.role, llm::ChatPayload::new(blocks))
+            })
+            .collect()
+    }
+
     fn build_manager(
         &self,
         session: Session<S>,
@@ -241,7 +294,6 @@ where
         &self,
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
-        let conversation_id = ConversationId::new();
         let session_id = SessionId::generate();
         let persistence = options.persistence.unwrap_or(Persistence::Persistent);
 
@@ -251,41 +303,78 @@ where
         };
         let model = llm::create_model(&model_id)?;
 
-        let mut session = Session::new(Arc::clone(&self.coordinator), conversation_id.clone());
-
-        // Seed with provided history
-        if !options.seed.is_empty() {
-            let seed_messages: Vec<llm::ChatMessage> = options.seed.into_iter().map(|sm| {
-                let blocks: Vec<llm::ContentBlock> = sm.content.into_iter().map(|c| match c {
-                    InputContent::Text { text } => llm::ContentBlock::Text { text },
-                    InputContent::Image { data, mime_type } => llm::ContentBlock::Image { data, mime_type },
-                    InputContent::Audio { data, mime_type } => llm::ContentBlock::Audio { data, mime_type },
-                    InputContent::DocumentRef { id } => llm::ContentBlock::DocumentRef { id: id.to_string() },
-                    InputContent::AssetRef { asset_id, mime_type } => llm::ContentBlock::DocumentRef { id: asset_id.to_string() },
-                }).collect();
-                llm::ChatMessage::new(sm.role, llm::ChatPayload::new(blocks))
-            }).collect();
-            tracing::debug!(count = seed_messages.len(), "seeding session with history");
-            session.seed(seed_messages);
-        }
-
-        let manager = self.build_manager(session, model, model_id.clone());
-        let info = Self::make_session_info(&session_id, persistence, model_id);
-
+        let seed_messages = Self::convert_seed(options.seed);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
+        let info = Self::make_session_info(&session_id, persistence, model_id.clone());
 
-        let is_persistent = matches!(&persistence, Persistence::Persistent);
-        let conv_id_for_session = if is_persistent {
-            self.conv_to_session.lock().await.insert(conversation_id.clone(), session_id.clone());
-            Some(conversation_id)
-        } else {
-            None
+        let manager = match persistence {
+            Persistence::Ephemeral => {
+                // Lightweight path: in-memory only, no storage
+                let mut light = LightSession::new();
+                if let Some(ref prompt) = options.system_prompt {
+                    light = LightSession::with_system_prompt(prompt.clone());
+                }
+                if !seed_messages.is_empty() {
+                    tracing::debug!(count = seed_messages.len(), "seeding ephemeral session");
+                    light.seed(seed_messages);
+                }
+
+                let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<(String, ManagerEvent)>();
+                let broadcast_tx_clone = broadcast_tx.clone();
+                let sid = session_id.clone();
+                // Forward SessionManager events to the session broadcast channel
+                tokio::spawn(async move {
+                    while let Some((_key, event)) = evt_rx.recv().await {
+                        let daemon_events = Self::manager_event_to_daemon_events(&sid, event);
+                        for de in daemon_events {
+                            let _ = broadcast_tx_clone.send(de);
+                        }
+                    }
+                });
+
+                let sm = SessionManager::new(
+                    session_id.as_str().to_string(),
+                    light,
+                    model,
+                    model_id,
+                    Arc::clone(self.mcp.registry()),
+                    self.stores.document(),
+                    evt_tx,
+                    NoStorage,
+                );
+                Manager::Ephemeral(sm)
+            }
+            Persistence::Persistent => {
+                // Full path: storage-backed
+                let conversation_id = ConversationId::new();
+                let mut session = Session::new(Arc::clone(&self.coordinator), conversation_id.clone());
+                if !seed_messages.is_empty() {
+                    tracing::debug!(count = seed_messages.len(), "seeding persistent session");
+                    session.seed(seed_messages);
+                }
+                let cm = self.build_manager(session, model, model_id);
+                self.conv_to_session.lock().await.insert(conversation_id.clone(), session_id.clone());
+                Manager::Persistent(cm)
+            }
         };
+
+        let conv_id = match &manager {
+            Manager::Persistent(_) => {
+                // Already inserted above
+                // Get it back from conv_to_session by reverse lookup
+                let conv_map = self.conv_to_session.lock().await;
+                conv_map.iter()
+                    .find(|(_, sid)| **sid == session_id)
+                    .map(|(cid, _)| cid.clone())
+            }
+            Manager::Ephemeral(_) => None,
+        };
+
         self.sessions.lock().await.insert(
             session_id.clone(),
             ManagedSession {
                 info: info.clone(),
-                conversation_id: conv_id_for_session,
+                conversation_id: conv_id,
                 manager,
                 event_broadcast: broadcast_tx,
             },
@@ -318,7 +407,7 @@ where
 
         let model_id = self.default_model_id.lock().await.clone();
         let model = llm::create_model(&model_id)?;
-        let manager = self.build_manager(session, model, model_id.clone());
+        let manager = Manager::Persistent(self.build_manager(session, model, model_id.clone()));
         let info = Self::make_session_info(session_id, Persistence::Persistent, model_id);
 
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
