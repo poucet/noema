@@ -54,12 +54,21 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let limit = lx.config.discord.history_limit.unwrap_or(DEFAULT_HISTORY_LIMIT);
     let history = load_channel_history(lx, msg.channel_id, bot_id.get(), limit).await?;
 
-    // 2. Create ephemeral session with system prompt
+    // 2. Create ephemeral session with system prompt and resolved model
+    // Priority: per-channel override → config default → daemon default
+    let model_id = {
+        let channel_models = lx.state.channel_models.read().await;
+        channel_models
+            .get(&msg.channel_id)
+            .cloned()
+            .or_else(|| lx.config.discord.model_id.clone().filter(|s| !s.is_empty()))
+    };
     let (info, mut events) = lx
         .daemon
         .create_session(CreateSessionOptions {
             persistence: Some(Persistence::Ephemeral),
             system_prompt: Some(SYSTEM_PROMPT.to_string()),
+            model_id,
             ..Default::default()
         })
         .await?;

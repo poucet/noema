@@ -10,3 +10,4 @@ guild_ids = []
 status_channel_id =
 ai_chats_category_id =
 history_limit = 1000
+model_id = ""

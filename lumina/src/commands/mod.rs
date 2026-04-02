@@ -25,12 +25,15 @@ use tokio::sync::RwLock;
 /// Shared mutable state across all handlers.
 pub struct SharedState {
     pub paused_channels: RwLock<HashSet<ChannelId>>,
+    /// Per-channel model override. Falls back to config default if not set.
+    pub channel_models: RwLock<HashMap<ChannelId, String>>,
 }
 
 impl SharedState {
     pub fn new() -> Self {
         Self {
             paused_channels: RwLock::new(HashSet::new()),
+            channel_models: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -89,6 +92,11 @@ pub trait SlashCommand: Send + Sync {
 
     /// Handle an incoming invocation.
     async fn run(&self, lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()>;
+
+    /// Handle autocomplete for a command option. Default: no-op.
+    async fn autocomplete(&self, _lx: &LuminaContext, _ac: &CommandInteraction) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +164,7 @@ impl CommandRegistry {
         self.commands.values().map(|c| c.register()).collect()
     }
 
-    /// Dispatch an incoming interaction to the matching command.
+    /// Dispatch an incoming command interaction.
     pub async fn dispatch(&self, lx: &LuminaContext, cmd: &CommandInteraction) {
         let name = cmd.data.name.as_str();
         match self.commands.get(name) {
@@ -166,6 +174,16 @@ impl CommandRegistry {
                 }
             }
             None => tracing::warn!(command = name, "unknown command"),
+        }
+    }
+
+    /// Dispatch an autocomplete interaction.
+    pub async fn dispatch_autocomplete(&self, lx: &LuminaContext, ac: &CommandInteraction) {
+        let name = ac.data.name.as_str();
+        if let Some(handler) = self.commands.get(name) {
+            if let Err(e) = handler.autocomplete(lx, ac).await {
+                tracing::error!(command = name, error = %e, "autocomplete failed");
+            }
         }
     }
 }

@@ -26,6 +26,8 @@ pub struct DiscordConfig {
     pub ai_chats_category_id: Option<u64>,
     /// Max messages to load from Discord channel history as context (default: 1000)
     pub history_limit: Option<u16>,
+    /// Default LLM model ID for Lumina sessions
+    pub model_id: Option<String>,
 }
 
 impl LuminaConfig {
