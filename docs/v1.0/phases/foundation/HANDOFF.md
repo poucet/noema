@@ -1,143 +1,70 @@
-# Foundation — Stage 2 Handoff
+# Foundation Phase — Handoff
 
-Stage 1 (Workspace Restructure) is complete. This document has everything needed to start Stage 2 (Daemon).
-
----
-
-## What was done in Stage 1
-
-Restructured the workspace from `noema-*` naming to the target architecture:
-
-| Before | After | Notes |
-|--------|-------|-------|
-| `noema-core/` | `simply-core/` | Library crate — LLM, MCP client, agents |
-| `noema-core/llm/` | `simply-core/llm/` | LLM abstraction (unchanged internally) |
-| `noema-audio/` | `simply-audio/` | Audio — Whisper STT, CPAL, voice coordination |
-| `noema-mcp-core/` | `simply-daemon/src/mcp/` | Merged into daemon — depends on storage/sessions |
-| *(new)* | `simply-daemon/` | Daemon crate with `DaemonApi` trait skeleton |
-
-All `use noema_core::` → `use simply_core::`, all `use noema_audio::` → `use simply_audio::`.
-Desktop uses `simply_daemon::mcp` instead of the old standalone crate.
-Workspace compiles and Noema runs end-to-end.
+Current state of Stage 2 (Daemon) and open decisions for the next session.
 
 ---
 
-## Current workspace structure
+## Completed
 
-```
-Cargo.toml              — workspace: simply-core, simply-core/llm, simply-audio,
-                          simply-daemon, noema-ext, noema-desktop, noema-mcp-gdocs,
-                          commands, config
-simply-core/            — library: agents, MCP client, storage (still here for now)
-simply-core/llm/        — LLM provider abstraction
-simply-audio/           — audio capture, STT, voice coordination
-simply-daemon/          — daemon crate (Stage 2 target)
-  src/api.rs            — DaemonApi trait + all types (see below)
-  src/lib.rs            — pub mod api; pub mod mcp;
-  src/main.rs           — stub binary
-  src/mcp/              — MCP server (moved from noema-mcp-core)
-    mod.rs, server.rs, tools.rs
-noema-desktop/          — Tauri 2 app (React frontend + Rust backend)
-noema-ext/              — PDF extraction utilities
-noema-mcp-gdocs/        — standalone Google Docs MCP server
-commands/               — command framework
-config/                 — config, paths, API key encryption
-```
+- **Stage 1** — Workspace restructure (all done)
+- **2.1** — DaemonApi split into 7 focused traits: SessionApi, ConversationApi, AssetApi, McpApi, OAuthApi, ModelApi, VoiceApi
+- **2.2** — EmbeddedDaemon (in-process impl) — all traits implemented
+- **2.3** — Noema wired to daemon: chat, conversations, models, assets, MCP, OAuth all route through daemon traits
+- **2.3.1** — Noema decoupled from simply-core/llm, renamed to `noema/`
+- **2.3.2** — MCP commands + OAuth moved into daemon (McpApi + OAuthApi + OAuthService)
+
+## Remaining (no design blockers)
+
+- **2.4** — Stable OAuth callback port (daemon starts long-lived server on configured port)
+- **2.6** — Daemon binary (startup, config, shutdown)
+- **2.7** — WebSocket server + remote DaemonApi (lets Lumina connect)
+
+## Blocked on design decision
+
+- **2.5** — DocumentApi + gdocs rewrite (see open design problem below)
 
 ---
 
-## DaemonApi trait (already defined in `simply-daemon/src/api.rs`)
+## Open Design Problem: Domain Features as MCP Sidecars
 
-The trait is complete and covers all protocol operations from CORE_SERVICE.md:
+### Context
 
-**Session lifecycle:**
-- `create_session(options)` → `SessionId`
-- `resume_session(id)` → `SessionInfo` (solves restart problem)
-- `close_session(id)` — frees memory, keeps UCM data
-- `seed_context(id, messages)` — replay history (Lumina re-sends Discord messages)
-- `list_sessions()` → `Vec<SessionInfo>`
-- `set_persistence(id, mode)` — toggle ephemeral ↔ persistent
+Google Docs support currently lives partly in `noema-mcp-gdocs` (Google API client) and partly in Noema's `gdocs.rs` commands (storage, indexing, UI orchestration). The `gdocs.rs` file is broken — it uses `EmbeddedDaemon` escape hatches (`stores()`, `coordinator()`) that should be removed.
 
-**Conversation:**
-- `send_message(id, message)` → `Vec<DaemonEvent>` (multimodal `UserMessage` with `ContentBlock::Text/Image/File`)
-- `set_model(id, model_id)`
-- `truncate(id, before_turn)`
+### Proposed direction
 
-**MCP tools:**
-- `register_mcp(registration)` — tools become globally available
-- `unregister_mcp(name)`
-- `list_tools()` → tool names
+Domain-specific features (Google Docs, future integrations) should be **MCP sidecars** — standalone processes that the daemon connects to as MCP servers. The daemon stays generic.
 
-**Events:**
-- `push_event(event)` — trigger interface (InboundEvent with type + JSON payload)
+### What this means
 
-**Voice:**
-- `voice_connect(id)` → `VoiceHandle { audio_in: Sender<AudioFrame>, events: Receiver<VoiceEvent> }`
-- Client handles platform audio (CPAL/songbird/WebRTC), daemon handles STT/LLM/TTS
+1. **`noema-mcp-gdocs`** stays a standalone MCP server (sidecar). It handles Google OAuth, fetching, and extracting documents. It returns content to the caller — it does not write to storage.
 
----
+2. **The daemon needs `invoke_tool`** — a way for clients (Noema UI, Lumina Discord) to call MCP tools directly without going through an LLM conversation turn. This is the missing piece that makes sidecars useful for user-initiated actions like "import this doc."
 
-## Key architectural decisions
+3. **The daemon still needs a DocumentApi** for CRUD on documents stored in the UCM. Tools like `list_documents`, `get_document`, `delete_document` are daemon concerns regardless of where the doc came from.
 
-1. **Trait-based with two impls.** Noema/Lumina depend on `DaemonApi`, never on a concrete impl.
-   - **In-process** (`embedded.rs`) — daemon linked into the same binary. No networking. First to build.
-   - **Remote** (future) — calls over WebSocket to a separate daemon process.
+4. **The open question is orchestration**: who connects fetch → store?
+   - **Option A: Client orchestrates.** Noema/Lumina calls `invoke_tool("gdocs", "fetch_document", {id})`, gets content back, then calls `daemon.import_document(content)`. Simple, but duplicates orchestration across clients.
+   - **Option B: Daemon orchestrates.** `daemon.import_document(source: "gdocs", id: "...")` — daemon calls the sidecar internally, then stores. Cleaner for clients, but daemon needs to know about import sources.
+   - **Option C: Sidecar calls back.** Sidecar fetches the doc and calls a daemon tool (via MCP) to store it. Daemon exposes `store_document` as an MCP tool. Clean separation, but adds complexity and bidirectional MCP.
 
-2. **In-process first.** Build the embedded impl, wire Noema to it, validate the API surface — *then* build WebSocket/REST.
+### What we need to decide
 
-3. **Storage stays in simply-core for now.** Task 2.10 moves it to the daemon, but only after the daemon is wired up and verified. This avoids a risky refactor before the wiring is tested.
+- Which orchestration model (A/B/C)?
+- Does `invoke_tool` belong on `McpApi` or a new trait?
+- How does the sidecar get Google OAuth tokens — daemon's OAuthService, or self-managed?
+- Should `invoke_tool` be typed (returns structured results) or generic (returns `serde_json::Value`)?
 
-4. **`send_message` returns `Vec<DaemonEvent>` for now.** Good enough for in-process. The remote impl will use a proper async stream/channel.
+### What can proceed without this decision
+
+Everything except 2.5 (DocumentApi) and 2.5.1 (gdocs rewrite). The daemon binary, WebSocket server, and stable OAuth port are all independent.
 
 ---
 
-## Stage 2 task order
+## Other Open Items
 
-See [TASKS.md](TASKS.md) for full details. Recommended order:
+### Voice recognition -> daemon
+Voice recognition currently lives in Noema (`simply-audio` + `VoiceCoordinator` on `AppState`). Should move into the daemon so any client (Lumina, etc.) can use it. The `VoiceApi` trait is stubbed and waiting.
 
-```
-2.1 (DaemonApi trait)  — already done (api.rs exists)
-      ↓
-2.2 (in-process impl)  — EmbeddedDaemon in simply-daemon/src/embedded.rs
-      ↓                   Wire simply-core agent + MCP + storage
-2.3 (wire Noema)        — Replace desktop's direct simply-core usage with DaemonApi
-      ↓                   Validates the API is complete
-2.4 (sessions)          — Session manager (feeds into 2.2, can overlap)
-      ↓
-2.5 (daemon binary)     — main.rs: startup, config, shutdown
-      ↓
-2.6 (WebSocket)         — WS server + remote DaemonApi client impl
-      ↓
-2.7 (REST)              — /events, /register, /health
-      ↓
-2.8 (peer registry)     — Track clients + services + global tool registry
-      ↓
-2.9 (MCP client)        — Connect to action services, discover tools
-      ↓
-2.10 (move storage)     — simply-core/src/storage/ → simply-daemon/
-```
-
-**Start with 2.1 (already done) → 2.2 → 2.3.** That's the critical path — everything else can wait until Noema works through the daemon API.
-
----
-
-## Key files to read
-
-| File | Why |
-|------|-----|
-| `simply-daemon/src/api.rs` | The DaemonApi trait — this is the contract |
-| `docs/designs/CORE_SERVICE.md` | Full protocol spec (WebSocket messages, REST endpoints, MCP) |
-| `docs/designs/ARCHITECTURE.md` | Three-interface hub pattern, content-as-config |
-| `noema-desktop/src-tauri/src/state.rs` | Current Noema state — what needs to go through DaemonApi |
-| `noema-desktop/src-tauri/src/commands/chat.rs` | Current chat flow — direct simply-core usage to replace |
-| `noema-desktop/src-tauri/src/core_server.rs` | How MCP server is currently started in-process |
-| `simply-core/src/manager.rs` | ConversationManager — the logic EmbeddedDaemon will wrap |
-| `simply-daemon/src/mcp/tools.rs` | spawn_agent tool — already in the daemon |
-
----
-
-## Rules
-
-- Always commit with `jj commit` (not `git commit`)
-- Update TASKS.md status emoji after each task completion, commit separately
-- Do NOT run tests, builds, or type generation — user handles that
+### EmbeddedDaemon escape hatches
+`EmbeddedDaemon` still exposes `stores()`, `coordinator()`, `mcp_registry()` as pub accessors for gdocs commands. These should be removed once the sidecar/DocumentApi design is resolved.

@@ -18,6 +18,8 @@ pub struct Settings {
     /// Favorite model IDs for quick access (e.g., ["claude/claude-sonnet-4-5", "openai/gpt-4o"])
     #[serde(default)]
     pub favorite_models: Vec<String>,
+    /// Port for the OAuth callback server (default: 9876)
+    pub oauth_callback_port: Option<u16>,
 }
 
 impl Settings {
