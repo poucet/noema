@@ -28,7 +28,7 @@
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
 | 2.1 | ✅ | `/chat new [name]` — create private text channel under "AI Chats" category with permissions | P0 | M |
-| 2.2 | 🔄 | `on_message` listener: respond in AI Chats category channels and @mentions | P0 | M |
+| 2.2 | ✅ | `on_message` listener: respond in AI Chats category channels and @mentions | P0 | M |
 | 2.3 | ⬜ | Load Discord channel history as conversation context (last N messages → daemon session) | P0 | M |
 | 2.4 | ⬜ | Open daemon session, send message, stream response back with debounced edits | P0 | M |
 | 2.5 | ⬜ | System prompt from UCM: load by named doc (e.g. `lumina/system-prompt`), depends on Content Stage 2 | P0 | M |
