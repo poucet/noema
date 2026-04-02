@@ -1,40 +1,29 @@
-# Lumina — Minimal Discord Bot
+# Lumina — Discord Bot
 
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P0
-**Complexity:** M
+**Complexity:** L
 **Depends on:** Foundation complete
 
 ---
 
 ## Goal
 
-Lumina exists in the workspace as a Discord bot that connects to simply-daemon via WebSocket. It seeds conversation context from Discord channel history, registers Discord MCP tools, and delegates all agent work to the daemon. No dependency on simply-core.
+Port the full Python Lumina Discord bot to Rust. Lumina connects to simply-daemon via WebSocket, delegates all agent/LLM work to the daemon, and provides Discord slash commands for chat, voice, scheduling, notes, todos, knowledge base, and server management.
 
 ---
 
 ## Stages
 
-### Stage 1 — Lumina Crate
+### Stage 1 — Lumina Crate (COMPLETE)
 
 **Goal:** Minimal Lumina bot exists in the workspace, connects to Discord and simply-daemon.
 
-**Complexity:** S
-
-**Tasks:**
-- [ ] Add `lumina/` crate to workspace `Cargo.toml`
-- [ ] Basic `main.rs`: serenity bot, connect to Discord gateway
-- [ ] WebSocket client to simply-daemon
-- [ ] Two slash commands: `/ping` (health check), `/chat` (echo for now)
-- [ ] Config: Discord bot token loading (`.env` or shared config approach)
-
-**Verify:**
-- Lumina: Bot comes online, responds to `/ping` and `/chat` with echo.
-- Noema: Desktop app still works — nothing broken by adding the crate.
+**Status:** Complete
 
 ---
 
-### Stage 2 — Shared LLM Chat
+### Stage 2 — LLM Chat
 
 **Goal:** Lumina chats with an LLM by sending messages to simply-daemon, which runs the agent.
 
@@ -44,9 +33,10 @@ Lumina exists in the workspace as a Discord bot that connects to simply-daemon v
 - [ ] On `/chat`, Lumina opens a session (ephemeral by default) with simply-daemon
 - [ ] Seeds context from recent Discord channel messages (rolling window of last N)
 - [ ] Sends user message, receives streamed agent response, posts to Discord
-- [ ] Registers Discord MCP tools so the agent can interact with Discord
-- [ ] Port ChatCog basics: message handling, response formatting as Discord embeds
-- [ ] Verify Noema still works through simply-daemon with persistent sessions
+- [ ] Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model`
+- [ ] `on_message` listener for bot chat channels and @mentions
+- [ ] Response formatting as Discord embeds
+- [ ] Register Discord MCP tools so the agent can interact with Discord
 
 **Verify:**
 - Lumina: `/chat hello` → LLM response appears in Discord.
@@ -54,8 +44,165 @@ Lumina exists in the workspace as a Discord bot that connects to simply-daemon v
 
 ---
 
+### Stage 3 — Admin & Access Control
+
+**Goal:** Port admin commands and role-based access control.
+
+**Complexity:** S
+
+**Tasks:**
+- [ ] Port AdminCog: `/admin set-access`, `/admin list-access`
+- [ ] Access level system (Full Access, Chat Only, No Access)
+- [ ] Role → access level mapping
+- [ ] Permission checks in command handlers
+
+**Verify:** Admin can manage role access levels via slash commands.
+
+---
+
+### Stage 4 — Todo & Notes
+
+**Goal:** Port task and note management commands.
+
+**Complexity:** M
+
+**Tasks:**
+- [ ] Port TodoCog: `/todo add`, `/todo list`, `/todo done`, `/todo undo`, `/todo label`, `/todo unlabel`, `/todo delete`, `/todo info`
+- [ ] Port NoteCog: `/note take`, `/note list`, `/note view`, `/note edit`, `/note delete`, `/note tag`, `/note untag`, `/note search`, `/note quick`
+
+**Verify:** Users can create, manage, and search todos and notes via Discord.
+
+---
+
+### Stage 5 — Schedule
+
+**Goal:** Port scheduled prompt execution system.
+
+**Complexity:** M
+
+**Tasks:**
+- [ ] Port ScheduleCog: `/schedule create` (interval, daily, weekly, monthly, cron, one_time)
+- [ ] `/schedule edit`, `/schedule list`, `/schedule delete`, `/schedule test`
+- [ ] Schedule service startup on bot ready
+
+**Verify:** Scheduled prompts execute on configured intervals.
+
+---
+
+### Stage 6 — Voice
+
+**Goal:** Port voice channel features (STT → LLM → TTS pipeline).
+
+**Complexity:** L
+
+**Tasks:**
+- [ ] Port VoiceCog: `/voice join`, `/voice leave`
+- [ ] `/voice converse` — realtime voice conversation (STT → LLM → TTS)
+- [ ] `/voice transcribe` — voice to text
+- [ ] `/voice say` — TTS playback
+- [ ] `/voice voices`, `/voice tts_providers`, `/voice set_tts` — TTS management
+
+**Verify:** Bot joins voice channel, transcribes speech, responds via TTS.
+
+---
+
+### Stage 7 — Knowledge Base (RAG)
+
+**Goal:** Port RAG document management and semantic search.
+
+**Complexity:** M
+
+**Tasks:**
+- [ ] Port RAGCog: `/rag add_attachment`, `/rag add_document`
+- [ ] `/rag list`, `/rag remove`, `/rag update`, `/rag sync`, `/rag sync_all`
+- [ ] `/rag query` — semantic search
+- [ ] `/rag chat` — RAG-enhanced chat session
+
+**Verify:** Documents can be ingested and queried via semantic search.
+
+---
+
+### Stage 8 — Brain & Analytics
+
+**Goal:** Port AI task analytics and model management.
+
+**Complexity:** S
+
+**Tasks:**
+- [ ] Port BrainCog: `/brain last`, `/brain tasks`, `/brain active`, `/brain task`
+- [ ] `/brain model` — view/change LLM model (with autocomplete)
+
+**Verify:** Users can view tool usage history and switch models.
+
+---
+
+### Stage 9 — MCP Server Management
+
+**Goal:** Port MCP server discovery and management commands.
+
+**Complexity:** M
+
+**Tasks:**
+- [ ] Port MCPServerCog: `/mcp list`, `/mcp info`, `/mcp toggle`, `/mcp delete`
+- [ ] `/mcp tools` — list available tools
+- [ ] `/mcp call`, `/mcp call_raw` — invoke tools
+- [ ] `/mcp add` — interactive server registration
+
+**Verify:** MCP servers can be managed and tools invoked from Discord.
+
+---
+
+### Stage 10 — Context (Memory Garden)
+
+**Goal:** Port context/mental state management system.
+
+**Complexity:** M
+
+**Tasks:**
+- [ ] Port ContextCog: `/context save`, `/context reload`, `/context list`, `/context show`, `/context delete`
+- [ ] `on_message` listener for context switch detection
+
+**Verify:** Users can save and restore work contexts.
+
+---
+
+### Stage 11 — Google Integrations
+
+**Goal:** Port Google service integrations (conditional on auth).
+
+**Complexity:** M
+
+**Tasks:**
+- [ ] Port AuthCog / GoogleAuthCog: `/authenticate`, `/authenticate_google`
+- [ ] Port DriveCog: `/drive list`, `/drive show`, `/drive read`
+- [ ] Port CalendarCog: `/calendar list`
+
+**Verify:** Authenticated users can access Drive files and Calendar events.
+
+---
+
+### Stage 12 — Server Management & Utilities
+
+**Goal:** Port remaining server and utility commands.
+
+**Complexity:** S
+
+**Tasks:**
+- [ ] Port ServerCog: `/welcome set_channel`, `/welcome toggle`, `/welcome set_template`, `/welcome test`
+- [ ] `/serverinfo` — server information display
+- [ ] `on_member_join` listener for welcome messages
+- [ ] Port UtilityCog: `/export_messages`
+- [ ] Rich Discord embeds and interactive components (buttons, select menus, autocomplete)
+
+**Verify:** Welcome messages fire on join, server info displays correctly.
+
+---
+
 ## Dependencies
 
 ```
-Stage 1 → Stage 2 (sequential)
+Stage 1 → Stage 2 (sequential, core chat first)
+Stage 2 → Stages 3-12 (parallel after chat works)
+Stage 6 depends on Voice phase (simply-voice crate)
+Stage 7 depends on Content phase (document storage)
 ```
