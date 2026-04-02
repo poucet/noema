@@ -30,8 +30,19 @@ Be helpful, concise, and conversational.";
 /// then processes it.
 pub async fn handle_message(lx: &LuminaContext, msg: &Message) {
     if !should_respond(lx, msg).await {
+        tracing::debug!(
+            channel_id = %msg.channel_id,
+            author = %msg.author.name,
+            "skipping message (not AI chat channel or mention)"
+        );
         return;
     }
+
+    tracing::info!(
+        channel_id = %msg.channel_id,
+        author = %msg.author.name,
+        "processing chat message"
+    );
 
     let typing = msg.channel_id.start_typing(&lx.http);
 

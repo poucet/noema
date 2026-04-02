@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-export RUST_LOG="${RUST_LOG:-lumina=info,simply_daemon=info}"
+export RUST_LOG="${RUST_LOG:-lumina=debug,simply_daemon=info}"
 
 case "${1:-run}" in
   run)

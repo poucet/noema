@@ -29,12 +29,22 @@ impl TypeMapKey for ConfigKey {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "lumina=info".into()),
-        )
-        .init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "lumina=info,simply_daemon=info".into());
+
+    if let Ok(log_path) = std::env::var("LUMINA_LOG_FILE") {
+        let file = std::fs::File::create(&log_path)?;
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_writer(file)
+            .with_ansi(false)
+            .init();
+        eprintln!("Logging to {log_path}");
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .init();
+    };
 
     config::load_env_file();
     let lumina_cfg = config::LuminaConfig::load();
