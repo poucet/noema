@@ -34,7 +34,7 @@
 | 2.5 | ⬜ | DocumentApi on daemon — store/index/query documents | P0 | M |
 | 2.5.1 | ⬜ | Rewrite Noema gdocs.rs as thin wrappers (Google API via `noema-mcp-gdocs`, storage via DocumentApi) | P0 | M |
 | 2.6 | ✅ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
-| 2.7 | ⬜ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
+| 2.7 | ✅ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
 | 2.8 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P1 | M |
 | 2.9 | ⬜ | Peer registry: connected clients, global MCP tool registry | P1 | M |
 | 2.10 | ⬜ | MCP client: connect to action services, discover tools | P2 | M |

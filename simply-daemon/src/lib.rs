@@ -13,6 +13,7 @@ pub mod embedded;
 pub mod mcp;
 pub mod oauth;
 pub mod storage;
+pub mod ws;
 
 /// Re-exported types for clients.
 pub use api::types as types;

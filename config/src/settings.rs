@@ -20,6 +20,8 @@ pub struct Settings {
     pub favorite_models: Vec<String>,
     /// Port for the OAuth callback server (default: 9876)
     pub oauth_callback_port: Option<u16>,
+    /// Port for the daemon WebSocket server (default: 9800)
+    pub daemon_port: Option<u16>,
 }
 
 impl Settings {

@@ -35,7 +35,7 @@ pub struct SessionInfo {
 }
 
 /// A user message sent to a session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserMessage {
     pub content: Vec<InputContent>,
     pub tool_filter: Option<ToolFilter>,
@@ -59,7 +59,7 @@ impl ToolFilter {
 }
 
 /// Context seed message — replay history into a session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeedMessage {
     pub role: llm::Role,
     pub content: Vec<InputContent>,

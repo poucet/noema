@@ -1,17 +1,16 @@
 //! Simply Daemon — standalone runner.
 //!
-//! Hosts the daemon as a separate process. Clients connect via WebSocket
-//! (once implemented) or use the in-process library crate directly.
+//! Hosts the daemon as a separate process. Clients connect via WebSocket.
 
 use std::sync::Arc;
 
-use simply_daemon::api::SessionApi;
+use simply_daemon::api::{DaemonApi, SessionApi};
 use simply_daemon::embedded::EmbeddedDaemon;
 use simply_daemon::storage::SqliteStores;
+use simply_daemon::ws;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Logging
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -21,22 +20,22 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("simply-daemon starting");
 
-    // Load env file (API keys, etc.)
     config::load_env_file();
+    let settings = config::Settings::load();
+    let port = settings.daemon_port.unwrap_or(9800);
 
-    // Open storage
-    let stores = SqliteStores::open()?;
-    let stores = Arc::new(stores);
-
-    // Create daemon (starts MCP server, OAuth callback server, auto-connect)
+    // Open storage and create daemon
+    let stores = Arc::new(SqliteStores::open()?);
     let daemon = EmbeddedDaemon::new(stores).await?;
+    let daemon: Arc<dyn DaemonApi> = daemon;
+
+    // Start WebSocket server
+    let _ws_server = ws::server::start(Arc::clone(&daemon), port).await?;
 
     tracing::info!(
-        oauth_callback = %daemon.oauth_redirect_uri(),
+        ws_port = port,
         "daemon ready"
     );
-
-    // TODO: Start WebSocket server here (task 2.7)
 
     // Wait for shutdown signal
     shutdown_signal().await;

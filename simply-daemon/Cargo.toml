@@ -43,6 +43,10 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 urlencoding = "2"
 
+# WebSocket
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
 # MCP protocol
 rmcp = { version = "0.9", features = ["server", "transport-streamable-http-server"] }
 

@@ -25,7 +25,7 @@ pub type ChatStream = Pin<Box<dyn Stream<Item = ChatChunk> + Send>>;
 /// - Filter models by what they can do (e.g., only show models that support vision)
 /// - Display capability indicators in the UI
 /// - Enforce privacy rules (e.g., block cloud models for private content)
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ModelCapability {
     // === Content Processing ===
     /// Can process and generate text (chat/completion)
@@ -56,7 +56,7 @@ pub enum ModelCapability {
     Private,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ModelDefinition {
     pub id: String,
     pub display_name: Option<String>,

@@ -4,6 +4,8 @@
 //! - `ResolvedContent` - Content with text resolved, assets/docs cached lazily
 //! - `ResolvedMessage` - A message with resolved content
 
+use serde::{Deserialize, Serialize};
+
 use llm::{ContentBlock, Role, ToolCall, ToolResult};
 
 use crate::storage::ids::{AssetId, DocumentId, TurnId};
@@ -14,7 +16,7 @@ use crate::storage::types::{BlobHash};
 // ============================================================================
 
 /// A resolved message with cached content
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResolvedMessage {
     pub role: Role,
     pub content: Vec<ResolvedContent>,
@@ -37,7 +39,7 @@ impl ResolvedMessage {
 /// This enum serves both display and LLM needs:
 /// - Display: Uses the variant fields directly (ignores `resolved`)
 /// - LLM: Uses cached `resolved` ContentBlock, populates on first access
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ResolvedContent {
     /// Text content - already resolved, no caching needed
     Text { text: String },
