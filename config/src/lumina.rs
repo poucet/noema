@@ -15,6 +15,11 @@ pub struct DiscordConfig {
     /// Discord bot token — can also be set via DISCORD_BOT_TOKEN env var
     #[serde(default)]
     pub bot_token: String,
+    /// Bot owner's Discord user ID
+    pub owner_id: Option<u64>,
+    /// Guild IDs where slash commands are registered (guild-specific, not global)
+    #[serde(default)]
+    pub guild_ids: Vec<u64>,
 }
 
 impl LuminaConfig {
