@@ -206,6 +206,7 @@ Only features with **active behavior** (event processing, intent execution, iden
 |----------|---------|
 | [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md) | UCM three-layer architecture (detailed specification) |
 | [STORAGE.md](STORAGE.md) | UCM database schema reference |
+| [ACTIONS.md](ACTIONS.md) | Action system — unified capability primitive, composition chains, MCP projection |
 | [AGENTIC.md](AGENTIC.md) | Event & Intent engine — triggers, Action AST, service registry, engine loop |
 | [CORE_SERVICE.md](CORE_SERVICE.md) | Daemon communication — WebSocket, REST, MCP interfaces |
 | [VOICE.md](VOICE.md) | Voice pipeline architecture — providers, backends, orchestration |
