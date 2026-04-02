@@ -5,6 +5,7 @@
 //! No manual dispatch table — `inventory` collects them at link time.
 
 mod chat;
+mod model;
 mod ping;
 
 use std::collections::{HashMap, HashSet};
