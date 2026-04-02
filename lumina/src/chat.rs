@@ -54,15 +54,8 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let limit = lx.config.discord.history_limit.unwrap_or(DEFAULT_HISTORY_LIMIT);
     let history = load_channel_history(lx, msg.channel_id, bot_id.get(), limit).await?;
 
-    // 2. Create ephemeral session with system prompt and resolved model
-    // Priority: per-channel override → config default → daemon default
-    let model_id = {
-        let channel_models = lx.state.channel_models.read().await;
-        channel_models
-            .get(&msg.channel_id)
-            .cloned()
-            .or_else(|| lx.config.discord.model_id.clone().filter(|s| !s.is_empty()))
-    };
+    // 2. Resolve model: in-memory override → channel topic → config default
+    let model_id = resolve_model(lx, msg).await;
     let (info, mut events) = lx
         .daemon
         .create_session(CreateSessionOptions {
@@ -297,17 +290,112 @@ fn truncate_for_discord(text: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Model resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve which model to use for a message.
+/// Priority: in-memory override → channel topic tag → config default → None (daemon picks).
+/// Validates the resolved model exists; falls back to config default if not.
+async fn resolve_model(lx: &LuminaContext, msg: &Message) -> Option<String> {
+    // 1. Check in-memory override
+    let from_memory = lx
+        .state
+        .channel_models
+        .read()
+        .await
+        .get(&msg.channel_id)
+        .cloned();
+
+    // 2. Check channel topic for [model:...] tag
+    let from_topic = parse_model_from_topic(lx, msg);
+
+    let config_default = lx
+        .config
+        .discord
+        .model_id
+        .clone()
+        .filter(|s| !s.is_empty());
+
+    let candidate = from_memory.or(from_topic).or(config_default.clone());
+
+    let Some(model_id) = candidate else {
+        return None;
+    };
+
+    // Validate the model exists
+    if let Ok(models) = lx.daemon.list_models().await {
+        let exists = models.iter().any(|m| m.id.to_string() == model_id);
+        if exists {
+            return Some(model_id);
+        }
+        tracing::warn!(model = %model_id, "model not found, falling back to default");
+    }
+
+    // Fallback to config default (which may also be None)
+    config_default
+}
+
+/// Parse `[model:provider/model-name]` from the channel topic.
+fn parse_model_from_topic(lx: &LuminaContext, msg: &Message) -> Option<String> {
+    let guild_id = msg.guild_id?;
+    let guild = lx.ctx.cache.guild(guild_id)?;
+    let channel = guild.channels.get(&msg.channel_id)?;
+    let topic = channel.topic.as_deref()?;
+    extract_model_tag(topic)
+}
+
+/// Extract model ID from a `[model:...]` tag in text.
+fn extract_model_tag(text: &str) -> Option<String> {
+    let start = text.find("[model:")? + 7;
+    let end = text[start..].find(']')? + start;
+    let model = text[start..end].trim();
+    if model.is_empty() {
+        None
+    } else {
+        Some(model.to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Detection
 // ---------------------------------------------------------------------------
 
 /// Check if the bot should respond to this message.
 async fn should_respond(lx: &LuminaContext, msg: &Message) -> bool {
-    // Check if channel is paused
+    if !is_ai_chat_channel(lx, msg) && !is_mentioned(lx, msg) {
+        return false;
+    }
+
+    // Check in-memory pause state first
     if lx.state.paused_channels.read().await.contains(&msg.channel_id) {
         return false;
     }
 
-    is_ai_chat_channel(lx, msg) || is_mentioned(lx, msg)
+    // Also check channel topic for [paused] tag (survives restarts)
+    if is_paused_in_topic(lx, msg) {
+        // Sync to in-memory state
+        lx.state.paused_channels.write().await.insert(msg.channel_id);
+        return false;
+    }
+
+    true
+}
+
+/// Check if `[paused:true]` or `[paused]` is in the channel topic.
+fn is_paused_in_topic(lx: &LuminaContext, msg: &Message) -> bool {
+    let guild_id = match msg.guild_id {
+        Some(id) => id,
+        None => return false,
+    };
+    lx.ctx
+        .cache
+        .guild(guild_id)
+        .and_then(|guild| {
+            let ch = guild.channels.get(&msg.channel_id)?;
+            let topic = ch.topic.as_deref()?;
+            Some(topic.contains("[paused:true]") || topic.contains("[paused]"))
+        })
+        .unwrap_or(false)
 }
 
 /// Message is in a channel under the configured AI Chats category.

@@ -221,19 +221,19 @@ async fn cmd_new(
 async fn cmd_pause(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let mut paused = lx.state.paused_channels.write().await;
     if !paused.insert(cmd.channel_id) {
-        reply_ephemeral(lx, cmd, "Already paused.").await
-    } else {
-        reply_ephemeral(lx, cmd, "Paused. Use `/chat resume` to resume.").await
+        return reply_ephemeral(lx, cmd, "Already paused.").await;
     }
+    set_topic_tag(lx, cmd.channel_id, "paused", "true").await;
+    reply_ephemeral(lx, cmd, "Paused. Use `/chat resume` to resume.").await
 }
 
 async fn cmd_resume(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let mut paused = lx.state.paused_channels.write().await;
-    if paused.remove(&cmd.channel_id) {
-        reply_ephemeral(lx, cmd, "Resumed.").await
-    } else {
-        reply_ephemeral(lx, cmd, "Not paused.").await
+    if !paused.remove(&cmd.channel_id) {
+        return reply_ephemeral(lx, cmd, "Not paused.").await;
     }
+    remove_topic_tag(lx, cmd.channel_id, "paused").await;
+    reply_ephemeral(lx, cmd, "Resumed.").await
 }
 
 async fn cmd_model(
@@ -249,6 +249,7 @@ async fn cmd_model(
                 .write()
                 .await
                 .insert(channel_id, id.clone());
+            set_topic_tag(lx, channel_id, "model", &id).await;
             reply_ephemeral(lx, cmd, &format!("Model for this channel set to `{id}`")).await
         }
         None => {
@@ -267,6 +268,96 @@ async fn cmd_model(
             reply_ephemeral(lx, cmd, &format!("Current model: `{display}`")).await
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Channel topic tag helpers
+// ---------------------------------------------------------------------------
+
+/// Set a `[key:value]` tag in the channel topic. Replaces existing tag if present.
+async fn set_topic_tag(lx: &LuminaContext, channel_id: ChannelId, key: &str, value: &str) {
+    let current_topic = get_channel_topic(lx, channel_id).unwrap_or_default();
+    let new_topic = update_tag_in_topic(&current_topic, key, Some(value));
+    let _ = channel_id
+        .edit(&lx.http, EditChannel::new().topic(&new_topic))
+        .await;
+}
+
+/// Remove a `[key:...]` or `[key]` tag from the channel topic.
+async fn remove_topic_tag(lx: &LuminaContext, channel_id: ChannelId, key: &str) {
+    let current_topic = get_channel_topic(lx, channel_id).unwrap_or_default();
+    let new_topic = update_tag_in_topic(&current_topic, key, None);
+    let _ = channel_id
+        .edit(&lx.http, EditChannel::new().topic(&new_topic))
+        .await;
+}
+
+fn get_channel_topic(lx: &LuminaContext, channel_id: ChannelId) -> Option<String> {
+    // Try each guild in cache to find the channel
+    for guild_id in &lx.config.discord.guild_ids {
+        if let Some(guild) = lx.ctx.cache.guild(serenity::model::id::GuildId::new(*guild_id)) {
+            if let Some(ch) = guild.channels.get(&channel_id) {
+                return ch.topic.clone();
+            }
+        }
+    }
+    None
+}
+
+/// Update or remove a tag in topic text.
+/// Tags are `[key:value]` or `[key]` at the start, separated by spaces.
+fn update_tag_in_topic(topic: &str, key: &str, value: Option<&str>) -> String {
+    let tag_prefix = format!("[{key}:");
+    let tag_bare = format!("[{key}]");
+
+    // Remove existing tag
+    let cleaned: String = topic
+        .split_whitespace()
+        .filter(|word| !word.starts_with(&tag_prefix) && *word != tag_bare)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    match value {
+        Some(v) => {
+            let new_tag = format!("[{key}:{v}]");
+            if cleaned.is_empty() {
+                new_tag
+            } else {
+                // Put tags at the front
+                let (tags, rest) = split_tags_and_rest(&cleaned);
+                let mut parts = tags;
+                parts.push(new_tag);
+                if !rest.is_empty() {
+                    parts.push(rest);
+                }
+                parts.join(" ")
+            }
+        }
+        None => cleaned,
+    }
+}
+
+/// Split a topic into tag portion and the rest.
+fn split_tags_and_rest(topic: &str) -> (Vec<String>, String) {
+    let mut tags = Vec::new();
+    let mut rest_start = 0;
+
+    for word in topic.split_whitespace() {
+        if word.starts_with('[') && word.ends_with(']') {
+            tags.push(word.to_string());
+            rest_start += word.len() + 1; // +1 for the space
+        } else {
+            break;
+        }
+    }
+
+    let rest = if rest_start < topic.len() {
+        topic[rest_start..].trim().to_string()
+    } else {
+        String::new()
+    };
+
+    (tags, rest)
 }
 
 async fn reply_ephemeral(
