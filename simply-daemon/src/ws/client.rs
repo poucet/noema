@@ -65,7 +65,6 @@ impl RemoteDaemon {
                 };
 
                 if incoming.is_response() {
-                    // Match to pending request
                     let id = incoming.id.unwrap();
                     let response = WsResponse {
                         id,
@@ -141,47 +140,38 @@ impl RemoteDaemon {
 }
 
 // ---------------------------------------------------------------------------
-// Trait implementations — all delegate to self.call()
+// SessionApi
 // ---------------------------------------------------------------------------
 
 #[async_trait]
 impl SessionApi for RemoteDaemon {
-    async fn create_session(
-        &self,
-        options: CreateSessionOptions,
-    ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
-        let result = self.call("session.create", &options).await?;
+    async fn create_session(&self, options: CreateSessionOptions) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
+        let result = self.call("session.create_session", &options).await?;
         let info: SessionInfo = serde_json::from_value(result)?;
         let rx = self.register_session(&info.id).await;
         Ok((info, rx))
     }
 
-    async fn resume_session(
-        &self,
-        session_id: &SessionId,
-    ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
-        let result = self.call("session.resume", session_id).await?;
+    async fn resume_session(&self, session_id: &SessionId) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
+        let result = self.call("session.resume_session", session_id).await?;
         let info: SessionInfo = serde_json::from_value(result)?;
         let rx = self.register_session(&info.id).await;
         Ok((info, rx))
     }
 
-    async fn subscribe_session(
-        &self,
-        session_id: &SessionId,
-    ) -> anyhow::Result<broadcast::Receiver<DaemonEvent>> {
-        self.call("session.subscribe", session_id).await?;
+    async fn subscribe_session(&self, session_id: &SessionId) -> anyhow::Result<broadcast::Receiver<DaemonEvent>> {
+        self.call("session.subscribe_session", session_id).await?;
         Ok(self.register_session(session_id).await)
     }
 
     async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()> {
-        self.call("session.close", session_id).await?;
+        self.call("session.close_session", session_id).await?;
         self.session_senders.lock().await.remove(session_id);
         Ok(())
     }
 
     async fn close_all_sessions(&self) -> anyhow::Result<()> {
-        self.call("session.close_all", &()).await?;
+        self.call("session.close_all_sessions", &()).await?;
         self.session_senders.lock().await.clear();
         Ok(())
     }
@@ -194,8 +184,8 @@ impl SessionApi for RemoteDaemon {
     }
 
     async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>> {
-        let result = self.call("session.list", &()).await?;
-        Ok(serde_json::from_value(result)?)
+        let r = self.call("session.list_sessions", &()).await?;
+        Ok(serde_json::from_value(r)?)
     }
 
     async fn set_persistence(&self, session_id: &SessionId, persistence: Persistence) -> anyhow::Result<()> {
@@ -213,8 +203,8 @@ impl SessionApi for RemoteDaemon {
     }
 
     async fn get_messages(&self, session_id: &SessionId) -> anyhow::Result<Vec<ResolvedMessage>> {
-        let result = self.call("session.get_messages", session_id).await?;
-        Ok(serde_json::from_value(result)?)
+        let r = self.call("session.get_messages", session_id).await?;
+        Ok(serde_json::from_value(r)?)
     }
 
     async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()> {
@@ -235,32 +225,40 @@ impl SessionApi for RemoteDaemon {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ConversationApi
+// ---------------------------------------------------------------------------
+
 #[async_trait]
 impl ConversationApi for RemoteDaemon {
     async fn create_conversation(&self, name: Option<&str>) -> anyhow::Result<ConversationId> {
         #[derive(serde::Serialize)]
         struct P<'a> { name: Option<&'a str> }
-        let result = self.call("conversation.create", &P { name }).await?;
-        Ok(serde_json::from_value(result)?)
+        let r = self.call("conversation.create_conversation", &P { name }).await?;
+        Ok(serde_json::from_value(r)?)
     }
 
     async fn list_conversations(&self) -> anyhow::Result<Vec<ConversationInfo>> {
-        let result = self.call("conversation.list", &()).await?;
-        Ok(serde_json::from_value(result)?)
+        let r = self.call("conversation.list_conversations", &()).await?;
+        Ok(serde_json::from_value(r)?)
     }
 
     async fn delete_conversation(&self, id: &ConversationId) -> anyhow::Result<()> {
-        self.call("conversation.delete", id).await?;
+        self.call("conversation.delete_conversation", id).await?;
         Ok(())
     }
 
     async fn rename_conversation(&self, id: &ConversationId, name: &str) -> anyhow::Result<()> {
         #[derive(serde::Serialize)]
-        struct P<'a> { id: &'a ConversationId, name: &'a str }
-        self.call("conversation.rename", &P { id, name }).await?;
+        struct P<'a> { conversation_id: &'a ConversationId, name: &'a str }
+        self.call("conversation.rename_conversation", &P { conversation_id: id, name }).await?;
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// AssetApi
+// ---------------------------------------------------------------------------
 
 #[async_trait]
 impl AssetApi for RemoteDaemon {
@@ -269,84 +267,95 @@ impl AssetApi for RemoteDaemon {
         #[derive(serde::Serialize)]
         struct P<'a> { data: String, media_type: &'a str }
         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-        let result = self.call("asset.store", &P { data: b64, media_type }).await?;
-        Ok(serde_json::from_value(result)?)
+        let r = self.call("asset.store_asset", &P { data: b64, media_type }).await?;
+        Ok(serde_json::from_value(r)?)
     }
 
     async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<Vec<u8>> {
         use base64::Engine;
-        let result = self.call("asset.get_blob", hash).await?;
-        let b64: String = serde_json::from_value(result)?;
+        let r = self.call("asset.get_blob", hash).await?;
+        let b64: String = serde_json::from_value(r)?;
         Ok(base64::engine::general_purpose::STANDARD.decode(&b64)?)
     }
 }
 
+// ---------------------------------------------------------------------------
+// McpApi
+// ---------------------------------------------------------------------------
+
 #[async_trait]
 impl McpApi for RemoteDaemon {
     async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> {
-        let result = self.call("mcp.list_servers", &()).await?;
-        Ok(serde_json::from_value(result)?)
+        let r = self.call("mcp.list_mcp_servers", &()).await?;
+        Ok(serde_json::from_value(r)?)
     }
     async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> {
-        self.call("mcp.add_server", &request).await?; Ok(())
+        self.call("mcp.add_mcp_server", &request).await?; Ok(())
     }
     async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
-        self.call("mcp.remove_server", server_id).await?; Ok(())
+        self.call("mcp.remove_mcp_server", server_id).await?; Ok(())
     }
     async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
-        let r = self.call("mcp.connect", server_id).await?;
+        let r = self.call("mcp.connect_mcp_server", server_id).await?;
         Ok(serde_json::from_value(r)?)
     }
     async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
-        self.call("mcp.disconnect", server_id).await?; Ok(())
+        self.call("mcp.disconnect_mcp_server", server_id).await?; Ok(())
     }
     async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpToolInfo>> {
-        let r = self.call("mcp.get_tools", server_id).await?;
+        let r = self.call("mcp.get_mcp_server_tools", server_id).await?;
         Ok(serde_json::from_value(r)?)
     }
     async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
-        let r = self.call("mcp.test", server_id).await?;
+        let r = self.call("mcp.test_mcp_server", server_id).await?;
         Ok(serde_json::from_value(r)?)
     }
     async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> {
         #[derive(serde::Serialize)]
         struct P<'a> { server_id: &'a str, request: UpdateMcpServerRequest }
-        self.call("mcp.update_settings", &P { server_id, request }).await?; Ok(())
+        self.call("mcp.update_mcp_server_settings", &P { server_id, request }).await?; Ok(())
     }
     async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
-        self.call("mcp.stop_retry", server_id).await?; Ok(())
+        self.call("mcp.stop_mcp_retry", server_id).await?; Ok(())
     }
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
-        self.call("mcp.start_retry", server_id).await?; Ok(())
+        self.call("mcp.start_mcp_retry", server_id).await?; Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// OAuthApi
+// ---------------------------------------------------------------------------
 
 #[async_trait]
 impl OAuthApi for RemoteDaemon {
     async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
-        let r = self.call("oauth.start", server_id).await?;
+        let r = self.call("oauth.start_oauth", server_id).await?;
         Ok(serde_json::from_value(r)?)
     }
     async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()> {
         #[derive(serde::Serialize)]
         struct P<'a> { server_id: &'a str, code: &'a str, state: &'a str }
-        self.call("oauth.complete", &P { server_id, code, state }).await?; Ok(())
+        self.call("oauth.complete_oauth", &P { server_id, code, state }).await?; Ok(())
     }
     async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()> {
         #[derive(serde::Serialize)]
         struct P<'a> { server_id: &'a str, code: &'a str }
-        self.call("oauth.complete_with_code", &P { server_id, code }).await?; Ok(())
+        self.call("oauth.complete_oauth_with_code", &P { server_id, code }).await?; Ok(())
     }
-    async fn resolve_oauth_state(&self, state: &str) -> Option<String> {
-        // This is a local lookup — not useful over remote. Return None.
-        None
+    async fn resolve_oauth_state(&self, _state: &str) -> Option<String> {
+        None // local lookup — not meaningful over remote
     }
 }
+
+// ---------------------------------------------------------------------------
+// ModelApi
+// ---------------------------------------------------------------------------
 
 #[async_trait]
 impl ModelApi for RemoteDaemon {
     async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>> {
-        let r = self.call("model.list", &()).await?;
+        let r = self.call("model.list_models", &()).await?;
         Ok(serde_json::from_value(r)?)
     }
     async fn list_providers(&self) -> Vec<llm::ProviderInfo> {
@@ -355,14 +364,18 @@ impl ModelApi for RemoteDaemon {
             .unwrap_or_default()
     }
     async fn default_model_id(&self) -> String {
-        self.call("model.default_id", &()).await
+        self.call("model.default_model_id", &()).await
             .and_then(|r| serde_json::from_value(r).map_err(Into::into))
             .unwrap_or_default()
     }
     async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> {
-        self.call("model.set_default", model_id).await?; Ok(())
+        self.call("model.set_default_model", model_id).await?; Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// VoiceApi
+// ---------------------------------------------------------------------------
 
 #[async_trait]
 impl VoiceApi for RemoteDaemon {
