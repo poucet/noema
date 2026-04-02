@@ -2,7 +2,9 @@
 
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P0 — everything else depends on this.
+**Status:** Complete
 **Tasks:** [TASKS.md](TASKS.md)
+**Handoff:** [HANDOFF.md](HANDOFF.md)
 
 ---
 
@@ -10,10 +12,12 @@
 
 Restructure the workspace to match the target architecture and build the daemon hub that all clients connect to.
 
-- **simply-core** — library crate, internal to simply-daemon. LLM providers, MCP server/client, agent orchestration. No external crate depends on it.
-- **simply-daemon** — the hub. Wires simply-core with UCM storage, WebSocket server (rich clients), REST server (triggers), MCP client (action services), session management, and later event bus / voice pipeline.
+- **simply-core** — library crate, internal to simply-daemon. LLM providers, MCP server/client, agent orchestration.
+- **simply-daemon** — the hub. WebSocket + REST server, session management, MCP registry, storage coordination.
+- **simply-rpc** — generic trait-over-network RPC framework. Proc macro auto-generates server dispatch + client impls from annotated traits.
 
-See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the full communication protocol.
+See [RPC_FRAMEWORK.md](../../../designs/RPC_FRAMEWORK.md) for the RPC design.
+See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the communication protocol.
 
 ---
 
@@ -21,22 +25,20 @@ See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the full communicati
 
 ### Stage 1 — Workspace Restructure (complete)
 
-Renamed crates from `noema-*` to `simply-*`, created `simply-daemon` with `DaemonApi` trait, merged `noema-mcp-core` into the daemon. See [HANDOFF.md](HANDOFF.md) for details.
+Renamed crates from `noema-*` to `simply-*`, created `simply-daemon` with `DaemonApi` trait, merged `noema-mcp-core` into the daemon.
 
-### Stage 2 — Daemon
+### Stage 2 — Daemon (complete)
 
-Build the daemon as a working service. Key milestones:
+Built the daemon as a working service:
 
-1. **In-process first** — `EmbeddedDaemon` implements `DaemonApi` directly, wrapping `ConversationManager`. Noema wires to it immediately, validating the API surface before any networking.
-2. **Standalone binary** — `simply-daemon` binary with config loading, signal handling, structured logging.
-3. **WebSocket + REST** — Remote `DaemonApi` over WebSocket, REST endpoints for triggers and health.
-4. **Registry + MCP client** — Peer tracking, global tool registry, connecting to action services.
-5. **Storage migration** — Move storage from `simply-core` to `simply-daemon` once wiring is validated.
+1. **In-process** — `EmbeddedDaemon` implements 7 API traits directly. Noema wired to it, validating the API surface.
+2. **Standalone binary** — `simply-daemon` binary with config, signal handling, structured logging.
+3. **WebSocket + REST** — Generic WS server (takes dispatch callback), REST for assets + management (`/health`, `/kill`).
+4. **RPC framework** — `simply-rpc` crate with proc macro: `#[rpc_service("prefix")]` auto-generates dispatch + client macros. Supports `#[rpc(stream)]`, `#[rpc(base64_param/return)]`, `#[rpc(rest_get)]`, `#[rpc(skip)]`.
+5. **RemoteDaemon** — client-side WS implementation with 7 one-liner macro invocations.
 
----
+### Deferred
 
-## Dependencies
-
-```
-Stage 1 → Stage 2 (sequential)
-```
+- **DocumentApi / GDocs sidecar** — deferred to content phase (sidecar design TBD)
+- **Peer registry** — deferred to Lumina phase (needed when multiple clients connect)
+- **Voice pipeline** — moved to voice phase
