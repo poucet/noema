@@ -1,0 +1,6 @@
+2026-04-02T19:56:32.166400Z  INFO lumina: connecting to simply-daemon addr=127.0.0.1:9800
+2026-04-02T19:56:32.170328Z  INFO lumina: connected to simply-daemon
+2026-04-02T19:56:32.170375Z  INFO lumina: commands registered count=2
+2026-04-02T19:56:32.232573Z  INFO lumina: lumina starting
+2026-04-02T19:56:33.097177Z  INFO lumina: connected to Discord — use .sync to register commands user=lumina-dev
+2026-04-02T19:56:50.038144Z DEBUG lumina::chat: skipping message (not AI chat channel or mention) channel_id=1489352918967652463 author=simplychris.rl

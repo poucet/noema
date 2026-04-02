@@ -67,7 +67,9 @@ async fn main() -> anyhow::Result<()> {
     let registry = CommandRegistry::collect();
     tracing::info!(count = registry.len(), "commands registered");
 
-    let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::GUILDS
+        | GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = Client::builder(token, intents)
         .event_handler(Handler {
