@@ -2,7 +2,7 @@
 
 use lumina_macros::command_group;
 use serenity::all::{
-    CommandInteraction, CreateInteractionResponse, CreateInteractionResponseMessage,
+    ChannelId, CommandInteraction, CreateInteractionResponse, CreateInteractionResponseMessage,
     EditChannel, PermissionOverwrite, PermissionOverwriteType, Permissions,
 };
 use serenity::model::channel::ChannelType;
@@ -23,38 +23,32 @@ mod chat {
             .guild_id
             .ok_or_else(|| anyhow::anyhow!("must be used in a server"))?;
 
+        let category_id = lx
+            .config
+            .discord
+            .ai_chats_category_id
+            .map(ChannelId::new)
+            .ok_or_else(|| anyhow::anyhow!("ai_chats_category_id not set in lumina.toml"))?;
+
         let channel_name = name
             .unwrap_or_else(|| cmd.user.name.clone())
             .to_lowercase()
             .replace(' ', "-");
 
-        // Find or create the "AI Chats" category
+        // Check for duplicate channel name in the category
         let guild_channels = guild_id.channels(&lx.http).await?;
-        let category = guild_channels
+        let existing = guild_channels
             .values()
-            .find(|c| c.kind == ChannelType::Category && c.name == "AI Chats");
-
-        let category_id = if let Some(cat) = category {
-            // Check for duplicate channel name in the category
-            let existing = guild_channels
-                .values()
-                .any(|c| c.parent_id == Some(cat.id) && c.name == channel_name);
-            if existing {
-                let response = CreateInteractionResponse::Message(
-                    CreateInteractionResponseMessage::new()
-                        .content(format!("Channel `{channel_name}` already exists in AI Chats."))
-                        .ephemeral(true),
-                );
-                cmd.create_response(&lx.http, response).await?;
-                return Ok(());
-            }
-            cat.id
-        } else {
-            guild_id
-                .create_channel(&lx.http, serenity::builder::CreateChannel::new("AI Chats").kind(ChannelType::Category))
-                .await?
-                .id
-        };
+            .any(|c| c.parent_id == Some(category_id) && c.name == channel_name);
+        if existing {
+            let response = CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .content(format!("Channel `{channel_name}` already exists."))
+                    .ephemeral(true),
+            );
+            cmd.create_response(&lx.http, response).await?;
+            return Ok(());
+        }
 
         // Create the channel under the category
         let channel = guild_id

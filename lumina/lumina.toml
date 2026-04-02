@@ -8,3 +8,4 @@ bot_token = ""
 owner_id =
 guild_ids = []
 status_channel_id =
+ai_chats_category_id =

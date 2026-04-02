@@ -22,6 +22,8 @@ pub struct DiscordConfig {
     pub guild_ids: Vec<u64>,
     /// Channel ID for bot status messages (online/offline)
     pub status_channel_id: Option<u64>,
+    /// Category ID for AI chat channels (created by /chat new)
+    pub ai_chats_category_id: Option<u64>,
 }
 
 impl LuminaConfig {
