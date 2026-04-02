@@ -136,9 +136,10 @@ impl EventHandler for Handler {
 
     async fn interaction_create(&self, ctx: Context, interaction: serenity::model::application::Interaction) {
         if let serenity::model::application::Interaction::Command(cmd) = interaction {
+            let lx = commands::LuminaContext::from_serenity(&ctx).await;
             let data = ctx.data.read().await;
             let registry = data.get::<CommandRegistry>().expect("CommandRegistry missing");
-            registry.dispatch(&ctx, &cmd).await;
+            registry.dispatch(&lx, &cmd).await;
         }
     }
 }

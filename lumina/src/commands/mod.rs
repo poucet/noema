@@ -8,11 +8,45 @@ mod chat;
 mod ping;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serenity::all::CommandInteraction;
 use serenity::builder::CreateCommand;
 use serenity::prelude::*;
+use simply_daemon::api::DaemonApi;
+
+// ---------------------------------------------------------------------------
+// LuminaContext — passed to every command handler
+// ---------------------------------------------------------------------------
+
+/// Rich context for command handlers. Bundles serenity context, daemon, and config.
+pub struct LuminaContext {
+    pub ctx: Context,
+    pub daemon: Arc<dyn DaemonApi>,
+    pub config: config::LuminaConfig,
+}
+
+impl LuminaContext {
+    /// Build from serenity Context by extracting TypeMap values.
+    pub async fn from_serenity(ctx: &Context) -> Self {
+        let data = ctx.data.read().await;
+        let daemon = data.get::<crate::DaemonKey>().expect("DaemonKey missing").clone();
+        let config = data.get::<crate::ConfigKey>().expect("ConfigKey missing").clone();
+        Self {
+            ctx: ctx.clone(),
+            daemon,
+            config,
+        }
+    }
+}
+
+impl std::ops::Deref for LuminaContext {
+    type Target = Context;
+    fn deref(&self) -> &Self::Target {
+        &self.ctx
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -28,7 +62,7 @@ pub trait SlashCommand: Send + Sync {
     fn register(&self) -> CreateCommand;
 
     /// Handle an incoming invocation.
-    async fn run(&self, ctx: &Context, cmd: &CommandInteraction) -> anyhow::Result<()>;
+    async fn run(&self, lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,11 +131,11 @@ impl CommandRegistry {
     }
 
     /// Dispatch an incoming interaction to the matching command.
-    pub async fn dispatch(&self, ctx: &Context, cmd: &CommandInteraction) {
+    pub async fn dispatch(&self, lx: &LuminaContext, cmd: &CommandInteraction) {
         let name = cmd.data.name.as_str();
         match self.commands.get(name) {
             Some(handler) => {
-                if let Err(e) = handler.run(ctx, cmd).await {
+                if let Err(e) = handler.run(lx, cmd).await {
                     tracing::error!(command = name, error = %e, "command failed");
                 }
             }

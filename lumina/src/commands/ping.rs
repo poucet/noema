@@ -3,13 +3,14 @@
 use lumina_macros::slash_command;
 use serenity::all::CommandInteraction;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
-use serenity::prelude::*;
+
+use super::LuminaContext;
 
 #[slash_command(description = "Check if Lumina is alive")]
-async fn ping(ctx: &Context, cmd: &CommandInteraction) -> anyhow::Result<()> {
+async fn ping(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let response = CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new().content("Pong!"),
     );
-    cmd.create_response(&ctx.http, response).await?;
+    cmd.create_response(&lx.http, response).await?;
     Ok(())
 }

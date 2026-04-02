@@ -18,17 +18,18 @@ use syn::{parse_macro_input, FnArg, ItemFn, Lit, Meta, Pat, Type};
 ///
 /// ```ignore
 /// #[slash_command(description = "Check if Lumina is alive")]
-/// async fn ping(ctx: &Context, cmd: &CommandInteraction) -> anyhow::Result<()> {
-///     reply(ctx, cmd, "Pong!").await
+/// async fn ping(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
+///     reply(&lx.ctx, cmd, "Pong!").await
 /// }
 ///
-/// #[slash_command(description = "Chat with Lumina")]
-/// async fn chat(
-///     ctx: &Context,
+/// #[slash_command(description = "Set LLM model")]
+/// async fn model(
+///     lx: &LuminaContext,
 ///     cmd: &CommandInteraction,
-///     #[describe("Your message")] message: String,
+///     #[describe("Model ID")] model_id: String,
 /// ) -> anyhow::Result<()> {
-///     reply(ctx, cmd, &format!("Echo: {message}")).await
+///     lx.daemon.set_default_model(&model_id).await?;
+///     reply(&lx.ctx, cmd, &format!("Model set to {model_id}")).await
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -342,12 +343,12 @@ fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStrea
 
             async fn run(
                 &self,
-                ctx: &serenity::prelude::Context,
+                lx: &crate::commands::LuminaContext,
                 cmd: &serenity::all::CommandInteraction,
             ) -> anyhow::Result<()> {
                 #opts_binding
                 #(#arg_extractions)*
-                #fn_name(ctx, cmd, #(#call_args),*).await
+                #fn_name(lx, cmd, #(#call_args),*).await
             }
         }
     })

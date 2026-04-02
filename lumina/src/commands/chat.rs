@@ -3,17 +3,18 @@
 use lumina_macros::slash_command;
 use serenity::all::CommandInteraction;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
-use serenity::prelude::*;
+
+use super::LuminaContext;
 
 #[slash_command(description = "Chat with Lumina")]
 async fn chat(
-    ctx: &Context,
+    lx: &LuminaContext,
     cmd: &CommandInteraction,
     #[describe("Your message")] message: String,
 ) -> anyhow::Result<()> {
     let response = CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new().content(format!("Echo: {message}")),
     );
-    cmd.create_response(&ctx.http, response).await?;
+    cmd.create_response(&lx.http, response).await?;
     Ok(())
 }
