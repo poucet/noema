@@ -5183,6 +5183,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simply-core",
+ "simply-rpc",
  "tokio",
  "tokio-tungstenite",
  "tower-service",
@@ -5191,6 +5192,27 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "simply-rpc"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "simply-rpc-macros",
+ "tokio",
+]
+
+[[package]]
+name = "simply-rpc-macros"
+version = "0.3.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
 ]
 
 [[package]]

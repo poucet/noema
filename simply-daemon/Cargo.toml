@@ -16,6 +16,7 @@ path = "src/main.rs"
 # Internal crates
 config = { path = "../config" }
 simply-core = { path = "../simply-core", features = ["sqlite"] }
+simply-rpc = { path = "../simply-rpc" }
 llm = { path = "../simply-core/llm" }
 
 # Async runtime
