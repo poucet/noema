@@ -1,0 +1,56 @@
+#!/bin/bash
+# lumina — run the Lumina Discord bot (requires a running daemon)
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+export RUST_LOG="${RUST_LOG:-lumina=info,simply_daemon=info}"
+
+case "${1:-run}" in
+  run)
+    # Start Lumina (expects daemon already running on port 9800)
+    export LUMINA_LOG_FILE="$REPO_ROOT/lumina.log"
+    : > "$LUMINA_LOG_FILE"
+    echo "Starting lumina... (log: $LUMINA_LOG_FILE)"
+    cd "$REPO_ROOT" && cargo run -p lumina
+    ;;
+  split)
+    # Start daemon in background, then Lumina connecting to it
+    export DAEMON_LOG_FILE="$REPO_ROOT/daemon.log"
+    : > "$DAEMON_LOG_FILE"
+    echo "Starting daemon in background... (log: $DAEMON_LOG_FILE)"
+    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
+    DAEMON_PID=$!
+
+    cleanup() {
+      echo "Stopping daemon (pid $DAEMON_PID)..."
+      kill $DAEMON_PID 2>/dev/null
+      wait $DAEMON_PID 2>/dev/null
+    }
+    trap cleanup EXIT INT TERM
+
+    echo "Waiting for daemon on port 9800..."
+    for i in $(seq 1 30); do
+      if nc -z 127.0.0.1 9800 2>/dev/null; then
+        echo "Daemon ready (pid $DAEMON_PID)"
+        break
+      fi
+      sleep 0.5
+    done
+
+    if ! nc -z 127.0.0.1 9800 2>/dev/null; then
+      echo "Daemon failed to start"
+      exit 1
+    fi
+
+    export LUMINA_LOG_FILE="$REPO_ROOT/lumina.log"
+    : > "$LUMINA_LOG_FILE"
+    cd "$REPO_ROOT" && cargo run -p lumina
+    ;;
+  *)
+    echo "Usage: lumina [run|split]"
+    echo "  run    Start Lumina (daemon must be running) (default)"
+    echo "  split  Start daemon + Lumina together"
+    ;;
+esac
