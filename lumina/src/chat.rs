@@ -184,6 +184,51 @@ async fn stream_response(
                     last_edit = std::time::Instant::now();
                 }
             }
+            Ok(DaemonEvent::AssistantContent(content_block)) => {
+                match content_block {
+                    ContentBlock::Image { data, mime_type } => {
+                        let ext = match mime_type.as_str() {
+                            "image/png" => "png",
+                            "image/gif" => "gif",
+                            "image/webp" => "webp",
+                            _ => "jpg",
+                        };
+                        if let Ok(bytes) = base64_decode(&data) {
+                            let attachment = serenity::builder::CreateAttachment::bytes(
+                                bytes,
+                                format!("image.{ext}"),
+                            );
+                            msg.channel_id
+                                .send_message(
+                                    &lx.http,
+                                    serenity::builder::CreateMessage::new().add_file(attachment),
+                                )
+                                .await?;
+                        }
+                    }
+                    ContentBlock::Audio { data, mime_type } => {
+                        let ext = match mime_type.as_str() {
+                            "audio/mp3" | "audio/mpeg" => "mp3",
+                            "audio/ogg" => "ogg",
+                            "audio/wav" => "wav",
+                            _ => "mp3",
+                        };
+                        if let Ok(bytes) = base64_decode(&data) {
+                            let attachment = serenity::builder::CreateAttachment::bytes(
+                                bytes,
+                                format!("audio.{ext}"),
+                            );
+                            msg.channel_id
+                                .send_message(
+                                    &lx.http,
+                                    serenity::builder::CreateMessage::new().add_file(attachment),
+                                )
+                                .await?;
+                        }
+                    }
+                    _ => {} // Text handled via TextDelta, ToolCall/ToolResult handled below
+                }
+            }
             Ok(DaemonEvent::ToolCall { id: _, name, arguments }) => {
                 let args_str = truncate_for_discord(
                     &serde_json::to_string_pretty(&arguments).unwrap_or_default(),
@@ -226,6 +271,11 @@ async fn stream_response(
     }
 
     Ok(())
+}
+
+fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
 }
 
 /// Truncate text to Discord's 2000 char limit.
