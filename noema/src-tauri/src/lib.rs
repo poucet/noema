@@ -3,7 +3,6 @@
 mod commands;
 
 mod logging;
-mod oauth_callback;
 mod state;
 mod types;
 

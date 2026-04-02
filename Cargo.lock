@@ -3137,7 +3137,6 @@ dependencies = [
  "noema-mcp-gdocs",
  "regex",
  "reqwest",
- "rmcp",
  "serde",
  "serde_json",
  "simply-audio",
@@ -5155,11 +5154,13 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "chrono",
  "config",
  "http-body-util",
  "hyper",
  "hyper-util",
  "llm",
+ "reqwest",
  "rmcp",
  "serde",
  "serde_json",
@@ -5167,6 +5168,9 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
+ "url",
+ "urlencoding",
+ "uuid",
 ]
 
 [[package]]

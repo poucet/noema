@@ -68,8 +68,8 @@
 | 2.1 | ✅ | `DaemonApi` trait: define the core API surface | P0 | M |
 | 2.2 | ✅ | In-process implementation of `DaemonApi` | P0 | M |
 | 2.3 | ✅ | Wire Noema desktop to use in-process daemon | P0 | L |
-| 2.3.1 | 🔄 | Decouple Noema from simply-core/llm — only use daemon traits; rename `noema-desktop` → `noema` | P0 | L |
-| 2.3.2 | ⬜ | Move MCP commands + OAuth flow into daemon McpApi | P0 | M |
+| 2.3.1 | ✅ | Decouple Noema from simply-core/llm — only use daemon traits; rename `noema-desktop` → `noema` | P0 | L |
+| 2.3.2 | ✅ | Move MCP commands + OAuth flow into daemon McpApi | P0 | M |
 | 2.3.3 | ⬜ | Move gdocs document operations into daemon DocumentApi | P1 | M |
 | 2.4 | ⬜ | Session manager: in-memory state, ephemeral + persistent modes | P0 | M |
 | 2.5 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |

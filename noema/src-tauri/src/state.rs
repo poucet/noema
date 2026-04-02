@@ -18,21 +18,17 @@ pub struct AppState {
     pub voice_conversation: Mutex<Option<ConversationId>>,
     pub processing: Mutex<HashMap<ConversationId, bool>>,
     pub forwarders: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
-    pub pending_oauth_states: Mutex<HashMap<String, String>>,
     pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        let pending_states = load_pending_oauth_states().unwrap_or_default();
-
         Self {
             daemon: OnceCell::new(),
             voice_coordinator: Mutex::new(None),
             voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),
             forwarders: Mutex::new(HashMap::new()),
-            pending_oauth_states: Mutex::new(pending_states),
             browser_audio_controller: Mutex::new(None),
         }
     }
@@ -68,24 +64,4 @@ impl AppState {
 
 impl Default for AppState {
     fn default() -> Self { Self::new() }
-}
-
-pub fn get_oauth_states_path() -> Option<std::path::PathBuf> {
-    use config::PathManager;
-    PathManager::data_dir().map(|d| d.join("pending_oauth.json"))
-}
-
-pub fn load_pending_oauth_states() -> Option<HashMap<String, String>> {
-    let path = get_oauth_states_path()?;
-    let content = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-pub fn save_pending_oauth_states(states: &HashMap<String, String>) -> Result<(), String> {
-    let path = get_oauth_states_path().ok_or("Could not determine data directory")?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let content = serde_json::to_string(states).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| e.to_string())
 }

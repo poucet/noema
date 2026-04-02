@@ -11,6 +11,7 @@
 pub mod api;
 pub mod embedded;
 pub mod mcp;
+pub mod oauth;
 pub mod storage;
 
 /// Re-exported types for clients.

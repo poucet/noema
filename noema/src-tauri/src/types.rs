@@ -299,6 +299,23 @@ pub struct McpServerInfo {
     pub auto_retry: bool,
 }
 
+impl From<simply_daemon::api::McpServerInfo> for McpServerInfo {
+    fn from(s: simply_daemon::api::McpServerInfo) -> Self {
+        Self {
+            id: s.id,
+            name: s.name,
+            url: s.url,
+            auth_type: s.auth_type,
+            is_connected: s.is_connected,
+            needs_oauth_login: s.needs_oauth_login,
+            tool_count: s.tool_count,
+            status: s.status,
+            auto_connect: s.auto_connect,
+            auto_retry: s.auto_retry,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/generated/")]
@@ -306,6 +323,16 @@ pub struct McpToolInfo {
     pub name: String,
     pub description: Option<String>,
     pub server_id: String,
+}
+
+impl From<simply_daemon::api::McpToolInfo> for McpToolInfo {
+    fn from(t: simply_daemon::api::McpToolInfo) -> Self {
+        Self {
+            name: t.name,
+            description: t.description,
+            server_id: t.server_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -328,9 +355,21 @@ pub struct AddMcpServerRequest {
     #[serde(default)]
     #[ts(optional)]
     pub scopes: Option<Vec<String>>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub use_well_known: Option<bool>,
+}
+
+impl From<AddMcpServerRequest> for simply_daemon::api::AddMcpServerRequest {
+    fn from(r: AddMcpServerRequest) -> Self {
+        Self {
+            id: r.id,
+            name: r.name,
+            url: r.url,
+            auth_type: r.auth_type,
+            auth_token: r.token,
+            client_id: r.client_id,
+            client_secret: r.client_secret,
+            scopes: r.scopes,
+        }
+    }
 }
 
 /// Attachment from frontend for message sending

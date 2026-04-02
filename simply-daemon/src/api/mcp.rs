@@ -11,8 +11,11 @@ pub struct McpServerInfo {
     pub url: String,
     pub auth_type: String,
     pub is_connected: bool,
+    pub needs_oauth_login: bool,
     pub tool_count: usize,
     pub status: String,
+    pub auto_connect: bool,
+    pub auto_retry: bool,
 }
 
 /// Information about an MCP tool.
@@ -20,6 +23,7 @@ pub struct McpServerInfo {
 pub struct McpToolInfo {
     pub name: String,
     pub description: Option<String>,
+    pub server_id: String,
 }
 
 /// Request to add a new MCP server.
@@ -30,6 +34,9 @@ pub struct AddMcpServerRequest {
     pub url: String,
     pub auth_type: String,
     pub auth_token: Option<String>,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub scopes: Option<Vec<String>>,
 }
 
 /// Request to update MCP server settings.
@@ -47,6 +54,7 @@ pub trait McpApi: Send + Sync {
     async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>>;
 
     /// Add a new MCP server configuration.
+    /// If `auth_type` is "auto" or empty, probes `.well-known` to detect OAuth.
     async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()>;
 
     /// Remove an MCP server configuration.

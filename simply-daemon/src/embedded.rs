@@ -21,6 +21,7 @@ use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSen
 
 use crate::api::*;
 use crate::mcp::{DaemonMcpServer, ServerHandle, start_server};
+use crate::oauth::OAuthService;
 
 // ---------------------------------------------------------------------------
 // Session bookkeeping
@@ -48,6 +49,7 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     user_id: UserId,
     manager_event_tx: SharedEventSender,
     _mcp_server_handle: Mutex<Option<ServerHandle>>,
+    oauth: OAuthService,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -106,6 +108,7 @@ where
             user_id,
             manager_event_tx,
             _mcp_server_handle: Mutex::new(Some(server_handle)),
+            oauth: OAuthService::new(Arc::clone(&mcp_registry)),
         });
 
         Self::spawn_event_dispatcher(Arc::clone(&daemon), manager_event_rx);
@@ -551,8 +554,11 @@ where
                 url: config.url.clone(),
                 auth_type: auth_type.to_string(),
                 is_connected,
+                needs_oauth_login: config.auth.needs_oauth_login(),
                 tool_count,
                 status,
+                auto_connect: config.auto_connect,
+                auto_retry: config.auto_retry,
             });
         }
         Ok(servers)
@@ -563,8 +569,43 @@ where
             "token" => simply_core::AuthMethod::Token {
                 token: request.auth_token.unwrap_or_default(),
             },
-            _ => simply_core::AuthMethod::None,
+            "oauth" => simply_core::AuthMethod::OAuth {
+                client_id: request.client_id.unwrap_or_else(|| "simply".to_string()),
+                client_secret: request.client_secret,
+                authorization_url: None,
+                token_url: None,
+                scopes: request.scopes.unwrap_or_default(),
+                access_token: None,
+                refresh_token: None,
+                expires_at: None,
+            },
+            "none" => simply_core::AuthMethod::None,
+            _ => {
+                // Auto-detect: probe .well-known
+                tracing::info!(url = %request.url, "auto-detecting auth via .well-known");
+                if let Ok(well_known) = crate::oauth::fetch_well_known(&request.url).await {
+                    if well_known.get("authorization_endpoint").is_some() {
+                        tracing::info!("OAuth detected via .well-known");
+                        simply_core::AuthMethod::OAuth {
+                            client_id: "simply".to_string(),
+                            client_secret: None,
+                            authorization_url: None,
+                            token_url: None,
+                            scopes: vec![],
+                            access_token: None,
+                            refresh_token: None,
+                            expires_at: None,
+                        }
+                    } else {
+                        simply_core::AuthMethod::None
+                    }
+                } else {
+                    simply_core::AuthMethod::None
+                }
+            }
         };
+
+        let use_well_known = matches!(auth, simply_core::AuthMethod::OAuth { .. });
         let config = simply_core::ServerConfig {
             name: request.name,
             url: request.url,
@@ -572,12 +613,11 @@ where
             auth_token: None,
             auto_connect: true,
             auto_retry: true,
-            use_well_known: false,
+            use_well_known,
         };
         let mut registry = self.mcp_registry.lock().await;
         registry.add_server(request.id.clone(), config);
         registry.save_config()?;
-        registry.connect(&request.id).await?;
         Ok(())
     }
 
@@ -610,6 +650,7 @@ where
         Ok(conn.tools.iter().map(|t| McpToolInfo {
             name: t.name.to_string(),
             description: t.description.as_deref().map(|s| s.to_string()),
+            server_id: server_id.to_string(),
         }).collect())
     }
 
@@ -660,6 +701,33 @@ where
             None,
         );
         Ok(())
+    }
+
+}
+
+// ---------------------------------------------------------------------------
+// OAuthApi
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl<S: StorageTypes> OAuthApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
+    async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
+        self.oauth.start(server_id).await
+    }
+
+    async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()> {
+        self.oauth.complete_with_state(server_id, code, state).await
+    }
+
+    async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()> {
+        self.oauth.complete_with_code(server_id, code).await
+    }
+
+    async fn resolve_oauth_state(&self, state: &str) -> Option<String> {
+        self.oauth.resolve_state(state).await
     }
 }
 
