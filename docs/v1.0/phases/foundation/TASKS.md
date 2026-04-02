@@ -35,10 +35,9 @@
 | 2.5.1 | ⬜ | Rewrite Noema gdocs.rs as thin wrappers (Google API via `noema-mcp-gdocs`, storage via DocumentApi) | P0 | M |
 | 2.6 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
 | 2.7 | ⬜ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
-| 2.8 | ⬜ | Move storage from `simply-core` → `simply-daemon` | P0 | M |
-| 2.9 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P1 | M |
-| 2.10 | ⬜ | Peer registry: connected clients, global MCP tool registry | P1 | M |
-| 2.11 | ⬜ | MCP client: connect to action services, discover tools | P2 | M |
+| 2.8 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P1 | M |
+| 2.9 | ⬜ | Peer registry: connected clients, global MCP tool registry | P1 | M |
+| 2.10 | ⬜ | MCP client: connect to action services, discover tools | P2 | M |
 
 ### Task Details
 
@@ -75,12 +74,6 @@
 - JSON message protocol per [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md)
 - Noema/Lumina can swap in-process for remote without code changes
 
-**2.8 — Move storage from simply-core → simply-daemon**
-- Move `simply-core/src/storage/` → `simply-daemon/src/storage/`
-- Update `simply-core` to remove storage module
-- Re-export or adjust imports in `simply-daemon`
-- Deferred — easier once daemon is wired up and verifiable
-
 ---
 
 ## Dependencies
@@ -90,5 +83,4 @@ Stage 2 (remaining):
   2.4 (stable OAuth port) — independent, small
   2.5 (DocumentApi) → 2.5.1 (rewrite gdocs.rs)
   2.6 (daemon binary) → 2.7 (WebSocket + remote impl)
-  2.8 (move storage) — after 2.5.1 is validated
 ```
