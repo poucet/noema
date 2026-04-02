@@ -211,9 +211,9 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
         let base_url_env = &info.base_url_env;
         quote! {
             crate::registry::ProviderInfo {
-                name: #name,
-                api_key_env: #api_key_env,
-                base_url_env: #base_url_env,
+                name: #name.to_string(),
+                api_key_env: #api_key_env.map(|s: &str| s.to_string()),
+                base_url_env: #base_url_env.to_string(),
             }
         }
     });
@@ -296,11 +296,10 @@ pub fn delegate_provider_enum_impl(_attr: TokenStream, item: TokenStream) -> Tok
             }
 
             /// Get provider info for all providers
-            pub fn all_provider_info() -> &'static [crate::registry::ProviderInfo] {
-                static PROVIDERS: &[crate::registry::ProviderInfo] = &[
+            pub fn all_provider_info() -> Vec<crate::registry::ProviderInfo> {
+                vec![
                     #(#provider_info_entries),*
-                ];
-                PROVIDERS
+                ]
             }
         }
     };

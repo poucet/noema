@@ -25,7 +25,7 @@ pub fn get_api_key_status() -> HashMap<String, bool> {
     let settings = Settings::load();
     list_providers()
         .iter()
-        .map(|info| (info.name.to_string(), settings.has_api_key(info.name)))
+        .map(|info| (info.name.clone(), settings.has_api_key(&info.name)))
         .collect()
 }
 
@@ -51,9 +51,9 @@ pub fn get_provider_info() -> Vec<ProviderInfoResponse> {
     list_providers()
         .iter()
         .map(|info| ProviderInfoResponse {
-            name: info.name.to_string(),
+            name: info.name.clone(),
             requires_api_key: info.api_key_env.is_some(),
-            api_key_env: info.api_key_env.map(|s| s.to_string()),
+            api_key_env: info.api_key_env.clone(),
         })
         .collect()
 }

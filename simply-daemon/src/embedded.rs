@@ -581,7 +581,7 @@ where
     }
 
     async fn list_providers(&self) -> Vec<llm::ProviderInfo> {
-        llm::list_providers().to_vec()
+        llm::list_providers()
     }
 
     async fn default_model_id(&self) -> String {

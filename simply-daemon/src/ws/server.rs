@@ -12,6 +12,51 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::api::*;
 use super::protocol::*;
 
+// ---------------------------------------------------------------------------
+// Helper macros (must be defined before use)
+// ---------------------------------------------------------------------------
+
+/// Deserialize params or return error response.
+macro_rules! de {
+    ($id:expr, $params:expr) => {
+        match serde_json::from_value($params) {
+            Ok(v) => v,
+            Err(e) => return WsResponse::err($id, e),
+        }
+    };
+}
+
+/// Single-param RPC: deserialize one value, call with &ref, return serialized result.
+macro_rules! rpc {
+    ($id:expr, $params:expr, |$p:ident : $T:ty| $call:expr) => {{
+        let $p: $T = de!($id, $params);
+        match $call.await {
+            Ok(v) => WsResponse::ok($id, v),
+            Err(e) => WsResponse::err($id, e),
+        }
+    }};
+}
+
+/// RPC returning Result<()> — returns true on success.
+macro_rules! rpc_unit {
+    ($id:expr, $call:expr) => {
+        match $call.await {
+            Ok(()) => WsResponse::ok($id, true),
+            Err(e) => WsResponse::err($id, e),
+        }
+    };
+}
+
+/// RPC returning Result<T> — serialize the value.
+macro_rules! rpc_val {
+    ($id:expr, $call:expr) => {
+        match $call.await {
+            Ok(v) => WsResponse::ok($id, v),
+            Err(e) => WsResponse::err($id, e),
+        }
+    };
+}
+
 /// Starts a WebSocket server on the given port, serving the provided daemon.
 pub async fn start(daemon: Arc<dyn DaemonApi>, port: u16) -> anyhow::Result<ServerHandle> {
     let addr = format!("127.0.0.1:{}", port);
@@ -292,47 +337,3 @@ pub fn spawn_event_forwarder(
     forwarders.insert(session_id.clone(), handle);
 }
 
-// ---------------------------------------------------------------------------
-// Helper macros
-// ---------------------------------------------------------------------------
-
-/// Deserialize params or return error response.
-macro_rules! de {
-    ($id:expr, $params:expr) => {
-        match serde_json::from_value($params) {
-            Ok(v) => v,
-            Err(e) => return WsResponse::err($id, e),
-        }
-    };
-}
-
-/// Single-param RPC: deserialize one value, call with &ref, return serialized result.
-macro_rules! rpc {
-    ($id:expr, $params:expr, |$p:ident : $T:ty| $call:expr) => {{
-        let $p: $T = de!($id, $params);
-        match $call.await {
-            Ok(v) => WsResponse::ok($id, v),
-            Err(e) => WsResponse::err($id, e),
-        }
-    }};
-}
-
-/// RPC returning Result<()> — returns true on success.
-macro_rules! rpc_unit {
-    ($id:expr, $call:expr) => {
-        match $call.await {
-            Ok(()) => WsResponse::ok($id, true),
-            Err(e) => WsResponse::err($id, e),
-        }
-    };
-}
-
-/// RPC returning Result<T> — serialize the value.
-macro_rules! rpc_val {
-    ($id:expr, $call:expr) => {
-        match $call.await {
-            Ok(v) => WsResponse::ok($id, v),
-            Err(e) => WsResponse::err($id, e),
-        }
-    };
-}
