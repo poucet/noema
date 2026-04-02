@@ -2,7 +2,6 @@
 //!
 //! Hosts the daemon as a separate process. Clients connect via WebSocket.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use simply_daemon::api::*;
@@ -48,11 +47,12 @@ async fn main() -> anyhow::Result<()> {
     let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
     let _ws_server = ws::server::start(ws_dispatch, port).await?;
 
-    // REST server — stateless, shared across all clients + management endpoints
+    // REST server — stateless, shared across all clients + management endpoints + admin page
     let rest_port = port + 1;
     let rest_dispatcher = Dispatcher::new()
         .register(<dyn AssetApi>::service(daemon.clone()));
-    let (_rest_server, mut kill_rx) = ws::rest::start(rest_dispatcher, rest_port).await?;
+    let tracker = _ws_server.tracker().clone();
+    let (_rest_server, mut kill_rx) = ws::rest::start_with_tracker(rest_dispatcher, rest_port, Some(tracker)).await?;
 
     tracing::info!(ws_port = port, rest_port = rest_port, "daemon ready");
 

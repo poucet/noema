@@ -3,11 +3,16 @@
 //! Knows nothing about specific API traits. Takes a dispatch function
 //! that the caller wires up with the appropriate services.
 
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
+use serde::Serialize;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -29,6 +34,50 @@ pub type DispatchFn = Arc<
         + Sync,
 >;
 
+/// Info about a connected WS client.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectionInfo {
+    pub id: u64,
+    pub addr: String,
+    pub connected_at: String,
+}
+
+/// Tracks active WebSocket connections. Shared with the REST admin page.
+#[derive(Debug, Clone)]
+pub struct ConnectionTracker {
+    connections: Arc<Mutex<HashMap<u64, ConnectionInfo>>>,
+    next_id: Arc<AtomicU64>,
+}
+
+impl ConnectionTracker {
+    pub fn new() -> Self {
+        Self {
+            connections: Arc::new(Mutex::new(HashMap::new())),
+            next_id: Arc::new(AtomicU64::new(1)),
+        }
+    }
+
+    async fn add(&self, addr: SocketAddr) -> u64 {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let info = ConnectionInfo {
+            id,
+            addr: addr.to_string(),
+            connected_at: Utc::now().to_rfc3339(),
+        };
+        self.connections.lock().await.insert(id, info);
+        id
+    }
+
+    async fn remove(&self, id: u64) {
+        self.connections.lock().await.remove(&id);
+    }
+
+    /// List all active connections.
+    pub async fn list(&self) -> Vec<ConnectionInfo> {
+        self.connections.lock().await.values().cloned().collect()
+    }
+}
+
 /// Starts a WebSocket server on the given port using the provided dispatch function.
 pub async fn start(dispatch: DispatchFn, port: u16) -> anyhow::Result<ServerHandle> {
     let addr = format!("127.0.0.1:{}", port);
@@ -36,6 +85,8 @@ pub async fn start(dispatch: DispatchFn, port: u16) -> anyhow::Result<ServerHand
     tracing::info!(port, "WebSocket server listening");
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let tracker = ConnectionTracker::new();
+    let tracker_clone = tracker.clone();
 
     let handle = tokio::spawn(async move {
         loop {
@@ -46,7 +97,12 @@ pub async fn start(dispatch: DispatchFn, port: u16) -> anyhow::Result<ServerHand
                         Ok((stream, addr)) => {
                             tracing::info!(%addr, "WS client connected");
                             let dispatch = Arc::clone(&dispatch);
-                            tokio::spawn(handle_connection(dispatch, stream));
+                            let tracker = tracker_clone.clone();
+                            tokio::spawn(async move {
+                                let conn_id = tracker.add(addr).await;
+                                handle_connection(dispatch, stream).await;
+                                tracker.remove(conn_id).await;
+                            });
                         }
                         Err(e) => tracing::error!(error = %e, "WS accept error"),
                     }
@@ -55,17 +111,23 @@ pub async fn start(dispatch: DispatchFn, port: u16) -> anyhow::Result<ServerHand
         }
     });
 
-    Ok(ServerHandle { _task: handle, _shutdown: shutdown_tx, port })
+    Ok(ServerHandle { _task: handle, _shutdown: shutdown_tx, port, tracker })
 }
 
 pub struct ServerHandle {
     _task: JoinHandle<()>,
     _shutdown: tokio::sync::oneshot::Sender<()>,
     port: u16,
+    tracker: ConnectionTracker,
 }
 
 impl ServerHandle {
     pub fn port(&self) -> u16 { self.port }
+
+    /// Get the connection tracker for admin endpoints.
+    pub fn tracker(&self) -> &ConnectionTracker {
+        &self.tracker
+    }
 }
 
 // ---------------------------------------------------------------------------

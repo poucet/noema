@@ -119,7 +119,8 @@ pub async fn connect_or_host(
 
     let rest_port = port + 1;
     let rest_dispatcher = (builders.rest_dispatcher)(Arc::clone(&daemon));
-    let (rest_server, kill_rx) = rest::start(rest_dispatcher, rest_port).await?;
+    let tracker = ws_server.tracker().clone();
+    let (rest_server, kill_rx) = rest::start_with_tracker(rest_dispatcher, rest_port, Some(tracker)).await?;
 
     Ok(DaemonHandle::Host {
         daemon,
