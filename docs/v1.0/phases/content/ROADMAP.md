@@ -41,6 +41,7 @@ Agent can call MCP tools through simply-daemon. Documents with frontmatter conve
 
 **Tasks:**
 - [ ] Implement frontmatter parsing + indexing in UCM storage layer
+- [ ] Named documents: wire entity slugs to documents so docs can be addressed by namespaced path (e.g. `lumina/system-prompt`) instead of raw UUIDs
 - [ ] Generic MCP tools: `create_document`, `query_documents`, `update_document`, `delete_document`
 - [ ] Frontmatter-aware query syntax: filter by `type`, `tags`, `done`, `due`, etc.
 - [ ] Document operations exposed as MCP tools (agent-facing) and WebSocket messages (client-facing)

@@ -28,7 +28,7 @@
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
 | 2.1 | ⬜ | On `/chat`, open ephemeral session with daemon | P0 | M |
-| 2.2 | ⬜ | System prompt from UCM: configurable document ID loaded as system prompt | P0 | M |
+| 2.2 | ⬜ | System prompt from UCM: load by named doc (e.g. `lumina/system-prompt`), depends on Content Stage 2 named docs | P0 | M |
 | 2.3 | ⬜ | Seed context from recent Discord channel messages | P0 | M |
 | 2.4 | ⬜ | Send user message, receive streamed response, post to Discord | P0 | M |
 | 2.5 | ⬜ | Port ChatCog: `/chat new`, `/chat pause`, `/chat resume`, `/chat model` | P0 | M |
