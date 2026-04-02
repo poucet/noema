@@ -10,7 +10,7 @@ use simply_daemon::api::*;
 
 use crate::commands::LuminaContext;
 
-const DEFAULT_HISTORY_LIMIT: u8 = 50;
+const DEFAULT_HISTORY_LIMIT: u16 = 1000;
 
 /// Handle an incoming message — checks if it should get an AI response,
 /// then processes it.
@@ -37,7 +37,8 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let bot_id = lx.ctx.cache.current_user().id;
 
     // 1. Load channel history as seed messages
-    let history = load_channel_history(lx, msg.channel_id, bot_id.get()).await?;
+    let limit = lx.config.discord.history_limit.unwrap_or(DEFAULT_HISTORY_LIMIT);
+    let history = load_channel_history(lx, msg.channel_id, bot_id.get(), limit).await?;
 
     // 2. Create ephemeral session
     let (info, mut events) = lx
@@ -79,10 +80,31 @@ async fn load_channel_history(
     lx: &LuminaContext,
     channel_id: ChannelId,
     bot_user_id: u64,
+    limit: u16,
 ) -> anyhow::Result<Vec<SeedMessage>> {
-    let messages = channel_id
-        .messages(&lx.http, GetMessages::new().limit(DEFAULT_HISTORY_LIMIT))
-        .await?;
+    // Discord API caps at 100 per request, so we paginate
+    let mut all_messages = Vec::new();
+    let mut remaining = limit;
+    let mut before = None;
+
+    while remaining > 0 {
+        let batch_size = remaining.min(100) as u8;
+        let mut request = GetMessages::new().limit(batch_size);
+        if let Some(id) = before {
+            request = request.before(id);
+        }
+
+        let batch = channel_id.messages(&lx.http, request).await?;
+        if batch.is_empty() {
+            break;
+        }
+
+        before = batch.last().map(|m| m.id);
+        remaining = remaining.saturating_sub(batch.len() as u16);
+        all_messages.extend(batch);
+    }
+
+    let messages = all_messages;
 
     // Discord returns newest-first, we need oldest-first
     let mut seed: Vec<SeedMessage> = messages

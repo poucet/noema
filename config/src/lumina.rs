@@ -24,6 +24,8 @@ pub struct DiscordConfig {
     pub status_channel_id: Option<u64>,
     /// Category ID for AI chat channels (created by /chat new)
     pub ai_chats_category_id: Option<u64>,
+    /// Max messages to load from Discord channel history as context (default: 1000)
+    pub history_limit: Option<u16>,
 }
 
 impl LuminaConfig {
