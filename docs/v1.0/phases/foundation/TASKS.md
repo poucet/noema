@@ -31,10 +31,11 @@
 | 2.3.1 | ✅ | Decouple Noema from simply-core/llm — only use daemon traits; rename `noema-desktop` → `noema` | P0 | L |
 | 2.3.2 | ✅ | Move MCP commands + OAuth flow into daemon (McpApi + OAuthApi) | P0 | M |
 | 2.4 | ✅ | Stable OAuth callback port on daemon | P0 | S |
-| 2.5 | ⬜ | DocumentApi on daemon — store/index/query documents | P0 | M |
-| 2.5.1 | ⬜ | Rewrite Noema gdocs.rs as thin wrappers (Google API via `noema-mcp-gdocs`, storage via DocumentApi) | P0 | M |
+| 2.5 | ⏸️ | DocumentApi on daemon — store/index/query documents (blocked on sidecar design) | P0 | M |
+| 2.5.1 | ⏸️ | Rewrite Noema gdocs.rs as thin wrappers (blocked, gdocs disabled temporarily) | P0 | M |
 | 2.6 | ✅ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |
 | 2.7 | ✅ | WebSocket server + remote `DaemonApi` implementation | P0 | L |
+| 2.7.1 | ✅ | Smart discovery: `connect_or_host()`, Noema uses `Arc<dyn DaemonApi>` | P0 | M |
 | 2.8 | ⬜ | REST server: `/events`, `/register`, `/health` endpoints | P1 | M |
 | 2.9 | ⬜ | Peer registry: connected clients, global MCP tool registry | P1 | M |
 | 2.10 | ⬜ | MCP client: connect to action services, discover tools | P2 | M |
