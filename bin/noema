@@ -33,6 +33,14 @@ case "${1:-dev}" in
     cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
     DAEMON_PID=$!
 
+    # Kill daemon on exit (Ctrl+C, SIGTERM, or normal exit)
+    cleanup() {
+      echo "Stopping daemon (pid $DAEMON_PID)..."
+      kill $DAEMON_PID 2>/dev/null
+      wait $DAEMON_PID 2>/dev/null
+    }
+    trap cleanup EXIT INT TERM
+
     # Wait for daemon to be ready
     echo "Waiting for daemon on port 9800..."
     for i in $(seq 1 30); do
@@ -45,17 +53,11 @@ case "${1:-dev}" in
 
     if ! nc -z 127.0.0.1 9800 2>/dev/null; then
       echo "Daemon failed to start"
-      kill $DAEMON_PID 2>/dev/null
       exit 1
     fi
 
     # Start Noema (it will discover the running daemon via WS)
     cd "$REPO_ROOT/noema" && npm run tauri dev
-
-    # Cleanup: stop daemon when Noema exits
-    echo "Stopping daemon..."
-    kill $DAEMON_PID 2>/dev/null
-    wait $DAEMON_PID 2>/dev/null
     ;;
   build)
     cd "$REPO_ROOT/noema" && npm run tauri build

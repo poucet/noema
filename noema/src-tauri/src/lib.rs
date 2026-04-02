@@ -54,10 +54,12 @@ async fn handle_asset_request(
         }
     };
     let url = format!("{base_url}/asset/{blob_hash}");
+    tracing::debug!(url = %url, "asset proxy request");
 
     match reqwest::get(&url).await {
         Ok(resp) => {
             let status = resp.status().as_u16();
+            tracing::debug!(status, url = %url, "asset proxy response");
             let mut builder = Response::builder().status(status);
             // Forward cache headers from daemon
             for (key, value) in resp.headers() {
@@ -69,6 +71,7 @@ async fn handle_asset_request(
             builder.body(body).unwrap()
         }
         Err(e) => {
+            tracing::error!(url = %url, error = %e, "asset proxy failed");
             Response::builder()
                 .status(502)
                 .header("Content-Type", "text/plain")
