@@ -117,10 +117,15 @@ pub async fn connect_or_host(
     let ws_dispatch = (builders.ws_dispatch)(Arc::clone(&daemon));
     let ws_server = server::start(ws_dispatch, port).await?;
 
-    let rest_port = port + 1;
-    let rest_dispatcher = (builders.rest_dispatcher)(Arc::clone(&daemon));
     let tracker = ws_server.tracker().clone();
-    let (rest_server, kill_rx) = rest::start_with_tracker(rest_dispatcher, rest_port, Some(tracker)).await?;
+    let (admin_routes, kill_rx) = crate::admin::routes(tracker);
+
+    let rest_port = port + 1;
+    let rest_server = rest::start(rest::RestConfig {
+        dispatcher: (builders.rest_dispatcher)(Arc::clone(&daemon)),
+        port: rest_port,
+        extra_routes: Some(admin_routes),
+    }).await?;
 
     Ok(DaemonHandle::Host {
         daemon,

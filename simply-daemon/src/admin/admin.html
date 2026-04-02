@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>simply-daemon</title>
+<meta charset="utf-8">
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; background: #1a1a2e; color: #e0e0e0; }
+  h1 { font-size: 1.4em; color: #fff; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #333; }
+  th { color: #888; font-weight: 500; font-size: 0.85em; text-transform: uppercase; }
+  .count { color: #888; font-weight: normal; font-size: 0.9em; }
+  .empty { text-align: center; color: #888; }
+  .actions { margin: 30px 0; }
+  button { background: #c0392b; color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+  button:hover { background: #e74c3c; }
+  button:disabled { background: #555; cursor: not-allowed; }
+  #status { margin-top: 10px; font-size: 0.85em; color: #888; }
+</style>
+</head>
+<body>
+<h1>simply-daemon <span class="count" id="count"></span></h1>
+<table>
+  <thead><tr><th>ID</th><th>Address</th><th>Connected</th></tr></thead>
+  <tbody id="connections"></tbody>
+</table>
+<div class="actions">
+  <button onclick="killDaemon()" id="killBtn">Kill Daemon</button>
+  <div id="status"></div>
+</div>
+<script>
+async function loadConnections() {
+  try {
+    const res = await fetch('/admin/api/connections');
+    const conns = await res.json();
+    const tbody = document.getElementById('connections');
+    const count = document.getElementById('count');
+    count.textContent = `(${conns.length} connection${conns.length === 1 ? '' : 's'})`;
+    if (conns.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" class="empty">No active connections</td></tr>';
+    } else {
+      tbody.innerHTML = conns.map(c =>
+        `<tr><td>${c.id}</td><td>${c.addr}</td><td>${c.connected_at}</td></tr>`
+      ).join('');
+    }
+  } catch (e) {
+    document.getElementById('count').textContent = '(unreachable)';
+  }
+}
+
+async function killDaemon() {
+  if (!confirm('Shut down the daemon? Connected clients will need to reconnect.')) return;
+  const btn = document.getElementById('killBtn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  btn.textContent = 'Shutting down...';
+  try {
+    await fetch('/kill', { method: 'POST' });
+    status.textContent = 'Shutdown signal sent.';
+  } catch (e) {
+    status.textContent = 'Request sent (daemon may already be down).';
+  }
+}
+
+loadConnections();
+setInterval(loadConnections, 5000);
+</script>
+</body>
+</html>

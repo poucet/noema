@@ -10,7 +10,6 @@ use simply_daemon::storage::SqliteStores;
 use simply_daemon::ws;
 use simply_rpc::{Dispatcher, RpcService};
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -47,12 +46,18 @@ async fn main() -> anyhow::Result<()> {
     let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
     let _ws_server = ws::server::start(ws_dispatch, port).await?;
 
-    // REST server — stateless, shared across all clients + management endpoints + admin page
-    let rest_port = port + 1;
-    let rest_dispatcher = Dispatcher::new()
-        .register(<dyn AssetApi>::service(daemon.clone()));
+    // Admin routes (health, kill, dashboard)
     let tracker = _ws_server.tracker().clone();
-    let (_rest_server, mut kill_rx) = ws::rest::start_with_tracker(rest_dispatcher, rest_port, Some(tracker)).await?;
+    let (admin_routes, mut kill_rx) = simply_daemon::admin::routes(tracker);
+
+    // REST server
+    let rest_port = port + 1;
+    let _rest_server = ws::rest::start(ws::rest::RestConfig {
+        dispatcher: Dispatcher::new()
+            .register(<dyn AssetApi>::service(daemon.clone())),
+        port: rest_port,
+        extra_routes: Some(admin_routes),
+    }).await?;
 
     tracing::info!(ws_port = port, rest_port = rest_port, "daemon ready");
 

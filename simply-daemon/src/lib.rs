@@ -10,6 +10,7 @@
 //!   standalone daemon process.
 
 #[macro_use] pub mod api;
+pub mod admin;
 pub mod embedded;
 pub mod mcp;
 pub mod oauth;

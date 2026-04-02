@@ -8,5 +8,5 @@ pub mod discovery;
 
 pub use client::ConnectionState;
 pub use discovery::{connect_or_host, DaemonHandle, ServiceBuilders};
-pub use server::{ConnectionTracker, ServerHandle};
+pub use server::ServerHandle;
 pub use rest::RestHandle;
