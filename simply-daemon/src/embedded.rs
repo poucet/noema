@@ -20,8 +20,7 @@ use simply_core::storage::DocumentResolver;
 use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender};
 
 use crate::api::*;
-use crate::mcp::{DaemonMcpServer, ServerHandle, start_server};
-use crate::oauth::OAuthService;
+use crate::mcp::{McpService, McpServiceConfig};
 
 // ---------------------------------------------------------------------------
 // Session bookkeeping
@@ -42,14 +41,11 @@ struct ManagedSession<S: StorageTypes> {
 pub struct EmbeddedDaemon<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
     stores: Arc<dyn Stores<S>>,
-    mcp_registry: Arc<Mutex<McpRegistry>>,
+    mcp: McpService,
     sessions: Mutex<HashMap<SessionId, ManagedSession<S>>>,
-    /// Default model ID — used when sessions don't specify one.
     default_model_id: Mutex<String>,
     user_id: UserId,
     manager_event_tx: SharedEventSender,
-    _mcp_server_handle: Mutex<Option<ServerHandle>>,
-    oauth: OAuthService,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -75,49 +71,30 @@ where
             .default_model
             .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
 
-        // Initialize MCP registry
-        let mcp_registry = Arc::new(Mutex::new(
-            McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default()))
-        ));
-
         let (manager_event_tx, manager_event_rx) = mpsc::unbounded_channel();
 
-        // Start the daemon's MCP server (exposes tools like spawn_agent)
+        // Start MCP service (registry, daemon server, OAuth, auto-connect)
         let document_resolver: Arc<dyn DocumentResolver> = stores.document();
-        let mcp_server = DaemonMcpServer::new(
-            Arc::clone(&coordinator),
-            Arc::clone(&mcp_registry),
+        let mcp = McpService::start(
+            &coordinator,
             document_resolver,
-        );
-        let server_handle = start_server(mcp_server).await?;
-        let server_url = server_handle.url();
-
-        // Register and connect the MCP server in the registry
-        {
-            let mut registry = mcp_registry.lock().await;
-            registry.register_ephemeral("daemon-tools".to_string(), server_url);
-            registry.connect("daemon-tools").await?;
-        }
+            McpServiceConfig {
+                oauth_callback_port: settings.oauth_callback_port,
+            },
+        )
+        .await?;
 
         let daemon = Arc::new(Self {
             coordinator,
             stores,
-            mcp_registry,
+            mcp,
             sessions: Mutex::new(HashMap::new()),
             default_model_id: Mutex::new(default_model_id.to_string()),
             user_id,
             manager_event_tx,
-            _mcp_server_handle: Mutex::new(Some(server_handle)),
-            oauth: OAuthService::start(Arc::clone(&mcp_registry), settings.oauth_callback_port).await?,
         });
 
         Self::spawn_event_dispatcher(Arc::clone(&daemon), manager_event_rx);
-
-        // Auto-connect configured MCP servers in background
-        {
-            let registry = Arc::clone(&daemon.mcp_registry);
-            simply_core::mcp::start_auto_connect(registry, None).await;
-        }
 
         Ok(daemon)
     }
@@ -133,10 +110,8 @@ where
                 let session_id = SessionId::new(conversation_id.as_str());
                 let sessions = daemon.sessions.lock().await;
                 if let Some(managed) = sessions.get(&session_id) {
-                    // Convert ManagerEvent → DaemonEvent and broadcast
                     let daemon_events = Self::manager_event_to_daemon_events(&session_id, event);
                     for daemon_event in daemon_events {
-                        // Ignore send errors (no active subscribers)
                         let _ = managed.event_broadcast.send(daemon_event);
                     }
                 }
@@ -145,7 +120,7 @@ where
     }
 
     fn manager_event_to_daemon_events(
-        session_id: &SessionId,
+        _session_id: &SessionId,
         event: ManagerEvent,
     ) -> Vec<DaemonEvent> {
         match event {
@@ -172,7 +147,7 @@ where
             Arc::clone(&self.coordinator),
             model,
             model_id,
-            Arc::clone(&self.mcp_registry),
+            Arc::clone(self.mcp.registry()),
             document_resolver,
             self.user_id.clone(),
             self.manager_event_tx.clone(),
@@ -207,12 +182,12 @@ where
 
     /// The OAuth callback redirect URI (stable port).
     pub fn oauth_redirect_uri(&self) -> String {
-        self.oauth.redirect_uri()
+        self.mcp.oauth_redirect_uri()
     }
 
-    /// Access the MCP registry (for MCP config commands).
-    pub fn mcp_registry(&self) -> &Arc<Mutex<McpRegistry>> {
-        &self.mcp_registry
+    /// Access the MCP service (for features not yet fully in daemon API, e.g. gdocs).
+    pub fn mcp_service(&self) -> &McpService {
+        &self.mcp
     }
 
     /// Access stores (for features not yet in daemon API, e.g. gdocs).
@@ -290,7 +265,6 @@ where
         &self,
         session_id: &SessionId,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
-        // If already loaded, return info + new subscriber
         {
             let sessions = self.sessions.lock().await;
             if let Some(managed) = sessions.get(session_id) {
@@ -298,7 +272,6 @@ where
             }
         }
 
-        // Load from storage
         let conversation_id = ConversationId::from_string(session_id.as_str());
         let session = Session::open(Arc::clone(&self.coordinator), conversation_id).await?;
 
@@ -477,7 +450,6 @@ where
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
         use simply_core::storage::EntityStore;
 
-        // Close session if open
         let session_id = SessionId::new(conversation_id.as_str());
         let _ = self.close_session(&session_id).await;
 
@@ -526,7 +498,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// McpApi
+// McpApi — delegates to McpService
 // ---------------------------------------------------------------------------
 
 #[async_trait]
@@ -535,183 +507,39 @@ where
     S::Document: DocumentResolver,
 {
     async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> {
-        let registry = self.mcp_registry.lock().await;
-        let mut servers = Vec::new();
-        for (id, config) in registry.list_servers() {
-            let is_connected = registry.is_connected(id);
-            let tool_count = registry.get_connection(id)
-                .map(|c| c.tools.len())
-                .unwrap_or(0);
-            let status = match registry.get_status(id) {
-                simply_core::mcp::ServerStatus::Disconnected => "disconnected".to_string(),
-                simply_core::mcp::ServerStatus::Connected => "connected".to_string(),
-                simply_core::mcp::ServerStatus::Retrying { attempt } => format!("retrying:{}", attempt),
-                simply_core::mcp::ServerStatus::RetryStopped { last_error } => format!("stopped:{}", last_error),
-            };
-            let auth_type = match &config.auth {
-                simply_core::AuthMethod::None => "none",
-                simply_core::AuthMethod::Token { .. } => "token",
-                simply_core::AuthMethod::OAuth { .. } => "oauth",
-            };
-            servers.push(McpServerInfo {
-                id: id.to_string(),
-                name: config.name.clone(),
-                url: config.url.clone(),
-                auth_type: auth_type.to_string(),
-                is_connected,
-                needs_oauth_login: config.auth.needs_oauth_login(),
-                tool_count,
-                status,
-                auto_connect: config.auto_connect,
-                auto_retry: config.auto_retry,
-            });
-        }
-        Ok(servers)
+        self.mcp.list_mcp_servers().await
     }
-
     async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> {
-        let auth = match request.auth_type.as_str() {
-            "token" => simply_core::AuthMethod::Token {
-                token: request.auth_token.unwrap_or_default(),
-            },
-            "oauth" => simply_core::AuthMethod::OAuth {
-                client_id: request.client_id.unwrap_or_else(|| "simply".to_string()),
-                client_secret: request.client_secret,
-                authorization_url: None,
-                token_url: None,
-                scopes: request.scopes.unwrap_or_default(),
-                access_token: None,
-                refresh_token: None,
-                expires_at: None,
-            },
-            "none" => simply_core::AuthMethod::None,
-            _ => {
-                // Auto-detect: probe .well-known
-                tracing::info!(url = %request.url, "auto-detecting auth via .well-known");
-                if let Ok(well_known) = crate::oauth::fetch_well_known(&request.url).await {
-                    if well_known.get("authorization_endpoint").is_some() {
-                        tracing::info!("OAuth detected via .well-known");
-                        simply_core::AuthMethod::OAuth {
-                            client_id: "simply".to_string(),
-                            client_secret: None,
-                            authorization_url: None,
-                            token_url: None,
-                            scopes: vec![],
-                            access_token: None,
-                            refresh_token: None,
-                            expires_at: None,
-                        }
-                    } else {
-                        simply_core::AuthMethod::None
-                    }
-                } else {
-                    simply_core::AuthMethod::None
-                }
-            }
-        };
-
-        let use_well_known = matches!(auth, simply_core::AuthMethod::OAuth { .. });
-        let config = simply_core::ServerConfig {
-            name: request.name,
-            url: request.url,
-            auth,
-            auth_token: None,
-            auto_connect: true,
-            auto_retry: true,
-            use_well_known,
-        };
-        let mut registry = self.mcp_registry.lock().await;
-        registry.add_server(request.id.clone(), config);
-        registry.save_config()?;
-        Ok(())
+        self.mcp.add_mcp_server(request).await
     }
-
     async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
-        let mut registry = self.mcp_registry.lock().await;
-        registry.remove_server(server_id).await?;
-        registry.save_config()?;
-        Ok(())
+        self.mcp.remove_mcp_server(server_id).await
     }
-
     async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
-        let mut registry = self.mcp_registry.lock().await;
-        registry.connect(server_id).await?;
-        let tool_count = registry.get_connection(server_id)
-            .map(|c| c.tools.len())
-            .unwrap_or(0);
-        Ok(tool_count)
+        self.mcp.connect_mcp_server(server_id).await
     }
-
     async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
-        let mut registry = self.mcp_registry.lock().await;
-        registry.disconnect(server_id).await?;
-        Ok(())
+        self.mcp.disconnect_mcp_server(server_id).await
     }
-
     async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpToolInfo>> {
-        let registry = self.mcp_registry.lock().await;
-        let conn = registry.get_connection(server_id)
-            .ok_or_else(|| anyhow::anyhow!("server not connected: {server_id}"))?;
-        Ok(conn.tools.iter().map(|t| McpToolInfo {
-            name: t.name.to_string(),
-            description: t.description.as_deref().map(|s| s.to_string()),
-            server_id: server_id.to_string(),
-        }).collect())
+        self.mcp.get_mcp_server_tools(server_id).await
     }
-
     async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
-        // Disconnect then reconnect to test
-        let mut registry = self.mcp_registry.lock().await;
-        let _ = registry.disconnect(server_id).await;
-        registry.connect(server_id).await?;
-        let tool_count = registry.get_connection(server_id)
-            .map(|c| c.tools.len())
-            .unwrap_or(0);
-        Ok(tool_count)
+        self.mcp.test_mcp_server(server_id).await
     }
-
-    async fn update_mcp_server_settings(
-        &self,
-        server_id: &str,
-        request: UpdateMcpServerRequest,
-    ) -> anyhow::Result<()> {
-        let mut registry = self.mcp_registry.lock().await;
-        if let Some(config) = registry.config_mut().servers.get_mut(server_id) {
-            if let Some(name) = request.name { config.name = name; }
-            if let Some(url) = request.url { config.url = url; }
-            if let Some(auto_connect) = request.auto_connect { config.auto_connect = auto_connect; }
-            if let Some(auto_retry) = request.auto_retry { config.auto_retry = auto_retry; }
-        }
-        registry.save_config()?;
-        Ok(())
+    async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> {
+        self.mcp.update_mcp_server_settings(server_id, request).await
     }
-
     async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
-        let mut registry = self.mcp_registry.lock().await;
-        registry.cancel_retry(server_id);
-        Ok(())
+        self.mcp.stop_mcp_retry(server_id).await
     }
-
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
-        let registry = self.mcp_registry.lock().await;
-        let config = registry.config().servers.get(server_id)
-            .ok_or_else(|| anyhow::anyhow!("server not found: {server_id}"))?
-            .clone();
-        drop(registry);
-
-        simply_core::mcp::spawn_retry_task(
-            Arc::clone(&self.mcp_registry),
-            server_id.to_string(),
-            config,
-            None,
-        );
-        Ok(())
+        self.mcp.start_mcp_retry(server_id).await
     }
-
 }
 
 // ---------------------------------------------------------------------------
-// OAuthApi
+// OAuthApi — delegates to McpService
 // ---------------------------------------------------------------------------
 
 #[async_trait]
@@ -720,19 +548,16 @@ where
     S::Document: DocumentResolver,
 {
     async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
-        self.oauth.start_flow(server_id).await
+        self.mcp.start_oauth(server_id).await
     }
-
     async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()> {
-        self.oauth.complete_with_state(server_id, code, state).await
+        self.mcp.complete_oauth(server_id, code, state).await
     }
-
     async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()> {
-        self.oauth.complete_with_code(server_id, code).await
+        self.mcp.complete_oauth_with_code(server_id, code).await
     }
-
     async fn resolve_oauth_state(&self, state: &str) -> Option<String> {
-        self.oauth.resolve_state(state).await
+        self.mcp.resolve_oauth_state(state).await
     }
 }
 
@@ -764,7 +589,6 @@ where
     }
 
     async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> {
-        // Validate the model ID is valid
         let _ = llm::create_model(model_id)?;
         *self.default_model_id.lock().await = model_id.to_string();
         Ok(())

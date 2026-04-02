@@ -32,13 +32,13 @@ impl WsResponse {
         }
     }
 
-    pub fn err(id: u64, message: impl Into<String>) -> Self {
+    pub fn err(id: u64, message: impl std::fmt::Display) -> Self {
         Self {
             id,
             result: None,
             error: Some(WsError {
                 code: -1,
-                message: message.into(),
+                message: message.to_string(),
             }),
         }
     }
