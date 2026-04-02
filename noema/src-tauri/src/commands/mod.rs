@@ -2,7 +2,7 @@
 
 pub mod chat;
 pub mod files;
-pub mod gdocs;
+// pub mod gdocs; // TODO: re-enable once DocumentApi / sidecar design is resolved
 pub mod init;
 pub mod mcp;
 pub mod settings;
@@ -11,7 +11,7 @@ pub mod voice;
 // Re-export all commands for convenience
 pub use chat::*;
 pub use files::*;
-pub use gdocs::*;
+// pub use gdocs::*;
 pub use init::*;
 pub use mcp::*;
 pub use settings::*;

@@ -24,11 +24,11 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
 
     config::load_env_file();
 
-    let stores = SqliteStores::open()
-        .map_err(|e| format!("Failed to open storage: {}", e))?;
-    let stores_arc: Arc<dyn simply_daemon::types::Stores<_>> = Arc::new(stores);
+    let stores = Arc::new(
+        SqliteStores::open().map_err(|e| format!("Failed to open storage: {}", e))?
+    );
 
-    let daemon = EmbeddedDaemon::new(stores_arc)
+    let daemon = EmbeddedDaemon::new(stores)
         .await
         .map_err(|e| format!("Failed to create daemon: {}", e))?;
 

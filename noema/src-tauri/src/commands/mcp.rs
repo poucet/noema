@@ -4,7 +4,7 @@
 
 use simply_daemon::api::{McpApi, OAuthApi, UpdateMcpServerRequest};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::state::AppState;
 use crate::types::{AddMcpServerRequest, McpServerInfo, McpToolInfo};
