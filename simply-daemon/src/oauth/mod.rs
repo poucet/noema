@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 use simply_core::McpRegistry;
 
 use crate::api::OAuthFlowInfo;
+use callback::CallbackServer;
 
 // ---------------------------------------------------------------------------
 // OAuthService
@@ -20,23 +21,38 @@ use crate::api::OAuthFlowInfo;
 
 /// Manages OAuth flows for MCP servers.
 ///
-/// Owns pending-state tracking and provides methods that operate on the
-/// MCP registry to read/write server configs and reconnect after token exchange.
+/// Owns a long-lived [`CallbackServer`] on a stable port and multiplexes
+/// concurrent flows by `state` parameter. Both `EmbeddedDaemon` and the
+/// future standalone daemon can share this.
 pub struct OAuthService {
     mcp_registry: Arc<Mutex<McpRegistry>>,
+    callback_server: CallbackServer,
+    /// state -> server_id for flows initiated via deep link (not callback server)
     pending_states: Mutex<HashMap<String, String>>,
 }
 
 impl OAuthService {
-    pub fn new(mcp_registry: Arc<Mutex<McpRegistry>>) -> Self {
-        Self {
+    /// Create an OAuthService with a long-lived callback server on the given port.
+    pub async fn start(
+        mcp_registry: Arc<Mutex<McpRegistry>>,
+        port: Option<u16>,
+    ) -> anyhow::Result<Self> {
+        let callback_server = CallbackServer::start(port).await?;
+        Ok(Self {
             mcp_registry,
+            callback_server,
             pending_states: Mutex::new(HashMap::new()),
-        }
+        })
     }
 
-    /// Start an OAuth flow: callback server, authorization URL, background listener.
-    pub async fn start(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
+    /// The stable redirect URI for this daemon's callback server.
+    pub fn redirect_uri(&self) -> String {
+        self.callback_server.redirect_uri()
+    }
+
+    /// Start an OAuth flow: register on the callback server, build the
+    /// authorization URL, spawn a background task to complete on callback.
+    pub async fn start_flow(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
         let config = {
             let registry = self.mcp_registry.lock().await;
             registry
@@ -60,10 +76,7 @@ impl OAuthService {
             anyhow::bail!("Please configure your OAuth Client ID in the server settings first.");
         }
 
-        // Start local callback server
-        let callback_server = callback::start_callback_server().await?;
-        let redirect_uri = callback_server.redirect_uri();
-        tracing::info!(redirect_uri = %redirect_uri, "OAuth callback server started");
+        let redirect_uri = self.callback_server.redirect_uri();
 
         // Fetch .well-known if needed
         let well_known = if config.use_well_known {
@@ -84,8 +97,9 @@ impl OAuthService {
             anyhow::bail!("OAuth requires authorization_url or use_well_known");
         };
 
-        // Track state -> server_id
+        // Generate state, register with callback server, and track server_id
         let state_param = uuid::Uuid::new_v4().to_string();
+        let callback_rx = self.callback_server.register(&state_param).await;
         self.pending_states
             .lock()
             .await
@@ -117,8 +131,9 @@ impl OAuthService {
         let use_well_known = config.use_well_known;
 
         tokio::spawn(async move {
-            match callback_server.wait_for_callback().await {
-                Ok((code, received_state)) => {
+            let result = callback_rx.await;
+            match result {
+                Ok(Ok((code, received_state))) => {
                     if received_state != state_clone {
                         tracing::error!("OAuth state mismatch");
                         return;
@@ -136,8 +151,11 @@ impl OAuthService {
                         tracing::error!(error = %e, "OAuth token exchange failed");
                     }
                 }
-                Err(e) => {
-                    tracing::error!(error = %e, "OAuth callback failed");
+                Ok(Err(e)) => {
+                    tracing::error!(error = %e, "OAuth callback returned error");
+                }
+                Err(_) => {
+                    tracing::error!("OAuth callback cancelled");
                 }
             }
         });
@@ -166,20 +184,16 @@ impl OAuthService {
             anyhow::bail!("OAuth state does not match server_id");
         }
 
-        let (server_url, use_well_known) = {
-            let registry = self.mcp_registry.lock().await;
-            let config = registry
-                .config()
-                .get_server(server_id)
-                .ok_or_else(|| anyhow::anyhow!("server not found: {server_id}"))?;
-            (config.url.clone(), config.use_well_known)
-        };
+        // Cancel the callback server registration since we're completing directly
+        self.callback_server.cancel(state).await;
+
+        let (server_url, use_well_known) = self.get_server_url(server_id).await?;
 
         complete_token_exchange(
             &self.mcp_registry,
             server_id,
             code,
-            "noema://oauth/callback",
+            &self.callback_server.redirect_uri(),
             &server_url,
             use_well_known,
         )
@@ -192,20 +206,13 @@ impl OAuthService {
         server_id: &str,
         code: &str,
     ) -> anyhow::Result<()> {
-        let (server_url, use_well_known) = {
-            let registry = self.mcp_registry.lock().await;
-            let config = registry
-                .config()
-                .get_server(server_id)
-                .ok_or_else(|| anyhow::anyhow!("server not found: {server_id}"))?;
-            (config.url.clone(), config.use_well_known)
-        };
+        let (server_url, use_well_known) = self.get_server_url(server_id).await?;
 
         complete_token_exchange(
             &self.mcp_registry,
             server_id,
             code,
-            "noema://oauth/callback",
+            &self.callback_server.redirect_uri(),
             &server_url,
             use_well_known,
         )
@@ -215,6 +222,15 @@ impl OAuthService {
     /// Look up server_id for a pending OAuth state without consuming it.
     pub async fn resolve_state(&self, state: &str) -> Option<String> {
         self.pending_states.lock().await.get(state).cloned()
+    }
+
+    async fn get_server_url(&self, server_id: &str) -> anyhow::Result<(String, bool)> {
+        let registry = self.mcp_registry.lock().await;
+        let config = registry
+            .config()
+            .get_server(server_id)
+            .ok_or_else(|| anyhow::anyhow!("server not found: {server_id}"))?;
+        Ok((config.url.clone(), config.use_well_known))
     }
 }
 

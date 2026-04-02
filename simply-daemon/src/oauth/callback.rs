@@ -1,76 +1,96 @@
-//! OAuth callback server for loopback redirect.
+//! Long-lived OAuth callback server.
 //!
-//! Starts a temporary local HTTP server to receive OAuth callbacks
-//! and capture the authorization code.
+//! Runs on a stable configured port for the lifetime of the daemon.
+//! Multiple concurrent OAuth flows are multiplexed by the `state` query param.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{oneshot, Mutex};
 
-/// State for an active OAuth callback server.
-pub struct OAuthCallbackServer {
+/// A callback result: (authorization_code, state).
+type CallbackResult = Result<(String, String), String>;
+
+/// Long-lived OAuth callback server.
+/// Call `register` before starting a flow, then `await` the returned receiver.
+pub struct CallbackServer {
     port: u16,
-    code_rx: oneshot::Receiver<Result<(String, String), String>>,
-    _shutdown_tx: Option<oneshot::Sender<()>>,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<CallbackResult>>>>,
+    _shutdown_tx: oneshot::Sender<()>,
 }
 
-impl OAuthCallbackServer {
-    /// Get the redirect URI for this callback server.
-    pub fn redirect_uri(&self) -> String {
-        format!("http://127.0.0.1:{}/callback", self.port)
-    }
+const DEFAULT_PORT: u16 = 9876;
 
-    /// Wait for the OAuth callback and return (code, state).
-    pub async fn wait_for_callback(self) -> Result<(String, String), String> {
-        self.code_rx
-            .await
-            .map_err(|_| "Callback cancelled".to_string())?
-    }
-}
+impl CallbackServer {
+    /// Start the callback server on the given port (or default 9876).
+    pub async fn start(port: Option<u16>) -> anyhow::Result<Self> {
+        let port = port.unwrap_or(DEFAULT_PORT);
+        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+        let listener = TcpListener::bind(addr).await?;
+        let actual_port = listener.local_addr()?.port();
 
-/// Start a temporary OAuth callback server on a random local port.
-pub async fn start_callback_server() -> anyhow::Result<OAuthCallbackServer> {
-    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let listener = TcpListener::bind(addr).await?;
-    let port = listener.local_addr()?.port();
+        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<CallbackResult>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
-    let (code_tx, code_rx) = oneshot::channel();
-    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-
-    let code_tx = Arc::new(Mutex::new(Some(code_tx)));
-
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = &mut shutdown_rx => break,
-                result = listener.accept() => {
-                    match result {
-                        Ok((stream, _)) => {
-                            let code_tx = code_tx.clone();
-                            tokio::spawn(async move {
-                                handle_callback(stream, code_tx).await;
-                            });
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to accept OAuth callback connection: {}", e);
+        let pending_clone = Arc::clone(&pending);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => break,
+                    result = listener.accept() => {
+                        match result {
+                            Ok((stream, _)) => {
+                                let pending = Arc::clone(&pending_clone);
+                                tokio::spawn(async move {
+                                    handle_request(stream, pending).await;
+                                });
+                            }
+                            Err(e) => {
+                                tracing::error!("OAuth callback server accept error: {}", e);
+                            }
                         }
                     }
                 }
             }
-        }
-    });
+        });
 
-    Ok(OAuthCallbackServer {
-        port,
-        code_rx,
-        _shutdown_tx: Some(shutdown_tx),
-    })
+        tracing::info!(port = actual_port, "OAuth callback server started");
+
+        Ok(Self {
+            port: actual_port,
+            pending,
+            _shutdown_tx: shutdown_tx,
+        })
+    }
+
+    /// The redirect URI clients should use.
+    pub fn redirect_uri(&self) -> String {
+        format!("http://127.0.0.1:{}/callback", self.port)
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Register a pending OAuth flow. Returns a receiver that resolves
+    /// when the callback arrives with the matching `state` param.
+    pub async fn register(&self, state: &str) -> oneshot::Receiver<CallbackResult> {
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(state.to_string(), tx);
+        rx
+    }
+
+    /// Cancel a pending flow (e.g., on timeout).
+    pub async fn cancel(&self, state: &str) {
+        self.pending.lock().await.remove(state);
+    }
 }
 
-async fn handle_callback(
+async fn handle_request(
     mut stream: tokio::net::TcpStream,
-    code_tx: Arc<Mutex<Option<oneshot::Sender<Result<(String, String), String>>>>>,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<CallbackResult>>>>,
 ) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -88,49 +108,32 @@ async fn handle_callback(
 
     let path = parts[1];
 
-    let (code, state, error) = if let Some(query_start) = path.find('?') {
-        let query = &path[query_start + 1..];
-        let mut code = None;
-        let mut state = None;
-        let mut error = None;
-
-        for param in query.split('&') {
-            if let Some((key, value)) = param.split_once('=') {
-                match key {
-                    "code" => {
-                        code = Some(urlencoding::decode(value).unwrap_or_default().to_string())
-                    }
-                    "state" => {
-                        state = Some(urlencoding::decode(value).unwrap_or_default().to_string())
-                    }
-                    "error" => {
-                        error = Some(urlencoding::decode(value).unwrap_or_default().to_string())
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        (code, state, error)
-    } else {
-        (None, None, None)
-    };
+    // Parse query params
+    let (code, state, error) = parse_query(path);
 
     let result = if let Some(err) = error {
         Err(format!("OAuth error: {}", err))
-    } else if let (Some(code), Some(state)) = (code, state) {
-        Ok((code, state))
+    } else if let (Some(code), Some(ref state)) = (&code, &state) {
+        Ok((code.clone(), state.clone()))
     } else {
         Err("Missing code or state parameter".to_string())
     };
 
-    let is_success = result.is_ok();
+    // Dispatch to the waiting flow by state param
+    let dispatched = if let Some(ref state_val) = state {
+        if let Some(tx) = pending.lock().await.remove(state_val) {
+            let _ = tx.send(result);
+            true
+        } else {
+            tracing::warn!(state = %state_val, "OAuth callback for unknown state");
+            false
+        }
+    } else {
+        false
+    };
 
-    if let Some(tx) = code_tx.lock().await.take() {
-        let _ = tx.send(result);
-    }
-
-    let (status, body) = if is_success {
+    // Respond to browser
+    let (status, body) = if dispatched {
         (
             "200 OK",
             concat!(
@@ -166,4 +169,29 @@ async fn handle_callback(
     );
 
     let _ = stream.write_all(response.as_bytes()).await;
+}
+
+fn parse_query(path: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let Some(query_start) = path.find('?') else {
+        return (None, None, None);
+    };
+
+    let query = &path[query_start + 1..];
+    let mut code = None;
+    let mut state = None;
+    let mut error = None;
+
+    for param in query.split('&') {
+        if let Some((key, value)) = param.split_once('=') {
+            let decoded = urlencoding::decode(value).unwrap_or_default().to_string();
+            match key {
+                "code" => code = Some(decoded),
+                "state" => state = Some(decoded),
+                "error" => error = Some(decoded),
+                _ => {}
+            }
+        }
+    }
+
+    (code, state, error)
 }

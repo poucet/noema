@@ -30,7 +30,7 @@
 | 2.3 | ✅ | Wire Noema desktop to use in-process daemon | P0 | L |
 | 2.3.1 | ✅ | Decouple Noema from simply-core/llm — only use daemon traits; rename `noema-desktop` → `noema` | P0 | L |
 | 2.3.2 | ✅ | Move MCP commands + OAuth flow into daemon (McpApi + OAuthApi) | P0 | M |
-| 2.4 | ⬜ | Stable OAuth callback port on daemon | P0 | S |
+| 2.4 | ✅ | Stable OAuth callback port on daemon | P0 | S |
 | 2.5 | ⬜ | DocumentApi on daemon — store/index/query documents | P0 | M |
 | 2.5.1 | ⬜ | Rewrite Noema gdocs.rs as thin wrappers (Google API via `noema-mcp-gdocs`, storage via DocumentApi) | P0 | M |
 | 2.6 | ⬜ | Daemon binary: startup, config loading, graceful shutdown | P0 | M |

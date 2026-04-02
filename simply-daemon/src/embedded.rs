@@ -108,7 +108,7 @@ where
             user_id,
             manager_event_tx,
             _mcp_server_handle: Mutex::new(Some(server_handle)),
-            oauth: OAuthService::new(Arc::clone(&mcp_registry)),
+            oauth: OAuthService::start(Arc::clone(&mcp_registry), settings.oauth_callback_port).await?,
         });
 
         Self::spawn_event_dispatcher(Arc::clone(&daemon), manager_event_rx);
@@ -715,7 +715,7 @@ where
     S::Document: DocumentResolver,
 {
     async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
-        self.oauth.start(server_id).await
+        self.oauth.start_flow(server_id).await
     }
 
     async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()> {
