@@ -275,7 +275,7 @@ pub async fn new_conversation(
     });
 
     let conv_id = daemon
-        .create_conversation(Some(&conversation_name))
+        .create_conversation(Some(conversation_name))
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 

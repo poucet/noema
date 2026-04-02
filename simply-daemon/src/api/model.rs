@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use super::types::{ModelInfo, ProviderInfo};
 
+#[simply_rpc::rpc_service("model")]
 #[async_trait]
 pub trait ModelApi: Send + Sync {
     /// List available models from all providers.

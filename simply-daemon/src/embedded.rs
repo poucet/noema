@@ -416,9 +416,9 @@ impl<S: StorageTypes> ConversationApi for EmbeddedDaemon<S>
 where
     S::Document: DocumentResolver,
 {
-    async fn create_conversation(&self, name: Option<&str>) -> anyhow::Result<ConversationId> {
+    async fn create_conversation(&self, name: Option<String>) -> anyhow::Result<ConversationId> {
         self.coordinator
-            .create_conversation(&self.user_id, name)
+            .create_conversation(&self.user_id, name.as_deref())
             .await
     }
 
@@ -611,5 +611,10 @@ where
             audio_in: audio_tx,
             events: voice_rx,
         })
+    }
+
+    async fn voice_disconnect(&self, _session_id: &SessionId) -> anyhow::Result<()> {
+        // TODO: drop the voice handle for this session
+        Ok(())
     }
 }

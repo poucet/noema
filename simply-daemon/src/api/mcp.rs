@@ -48,6 +48,7 @@ pub struct UpdateMcpServerRequest {
     pub auto_retry: Option<bool>,
 }
 
+#[simply_rpc::rpc_service("mcp")]
 #[async_trait]
 pub trait McpApi: Send + Sync {
     /// List all configured MCP servers with their status.

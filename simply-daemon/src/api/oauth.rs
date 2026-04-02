@@ -12,6 +12,7 @@ pub struct OAuthFlowInfo {
     pub state: String,
 }
 
+#[simply_rpc::rpc_service("oauth")]
 #[async_trait]
 pub trait OAuthApi: Send + Sync {
     /// Start an OAuth flow for an MCP server.

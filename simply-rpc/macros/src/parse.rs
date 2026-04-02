@@ -45,11 +45,22 @@ pub struct ParsedParam {
 pub struct ParsedMethod {
     pub name: Ident,
     pub rpc_kind: RpcKind,
+    /// Parameter names that should be base64-encoded over the wire (`#[rpc(base64_param = "name")]`).
+    pub base64_params: Vec<String>,
+    /// Whether the return value should be base64-encoded (`#[rpc(base64_return)]`).
+    pub base64_return: bool,
     pub method_name: String,
     pub params: Vec<ParsedParam>,
     pub return_kind: ReturnKind,
     /// The full original method signature (for the client macro to reproduce).
     pub sig: syn::Signature,
+}
+
+impl ParsedMethod {
+    /// Check if a parameter should be base64-encoded.
+    pub fn is_base64_param(&self, name: &str) -> bool {
+        self.base64_params.iter().any(|p| p == name)
+    }
 }
 
 /// A fully parsed trait.
@@ -68,14 +79,16 @@ impl ParsedTrait {
         for trait_item in &item.items {
             let TraitItem::Fn(method) = trait_item else { continue };
 
-            let rpc_kind = detect_rpc_kind(&method.attrs);
+            let rpc_attrs = detect_rpc_attrs(&method.attrs);
             let method_name = format!("{}.{}", prefix, method.sig.ident);
             let params = parse_params(&method.sig)?;
-            let return_kind = parse_return_type(&method.sig.output, &rpc_kind)?;
+            let return_kind = parse_return_type(&method.sig.output, &rpc_attrs.kind)?;
 
             methods.push(ParsedMethod {
                 name: method.sig.ident.clone(),
-                rpc_kind,
+                rpc_kind: rpc_attrs.kind,
+                base64_params: rpc_attrs.base64_params,
+                base64_return: rpc_attrs.base64_return,
                 method_name,
                 params,
                 return_kind,
@@ -112,8 +125,23 @@ impl ParsedTrait {
     }
 }
 
-/// Detect `#[rpc(skip)]` or `#[rpc(stream)]` on a method.
-fn detect_rpc_kind(attrs: &[syn::Attribute]) -> RpcKind {
+/// Parsed `#[rpc(...)]` attributes.
+struct RpcAttrs {
+    kind: RpcKind,
+    base64_params: Vec<String>,
+    base64_return: bool,
+}
+
+/// Detect `#[rpc(...)]` attributes on a method.
+///
+/// Supported: `skip`, `stream`, `base64_param = "name"`, `base64_return`
+fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
+    let mut result = RpcAttrs {
+        kind: RpcKind::Normal,
+        base64_params: Vec::new(),
+        base64_return: false,
+    };
+
     for attr in attrs {
         if !attr.path().is_ident("rpc") {
             continue;
@@ -121,14 +149,28 @@ fn detect_rpc_kind(attrs: &[syn::Attribute]) -> RpcKind {
         if let Ok(list) = attr.meta.require_list() {
             let tokens = list.tokens.to_string();
             if tokens.contains("skip") {
-                return RpcKind::Skip;
+                result.kind = RpcKind::Skip;
             }
             if tokens.contains("stream") {
-                return RpcKind::Stream;
+                result.kind = RpcKind::Stream;
+            }
+            if tokens.contains("base64_return") {
+                result.base64_return = true;
+            }
+            // Parse base64_param = "name" (can appear multiple times)
+            // Simple token-level parsing: look for `base64_param = "..."` patterns
+            let token_str = tokens.replace(' ', "");
+            for segment in token_str.split(',') {
+                let segment = segment.trim();
+                if let Some(value) = segment.strip_prefix("base64_param=") {
+                    let name = value.trim_matches('"');
+                    result.base64_params.push(name.to_string());
+                }
             }
         }
     }
-    RpcKind::Normal
+
+    result
 }
 
 /// Parse method parameters, skipping `&self`.
@@ -265,6 +307,19 @@ fn to_snake_case(s: &str) -> String {
 /// Convert PascalCase to UPPER_SNAKE_CASE.
 fn to_upper_snake_case(s: &str) -> String {
     to_snake_case(s).to_uppercase()
+}
+
+/// Convert snake_case to PascalCase.
+pub fn to_pascal_case(s: &str) -> String {
+    s.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().chain(chars).collect(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

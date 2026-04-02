@@ -28,7 +28,6 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         /// Implement the trait for any type implementing `RpcClient`.
-        #[macro_export]
         macro_rules! #macro_name {
             ($T:ty) => {
                 #[::async_trait::async_trait]
@@ -79,27 +78,37 @@ fn generate_serialize(method: &ParsedMethod) -> (TokenStream, TokenStream) {
     if params.len() == 1 {
         let p = &params[0];
         let name = &p.name;
+        if method.is_base64_param(&name.to_string()) {
+            return (quote! {}, quote! {
+                ::serde_json::to_value(::simply_rpc::encode_base64(&#name))?
+            });
+        }
         return (quote! {}, quote! { ::serde_json::to_value(#name)? });
     }
 
     // Multi-param: generate a Params struct with owned types for serialization.
-    // We use owned types to avoid lifetime issues in the generated struct.
+    // base64_param fields become String on the wire.
     let struct_name = format_ident!("__RpcClientParams_{}", method.name);
     let fields: Vec<TokenStream> = params
         .iter()
         .map(|p| {
             let name = &p.name;
-            let owned_type = &p.owned_type;
-            quote! { #name: #owned_type }
+            if method.is_base64_param(&name.to_string()) {
+                quote! { #name: String }
+            } else {
+                let owned_type = &p.owned_type;
+                quote! { #name: #owned_type }
+            }
         })
         .collect();
 
-    // Convert refs to owned for struct init
     let field_inits: Vec<TokenStream> = params
         .iter()
         .map(|p| {
             let name = &p.name;
-            if p.is_str_ref {
+            if method.is_base64_param(&name.to_string()) {
+                quote! { #name: ::simply_rpc::encode_base64(&#name) }
+            } else if p.is_str_ref {
                 quote! { #name: #name.to_string() }
             } else if p.is_ref {
                 quote! { #name: #name.clone() }
@@ -125,6 +134,12 @@ fn generate_serialize(method: &ParsedMethod) -> (TokenStream, TokenStream) {
     (serialize, params_expr)
 }
 
+/// Check if a type is `Vec<u8>`.
+fn is_vec_u8(ty: &syn::Type) -> bool {
+    let s = quote! { #ty }.to_string().replace(' ', "");
+    s == "Vec<u8>"
+}
+
 /// Generate the body of a client method.
 fn generate_client_body(
     method: &ParsedMethod,
@@ -132,6 +147,18 @@ fn generate_client_body(
     serialize: &TokenStream,
     rpc_params: &TokenStream,
 ) -> TokenStream {
+    // For base64_return methods, decode the base64 response
+    if method.base64_return {
+        if let ReturnKind::ResultValue { .. } = &method.return_kind {
+            return quote! {
+                #serialize
+                let __r = self.rpc_call(#method_str, #rpc_params).await?;
+                let __b64: String = ::serde_json::from_value(__r)?;
+                Ok(::simply_rpc::decode_base64(&__b64)?)
+            };
+        }
+    }
+
     match &method.return_kind {
         ReturnKind::ResultUnit => {
             quote! {

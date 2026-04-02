@@ -69,21 +69,25 @@ pub struct SeedMessage {
 // Trait
 // ---------------------------------------------------------------------------
 
+#[simply_rpc::rpc_service("session")]
 #[async_trait]
 pub trait SessionApi: Send + Sync {
     /// Create a new session. Returns info and an event stream.
+    #[rpc(stream)]
     async fn create_session(
         &self,
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
     /// Resume an existing session from storage. Returns info and an event stream.
+    #[rpc(stream)]
     async fn resume_session(
         &self,
         session_id: &SessionId,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
     /// Subscribe to an already-open session's events (multiple listeners).
+    #[rpc(stream)]
     async fn subscribe_session(
         &self,
         session_id: &SessionId,

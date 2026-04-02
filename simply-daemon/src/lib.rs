@@ -8,7 +8,7 @@
 //!   host binary (Noema, Lumina, tests). No networking.
 //! - **Remote** (future) — calls go over WebSocket to a standalone daemon process.
 
-pub mod api;
+#[macro_use] pub mod api;
 pub mod embedded;
 pub mod mcp;
 pub mod oauth;

@@ -15,7 +15,7 @@ mod service;
 
 pub use client::RpcClient;
 pub use context::DispatchResult;
-pub use helpers::{call_raw, call_unit, call_val};
+pub use helpers::{call_raw, call_unit, call_val, decode_base64, encode_base64};
 pub use meta::{check_compat, MethodMeta, ServiceMeta, ServiceMetaWire};
 pub use service::{Dispatcher, RpcService};
 

@@ -5200,6 +5200,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "serde",
  "serde_json",
  "simply-rpc-macros",

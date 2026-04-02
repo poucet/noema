@@ -34,11 +34,16 @@ pub struct VoiceHandle {
     pub events: mpsc::Receiver<VoiceEvent>,
 }
 
+#[simply_rpc::rpc_service("voice")]
 #[async_trait]
 pub trait VoiceApi: Send + Sync {
     /// Connect a voice stream to a session.
     ///
     /// Client handles platform audio (CPAL/songbird/WebRTC),
-    /// daemon handles STT/LLM/TTS. Drop the handle to disconnect.
+    /// daemon handles STT/LLM/TTS.
+    #[rpc(skip)]
     async fn voice_connect(&self, session_id: &SessionId) -> anyhow::Result<VoiceHandle>;
+
+    /// Disconnect a voice stream from a session.
+    async fn voice_disconnect(&self, session_id: &SessionId) -> anyhow::Result<()>;
 }

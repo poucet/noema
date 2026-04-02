@@ -9,13 +9,13 @@
 //! - [`ModelApi`] — model listing and management
 //! - [`VoiceApi`] — voice pipeline
 
-mod session;
-mod conversation;
-mod asset;
-mod mcp;
-mod oauth;
-mod model;
-mod voice;
+#[macro_use] mod session;
+#[macro_use] mod conversation;
+#[macro_use] mod asset;
+#[macro_use] mod mcp;
+#[macro_use] mod oauth;
+#[macro_use] mod model;
+#[macro_use] mod voice;
 pub mod types;
 
 pub use session::*;
