@@ -1,7 +1,7 @@
 //! Lightweight HTTP REST server for the daemon.
 //!
-//! Auto-routes based on `#[rpc(rest_get)]` annotations in service metadata.
-//! No hardcoded API knowledge — routes are discovered from the Dispatcher.
+//! Auto-routes `#[rpc(rest_get)]` methods from service metadata.
+//! Also serves built-in management endpoints: `/health`, `/kill`.
 
 use std::sync::Arc;
 
@@ -12,18 +12,23 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use http_body_util::Full;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use simply_rpc::Dispatcher;
 
 /// Starts a REST HTTP server on the given port.
-pub async fn start(dispatcher: Dispatcher, port: u16) -> anyhow::Result<RestHandle> {
+///
+/// Returns the handle and a receiver that fires when `/kill` is called.
+pub async fn start(dispatcher: Dispatcher, port: u16) -> anyhow::Result<(RestHandle, mpsc::Receiver<()>)> {
     let addr = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!(port, "REST server listening");
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let (kill_tx, kill_rx) = mpsc::channel(1);
     let dispatcher = Arc::new(dispatcher);
+    let kill_tx = Arc::new(kill_tx);
 
     let handle = tokio::spawn(async move {
         loop {
@@ -33,10 +38,12 @@ pub async fn start(dispatcher: Dispatcher, port: u16) -> anyhow::Result<RestHand
                     match result {
                         Ok((stream, _addr)) => {
                             let dispatcher = Arc::clone(&dispatcher);
+                            let kill_tx = Arc::clone(&kill_tx);
                             tokio::spawn(async move {
                                 let service = service_fn(move |req| {
                                     let dispatcher = Arc::clone(&dispatcher);
-                                    async move { handle_request(req, &dispatcher).await }
+                                    let kill_tx = Arc::clone(&kill_tx);
+                                    async move { handle_request(req, &dispatcher, &kill_tx).await }
                                 });
                                 if let Err(e) = http1::Builder::new()
                                     .serve_connection(TokioIo::new(stream), service)
@@ -53,7 +60,7 @@ pub async fn start(dispatcher: Dispatcher, port: u16) -> anyhow::Result<RestHand
         }
     });
 
-    Ok(RestHandle { _task: handle, _shutdown: shutdown_tx, port })
+    Ok((RestHandle { _task: handle, _shutdown: shutdown_tx, port }, kill_rx))
 }
 
 pub struct RestHandle {
@@ -71,16 +78,34 @@ type HyperResponse = Response<Full<hyper::body::Bytes>>;
 async fn handle_request(
     req: Request<Incoming>,
     dispatcher: &Dispatcher,
+    kill_tx: &mpsc::Sender<()>,
 ) -> Result<HyperResponse, std::convert::Infallible> {
     let path = req.uri().path().to_string();
 
     tracing::debug!(method = %req.method(), path = %path, "REST request");
 
-    if req.method() != hyper::Method::GET {
-        return Ok(error_response(StatusCode::METHOD_NOT_ALLOWED, "only GET supported"));
+    // --- Built-in management endpoints ---
+    match path.as_str() {
+        "/health" => {
+            return Ok(json_response(StatusCode::OK, &serde_json::json!({
+                "status": "ok",
+            })));
+        }
+        "/kill" if req.method() == hyper::Method::POST => {
+            tracing::info!("Kill requested via REST");
+            let _ = kill_tx.send(()).await;
+            return Ok(json_response(StatusCode::OK, &serde_json::json!({
+                "status": "shutting_down",
+            })));
+        }
+        _ => {}
     }
 
-    // Match path against rest_get methods from service metadata.
+    // --- Service routes (rest_get methods from metadata) ---
+    if req.method() != hyper::Method::GET {
+        return Ok(error_response(StatusCode::METHOD_NOT_ALLOWED, "method not allowed"));
+    }
+
     // Convention: GET /{prefix}/{param_value} → dispatches "{prefix}.{method_name}" with param_value
     let segments: Vec<&str> = path.trim_start_matches('/').splitn(2, '/').collect();
     if segments.len() != 2 || segments[0].is_empty() || segments[1].is_empty() {
@@ -128,13 +153,7 @@ async fn handle_request(
                     .unwrap())
             } else {
                 // Return as JSON
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .header("Content-Type", "application/json")
-                    .body(Full::new(hyper::body::Bytes::from(
-                        serde_json::to_vec(&value).unwrap_or_default(),
-                    )))
-                    .unwrap())
+                Ok(json_response(StatusCode::OK, &value))
             }
         }
         Err(e) => {
@@ -146,6 +165,16 @@ async fn handle_request(
             }
         }
     }
+}
+
+fn json_response(status: StatusCode, value: &serde_json::Value) -> HyperResponse {
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(Full::new(hyper::body::Bytes::from(
+            serde_json::to_vec(value).unwrap_or_default(),
+        )))
+        .unwrap()
 }
 
 fn error_response(status: StatusCode, message: &str) -> HyperResponse {

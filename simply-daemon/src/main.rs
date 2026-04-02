@@ -48,16 +48,19 @@ async fn main() -> anyhow::Result<()> {
     let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
     let _ws_server = ws::server::start(ws_dispatch, port).await?;
 
-    // REST server — stateless, shared across all clients
+    // REST server — stateless, shared across all clients + management endpoints
     let rest_port = port + 1;
     let rest_dispatcher = Dispatcher::new()
         .register(<dyn AssetApi>::service(daemon.clone()));
-    let _rest_server = ws::rest::start(rest_dispatcher, rest_port).await?;
+    let (_rest_server, mut kill_rx) = ws::rest::start(rest_dispatcher, rest_port).await?;
 
     tracing::info!(ws_port = port, rest_port = rest_port, "daemon ready");
 
-    // Wait for shutdown signal
-    shutdown_signal().await;
+    // Wait for shutdown signal (Ctrl+C, SIGTERM, or /kill REST endpoint)
+    tokio::select! {
+        _ = shutdown_signal() => {}
+        _ = kill_rx.recv() => { tracing::info!("kill received via REST"); }
+    }
 
     tracing::info!("shutting down");
     daemon.close_all_sessions().await?;
