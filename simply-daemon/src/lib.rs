@@ -18,6 +18,7 @@ pub mod remote;
 pub mod session;
 pub mod storage;
 pub mod net;
+pub mod tools;
 
 /// Re-exported types for clients.
 pub use api::types as types;
