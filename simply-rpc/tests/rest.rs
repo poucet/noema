@@ -315,6 +315,18 @@ impl RpcClient for MockWsClient {
     }
 
     async fn unregister_stream(&self, _id: &str) {}
+
+    async fn rest_call(
+        &self,
+        http_method: HttpMethod,
+        path: &str,
+        body: Value,
+    ) -> anyhow::Result<Value> {
+        match self.svc.rest_dispatch(http_method, path, body).await {
+            Some(result) => result,
+            None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
+        }
+    }
 }
 
 impl_remote_widget_api!(MockWsClient);

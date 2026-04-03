@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::parse::{ParsedMethod, ParsedTrait, ReturnKind, RpcKind};
+use crate::parse::{HttpMethod, ParsedMethod, ParsedTrait, RestEndpoint, ReturnKind, RpcKind};
 
 /// Generate the `impl_remote_xxx!` declarative macro.
 pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
@@ -55,6 +55,20 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
         });
     }
 
+    // REST-annotated methods (not stream) → generate rest_call with path interpolation
+    if let Some(endpoint) = &method.rest_endpoint {
+        if endpoint.http_method != HttpMethod::Stream {
+            let body = generate_rest_client_body(method, endpoint);
+            return Ok(quote! {
+                async fn #fn_name(#inputs) #output {
+                    use ::simply_rpc::RpcClient;
+                    #body
+                }
+            });
+        }
+    }
+
+    // Stream or unannotated methods → WS rpc_call (existing behavior)
     let method_str = &method.method_name;
     let (serialize, rpc_params) = generate_serialize(method);
     let body = generate_client_body(method, method_str, &serialize, &rpc_params);
@@ -65,6 +79,118 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
             #body
         }
     })
+}
+
+/// Generate the body for a REST-annotated client method.
+///
+/// Builds the path from the template (interpolating params), collects remaining
+/// params into a JSON body, then calls `self.rest_call(method, path, body)`.
+fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> TokenStream {
+    let http_method = match endpoint.http_method {
+        HttpMethod::Get => quote! { ::simply_rpc::HttpMethod::Get },
+        HttpMethod::Post => quote! { ::simply_rpc::HttpMethod::Post },
+        HttpMethod::Put => quote! { ::simply_rpc::HttpMethod::Put },
+        HttpMethod::Delete => quote! { ::simply_rpc::HttpMethod::Delete },
+        HttpMethod::Stream => unreachable!("stream methods handled separately"),
+    };
+
+    // Build path string with interpolation
+    let path_template = &endpoint.path_template;
+    let path_expr = if endpoint.path_params.is_empty() {
+        quote! { #path_template.to_string() }
+    } else {
+        // Replace {param} with the actual param value
+        let mut format_str = path_template.clone();
+        let mut format_args = Vec::new();
+        for param_name in &endpoint.path_params {
+            let placeholder = format!("{{{param_name}}}");
+            format_str = format_str.replace(&placeholder, "{}");
+            let param_ident = format_ident!("{}", param_name);
+            format_args.push(quote! { #param_ident });
+        }
+        quote! { format!(#format_str, #(#format_args),*) }
+    };
+
+    // Body params: everything not in the path
+    let body_params: Vec<_> = method.params.iter().filter(|p| {
+        !endpoint.path_params.contains(&p.name.to_string())
+    }).collect();
+
+    let body_expr = if body_params.is_empty() {
+        quote! { ::serde_json::Value::Null }
+    } else if body_params.len() == 1 && endpoint.path_params.is_empty() {
+        // Single param, no path params → whole body is the value (matches server deser)
+        let p = &body_params[0];
+        let name = &p.name;
+        if method.is_base64_param(&name.to_string()) {
+            quote! { ::serde_json::to_value(::simply_rpc::encode_base64(&#name))? }
+        } else {
+            quote! { ::serde_json::to_value(#name)? }
+        }
+    } else {
+        let struct_name = format_ident!("__RestClientParams_{}", method.name);
+        let fields: Vec<TokenStream> = body_params.iter().map(|p| {
+            let name = &p.name;
+            let owned_type = &p.owned_type;
+            if method.is_base64_param(&name.to_string()) {
+                quote! { #name: String }
+            } else {
+                quote! { #name: #owned_type }
+            }
+        }).collect();
+        let field_inits: Vec<TokenStream> = body_params.iter().map(|p| {
+            let name = &p.name;
+            if method.is_base64_param(&name.to_string()) {
+                quote! { #name: ::simply_rpc::encode_base64(&#name) }
+            } else if p.is_str_ref {
+                quote! { #name: #name.to_string() }
+            } else if p.is_ref {
+                quote! { #name: #name.clone() }
+            } else {
+                quote! { #name }
+            }
+        }).collect();
+        quote! {
+            {
+                #[derive(::serde::Serialize)]
+                struct #struct_name { #(#fields,)* }
+                ::serde_json::to_value(&#struct_name { #(#field_inits,)* })?
+            }
+        }
+    };
+
+    // Result handling
+    if method.base64_return {
+        if let ReturnKind::ResultValue { .. } = &method.return_kind {
+            return quote! {
+                let __path = #path_expr;
+                let __r = self.rest_call(#http_method, &__path, #body_expr).await?;
+                let __b64: String = ::serde_json::from_value(__r)?;
+                Ok(::simply_rpc::decode_base64(&__b64)?)
+            };
+        }
+    }
+
+    match &method.return_kind {
+        ReturnKind::ResultUnit => quote! {
+            let __path = #path_expr;
+            self.rest_call(#http_method, &__path, #body_expr).await?;
+            Ok(())
+        },
+        ReturnKind::ResultValue { .. } => quote! {
+            let __path = #path_expr;
+            let __r = self.rest_call(#http_method, &__path, #body_expr).await?;
+            Ok(::serde_json::from_value(__r)?)
+        },
+        ReturnKind::RawValue { .. } => quote! {
+            let __path = #path_expr;
+            self.rest_call(#http_method, &__path, #body_expr)
+                .await
+                .and_then(|r| ::serde_json::from_value(r).map_err(Into::into))
+                .unwrap_or_default()
+        },
+        _ => unreachable!("stream return types handled separately"),
+    }
 }
 
 /// Generate serialization code for the client call.

@@ -27,5 +27,6 @@ pub trait ConversationApi: Send + Sync {
     async fn rename_conversation(&self, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()>;
 
     /// Get messages for a conversation (resolved content with turn IDs).
+    #[rpc(get = "/conversation/{conversation_id}/messages")]
     async fn get_messages(&self, conversation_id: &ConversationId) -> anyhow::Result<Vec<ResolvedMessage>>;
 }
