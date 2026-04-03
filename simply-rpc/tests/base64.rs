@@ -193,3 +193,147 @@ fn route_meta_for_blob_methods() {
     assert!(get.binary_response, "get_blob returns BinaryResponse");
     assert!(get.immutable_cache, "get_blob has immutable_cache annotation");
 }
+
+// ---------------------------------------------------------------------------
+// Raw HTTP integration tests — reqwest against a real axum server
+// ---------------------------------------------------------------------------
+
+async fn start_blob_server() -> (String, Arc<InMemoryBlobs>) {
+    use axum::body::Body;
+    use axum::extract::State;
+    use axum::http::{Method, StatusCode};
+    use axum::response::{IntoResponse, Json as AxumJson};
+    use axum::Router;
+
+    let impl_ = Arc::new(InMemoryBlobs::new());
+    let svc = <dyn BlobApi>::service(impl_.clone());
+    let dispatcher = Arc::new(RestDispatcher::new().register(svc));
+
+    #[derive(Clone)]
+    struct AppState { rd: Arc<RestDispatcher> }
+
+    async fn handler(State(state): State<AppState>, req: axum::extract::Request) -> axum::response::Response {
+        let method = req.method().clone();
+        let path = req.uri().path().to_string();
+
+        let http_method = match method {
+            Method::GET => HttpMethod::Get,
+            Method::POST => HttpMethod::Post,
+            _ => return (StatusCode::METHOD_NOT_ALLOWED, "").into_response(),
+        };
+
+        let body = match http_method {
+            HttpMethod::Post => {
+                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024).await.unwrap_or_default();
+                if bytes.is_empty() { serde_json::Value::Null }
+                else { serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null) }
+            }
+            _ => serde_json::Value::Null,
+        };
+
+        match state.rd.dispatch(http_method, &path, body).await {
+            Some(rr) => {
+                let value = match rr.result {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
+                        return (status, msg).into_response();
+                    }
+                };
+                if rr.meta.binary_response {
+                    let br: BinaryResponse = match serde_json::from_value(value) {
+                        Ok(br) => br,
+                        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+                    };
+                    let mut resp = axum::response::Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", &br.mime_type)
+                        .header("Content-Length", br.data.len().to_string())
+                        .body(Body::from(br.data))
+                        .unwrap();
+                    if rr.meta.immutable_cache {
+                        let etag = path.rsplit('/').next().unwrap_or("");
+                        resp.headers_mut().insert("Cache-Control", "public, max-age=31536000, immutable".parse().unwrap());
+                        resp.headers_mut().insert("ETag", format!("\"{etag}\"").parse().unwrap());
+                    }
+                    resp
+                } else {
+                    AxumJson(value).into_response()
+                }
+            }
+            None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        }
+    }
+
+    let app = Router::new()
+        .fallback(handler)
+        .with_state(AppState { rd: dispatcher });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move { axum::serve(listener, app).await.ok(); });
+
+    (format!("http://127.0.0.1:{port}"), impl_)
+}
+
+#[tokio::test]
+async fn http_store_blob() {
+    let (base, _impl) = start_blob_server().await;
+
+    let b64_data = simply_rpc::encode_base64(b"hello http");
+    let resp = reqwest::Client::new()
+        .post(format!("{base}/blob"))
+        .json(&serde_json::json!({"data": b64_data, "media_type": "text/plain"}))
+        .send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let id: BlobId = resp.json().await.unwrap();
+    assert!(id.0.starts_with("blob_"));
+}
+
+#[tokio::test]
+async fn http_get_blob_returns_raw_bytes() {
+    let (base, impl_) = start_blob_server().await;
+
+    // Store directly
+    impl_.store_blob(b"raw binary".to_vec(), "application/octet-stream").await.unwrap();
+
+    // GET should return raw bytes, not JSON
+    let resp = reqwest::get(format!("{base}/blob/blob_0")).await.unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers().get("Content-Type").unwrap(), "application/octet-stream");
+    assert_eq!(resp.headers().get("Cache-Control").unwrap(), "public, max-age=31536000, immutable");
+    assert!(resp.headers().get("ETag").is_some());
+
+    let body = resp.bytes().await.unwrap();
+    assert_eq!(&body[..], b"raw binary");
+}
+
+#[tokio::test]
+async fn http_get_blob_not_found() {
+    let (base, _impl) = start_blob_server().await;
+
+    let resp = reqwest::get(format!("{base}/blob/missing")).await.unwrap();
+    assert_ne!(resp.status(), 200);
+}
+
+#[tokio::test]
+async fn http_store_and_get_round_trip() {
+    let (base, _impl) = start_blob_server().await;
+    let client = reqwest::Client::new();
+
+    // Store via HTTP
+    let original = b"round trip data \x00\xff".to_vec();
+    let b64 = simply_rpc::encode_base64(&original);
+    let resp = client.post(format!("{base}/blob"))
+        .json(&serde_json::json!({"data": b64, "media_type": "image/png"}))
+        .send().await.unwrap();
+    let id: BlobId = resp.json().await.unwrap();
+
+    // Get via HTTP — raw bytes back
+    let resp = reqwest::get(format!("{base}/blob/{}", id.0)).await.unwrap();
+    assert_eq!(resp.headers().get("Content-Type").unwrap(), "image/png");
+    let body = resp.bytes().await.unwrap();
+    assert_eq!(&body[..], &original[..]);
+}
