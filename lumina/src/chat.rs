@@ -157,7 +157,80 @@ async fn load_channel_history(
     Ok(seed)
 }
 
- 
+/// Stream daemon events back to Discord.
+/// Collects text via AssistantContent and sends once on TurnComplete.
+async fn stream_response(
+    lx: &LuminaContext,
+    msg: &Message,
+    session: &mut simply_daemon::DaemonSession,
+) -> anyhow::Result<()> {
+    let mut text_buffer = String::new();
+
+    loop {
+        match session.recv().await {
+            Ok(DaemonEvent::TextDelta(_)) => {}
+            Ok(DaemonEvent::AssistantContent(content_block)) => {
+                match content_block {
+                    ContentBlock::Text { text } => {
+                        text_buffer.push_str(&text);
+                    }
+                    ContentBlock::Image { data, mime_type } => {
+                        let ext = match mime_type.as_str() {
+                            "image/png" => "png",
+                            "image/gif" => "gif",
+                            "image/webp" => "webp",
+                            _ => "jpg",
+                        };
+                        if let Ok(bytes) = base64_decode(&data) {
+                            let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("image.{ext}"));
+                            msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().add_file(attachment)).await?;
+                        }
+                    }
+                    ContentBlock::Audio { data, mime_type } => {
+                        let ext = match mime_type.as_str() {
+                            "audio/mp3" | "audio/mpeg" => "mp3",
+                            "audio/ogg" => "ogg",
+                            "audio/wav" => "wav",
+                            _ => "mp3",
+                        };
+                        if let Ok(bytes) = base64_decode(&data) {
+                            let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("audio.{ext}"));
+                            msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().add_file(attachment)).await?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(DaemonEvent::ToolCall { id: _, name, arguments }) => {
+                let args_str = truncate_for_discord(&serde_json::to_string_pretty(&arguments).unwrap_or_default());
+                let embed = CreateEmbed::new()
+                    .title(format!("\u{1f527} Using: {name}"))
+                    .description(format!("```json\n{args_str}\n```"))
+                    .color(0x5865F2);
+                msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed)).await?;
+            }
+            Ok(DaemonEvent::TurnComplete) => {
+                if !text_buffer.is_empty() {
+                    let content = truncate_for_discord(&text_buffer);
+                    msg.channel_id.say(&lx.http, &content).await?;
+                }
+                break;
+            }
+            Ok(DaemonEvent::Error(e)) => {
+                return Err(anyhow::anyhow!("daemon error: {e}"));
+            }
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(skipped = n, "event stream lagged");
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
 
 fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine;
