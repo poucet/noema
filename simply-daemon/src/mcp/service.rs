@@ -292,6 +292,24 @@ impl McpApi for McpService {
         Ok(())
     }
 
+    async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize> {
+        let mut registry = self.registry.lock().await;
+        registry.register_ephemeral(request.id.clone(), request.url);
+        registry.connect(&request.id).await?;
+        let tool_count = registry
+            .get_connection(&request.id)
+            .map(|c| c.tools.len())
+            .unwrap_or(0);
+        tracing::info!(id = %request.id, tool_count, "ephemeral MCP service registered");
+        Ok(tool_count)
+    }
+
+    async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()> {
+        let mut registry = self.registry.lock().await;
+        registry.unregister_ephemeral(server_id).await;
+        tracing::info!(id = %server_id, "ephemeral MCP service unregistered");
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

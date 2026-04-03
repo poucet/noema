@@ -47,3 +47,6 @@ inventory = "0.3"
 
 # Async trait
 async-trait = "0.1"
+
+# MCP server
+rmcp = { version = "0.9", features = ["server"] }

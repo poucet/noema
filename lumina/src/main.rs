@@ -4,6 +4,7 @@
 
 mod chat;
 mod commands;
+pub mod mcp;
 pub mod paginator;
 
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use commands::CommandRegistry;
 use serenity::model::id::{ChannelId, GuildId};
 use serenity::prelude::*;
-use simply_daemon::api::DaemonApi;
+use simply_daemon::api::{DaemonApi, McpApi, RegisterEphemeralRequest};
 use simply_daemon::RemoteDaemon;
 
 /// Key for storing the daemon connection in serenity's TypeMap.
@@ -61,8 +62,23 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(addr = %daemon_addr, "connecting to simply-daemon");
 
     let daemon = RemoteDaemon::connect_as(&daemon_addr, "lumina").await?;
-    let daemon: Arc<dyn DaemonApi> = daemon.into_daemon();
     tracing::info!("connected to simply-daemon");
+
+    // Start Lumina's MCP server and register with daemon
+    let mcp_server = mcp::LuminaMcpServer::new();
+    let _mcp_handle = simply_daemon::mcp::start_server(mcp_server).await?;
+    let mcp_url = _mcp_handle.url();
+    tracing::info!(url = %mcp_url, "lumina MCP server started");
+
+    let tool_count = daemon
+        .register_ephemeral_mcp(RegisterEphemeralRequest {
+            id: "lumina-discord".to_string(),
+            url: mcp_url,
+        })
+        .await?;
+    tracing::info!(tool_count, "registered lumina MCP service with daemon");
+
+    let daemon: Arc<dyn DaemonApi> = daemon.into_daemon();
 
     // Collect all auto-registered commands
     let registry = CommandRegistry::collect();

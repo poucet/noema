@@ -2969,6 +2969,7 @@ dependencies = [
  "config",
  "inventory",
  "lumina-macros",
+ "rmcp",
  "serde",
  "serde_json",
  "serenity",

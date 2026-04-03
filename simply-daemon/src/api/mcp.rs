@@ -39,6 +39,13 @@ pub struct AddMcpServerRequest {
     pub scopes: Option<Vec<String>>,
 }
 
+/// Request to register an ephemeral MCP server at runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterEphemeralRequest {
+    pub id: String,
+    pub url: String,
+}
+
 /// Request to update MCP server settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateMcpServerRequest {
@@ -95,4 +102,14 @@ pub trait McpApi: Send + Sync {
     /// Start retry attempts for an MCP server.
     #[rpc(post = "/mcp/{server_id}/retry")]
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()>;
+
+    /// Register an ephemeral MCP server and connect to it.
+    /// Used by external services (e.g. Lumina) to expose tools to the daemon at runtime.
+    /// Returns the number of tools discovered.
+    #[rpc(post = "/mcp/ephemeral")]
+    async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize>;
+
+    /// Unregister an ephemeral MCP server and disconnect.
+    #[rpc(delete = "/mcp/ephemeral/{server_id}")]
+    async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()>;
 }

@@ -1,8 +1,8 @@
-//! MCP HTTP server — hosts the DaemonMcpServer over Streamable HTTP.
+//! MCP HTTP server — hosts any ServerHandler over Streamable HTTP.
 
-use super::tools::DaemonMcpServer;
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
+use rmcp::handler::server::ServerHandler;
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
@@ -36,24 +36,30 @@ impl ServerHandle {
     }
 }
 
-/// Start the noema-core MCP server on a random port
-pub async fn start_server(server: DaemonMcpServer) -> anyhow::Result<ServerHandle> {
-    start_server_on("127.0.0.1", 0, server).await
+/// Start an MCP server on a random port
+pub async fn start_server<H>(handler: H) -> anyhow::Result<ServerHandle>
+where
+    H: ServerHandler + Clone + Send + 'static,
+{
+    start_server_on("127.0.0.1", 0, handler).await
 }
 
-/// Start the noema-core MCP server on the specified host and port
-pub async fn start_server_on(
+/// Start an MCP server on the specified host and port
+pub async fn start_server_on<H>(
     host: &str,
     port: u16,
-    server: DaemonMcpServer,
-) -> anyhow::Result<ServerHandle> {
+    handler: H,
+) -> anyhow::Result<ServerHandle>
+where
+    H: ServerHandler + Clone + Send + 'static,
+{
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
 
     let listener = TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
     let actual_port = local_addr.port();
 
-    info!("Starting Noema Core MCP server on {}", local_addr);
+    info!("Starting MCP server on {}", local_addr);
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
@@ -62,7 +68,7 @@ pub async fn start_server_on(
         let session_manager = Arc::new(LocalSessionManager::default());
 
         let mcp_service = StreamableHttpService::new(
-            move || Ok(server.clone()),
+            move || Ok(handler.clone()),
             session_manager,
             config,
         );
@@ -72,7 +78,7 @@ pub async fn start_server_on(
         loop {
             tokio::select! {
                 _ = &mut shutdown_rx => {
-                    info!("Shutting down Noema Core MCP server");
+                    info!("Shutting down MCP server");
                     break;
                 }
                 result = listener.accept() => {
