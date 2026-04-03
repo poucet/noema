@@ -86,34 +86,6 @@ impl ToolResultContent {
     }
 }
 
-/// Convert a value into tool result content.
-///
-/// Implement this for types that can be returned from tool calls
-/// to get proper multimodal MCP responses (images, audio, etc.)
-/// instead of everything being JSON-stringified as text.
-pub trait IntoToolResult {
-    fn into_tool_result(self) -> Vec<ToolResultContent>;
-}
-
-/// Default: serialize to JSON text.
-impl IntoToolResult for serde_json::Value {
-    fn into_tool_result(self) -> Vec<ToolResultContent> {
-        let text = serde_json::to_string_pretty(&self).unwrap_or_default();
-        vec![ToolResultContent::text(text)]
-    }
-}
-
-impl IntoToolResult for String {
-    fn into_tool_result(self) -> Vec<ToolResultContent> {
-        vec![ToolResultContent::text(self)]
-    }
-}
-
-impl IntoToolResult for Vec<ToolResultContent> {
-    fn into_tool_result(self) -> Vec<ToolResultContent> {
-        self
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ToolResult {

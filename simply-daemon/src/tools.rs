@@ -4,29 +4,27 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use llm::{IntoToolResult, ToolDefinition, ToolResultContent};
-use simply_rpc::{BinaryResponse, RestService, RouteKind};
+use llm::{ToolDefinition, ToolResultContent};
+use simply_rpc::{ContentPart, RestService, RouteKind};
 
 use simply_core::ToolService;
 
-// ---------------------------------------------------------------------------
-// BinaryResponse → multimodal tool result
-// ---------------------------------------------------------------------------
-
-impl IntoToolResult for BinaryResponse {
-    fn into_tool_result(self) -> Vec<ToolResultContent> {
-        use base64::Engine;
-        let data = base64::engine::general_purpose::STANDARD.encode(&self.data);
-
-        if self.mime_type.starts_with("image/") {
-            vec![ToolResultContent::image(data, self.mime_type)]
-        } else if self.mime_type.starts_with("audio/") {
-            vec![ToolResultContent::audio(data, self.mime_type)]
-        } else {
-            // Unknown binary — return as text description
-            vec![ToolResultContent::text(format!(
-                "[binary: {} bytes, {}]", self.data.len(), self.mime_type
-            ))]
+/// Convert `ContentPart` (from RPC dispatch) to `ToolResultContent` (for LLM agents).
+fn content_part_to_tool_result(part: ContentPart) -> ToolResultContent {
+    match part {
+        ContentPart::Json(value) => {
+            ToolResultContent::text(serde_json::to_string_pretty(&value).unwrap_or_default())
+        }
+        ContentPart::Binary { data, mime_type } => {
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
+            if mime_type.starts_with("image/") {
+                ToolResultContent::image(encoded, mime_type)
+            } else if mime_type.starts_with("audio/") {
+                ToolResultContent::audio(encoded, mime_type)
+            } else {
+                ToolResultContent::text(format!("[binary: {} bytes, {}]", data.len(), mime_type))
+            }
         }
     }
 }
@@ -82,19 +80,9 @@ impl ToolService for DaemonToolService {
         arguments: serde_json::Value,
     ) -> Result<Vec<ToolResultContent>> {
         for svc in &self.services {
-            let route = svc.meta().routes.iter().find(|rm| rm.method_name == name);
-            if let Some(rm) = route {
-                let result = svc.rest_dispatch_by_name(name, arguments.clone()).await;
-                if let Some(result) = result {
-                    let value = result?;
-                    if rm.binary_response {
-                        // Deserialize as BinaryResponse → proper multimodal content
-                        let binary: BinaryResponse = serde_json::from_value(value)?;
-                        return Ok(binary.into_tool_result());
-                    } else {
-                        return Ok(value.into_tool_result());
-                    }
-                }
+            if let Some(result) = svc.rest_dispatch_as_content(name, arguments.clone()).await {
+                let parts = result?;
+                return Ok(parts.into_iter().map(content_part_to_tool_result).collect());
             }
         }
         anyhow::bail!("tool not found: {name}")
