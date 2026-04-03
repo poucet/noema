@@ -9,7 +9,7 @@ use simply_daemon::api::*;
 use simply_daemon::embedded::EmbeddedDaemon;
 use simply_daemon::storage::SqliteStores;
 use simply_daemon::net;
-use simply_rpc::{Dispatcher, RestDispatcher, RpcService};
+use simply_rpc::{RestDispatcher, RpcService};
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -87,24 +87,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Build the WS dispatch function — wires up all daemon services for WebSocket.
+/// Build the WS dispatch function — streaming sessions only.
 ///
-/// SessionApi dispatched separately (produces streams → event forwarders).
-/// Everything else goes through a Dispatcher.
+/// All non-streaming methods use REST. WS only handles SessionApi stream methods.
 fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> net::server::DispatchFn {
     let session_svc = <dyn SessionApi>::service(daemon.clone());
 
-    let dispatcher = Dispatcher::new()
-        .register(<dyn ConversationApi>::service(daemon.clone()))
-        .register(<dyn AssetApi>::service(daemon.clone()))
-        .register(<dyn McpApi>::service(daemon.clone()))
-        .register(<dyn OAuthApi>::service(daemon.clone()))
-        .register(<dyn ModelApi>::service(daemon.clone()))
-        .register(<dyn VoiceApi>::service(daemon.clone()));
-
     Arc::new(move |method: String, params: serde_json::Value, write_tx: mpsc::Sender<String>| {
         let session_svc = session_svc.clone();
-        let dispatcher = dispatcher.clone();
 
         Box::pin(async move {
             // SessionApi (stream-producing)
@@ -116,9 +106,8 @@ fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> net::server::DispatchFn {
                 return to_ws_response(dr.result);
             }
 
-            // Everything else
-            let result = dispatcher.dispatch(&method, params).await;
-            to_ws_response(result)
+            // Unknown method on WS — REST methods should go through HTTP
+            to_ws_response(Err(anyhow::anyhow!("unknown WS method: {method} — use REST for non-streaming methods")))
         })
     })
 }
