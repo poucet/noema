@@ -129,10 +129,9 @@ async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str)
 
     if params.is_empty() {
         // No params — execute immediately
-        let result = lx.daemon.call_tool_direct(CallToolRequestParam {
-            name: tool_name.into(),
-            arguments: None,
-        }).await;
+        let result = lx.daemon.call_tool_direct(
+            CallToolRequestParam::new(tool_name.to_string()),
+        ).await;
         send_result(lx, cmd, tool_name, result).await
     } else {
         // Build modal with input fields (Discord max: 5 components)
@@ -232,10 +231,9 @@ pub async fn handle_modal(lx: &LuminaContext, modal: &serenity::model::applicati
         CreateInteractionResponseMessage::new(),
     )).await?;
 
-    let result = lx.daemon.call_tool_direct(CallToolRequestParam {
-        name: tool_name.into(),
-        arguments: Some(args),
-    }).await;
+    let result = lx.daemon.call_tool_direct(
+        CallToolRequestParam::new(tool_name.to_string()).with_arguments(args),
+    ).await;
 
     send_tool_result(lx, modal.channel_id, tool_name, result).await?;
     modal.delete_response(&lx.http).await.ok();

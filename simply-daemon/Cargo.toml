@@ -49,7 +49,7 @@ tokio-tungstenite = "0.26"
 futures-util = "0.3"
 
 # MCP protocol
-rmcp = { version = "0.9", features = ["server", "transport-streamable-http-server"] }
+rmcp = { version = "1.3", features = ["server", "transport-streamable-http-server"] }
 
 # HTTP/WS server
 axum = { version = "0.8", features = ["ws"] }

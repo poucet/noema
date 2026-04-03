@@ -13,7 +13,6 @@ mod tools;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
-use rmcp::service::{RequestContext, RoleServer};
 use serenity::all::Cache;
 use serenity::http::Http;
 use std::sync::{Arc, OnceLock};
@@ -130,14 +129,10 @@ impl LuminaMcpServer {
 #[rmcp::tool_handler]
 impl ServerHandler for LuminaMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation {
-                name: "lumina-discord".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-            },
-            instructions: Some(self.instructions().into()),
-        }
+        ServerInfo::new(
+            ServerCapabilities::builder().enable_tools().build(),
+        )
+        .with_server_info(Implementation::new("lumina-discord", env!("CARGO_PKG_VERSION")))
+        .with_instructions(self.instructions())
     }
 }

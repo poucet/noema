@@ -7,6 +7,7 @@ use super::LuminaMcpServer;
 use super::param::*;
 use anyhow::Context as _;
 use rmcp::handler::server::wrapper::Parameters;
+use rmcp::tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -189,7 +190,7 @@ pub struct UserActivityParams {
 // Tool handlers — rmcp generates definitions + dispatch from these
 // ---------------------------------------------------------------------------
 
-#[rmcp::tool_router]
+#[rmcp::tool_router(vis = pub)]
 impl LuminaMcpServer {
 
     // -- Messaging --
