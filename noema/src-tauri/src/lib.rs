@@ -162,7 +162,7 @@ pub fn run() {
             commands::init::init_app,
             commands::chat::get_messages,
             commands::chat::send_message,
-            commands::chat::clear_history,
+            commands::chat::close_session,
             commands::chat::set_model,
             commands::chat::list_models,
             commands::chat::list_conversations,

@@ -633,77 +633,6 @@ impl McpToolRegistry {
         Self { mcp_registry }
     }
 
-    /// Get all tool definitions from all connected MCP servers.
-    /// This is called fresh each time to reflect current connections.
-    pub async fn get_all_definitions(&self) -> Vec<ToolDefinition> {
-        let registry = self.mcp_registry.lock().await;
-        let mut definitions = Vec::new();
-
-        for (_server_id, server) in registry.connected_servers() {
-            for tool in &server.tools {
-                definitions.push(mcp_tool_to_definition(tool));
-            }
-        }
-
-        definitions
-    }
-
-    /// Call a tool by name, routing to the appropriate MCP server.
-    /// Returns multimodal content (text, images, audio).
-    pub async fn call(&self, name: &str, args: serde_json::Value) -> Result<Vec<ToolResultContent>> {
-        traffic_log::log_mcp_request(name, &args);
-
-        // Get the tool caller and coerced arguments under the lock, then release it
-        // before making the actual call. This prevents deadlock when tools spawn
-        // subconversations that need to use the same registry.
-        let (tool_caller, arguments) = {
-            let registry = self.mcp_registry.lock().await;
-
-            // Find which server has this tool
-            let mut found = None;
-            for (_server_id, server) in registry.connected_servers() {
-                if let Some(tool) = server.tools.iter().find(|t| t.name == name) {
-                    // Coerce arguments to match the tool's schema
-                    let schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
-                    let coerced_args = coerce_args_to_schema(&args, &schema);
-                    let arguments = coerced_args.as_object().cloned();
-
-                    // Get a lock-free tool caller
-                    found = Some((server.tool_caller(), arguments));
-                    break;
-                }
-            }
-
-            match found {
-                Some(f) => f,
-                None => {
-                    let err_msg = format!("Tool '{}' not found in any connected MCP server", name);
-                    traffic_log::log_mcp_error(name, &err_msg);
-                    return Err(anyhow::anyhow!(err_msg));
-                }
-            }
-        }; // Lock released here
-
-        // Make the call without holding the registry lock
-        match tool_caller.call_tool(name.to_string(), arguments).await {
-            Ok(result) => {
-                // Convert MCP content to our ToolResultContent format
-                let content: Vec<ToolResultContent> = result
-                    .content
-                    .into_iter()
-                    .filter_map(|c| mcp_content_to_tool_result(&c.raw))
-                    .collect();
-
-                traffic_log::log_mcp_response(name, &content);
-                Ok(content)
-            }
-            Err(e) => {
-                traffic_log::log_mcp_error(name, &e.to_string());
-                Err(e)
-            }
-        }
-    }
-
     /// Check if a tool exists in any connected server
     pub async fn has_tool(&self, name: &str) -> bool {
         self.get_server_for_tool(name).await.is_some()
@@ -723,5 +652,71 @@ impl McpToolRegistry {
     /// Check if a tool belongs to a specific server
     pub async fn is_tool_from_server(&self, tool_name: &str, server_id: &str) -> bool {
         self.get_server_for_tool(tool_name).await.as_deref() == Some(server_id)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::agent::ToolService for McpToolRegistry {
+    async fn get_definitions(&self) -> Vec<ToolDefinition> {
+        let registry = self.mcp_registry.lock().await;
+        let mut definitions = Vec::new();
+        for (_server_id, server) in registry.connected_servers() {
+            for tool in &server.tools {
+                definitions.push(mcp_tool_to_definition(tool));
+            }
+        }
+        definitions
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<Vec<ToolResultContent>> {
+        traffic_log::log_mcp_request(name, &args);
+
+        // Get the tool caller and coerced arguments under the lock, then release it
+        // before making the actual call. This prevents deadlock when tools spawn
+        // subconversations that need to use the same registry.
+        let (tool_caller, arguments) = {
+            let registry = self.mcp_registry.lock().await;
+
+            let mut found = None;
+            for (_server_id, server) in registry.connected_servers() {
+                if let Some(tool) = server.tools.iter().find(|t| t.name == name) {
+                    let schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
+                    let coerced_args = coerce_args_to_schema(&args, &schema);
+                    let arguments = coerced_args.as_object().cloned();
+                    found = Some((server.tool_caller(), arguments));
+                    break;
+                }
+            }
+
+            match found {
+                Some(f) => f,
+                None => {
+                    let err_msg =
+                        format!("Tool '{}' not found in any connected MCP server", name);
+                    traffic_log::log_mcp_error(name, &err_msg);
+                    return Err(anyhow::anyhow!(err_msg));
+                }
+            }
+        };
+
+        match tool_caller.call_tool(name.to_string(), arguments).await {
+            Ok(result) => {
+                let content: Vec<ToolResultContent> = result
+                    .content
+                    .into_iter()
+                    .filter_map(|c| mcp_content_to_tool_result(&c.raw))
+                    .collect();
+                traffic_log::log_mcp_response(name, &content);
+                Ok(content)
+            }
+            Err(e) => {
+                traffic_log::log_mcp_error(name, &e.to_string());
+                Err(e)
+            }
+        }
     }
 }

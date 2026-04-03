@@ -87,7 +87,6 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     session
         .send(UserMessage {
             content: vec![InputContent::Text { text: user_text }],
-            tool_filter: None,
         })
         .await?;
 

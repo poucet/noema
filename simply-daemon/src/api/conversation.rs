@@ -1,7 +1,7 @@
 //! Persistent conversation entity management.
 
 use async_trait::async_trait;
-use super::types::{ConversationId, ConversationInfo};
+use super::types::{ConversationId, ConversationInfo, ResolvedMessage};
 
 /// CRUD on stored conversations.
 ///
@@ -25,4 +25,7 @@ pub trait ConversationApi: Send + Sync {
     /// Rename a conversation.
     #[rpc(put = "/conversation/{conversation_id}")]
     async fn rename_conversation(&self, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()>;
+
+    /// Get messages for a conversation (resolved content with turn IDs).
+    async fn get_messages(&self, conversation_id: &ConversationId) -> anyhow::Result<Vec<ResolvedMessage>>;
 }

@@ -1,8 +1,8 @@
 //! Chat-related Tauri commands
 
 use simply_daemon::api::{
-    ConversationApi, DaemonEvent, SessionApi, SessionId, ModelApi, UserMessage,
-    ToolFilter as DaemonToolFilter,
+    ConversationApi, CreateSessionOptions, DaemonEvent, ModelApi, Persistence, SessionApi,
+    SessionId, UserMessage,
 };
 use simply_daemon::types::{ConversationId, InputContent};
 use std::sync::Arc;
@@ -12,13 +12,10 @@ use tokio::sync::broadcast;
 use crate::logging::log_message;
 use crate::state::AppState;
 use crate::types::{
-    ConversationInfo, DisplayMessage, DisplayInputContent,
-    ErrorEvent, MessageCompleteEvent, StreamingMessageEvent, UserMessageEvent,
-    ModelInfo, ToolConfig,
+    ConversationInfo, DisplayInputContent, DisplayMessage, ErrorEvent, MessageCompleteEvent,
+    ModelInfo, StreamingMessageEvent, UserMessageEvent,
 };
 
-/// Spawn a task that forwards DaemonEvents from a session broadcast to Tauri UI events.
-/// If a forwarder already exists for this session, it's aborted and replaced.
 async fn spawn_event_forwarder(
     app: AppHandle,
     state: Arc<AppState>,
@@ -27,7 +24,6 @@ async fn spawn_event_forwarder(
 ) {
     let key = conversation_id.as_str().to_string();
 
-    // Abort existing forwarder if any
     {
         let mut forwarders = state.forwarders.lock().await;
         if let Some(old) = forwarders.remove(&key) {
@@ -67,9 +63,8 @@ async fn spawn_event_forwarder(
                             Ok(d) => d,
                             Err(_) => break,
                         };
-                        let session_id = SessionId::new(conversation_id.as_str());
                         let messages = daemon
-                            .get_messages(&session_id)
+                            .get_messages(&conversation_id)
                             .await
                             .unwrap_or_default()
                             .iter()
@@ -102,17 +97,14 @@ async fn spawn_event_forwarder(
     state.forwarders.lock().await.insert(key, handle);
 }
 
-/// Get current messages in the conversation
 #[tauri::command]
 pub async fn get_messages(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
     let daemon = state.get_daemon()?;
-    let session_id = SessionId::new(conversation_id.as_str());
-
     Ok(daemon
-        .get_messages(&session_id)
+        .get_messages(&conversation_id)
         .await
         .map_err(|e| format!("Failed to get messages: {}", e))?
         .iter()
@@ -120,13 +112,11 @@ pub async fn get_messages(
         .collect())
 }
 
-/// Send a message with structured content blocks.
 #[tauri::command]
 pub async fn send_message(
     state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
+    session_id: SessionId,
     content: Vec<DisplayInputContent>,
-    tool_config: Option<ToolConfig>,
 ) -> Result<(), String> {
     if content.is_empty() {
         return Err("Message must have content".to_string());
@@ -143,61 +133,39 @@ pub async fn send_message(
     }
 
     let daemon = state.get_daemon()?;
-    let session_id = SessionId::new(conversation_id.as_str());
-
     daemon
-        .send_message(&session_id, UserMessage {
-            content: input_content,
-            tool_filter: tool_config.map(|tc| DaemonToolFilter {
-                server_ids: tc.server_ids,
-                tool_names: tc.tool_names,
-            }),
-        })
+        .send_message(&session_id, UserMessage { content: input_content })
         .await
         .map_err(|e| format!("Failed to send message: {}", e))
 }
 
-/// Clear conversation history
 #[tauri::command]
-pub async fn clear_history(
+pub async fn close_session(
     state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
+    session_id: SessionId,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    let session_id = SessionId::new(conversation_id.as_str());
-    daemon
-        .close_session(&session_id)
-        .await
-        .map_err(|e| format!("Failed to clear history: {}", e))
+    daemon.close_session(&session_id).await
+        .map_err(|e| format!("Failed to close session: {}", e))
 }
 
-/// Set the model for a conversation
 #[tauri::command]
 pub async fn set_model(
     state: State<'_, Arc<AppState>>,
-    conversation_id: ConversationId,
+    session_id: SessionId,
     model_id: String,
     provider: String,
 ) -> Result<String, String> {
     let full_model_id = format!("{}/{}", provider, model_id);
     let daemon = state.get_daemon()?;
-    let session_id = SessionId::new(conversation_id.as_str());
 
-    daemon
-        .set_model(&session_id, &full_model_id)
-        .await
+    daemon.set_model(&session_id, &full_model_id).await
         .map_err(|e| format!("Failed to set model: {}", e))?;
 
-    daemon
-        .set_default_model(&full_model_id)
-        .await
+    daemon.set_default_model(&full_model_id).await
         .map_err(|e| format!("Failed to set default model: {}", e))?;
 
-    let display_name = model_id
-        .split('/')
-        .last()
-        .unwrap_or(&model_id)
-        .to_string();
+    let display_name = model_id.split('/').last().unwrap_or(&model_id).to_string();
 
     let mut settings = config::Settings::load();
     settings.default_model = Some(full_model_id);
@@ -208,12 +176,10 @@ pub async fn set_model(
     Ok(display_name)
 }
 
-/// List available models from all providers
 #[tauri::command]
 pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInfo>, String> {
     let daemon = state.get_daemon()?;
     let all = daemon.list_models().await.map_err(|e| format!("Failed to list models: {}", e))?;
-
     Ok(all
         .into_iter()
         .filter(|m| m.definition.has_capability(&simply_daemon::types::ModelCapability::Text))
@@ -221,52 +187,51 @@ pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInf
         .collect())
 }
 
-/// List all conversations for the current user
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
     let daemon = state.get_daemon()?;
-
-    let convos = daemon
-        .list_conversations()
-        .await
+    let convos = daemon.list_conversations().await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
-
     Ok(convos.into_iter().map(ConversationInfo::from).collect())
 }
 
-/// Load a conversation (creating a daemon session for it)
+/// Load a conversation: fetch messages, create a session. Returns (session_id, messages).
 #[tauri::command]
 pub async fn load_conversation(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
-) -> Result<Vec<DisplayMessage>, String> {
+) -> Result<(String, Vec<DisplayMessage>), String> {
     let daemon = state.get_daemon()?;
-    let session_id = SessionId::new(conversation_id.as_str());
 
-    let (_info, rx) = daemon
-        .resume_session(&session_id)
+    let messages: Vec<DisplayMessage> = daemon
+        .get_messages(&conversation_id)
         .await
-        .map_err(|e| format!("Failed to load conversation: {}", e))?;
-
-    spawn_event_forwarder(app, state.inner().clone(), conversation_id.clone(), rx).await;
-
-    Ok(daemon
-        .get_messages(&session_id)
-        .await
-        .map_err(|e| format!("Failed to get messages: {}", e))?
+        .map_err(|e| format!("Failed to load messages: {}", e))?
         .iter()
         .map(DisplayMessage::from)
-        .collect())
+        .collect();
+
+    let (info, rx) = daemon
+        .create_session(CreateSessionOptions {
+            persistence: Some(Persistence::Persistent { conversation_id: conversation_id.clone() }),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+
+    spawn_event_forwarder(app, state.inner().clone(), conversation_id, rx).await;
+
+    Ok((info.id.as_str().to_string(), messages))
 }
 
-/// Create a new conversation
+/// Create a new conversation and session. Returns (conversation_id, session_id).
 #[tauri::command]
 pub async fn new_conversation(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     name: Option<String>,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let daemon = state.get_daemon()?;
 
     let conversation_name = name.unwrap_or_else(|| {
@@ -279,31 +244,29 @@ pub async fn new_conversation(
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
-    let session_id = SessionId::new(conv_id.as_str());
-    let (_info, rx) = daemon
-        .resume_session(&session_id)
+    let (info, rx) = daemon
+        .create_session(CreateSessionOptions {
+            persistence: Some(Persistence::Persistent { conversation_id: conv_id.clone() }),
+            ..Default::default()
+        })
         .await
         .map_err(|e| format!("Failed to create session: {}", e))?;
 
     spawn_event_forwarder(app, state.inner().clone(), conv_id.clone(), rx).await;
 
-    Ok(conv_id.as_str().to_string())
+    Ok((conv_id.as_str().to_string(), info.id.as_str().to_string()))
 }
 
-/// Delete a conversation
 #[tauri::command]
 pub async fn delete_conversation(
     state: State<'_, Arc<AppState>>,
     conversation_id: ConversationId,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
-        .delete_conversation(&conversation_id)
-        .await
+    daemon.delete_conversation(&conversation_id).await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
 
-/// Rename a conversation
 #[tauri::command]
 pub async fn rename_conversation(
     state: State<'_, Arc<AppState>>,
@@ -311,13 +274,10 @@ pub async fn rename_conversation(
     name: String,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
-        .rename_conversation(&conversation_id, &name)
-        .await
+    daemon.rename_conversation(&conversation_id, &name).await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
 
-/// Get current model name
 #[tauri::command]
 pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let daemon = state.get_daemon()?;
@@ -325,14 +285,12 @@ pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, S
     Ok(model_id.split('/').last().unwrap_or(&model_id).to_string())
 }
 
-/// Get favorite models
 #[tauri::command]
 pub async fn get_favorite_models() -> Result<Vec<String>, String> {
     let settings = config::Settings::load();
     Ok(settings.favorite_models)
 }
 
-/// Toggle a model as favorite
 #[tauri::command]
 pub async fn toggle_favorite_model(model_id: String) -> Result<Vec<String>, String> {
     let mut settings = config::Settings::load();

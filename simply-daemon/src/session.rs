@@ -40,15 +40,6 @@ impl DaemonSession {
         Ok(Self { daemon, info, events, closed: false })
     }
 
-    /// Resume an existing session by session ID.
-    pub async fn resume(
-        daemon: Arc<dyn DaemonApi>,
-        session_id: &SessionId,
-    ) -> anyhow::Result<Self> {
-        let (info, events) = daemon.resume_session(session_id).await?;
-        Ok(Self { daemon, info, events, closed: false })
-    }
-
     /// Session ID.
     pub fn id(&self) -> &SessionId {
         &self.info.id

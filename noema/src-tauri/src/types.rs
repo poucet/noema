@@ -450,21 +450,6 @@ impl From<DisplayInputContent> for simply_daemon::types::InputContent {
     }
 }
 
-/// Information about a forked conversation
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ForkInfoResponse {
-    #[ts(type = "string")]
-    pub conversation_id: ConversationId,
-    /// The turn at which this conversation forked
-    #[ts(type = "string")]
-    pub forked_at_turn_id: TurnId,
-    /// Number of turns in this conversation
-    pub turn_count: usize,
-    pub created_at: i64,
-}
-
 // =============================================================================
 // Event Payloads - typed payloads for Tauri events
 // =============================================================================
@@ -531,33 +516,6 @@ pub struct TruncatedEvent {
     pub turn_id: Option<TurnId>,
 }
 
-/// Configuration for which tools to enable for a message.
-/// Designed to be extensible for future tool set selection.
-#[derive(Debug, Clone, Default, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/generated/")]
-pub struct ToolConfig {
-    /// Master toggle: if false, no tools are available regardless of other settings
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-
-    /// Optional list of specific MCP server IDs to include.
-    /// If None or empty, all connected servers are used (when enabled=true).
-    /// If Some with values, only those servers' tools are available.
-    #[serde(default)]
-    pub server_ids: Option<Vec<String>>,
-
-    /// Optional list of specific tool names to include (across all servers).
-    /// If None, all tools from selected servers are available.
-    /// If Some, only these specific tools are available.
-    #[serde(default)]
-    pub tool_names: Option<Vec<String>>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
 #[cfg(test)]
 mod ts_export {
     use super::*;
@@ -582,7 +540,5 @@ mod ts_export {
         TruncatedEvent::export_all().expect("Failed to export TruncatedEvent");
         ReferencedDocument::export_all().expect("Failed to export ReferencedDocument");
         DisplayInputContent::export_all().expect("Failed to export DisplayInputContent");
-        ForkInfoResponse::export_all().expect("Failed to export ForkInfoResponse");
-        ToolConfig::export_all().expect("Failed to export ToolConfig");
     }
 }

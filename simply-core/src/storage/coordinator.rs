@@ -26,6 +26,13 @@ use crate::storage::types::{
     TurnWithContent,
 };
 
+/// Opaque state for batching messages into the same turn during `append_message`.
+pub struct AppendState {
+    turn_id: TurnId,
+    span_id: SpanId,
+    role: Role,
+}
+
 /// Coordinates storage across all store types.
 ///
 /// Generic over `S: StorageTypes` which bundles all storage type associations.
@@ -173,6 +180,45 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         let span = self.turn_store.create_span(turn_id, model_id).await?;
         self.turn_store.select_span(conversation_id, turn_id, &span.id).await?;
         Ok(span.id)
+    }
+
+    /// Create a turn with an initial span and select it.
+    pub async fn create_turn_with_span(
+        &self,
+        conversation_id: &ConversationId,
+        role: Role,
+    ) -> Result<(TurnId, SpanId)> {
+        let turn = self.turn_store.create_turn(role).await?;
+        let span = self.turn_store.create_span(&turn.id, None).await?;
+        self.turn_store.select_span(conversation_id, &turn.id, &span.id).await?;
+        Ok((turn.id, span.id))
+    }
+
+    /// Append a message to a conversation, creating a new turn+span if the role
+    /// differs from the previous message. Pass the returned `AppendState` back
+    /// on subsequent calls to batch messages into the same turn.
+    pub async fn append_message(
+        &self,
+        conversation_id: &ConversationId,
+        msg: llm::ChatMessage,
+        state: Option<AppendState>,
+    ) -> Result<(ResolvedMessage, AppendState)> {
+        let role = msg.role;
+        let needs_new_turn = state.as_ref().map_or(true, |s| s.role != role);
+
+        let (turn_id, span_id) = if needs_new_turn {
+            self.create_turn_with_span(conversation_id, role).await?
+        } else {
+            let s = state.unwrap();
+            (s.turn_id, s.span_id)
+        };
+
+        let origin = OriginKind::from(role);
+        let resolved = self
+            .add_message(&span_id, &turn_id, role, msg.payload.content, origin)
+            .await?;
+
+        Ok((resolved, AppendState { turn_id, span_id, role }))
     }
 
     // ========== Session Methods ==========

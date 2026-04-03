@@ -36,17 +36,10 @@ impl<'a> AsRef<[ChatMessage]> for MessagesGuard<'a> {
     }
 }
 
-/// Async access to conversation messages with mutation support
+/// Conversation message history with persistence.
 ///
-/// This trait provides async access to conversation history and allows
-/// agents to add new messages during execution. Resolution of content
-/// (text, assets, documents) happens lazily when messages are accessed.
-///
-/// # Design
-///
-/// - `messages()` is async to support lazy resolution, returns guard to cached data
-/// - `add()` is sync (buffered in memory as pending)
-/// - `commit()` is async (persists to storage)
+/// Implementations buffer messages via `add()` and persist them via `commit()`.
+/// For in-memory contexts, `commit()` is a no-op.
 #[async_trait]
 pub trait ConversationContext: Send + Sync {
     /// Get all messages (resolved for LLM consumption)
@@ -56,7 +49,7 @@ pub trait ConversationContext: Send + Sync {
     /// Subsequent calls return the cached data without re-resolving.
     async fn messages(&mut self) -> Result<MessagesGuard<'_>>;
 
-    /// Get count of messages in the context (cached + pending)
+    /// Get count of messages in the context
     fn len(&self) -> usize;
 
     /// Check if context is empty
@@ -64,20 +57,16 @@ pub trait ConversationContext: Send + Sync {
         self.len() == 0
     }
 
-    /// Add a message to the context (pending, not yet committed)
-    ///
-    /// This adds the message to a pending buffer. Call `commit()` to
-    /// persist to storage.
+    /// Add a message to the context
     fn add(&mut self, message: ChatMessage);
-
-    /// Get pending messages (added but not yet committed)
-    fn pending(&self) -> &[ChatMessage];
 
     /// Optional system prompt for this conversation.
     fn system_prompt(&self) -> Option<&str> {
         None
     }
 
-    /// Commit pending messages to storage
-    async fn commit(&mut self) -> Result<()>;
+    /// Persist messages to storage (no-op for in-memory contexts)
+    async fn commit(&mut self) -> Result<()> {
+        Ok(())
+    }
 }

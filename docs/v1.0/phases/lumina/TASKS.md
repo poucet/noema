@@ -37,6 +37,26 @@
 
 ---
 
+## Stage 2.5 — Core Architecture Refactor (COMPLETE)
+
+**Goal:** Simplify the session/agent/manager architecture. One manager (SessionManager), one agent (ToolAgent), trait-based tool service, clean separation between sessions and conversations.
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 2.5.1 | ✅ | ToolService trait + EmptyToolService, McpToolRegistry implements it | P0 | M |
+| 2.5.2 | ✅ | ToolAgent: single agent using ToolService, streams tool calls/results | P0 | M |
+| 2.5.3 | ✅ | Agent trait: single execute_stream method, remove non-streaming execute | P0 | S |
+| 2.5.4 | ✅ | Delete ConversationManager, LightManager, LightSession — one SessionManager | P0 | L |
+| 2.5.5 | ✅ | SessionManager: Persistence enum, create() factory, no StorageHook | P0 | M |
+| 2.5.6 | ✅ | Session commit via ConversationContext trait, coordinator.append_message | P0 | M |
+| 2.5.7 | ✅ | Remove ToolConfig, ToolFilter, ToolEnricher, CommitMode, ForkInfoResponse | P0 | S |
+| 2.5.8 | ✅ | Daemon: shared sessions (same conversation reuses session), session reaper | P0 | M |
+| 2.5.9 | ✅ | API: remove resume_session/set_persistence/seed_context/reload, move get_messages to ConversationApi | P0 | M |
+| 2.5.10 | ✅ | Noema: conversation_id for loading, session_id for streaming | P0 | M |
+| 2.5.11 | ✅ | Restructure: agents/ → agent/, move context/in_memory_context/tool_service into agent/ | P0 | S |
+
+---
+
 ## Stage 3 — Discord MCP Service
 
 **Goal:** Lumina registers as an MCP service with the daemon, exposing Discord actions as tools. Noema (or any daemon client) can use Discord tools through the daemon.

@@ -3,29 +3,14 @@
 //! This server is stateless - the agent enriches tool calls with context
 //! (conversation_id, turn_id, etc) before forwarding to this server.
 
-use simply_core::agents::{ExecutionContext, McpAgent, ToolEnricher};
+use simply_core::agent::{ExecutionContext, ToolAgent};
 use simply_core::mcp::{McpRegistry, McpToolRegistry};
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::document_resolver::DocumentResolver;
 use simply_core::storage::ids::{ConversationId, SpanId, TurnId, UserId};
 use simply_core::storage::session::Session;
 use simply_core::storage::traits::StorageTypes;
-use simply_core::manager::CommitMode;
 use simply_core::{Agent, ConversationContext};
-
-/// Create an enricher that injects execution context for noema-core tools.
-fn create_simply_core_enricher() -> ToolEnricher {
-    Arc::new(|tool_name, args, context| {
-        if tool_name == "spawn_agent" {
-            match args {
-                serde_json::Value::Object(map) => serde_json::Value::Object(context.inject_into(map)),
-                other => other,
-            }
-        } else {
-            args
-        }
-    })
-}
 
 use llm::{ChatMessage, ChatPayload, ContentBlock, create_model};
 use rmcp::{
@@ -129,45 +114,22 @@ impl<S: StorageTypes> CoordinatorOps for ConcreteCoordinator<S> {
         document_resolver: Arc<dyn DocumentResolver>,
         execution_context: ExecutionContext,
     ) -> anyhow::Result<()> {
-        // Open session
-        let resolved_messages = self.coordinator.open_session(sub_id).await?;
-        let mut session = Session::new(self.coordinator.clone(), sub_id.clone());
-        for msg in resolved_messages {
-            session.add_resolved(msg);
-        }
-
-        // Add system prompt if provided
+        let mut session = Session::open(self.coordinator.clone(), sub_id.clone()).await?;
         if let Some(system) = system_prompt {
-            let system_message = ChatMessage::system(ChatPayload::new(vec![ContentBlock::Text {
-                text: system,
-            }]));
-            session.add(system_message);
+            session.add(ChatMessage::system(ChatPayload::new(vec![ContentBlock::Text { text: system }])));
         }
+        session.add(ChatMessage::user(ChatPayload::new(vec![ContentBlock::Text { text: prompt }])));
 
-        // Add user prompt
-        let user_message = ChatMessage::user(ChatPayload::new(vec![ContentBlock::Text {
-            text: prompt,
-        }]));
-        session.add(user_message);
-
-        // Create agent with enricher for nested spawn calls
         let tool_registry = McpToolRegistry::new(mcp_registry);
-        let agent = McpAgent::with_enricher(
+        let agent = ToolAgent::new(
             Arc::new(tool_registry),
-            5, // Lower max iterations for subconversations
+            5,
             document_resolver,
             execution_context,
-            create_simply_core_enricher(),
         );
 
-        // Save model id before move
-        let model_id = model.id().to_string();
-
-        // Run agent
-        agent.execute(&mut session, model).await?;
-
-        // Commit messages to storage so get_subconversation_result can find them
-        session.commit(Some(&model_id), &CommitMode::NewTurns).await
+        agent.execute_stream(&mut session, model).await?;
+        session.commit().await
     }
 }
 

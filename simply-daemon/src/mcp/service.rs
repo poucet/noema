@@ -77,7 +77,7 @@ impl McpService {
         })
     }
 
-    /// The shared MCP registry — needed by `ConversationManager`.
+    /// The shared MCP registry — needed by `SessionManager`.
     pub fn registry(&self) -> &Arc<Mutex<McpRegistry>> {
         &self.registry
     }

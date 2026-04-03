@@ -1,8 +1,7 @@
 //! In-process implementation of the daemon API traits.
 //!
-//! `EmbeddedDaemon` hosts the full daemon logic inside the calling process —
-//! no networking, no separate binary. This is the first (and simplest)
-//! implementation and the one Noema uses until the WebSocket layer is built.
+//! Both ephemeral and persistent sessions use `SessionManager` — the difference
+//! is the `ConversationContext` injected at creation time.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,11 +13,12 @@ use llm::ChatModel;
 
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::ids::{AssetId, ConversationId, UserId};
-use simply_core::storage::session::{ResolvedMessage, Session};
+use simply_core::storage::session::ResolvedMessage;
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_core::storage::DocumentResolver;
-use simply_core::{ConversationManager, ManagerEvent, McpRegistry, SharedEventSender};
-use simply_core::{InMemoryContext, NoStorage, SessionEvent, SessionEventSender, SessionManager};
+use simply_core::{
+    McpToolRegistry, Persistence, SessionEvent, SessionEventSender, SessionManager, ToolService,
+};
 
 use crate::api::*;
 use crate::mcp::{McpService, McpServiceConfig};
@@ -27,48 +27,9 @@ use crate::mcp::{McpService, McpServiceConfig};
 // Session bookkeeping
 // ---------------------------------------------------------------------------
 
-/// Wraps either a persistent ConversationManager or an ephemeral SessionManager.
-enum Manager<S: StorageTypes> {
-    Persistent(ConversationManager<S>),
-    Ephemeral(SessionManager),
-}
-
-impl<S: StorageTypes> Manager<S> {
-    fn send_message(&self, content: Vec<simply_core::storage::content::InputContent>, tool_config: simply_core::ToolConfig) {
-        match self {
-            Manager::Persistent(m) => m.send_message(content, tool_config),
-            Manager::Ephemeral(m) => m.send_message(content, tool_config.enabled),
-        }
-    }
-
-    async fn messages_for_display(&self) -> Vec<ResolvedMessage> {
-        match self {
-            Manager::Persistent(m) => m.messages_for_display().await,
-            Manager::Ephemeral(_) => vec![],
-        }
-    }
-
-    fn set_model(&mut self, model: Arc<dyn llm::ChatModel + Send + Sync>, model_id: String) {
-        match self {
-            Manager::Persistent(m) => m.set_model(model, model_id.clone()),
-            Manager::Ephemeral(m) => m.set_model(model, model_id),
-        }
-    }
-
-    async fn reload(&self) -> anyhow::Result<()> {
-        match self {
-            Manager::Persistent(m) => m.reload().await,
-            Manager::Ephemeral(_) => Ok(()),
-        }
-    }
-}
-
-struct ManagedSession<S: StorageTypes> {
+struct ManagedSession {
     info: SessionInfo,
-    /// Only set for persistent sessions (linked to storage).
-    conversation_id: Option<ConversationId>,
-    manager: Manager<S>,
-    /// Per-session broadcast sender — subscribers get a receiver from this.
+    manager: SessionManager,
     event_broadcast: broadcast::Sender<DaemonEvent>,
 }
 
@@ -76,17 +37,13 @@ struct ManagedSession<S: StorageTypes> {
 // EmbeddedDaemon
 // ---------------------------------------------------------------------------
 
-/// In-process daemon — all operations are direct Rust calls, no networking.
 pub struct EmbeddedDaemon<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
     stores: Arc<dyn Stores<S>>,
     mcp: McpService,
-    sessions: Mutex<HashMap<SessionId, ManagedSession<S>>>,
-    /// Maps conversation IDs to session IDs for event routing.
-    conv_to_session: Mutex<HashMap<ConversationId, SessionId>>,
+    sessions: Mutex<HashMap<SessionId, ManagedSession>>,
     default_model_id: Mutex<String>,
     user_id: UserId,
-    manager_event_tx: SharedEventSender,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -103,18 +60,13 @@ where
         let stores: Arc<dyn Stores<S>> = stores;
         let settings = config::Settings::load();
 
-        // Resolve user
         let user_id = Self::resolve_user(&*stores, &settings).await?;
 
-        // Resolve default model
         const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
         let default_model_id = settings
             .default_model
             .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
 
-        let (manager_event_tx, manager_event_rx) = mpsc::unbounded_channel();
-
-        // Start MCP service (registry, daemon server, OAuth, auto-connect)
         let document_resolver: Arc<dyn DocumentResolver> = stores.document();
         let mcp = McpService::start(
             &coordinator,
@@ -130,65 +82,70 @@ where
             stores,
             mcp,
             sessions: Mutex::new(HashMap::new()),
-            conv_to_session: Mutex::new(HashMap::new()),
             default_model_id: Mutex::new(default_model_id.to_string()),
             user_id,
-            manager_event_tx,
         });
 
-        Self::spawn_event_dispatcher(Arc::clone(&daemon), manager_event_rx);
+        Self::spawn_session_reaper(Arc::clone(&daemon));
 
         Ok(daemon)
     }
 
-    /// Background task: receives (ConversationId, ManagerEvent) from all managers
-    /// and forwards to the appropriate per-session broadcast channel.
-    fn spawn_event_dispatcher(
-        daemon: Arc<Self>,
-        mut rx: mpsc::UnboundedReceiver<(ConversationId, ManagerEvent)>,
-    ) {
+    fn spawn_session_reaper(daemon: Arc<Self>) {
         tokio::spawn(async move {
-            while let Some((conversation_id, event)) = rx.recv().await {
-                let conv_map = daemon.conv_to_session.lock().await;
-                let session_id = match conv_map.get(&conversation_id) {
-                    Some(sid) => sid.clone(),
-                    None => continue,
-                };
-                drop(conv_map);
-                let sessions = daemon.sessions.lock().await;
-                if let Some(managed) = sessions.get(&session_id) {
-                    let daemon_events = Self::manager_event_to_daemon_events(&session_id, event);
-                    for daemon_event in daemon_events {
-                        let _ = managed.event_broadcast.send(daemon_event);
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let mut sessions = daemon.sessions.lock().await;
+                let before = sessions.len();
+                sessions.retain(|sid, managed| {
+                    if managed.event_broadcast.receiver_count() == 0 {
+                        tracing::info!(session_id = %sid, "reaping orphaned session");
+                        false
+                    } else {
+                        true
                     }
+                });
+                let reaped = before - sessions.len();
+                if reaped > 0 {
+                    tracing::info!(reaped, remaining = sessions.len(), "session reaper sweep");
                 }
             }
         });
     }
 
-    fn manager_event_to_daemon_events(
-        _session_id: &SessionId,
-        event: ManagerEvent,
-    ) -> Vec<DaemonEvent> {
-        match event {
-            ManagerEvent::UserMessageAdded(msg) => vec![DaemonEvent::UserMessage(msg)],
-            ManagerEvent::StreamingMessage(msg) => {
-                msg.payload.content.into_iter().map(DaemonEvent::AssistantContent).collect()
+    fn spawn_event_forwarder(
+        session_id: &SessionId,
+        broadcast_tx: &broadcast::Sender<DaemonEvent>,
+    ) -> SessionEventSender {
+        let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<(String, SessionEvent)>();
+        let broadcast_tx = broadcast_tx.clone();
+        let sid = session_id.clone();
+
+        tokio::spawn(async move {
+            while let Some((_key, event)) = evt_rx.recv().await {
+                for de in Self::session_event_to_daemon_events(event) {
+                    let _ = broadcast_tx.send(de);
+                }
             }
-            ManagerEvent::Complete(_) => vec![DaemonEvent::TurnComplete],
-            ManagerEvent::Error(err) => vec![DaemonEvent::Error(err)],
-            ManagerEvent::ModelChanged(_) => vec![],
-        }
+            tracing::debug!(session_id = %sid, "event forwarder stopped");
+        });
+
+        evt_tx
     }
 
-    fn session_event_to_daemon_events(
-        _session_id: &SessionId,
-        event: SessionEvent,
-    ) -> Vec<DaemonEvent> {
+    fn session_event_to_daemon_events(event: SessionEvent) -> Vec<DaemonEvent> {
         match event {
             SessionEvent::UserMessageAdded(msg) => vec![DaemonEvent::UserMessage(msg)],
             SessionEvent::TextDelta(text) => vec![DaemonEvent::TextDelta(text)],
             SessionEvent::ContentBlock(block) => vec![DaemonEvent::AssistantContent(block)],
+            SessionEvent::ToolCallStart { id, name, arguments } => {
+                vec![DaemonEvent::ToolCall { id, name, arguments }]
+            }
+            SessionEvent::ToolCallResult { id, content } => {
+                let result = serde_json::to_value(&content).unwrap_or_default();
+                vec![DaemonEvent::ToolResult { id, result }]
+            }
             SessionEvent::AssistantMessage(msg) => {
                 msg.payload.content.into_iter().map(DaemonEvent::AssistantContent).collect()
             }
@@ -211,23 +168,11 @@ where
             .collect()
     }
 
-    fn build_manager(
-        &self,
-        session: Session<S>,
-        model: Arc<dyn ChatModel + Send + Sync>,
-        model_id: String,
-    ) -> ConversationManager<S> {
-        let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
-        ConversationManager::new(
-            session,
-            Arc::clone(&self.coordinator),
-            model,
-            model_id,
-            Arc::clone(self.mcp.registry()),
-            document_resolver,
-            self.user_id.clone(),
-            self.manager_event_tx.clone(),
-        )
+    fn convert_input_inline(content: Vec<simply_core::storage::content::InputContent>) -> Vec<llm::ContentBlock> {
+        content
+            .into_iter()
+            .filter_map(|c| c.into_content_block_inline())
+            .collect()
     }
 
     async fn resolve_user(
@@ -256,31 +201,12 @@ where
         Ok(user.id)
     }
 
-    /// The OAuth callback redirect URI (stable port).
-    pub fn oauth_redirect_uri(&self) -> String {
-        self.mcp.oauth_redirect_uri()
-    }
+    pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
+    pub fn mcp_service(&self) -> &McpService { &self.mcp }
+    pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
+    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> { &self.coordinator }
 
-    /// Access the MCP service (for features not yet fully in daemon API, e.g. gdocs).
-    pub fn mcp_service(&self) -> &McpService {
-        &self.mcp
-    }
-
-    /// Access stores (for features not yet in daemon API, e.g. gdocs).
-    pub fn stores(&self) -> &Arc<dyn Stores<S>> {
-        &self.stores
-    }
-
-    /// Access coordinator (for features not yet in daemon API, e.g. gdocs).
-    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> {
-        &self.coordinator
-    }
-
-    fn make_session_info(
-        session_id: &SessionId,
-        persistence: Persistence,
-        model_id: String,
-    ) -> SessionInfo {
+    fn make_session_info(session_id: &SessionId, persistence: Persistence, model_id: String) -> SessionInfo {
         SessionInfo {
             id: session_id.clone(),
             persistence,
@@ -308,233 +234,103 @@ where
         &self,
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
-        let session_id = SessionId::generate();
-        let persistence = options.persistence.unwrap_or(Persistence::Persistent);
+        let persistence = options.persistence.clone().unwrap_or(Persistence::Ephemeral);
 
+        // Reuse existing session for the same persistent conversation.
+        if let Persistence::Persistent { ref conversation_id } = persistence {
+            let sessions = self.sessions.lock().await;
+            if let Some(managed) = sessions.values().find(|m| matches!(
+                &m.info.persistence,
+                Persistence::Persistent { conversation_id: cid } if cid == conversation_id
+            )) {
+                return Ok((managed.info.clone(), managed.event_broadcast.subscribe()));
+            }
+        }
+
+        let session_id = SessionId::generate();
         let model_id = match options.model_id {
             Some(id) => id,
             None => self.default_model_id.lock().await.clone(),
         };
         let model = llm::create_model(&model_id)?;
-
         let seed_messages = Self::convert_seed(options.seed);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
-        let info = Self::make_session_info(&session_id, persistence, model_id.clone());
+        let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
-        let manager = match persistence {
-            Persistence::Ephemeral => {
-                // Lightweight path: in-memory only, no storage
-                let mut light = InMemoryContext::new();
-                if let Some(ref prompt) = options.system_prompt {
-                    light = InMemoryContext::with_system_prompt(prompt.clone());
-                }
-                if !seed_messages.is_empty() {
-                    tracing::debug!(count = seed_messages.len(), "seeding ephemeral session");
-                    light.seed(seed_messages);
-                }
+        let tools: Arc<dyn ToolService> =
+            Arc::new(McpToolRegistry::new(Arc::clone(self.mcp.registry())));
+        let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
+        let evt_tx = Self::spawn_event_forwarder(&session_id, &broadcast_tx);
 
-                let (evt_tx, mut evt_rx) = mpsc::unbounded_channel::<(String, SessionEvent)>();
-                let broadcast_tx_clone = broadcast_tx.clone();
-                let sid = session_id.clone();
-                // Forward SessionManager events to the session broadcast channel
-                tokio::spawn(async move {
-                    while let Some((_key, event)) = evt_rx.recv().await {
-                        let daemon_events = Self::session_event_to_daemon_events(&sid, event);
-                        for de in daemon_events {
-                            let _ = broadcast_tx_clone.send(de);
-                        }
-                    }
-                });
-
-                let sm = SessionManager::new(
-                    session_id.as_str().to_string(),
-                    light,
-                    model,
-                    Arc::clone(self.mcp.registry()),
-                    self.stores.document(),
-                    evt_tx,
-                    NoStorage,
-                );
-                Manager::Ephemeral(sm)
-            }
-            Persistence::Persistent => {
-                // Full path: storage-backed
-                let conversation_id = ConversationId::new();
-                let mut session = Session::new(Arc::clone(&self.coordinator), conversation_id.clone());
-                if !seed_messages.is_empty() {
-                    tracing::debug!(count = seed_messages.len(), "seeding persistent session");
-                    session.seed(seed_messages);
-                }
-                let cm = self.build_manager(session, model, model_id);
-                self.conv_to_session.lock().await.insert(conversation_id.clone(), session_id.clone());
-                Manager::Persistent(cm)
-            }
-        };
-
-        let conv_id = match &manager {
-            Manager::Persistent(_) => {
-                // Already inserted above
-                // Get it back from conv_to_session by reverse lookup
-                let conv_map = self.conv_to_session.lock().await;
-                conv_map.iter()
-                    .find(|(_, sid)| **sid == session_id)
-                    .map(|(cid, _)| cid.clone())
-            }
-            Manager::Ephemeral(_) => None,
-        };
-
-        self.sessions.lock().await.insert(
-            session_id.clone(),
-            ManagedSession {
-                info: info.clone(),
-                conversation_id: conv_id,
-                manager,
-                event_broadcast: broadcast_tx,
-            },
+        let manager = SessionManager::create(
+            session_id.as_str().to_string(),
+            persistence,
+            seed_messages,
+            options.system_prompt,
+            model,
+            tools,
+            Arc::clone(&self.coordinator),
+            document_resolver,
+            simply_core::ExecutionContext::default(),
+            evt_tx,
         );
 
-        if let Some(context) = options.context {
-            if !context.is_empty() {
-                tracing::info!(session_id = %session_id, count = context.len(), "seeding context");
-                // TODO: replay seed messages into the session's conversation manager
-            }
-        }
+        self.sessions.lock().await.insert(session_id.clone(), ManagedSession {
+            info: info.clone(),
+            manager,
+            event_broadcast: broadcast_tx,
+        });
 
         tracing::info!(session_id = %session_id, "session created");
         Ok((info, broadcast_rx))
     }
 
-    async fn resume_session(
-        &self,
-        session_id: &SessionId,
-    ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
-        {
-            let sessions = self.sessions.lock().await;
-            if let Some(managed) = sessions.get(session_id) {
-                return Ok((managed.info.clone(), managed.event_broadcast.subscribe()));
-            }
-        }
-
-        let conversation_id = ConversationId::from_string(session_id.as_str());
-        let session = Session::open(Arc::clone(&self.coordinator), conversation_id.clone()).await?;
-
-        let model_id = self.default_model_id.lock().await.clone();
-        let model = llm::create_model(&model_id)?;
-        let manager = Manager::Persistent(self.build_manager(session, model, model_id.clone()));
-        let info = Self::make_session_info(session_id, Persistence::Persistent, model_id);
-
-        let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
-
-        self.conv_to_session.lock().await.insert(conversation_id.clone(), session_id.clone());
-        self.sessions.lock().await.insert(
-            session_id.clone(),
-            ManagedSession {
-                info: info.clone(),
-                conversation_id: Some(conversation_id),
-                manager,
-                event_broadcast: broadcast_tx,
-            },
-        );
-
-        tracing::info!(session_id = %session_id, "session resumed from storage");
-        Ok((info, broadcast_rx))
-    }
-
-    async fn subscribe_session(
-        &self,
-        session_id: &SessionId,
-    ) -> anyhow::Result<broadcast::Receiver<DaemonEvent>> {
+    async fn subscribe_session(&self, session_id: &SessionId) -> anyhow::Result<broadcast::Receiver<DaemonEvent>> {
         let sessions = self.sessions.lock().await;
-        let managed = sessions
-            .get(session_id)
+        let managed = sessions.get(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
         Ok(managed.event_broadcast.subscribe())
     }
 
     async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()> {
-        let removed = self.sessions.lock().await.remove(session_id);
-        match removed {
-            Some(managed) => {
-                if let Some(conv_id) = &managed.conversation_id {
-                    self.conv_to_session.lock().await.remove(conv_id);
-                }
-                tracing::info!(session_id = %session_id, "session closed");
-                Ok(())
-            }
-            None => anyhow::bail!("session not found: {session_id}"),
+        if self.sessions.lock().await.remove(session_id).is_some() {
+            tracing::info!(session_id = %session_id, "session closed");
         }
+        Ok(())
     }
 
     async fn close_all_sessions(&self) -> anyhow::Result<()> {
         let mut sessions = self.sessions.lock().await;
         let count = sessions.len();
         sessions.clear();
-        self.conv_to_session.lock().await.clear();
         tracing::info!(count, "all sessions closed");
         Ok(())
     }
 
     async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>> {
-        let sessions = self.sessions.lock().await;
-        Ok(sessions.values().map(|s| s.info.clone()).collect())
+        Ok(self.sessions.lock().await.values().map(|s| s.info.clone()).collect())
     }
 
-    async fn set_persistence(
-        &self,
-        session_id: &SessionId,
-        persistence: Persistence,
-    ) -> anyhow::Result<()> {
-        let mut sessions = self.sessions.lock().await;
-        let managed = sessions
-            .get_mut(session_id)
+    async fn send_message(&self, session_id: &SessionId, message: UserMessage) -> anyhow::Result<()> {
+        let sessions = self.sessions.lock().await;
+        let managed = sessions.get(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-        managed.info.persistence = persistence;
+        managed.manager.send_message(Self::convert_input_inline(message.content));
         Ok(())
-    }
-
-    async fn send_message(
-        &self,
-        session_id: &SessionId,
-        message: UserMessage,
-    ) -> anyhow::Result<()> {
-        let sessions = self.sessions.lock().await;
-        let managed = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-
-        let tool_config = message
-            .tool_filter
-            .map(|f| f.into_tool_config())
-            .unwrap_or_else(simply_core::ToolConfig::all_enabled);
-
-        managed.manager.send_message(message.content, tool_config);
-        Ok(())
-    }
-
-    async fn get_messages(
-        &self,
-        session_id: &SessionId,
-    ) -> anyhow::Result<Vec<ResolvedMessage>> {
-        let sessions = self.sessions.lock().await;
-        let managed = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-        Ok(managed.manager.messages_for_display().await)
     }
 
     async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()> {
         let new_model = llm::create_model(model_id)?;
         let mut sessions = self.sessions.lock().await;
-        let managed = sessions
-            .get_mut(session_id)
+        let managed = sessions.get_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-        managed.manager.set_model(new_model, model_id.to_string());
+        managed.manager.set_model(new_model);
         managed.info.model_id = model_id.to_string();
         Ok(())
     }
 
     async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()> {
-        tracing::info!(event_type = %event.event_type, "inbound event received (not yet routed)");
+        tracing::info!(event_type = %event.event_type, "inbound event received");
         Ok(())
     }
 }
@@ -549,26 +345,16 @@ where
     S::Document: DocumentResolver,
 {
     async fn create_conversation(&self, name: Option<String>) -> anyhow::Result<ConversationId> {
-        self.coordinator
-            .create_conversation(&self.user_id, name.as_deref())
-            .await
+        self.coordinator.create_conversation(&self.user_id, name.as_deref()).await
     }
 
     async fn list_conversations(&self) -> anyhow::Result<Vec<ConversationInfo>> {
         use simply_core::storage::{EntityStore, EntityType, TurnStore};
-
-        let entities = self.stores
-            .entity()
-            .list_entities(&self.user_id, Some(&EntityType::conversation()))
-            .await?;
-
+        let entities = self.stores.entity()
+            .list_entities(&self.user_id, Some(&EntityType::conversation())).await?;
         let mut result = Vec::with_capacity(entities.len());
         for entity in entities {
-            let turn_count = self.stores
-                .turn()
-                .get_turn_count(&entity.id)
-                .await
-                .unwrap_or(0);
+            let turn_count = self.stores.turn().get_turn_count(&entity.id).await.unwrap_or(0);
             result.push(ConversationInfo {
                 id: entity.id.clone(),
                 name: entity.name.clone(),
@@ -581,31 +367,31 @@ where
 
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
         use simply_core::storage::EntityStore;
-
-        let session_id = SessionId::new(conversation_id.as_str());
-        let _ = self.close_session(&session_id).await;
-
-        self.stores
-            .entity()
-            .delete_entity(conversation_id)
-            .await
+        let session_id = {
+            let sessions = self.sessions.lock().await;
+            sessions.iter()
+                .find(|(_, m)| matches!(
+                    &m.info.persistence,
+                    Persistence::Persistent { conversation_id: cid } if cid == conversation_id
+                ))
+                .map(|(sid, _)| sid.clone())
+        };
+        if let Some(sid) = session_id {
+            let _ = self.close_session(&sid).await;
+        }
+        self.stores.entity().delete_entity(conversation_id).await
     }
 
     async fn rename_conversation(&self, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()> {
         use simply_core::storage::EntityStore;
-
-        let mut entity = self.stores
-            .entity()
-            .get_entity(conversation_id)
-            .await?
+        let mut entity = self.stores.entity().get_entity(conversation_id).await?
             .ok_or_else(|| anyhow::anyhow!("conversation not found: {conversation_id}"))?;
-
         entity.name = if name.trim().is_empty() { None } else { Some(name.to_string()) };
+        self.stores.entity().update_entity(conversation_id, &entity).await
+    }
 
-        self.stores
-            .entity()
-            .update_entity(conversation_id, &entity)
-            .await
+    async fn get_messages(&self, conversation_id: &ConversationId) -> anyhow::Result<Vec<ResolvedMessage>> {
+        self.coordinator.open_session(conversation_id).await
     }
 }
 
@@ -628,8 +414,7 @@ where
         use simply_core::storage::traits::AssetStore;
         let data = self.coordinator.get_blob(hash).await?;
         let mime_type = self.stores.asset()
-            .get_by_blob_hash(hash)
-            .await?
+            .get_by_blob_hash(hash).await?
             .map(|a| a.mime_type.clone())
             .unwrap_or_else(|| "application/octet-stream".to_string());
         Ok(BlobResponse { data, mime_type })
@@ -637,67 +422,37 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// McpApi — delegates to McpService
+// McpApi
 // ---------------------------------------------------------------------------
 
 #[async_trait]
 impl<S: StorageTypes> McpApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
+where S::Document: DocumentResolver,
 {
-    async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> {
-        self.mcp.list_mcp_servers().await
-    }
-    async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> {
-        self.mcp.add_mcp_server(request).await
-    }
-    async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
-        self.mcp.remove_mcp_server(server_id).await
-    }
-    async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
-        self.mcp.connect_mcp_server(server_id).await
-    }
-    async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
-        self.mcp.disconnect_mcp_server(server_id).await
-    }
-    async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpToolInfo>> {
-        self.mcp.get_mcp_server_tools(server_id).await
-    }
-    async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
-        self.mcp.test_mcp_server(server_id).await
-    }
-    async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> {
-        self.mcp.update_mcp_server_settings(server_id, request).await
-    }
-    async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
-        self.mcp.stop_mcp_retry(server_id).await
-    }
-    async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
-        self.mcp.start_mcp_retry(server_id).await
-    }
+    async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> { self.mcp.list_mcp_servers().await }
+    async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> { self.mcp.add_mcp_server(request).await }
+    async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.remove_mcp_server(server_id).await }
+    async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> { self.mcp.connect_mcp_server(server_id).await }
+    async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.disconnect_mcp_server(server_id).await }
+    async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpToolInfo>> { self.mcp.get_mcp_server_tools(server_id).await }
+    async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> { self.mcp.test_mcp_server(server_id).await }
+    async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> { self.mcp.update_mcp_server_settings(server_id, request).await }
+    async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.stop_mcp_retry(server_id).await }
+    async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.start_mcp_retry(server_id).await }
 }
 
 // ---------------------------------------------------------------------------
-// OAuthApi — delegates to McpService
+// OAuthApi
 // ---------------------------------------------------------------------------
 
 #[async_trait]
 impl<S: StorageTypes> OAuthApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
+where S::Document: DocumentResolver,
 {
-    async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
-        self.mcp.start_oauth(server_id).await
-    }
-    async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()> {
-        self.mcp.complete_oauth(server_id, code, state).await
-    }
-    async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()> {
-        self.mcp.complete_oauth_with_code(server_id, code).await
-    }
-    async fn resolve_oauth_state(&self, state: &str) -> Option<String> {
-        self.mcp.resolve_oauth_state(state).await
-    }
+    async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> { self.mcp.start_oauth(server_id).await }
+    async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()> { self.mcp.complete_oauth(server_id, code, state).await }
+    async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()> { self.mcp.complete_oauth_with_code(server_id, code).await }
+    async fn resolve_oauth_state(&self, state: &str) -> Option<String> { self.mcp.resolve_oauth_state(state).await }
 }
 
 // ---------------------------------------------------------------------------
@@ -706,27 +461,17 @@ where
 
 #[async_trait]
 impl<S: StorageTypes> ModelApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
+where S::Document: DocumentResolver,
 {
     async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>> {
-        let mut all_models = Vec::new();
-        for (_provider_name, result) in llm::list_all_models().await {
-            if let Ok(models) = result {
-                all_models.extend(models);
-            }
+        let mut all = Vec::new();
+        for (_, result) in llm::list_all_models().await {
+            if let Ok(models) = result { all.extend(models); }
         }
-        Ok(all_models)
+        Ok(all)
     }
-
-    async fn list_providers(&self) -> Vec<llm::ProviderInfo> {
-        llm::list_providers()
-    }
-
-    async fn default_model_id(&self) -> String {
-        self.default_model_id.lock().await.clone()
-    }
-
+    async fn list_providers(&self) -> Vec<llm::ProviderInfo> { llm::list_providers() }
+    async fn default_model_id(&self) -> String { self.default_model_id.lock().await.clone() }
     async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> {
         let _ = llm::create_model(model_id)?;
         *self.default_model_id.lock().await = model_id.to_string();
@@ -740,22 +485,14 @@ where
 
 #[async_trait]
 impl<S: StorageTypes> VoiceApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
+where S::Document: DocumentResolver,
 {
     async fn voice_connect(&self, _session_id: &SessionId) -> anyhow::Result<VoiceHandle> {
-        let (audio_tx, _audio_rx) = mpsc::channel(32);
-        let (_voice_tx, voice_rx) = mpsc::channel(32);
-        Ok(VoiceHandle {
-            audio_in: audio_tx,
-            events: voice_rx,
-        })
+        let (audio_tx, _) = mpsc::channel(32);
+        let (_, voice_rx) = mpsc::channel(32);
+        Ok(VoiceHandle { audio_in: audio_tx, events: voice_rx })
     }
-
-    async fn voice_disconnect(&self, _session_id: &SessionId) -> anyhow::Result<()> {
-        // TODO: drop the voice handle for this session
-        Ok(())
-    }
+    async fn voice_disconnect(&self, _session_id: &SessionId) -> anyhow::Result<()> { Ok(()) }
 }
 
 #[async_trait]
