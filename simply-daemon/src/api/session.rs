@@ -17,12 +17,21 @@ pub enum Persistence {
     Persistent,
 }
 
+/// Context seed message — replay history into a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeedMessage {
+    pub role: llm::Role,
+    pub content: Vec<InputContent>,
+}
+
 /// Options when creating a new session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSessionOptions {
     pub persistence: Option<Persistence>,
     pub system_prompt: Option<String>,
     pub model_id: Option<String>,
+    /// Optional context to seed into the session on creation (e.g., Discord history).
+    pub context: Option<Vec<SeedMessage>>,
 }
 
 /// Information about a session.
@@ -58,13 +67,6 @@ impl ToolFilter {
     }
 }
 
-/// Context seed message — replay history into a session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SeedMessage {
-    pub role: llm::Role,
-    pub content: Vec<InputContent>,
-}
-
 // ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------
@@ -73,53 +75,36 @@ pub struct SeedMessage {
 #[async_trait]
 pub trait SessionApi: Send + Sync {
     /// Create a new session. Returns info and an event stream.
-    #[rpc(stream)]
+    #[rpc(stream = "/session/new")]
     async fn create_session(
         &self,
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
     /// Resume an existing session from storage. Returns info and an event stream.
-    #[rpc(stream)]
+    #[rpc(stream = "/session/{session_id}")]
     async fn resume_session(
         &self,
         session_id: &SessionId,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
     /// Subscribe to an already-open session's events (multiple listeners).
-    #[rpc(stream)]
+    #[rpc(stream = "/session/{session_id}/subscribe")]
     async fn subscribe_session(
         &self,
         session_id: &SessionId,
     ) -> anyhow::Result<broadcast::Receiver<DaemonEvent>>;
 
-    /// Close a session and free its memory.
-    #[rpc(delete = "/session/{session_id}")]
-    async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()>;
-
-    /// Close all sessions (client disconnect cleanup).
-    #[rpc(delete = "/session")]
-    async fn close_all_sessions(&self) -> anyhow::Result<()>;
-
-    /// Replay context into a session (e.g., Discord history).
-    #[rpc(post = "/session/{session_id}/context")]
-    async fn seed_context(
-        &self,
-        session_id: &SessionId,
-        messages: Vec<SeedMessage>,
-    ) -> anyhow::Result<()>;
-
     /// List active sessions.
     #[rpc(get = "/session")]
     async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>>;
 
-    /// Change persistence mode.
-    #[rpc(put = "/session/{session_id}/persistence")]
-    async fn set_persistence(
+    /// Get messages for display (resolved content with turn IDs).
+    #[rpc(get = "/session/{session_id}/messages")]
+    async fn get_messages(
         &self,
         session_id: &SessionId,
-        persistence: Persistence,
-    ) -> anyhow::Result<()>;
+    ) -> anyhow::Result<Vec<ResolvedMessage>>;
 
     /// Send a user message. Events arrive on the session's broadcast receiver.
     #[rpc(post = "/session/{session_id}/message")]
@@ -129,20 +114,25 @@ pub trait SessionApi: Send + Sync {
         message: UserMessage,
     ) -> anyhow::Result<()>;
 
-    /// Get messages for display (resolved content with turn IDs).
-    #[rpc(get = "/session/{session_id}/messages")]
-    async fn get_messages(
+    /// Change persistence mode.
+    #[rpc(put = "/session/{session_id}/persistence")]
+    async fn set_persistence(
         &self,
         session_id: &SessionId,
-    ) -> anyhow::Result<Vec<ResolvedMessage>>;
+        persistence: Persistence,
+    ) -> anyhow::Result<()>;
 
     /// Change the model for a session.
     #[rpc(put = "/session/{session_id}/model")]
     async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()>;
 
-    /// Reload messages from storage (e.g., after span selection change).
-    #[rpc(post = "/session/{session_id}/reload")]
-    async fn reload(&self, session_id: &SessionId) -> anyhow::Result<()>;
+    /// Close a session and free its memory.
+    #[rpc(delete = "/session/{session_id}")]
+    async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()>;
+
+    /// Close all sessions (client disconnect cleanup).
+    #[rpc(delete = "/session")]
+    async fn close_all_sessions(&self) -> anyhow::Result<()>;
 
     /// Push an inbound event into the daemon.
     #[rpc(post = "/session/event")]

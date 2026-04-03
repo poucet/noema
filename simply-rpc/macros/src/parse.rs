@@ -15,16 +15,19 @@ pub enum ReturnKind {
     StreamBare { stream_type: Type },
 }
 
-/// An HTTP method for REST dispatch.
+/// An HTTP method (or WebSocket upgrade) for routing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HttpMethod {
     Get,
     Post,
     Put,
     Delete,
+    /// WebSocket upgrade — `#[rpc(stream = "/path")]`.
+    Stream,
 }
 
-/// REST endpoint info parsed from annotations like `#[rpc(get = "/path/{param}")]`.
+/// Endpoint info parsed from annotations like `#[rpc(get = "/path/{param}")]`
+/// or `#[rpc(stream = "/path")]`.
 #[derive(Debug, Clone)]
 pub struct RestEndpoint {
     pub http_method: HttpMethod,
@@ -69,7 +72,7 @@ pub struct ParsedMethod {
     pub base64_return: bool,
     /// Expose as HTTP GET endpoint (`#[rpc(rest_get)]`) — legacy, prefer `rest_endpoint`.
     pub rest_get: bool,
-    /// REST endpoint info parsed from `#[rpc(get = "/path")]` etc.
+    /// Endpoint info parsed from `#[rpc(get = "/path")]`, `#[rpc(stream = "/path")]`, etc.
     pub rest_endpoint: Option<RestEndpoint>,
     /// Whether to exclude this method from tool generation (`#[rpc(no_tool)]`).
     pub no_tool: bool,
@@ -181,13 +184,14 @@ fn extract_path_params(path: &str) -> Vec<String> {
     params
 }
 
-/// Try to parse a REST method annotation like `get = "/path"`.
+/// Try to parse a route annotation like `get = "/path"` or `stream = "/path"`.
 fn try_parse_rest(key: &str, value: &str) -> Option<RestEndpoint> {
     let http_method = match key {
         "get" => HttpMethod::Get,
         "post" => HttpMethod::Post,
         "put" => HttpMethod::Put,
         "delete" => HttpMethod::Delete,
+        "stream" => HttpMethod::Stream,
         _ => return None,
     };
     let path_params = extract_path_params(value);
@@ -221,8 +225,12 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
             if tokens.contains("skip") {
                 result.kind = RpcKind::Skip;
             }
-            if tokens.contains("stream") {
-                result.kind = RpcKind::Stream;
+            // Bare `stream` (no path) — backward compat
+            {
+                let token_str_check = tokens.replace(' ', "");
+                if token_str_check.split(',').any(|s| s.trim() == "stream") {
+                    result.kind = RpcKind::Stream;
+                }
             }
             if tokens.contains("base64_return") {
                 result.base64_return = true;
@@ -241,11 +249,14 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
                     let name = value.trim_matches('"');
                     result.base64_params.push(name.to_string());
                 }
-                // Parse REST method annotations: get="/path", post="/path", etc.
-                for method_key in &["get", "post", "put", "delete"] {
+                // Parse route annotations: get="/path", post="/path", stream="/path", etc.
+                for method_key in &["get", "post", "put", "delete", "stream"] {
                     if let Some(value) = segment.strip_prefix(&format!("{method_key}=")) {
                         let path = value.trim_matches('"');
                         if let Some(endpoint) = try_parse_rest(method_key, path) {
+                            if endpoint.http_method == HttpMethod::Stream {
+                                result.kind = RpcKind::Stream;
+                            }
                             result.rest_endpoint = Some(endpoint);
                         }
                     }

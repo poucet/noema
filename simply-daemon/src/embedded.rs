@@ -257,6 +257,13 @@ where
             },
         );
 
+        if let Some(context) = options.context {
+            if !context.is_empty() {
+                tracing::info!(session_id = %session_id, count = context.len(), "seeding context");
+                // TODO: replay seed messages into the session's conversation manager
+            }
+        }
+
         tracing::info!(session_id = %session_id, "session created");
         Ok((info, broadcast_rx))
     }
@@ -324,15 +331,6 @@ where
         Ok(())
     }
 
-    async fn seed_context(
-        &self,
-        _session_id: &SessionId,
-        _messages: Vec<SeedMessage>,
-    ) -> anyhow::Result<()> {
-        tracing::warn!("seed_context not yet implemented");
-        Ok(())
-    }
-
     async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>> {
         let sessions = self.sessions.lock().await;
         Ok(sessions.values().map(|s| s.info.clone()).collect())
@@ -389,15 +387,6 @@ where
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
         managed.manager.set_model(new_model, model_id.to_string());
         managed.info.model_id = model_id.to_string();
-        Ok(())
-    }
-
-    async fn reload(&self, session_id: &SessionId) -> anyhow::Result<()> {
-        let sessions = self.sessions.lock().await;
-        let managed = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
-        managed.manager.reload().await?;
         Ok(())
     }
 

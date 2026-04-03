@@ -6,6 +6,17 @@ use quote::{format_ident, quote};
 
 use crate::parse::{HttpMethod, ParsedMethod, ParsedTrait, ReturnKind, RpcKind};
 
+/// Convert a parse-time HttpMethod to the runtime token.
+fn http_method_tokens(method: &HttpMethod) -> TokenStream {
+    match method {
+        HttpMethod::Get => quote! { ::simply_rpc::HttpMethod::Get },
+        HttpMethod::Post => quote! { ::simply_rpc::HttpMethod::Post },
+        HttpMethod::Put => quote! { ::simply_rpc::HttpMethod::Put },
+        HttpMethod::Delete => quote! { ::simply_rpc::HttpMethod::Delete },
+        HttpMethod::Stream => quote! { ::simply_rpc::HttpMethod::Stream },
+    }
+}
+
 /// Generate the `XxxApiService<T>` struct + `RpcService` impl + metadata constant.
 pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
     let service_name = parsed.service_name();
@@ -52,12 +63,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         .iter()
         .filter_map(|m| {
             let endpoint = m.rest_endpoint.as_ref()?;
-            let http_method = match endpoint.http_method {
-                HttpMethod::Get => quote! { ::simply_rpc::HttpMethod::Get },
-                HttpMethod::Post => quote! { ::simply_rpc::HttpMethod::Post },
-                HttpMethod::Put => quote! { ::simply_rpc::HttpMethod::Put },
-                HttpMethod::Delete => quote! { ::simply_rpc::HttpMethod::Delete },
-            };
+            let http_method = http_method_tokens(&endpoint.http_method);
             let path = &endpoint.path_template;
             let method_name = &m.method_name;
             let description = match &m.doc_comment {
@@ -330,12 +336,11 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
         .iter()
         .filter_map(|m| {
             let endpoint = m.rest_endpoint.as_ref()?;
-            let http_method_check = match endpoint.http_method {
-                HttpMethod::Get => quote! { ::simply_rpc::HttpMethod::Get },
-                HttpMethod::Post => quote! { ::simply_rpc::HttpMethod::Post },
-                HttpMethod::Put => quote! { ::simply_rpc::HttpMethod::Put },
-                HttpMethod::Delete => quote! { ::simply_rpc::HttpMethod::Delete },
-            };
+            // Stream endpoints are handled by the WebSocket layer, not REST dispatch
+            if endpoint.http_method == HttpMethod::Stream {
+                return None;
+            }
+            let http_method_check = http_method_tokens(&endpoint.http_method);
 
             // Build a path pattern: split template into segments, each is either
             // a literal string match or a `{param}` capture.
