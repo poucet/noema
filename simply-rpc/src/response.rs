@@ -116,3 +116,60 @@ impl<T: Serialize> IntoContent for Vec<T> {
         vec![ContentPart::Json(v)]
     }
 }
+
+/// Convert a content part into an RPC parameter type.
+///
+/// `BinaryUpload` converts from `ContentPart::Binary` directly.
+/// All other types deserialize from `ContentPart::Json`.
+pub trait FromContent: Sized {
+    fn from_content(part: ContentPart) -> anyhow::Result<Self>;
+}
+
+impl FromContent for BinaryUpload {
+    fn from_content(part: ContentPart) -> anyhow::Result<Self> {
+        match part {
+            ContentPart::Binary { data, mime_type } => Ok(BinaryUpload { data, mime_type }),
+            ContentPart::Json(v) => {
+                // MCP image/audio content arrives as JSON with base64-encoded data + mime_type
+                if let Some(obj) = v.as_object() {
+                    if let (Some(data), Some(mime)) = (obj.get("data"), obj.get("mime_type")) {
+                        if let (Some(data_str), Some(mime_str)) = (data.as_str(), mime.as_str()) {
+                            let bytes = crate::decode_base64(data_str)?;
+                            return Ok(BinaryUpload { data: bytes, mime_type: mime_str.to_string() });
+                        }
+                    }
+                }
+                Ok(serde_json::from_value(v)?)
+            }
+        }
+    }
+}
+
+/// Implement `FromContent` as JSON deserialization for a type.
+#[macro_export]
+macro_rules! impl_json_from_content {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl $crate::FromContent for $ty {
+                fn from_content(part: $crate::ContentPart) -> ::anyhow::Result<Self> {
+                    match part {
+                        $crate::ContentPart::Json(v) => Ok(::serde_json::from_value(v)?),
+                        $crate::ContentPart::Binary { .. } => {
+                            ::anyhow::bail!("expected JSON, got binary content")
+                        }
+                    }
+                }
+            }
+        )*
+    };
+}
+
+// Common types
+impl_json_from_content!(
+    serde_json::Value,
+    String,
+    bool,
+    u8, u16, u32, u64, usize,
+    i8, i16, i32, i64, isize,
+    f32, f64,
+);

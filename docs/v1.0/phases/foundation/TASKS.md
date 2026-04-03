@@ -112,7 +112,7 @@
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
 | F.1 | ✅ | `IntoContent` trait + `ContentPart` enum in simply-rpc: types declare how they become content (JSON or binary) | P1 | S |
-| F.2 | ✅ | `IntoContent` for `BinaryResponse` (→ `ContentPart::Binary`), `impl_json_content!` macro for standard types | P1 | S |
+| F.2 | ✅ | `IntoContent` for `BinaryResponse` (→ `ContentPart::Binary`), `impl_json_content!` macro for standard types | P1 | S | 
 | F.3 | ✅ | RPC macro generates `rest_dispatch_as_content`: calls `IntoContent` on concrete return types, no runtime branching | P1 | S |
 | F.4 | ✅ | Add `IntoContent` impls for all daemon API return types (McpServerInfo, SessionInfo, etc.) via `impl_json_content!` | P1 | S |
-| F.5 | ⬜ | `FromContent` on `BinaryUpload`: convert MCP image/audio content blocks into `BinaryUpload` for tool calls like `store_asset` | P1 | S |
+| F.5 | ✅ | `FromContent` trait + `BinaryUpload` impl: MCP image/audio content blocks decode into `BinaryUpload` for tool calls like `store_asset` | P1 | S |
