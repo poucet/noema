@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PIDFILE="$REPO_ROOT/.daemon.pid"
 DAEMON_PORT="${DAEMON_PORT:-9800}"
 
-export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_core=info}"
+export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_core=debug}"
 export DAEMON_LOG_FILE="${DAEMON_LOG_FILE:-$REPO_ROOT/daemon.log}"
 
 daemon_is_running() {
