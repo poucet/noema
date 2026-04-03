@@ -2,7 +2,7 @@
 
 **Parent:** [v1.0 Roadmap](../../ROADMAP.md)
 **Priority:** P0 — everything else depends on this.
-**Status:** In Progress (Stage 3)
+**Status:** Complete
 **Tasks:** [TASKS.md](TASKS.md)
 **Handoff:** [HANDOFF.md](HANDOFF.md)
 

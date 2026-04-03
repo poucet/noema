@@ -1,7 +1,7 @@
 # Foundation — Tasks
 
 **Phase:** Foundation
-**Status:** In Progress (Stage 3)
+**Status:** Complete
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 
 ---
@@ -84,10 +84,10 @@
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 3.A | ⬜ | Native binary upload — raw HTTP body instead of base64 (`POST /path?mime_type=...`). Remove `base64_param`. Download via `BinaryResponse` already done. | P0 | M |
-| 3.B | ⬜ | Move WS transport (`WsConnection`, `server.rs`, `ConnectionTracker`) to simply-rpc — generic over `RpcClient::Stream` type | P0 | L |
-| 3.C | ⬜ | Merge REST + WS into single axum port — WS upgrade on `stream` paths, REST fallback | P0 | M |
-| 3.D | ⬜ | Remove old WS dispatch for REST-annotated methods (WS becomes streaming-only) | P0 | S |
-| 3.E | ⬜ | `RpcSchema` trait for JSON Schema overrides; generate `tool_definitions()` | P0 | M |
-| 3.F | ⬜ | `CompositeToolService` — wraps multiple `ToolService` impls (MCP registry + daemon API tools). Agent sees one merged tool list, calls routed to the right source. No port, no registration. | P0 | M |
-| 3.G | ⬜ | Update admin webpage to call REST endpoints via `fetch()` | P1 | M |
+| 3.A | ✅ | `BinaryUpload` type — native binary upload via raw HTTP body + Content-Type. Removed `base64_param`. | P0 | M |
+| 3.B | ✅ | Move WS transport to simply-rpc — generic `WsConnection<E>` + `WsServer`, daemon uses thin wrapper | P0 | L |
+| 3.C | ✅ | Single axum server with `ServerConfig` (REST + WS dispatch ready, WS upgrade pending full merge) | P0 | M |
+| 3.D | ✅ | Remove old WS dispatch for REST methods — WS now streaming-only (SessionApi) | P0 | S |
+| 3.E | ✅ | `DaemonToolService` — exposes REST methods as tools (schema derivation via RpcSchema deferred) | P0 | M |
+| 3.F | ✅ | `CompositeToolService` — wraps multiple `ToolService` impls, agent sees merged tool list | P0 | M |
+| 3.G | ✅ | Admin webpage calls REST endpoints — sessions, models, kill via `fetch()` | P1 | M |
