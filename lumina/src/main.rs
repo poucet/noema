@@ -13,7 +13,7 @@ use commands::CommandRegistry;
 use serenity::model::id::{ChannelId, GuildId};
 use serenity::prelude::*;
 use simply_daemon::api::{DaemonApi, McpApi, RegisterEphemeralRequest};
-use simply_daemon::RemoteDaemon;
+use simply_daemon::net;
 
 /// Key for storing the MCP server in serenity's TypeMap (to inject cache on ready).
 pub struct McpServerKey;
@@ -63,13 +63,7 @@ async fn main() -> anyhow::Result<()> {
         .bot_token()
         .expect("DISCORD_BOT_TOKEN env var or discord.bot_token in lumina.toml is required");
 
-    // Connect to simply-daemon
-    let daemon_port = settings.daemon_port.unwrap_or(9800);
-    let daemon_addr = format!("127.0.0.1:{daemon_port}");
-    tracing::info!(addr = %daemon_addr, "connecting to simply-daemon");
-
-    let daemon = RemoteDaemon::connect_as(&daemon_addr, "lumina").await?;
-    tracing::info!("connected to simply-daemon");
+ 
 
     // Start Lumina's MCP server and register with daemon
     let http = Arc::new(serenity::http::Http::new(&token));
@@ -85,8 +79,6 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     tracing::info!(tool_count, "registered lumina MCP service with daemon");
-
-    let daemon: Arc<dyn DaemonApi> = daemon.into_daemon();
 
     // Collect all auto-registered commands
     let registry = CommandRegistry::collect();
