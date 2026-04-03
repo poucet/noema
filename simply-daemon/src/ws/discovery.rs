@@ -125,6 +125,7 @@ pub async fn connect_or_host(
     let rest_port = port + 1;
     let rest_server = rest::start(rest::RestConfig {
         dispatcher: (builders.rest_dispatcher)(Arc::clone(&daemon)),
+        rest_dispatcher: simply_rpc::RestDispatcher::new(),
         port: rest_port,
         extra_routes: Some(admin_routes),
     }).await?;

@@ -119,6 +119,22 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         }
 
         #[::async_trait::async_trait]
+        impl<T: #trait_name + ?Sized + 'static> ::simply_rpc::RestService for #service_name<T> {
+            async fn rest_dispatch(
+                &self,
+                http_method: ::simply_rpc::HttpMethod,
+                path: &str,
+                body: ::serde_json::Value,
+            ) -> Option<::simply_rpc::RpcResult> {
+                self.rest_dispatch(http_method, path, body).await
+            }
+
+            fn meta(&self) -> &'static ::simply_rpc::ServiceMeta {
+                &#meta_const_name
+            }
+        }
+
+        #[::async_trait::async_trait]
         impl<T: #trait_name + ?Sized + 'static> ::simply_rpc::RpcService for #service_name<T> {
             type Stream = #stream_type;
 

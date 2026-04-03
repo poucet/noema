@@ -8,7 +8,7 @@ use simply_daemon::api::*;
 use simply_daemon::embedded::EmbeddedDaemon;
 use simply_daemon::storage::SqliteStores;
 use simply_daemon::ws;
-use simply_rpc::{Dispatcher, RpcService};
+use simply_rpc::{Dispatcher, RestDispatcher, RpcService};
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -50,11 +50,21 @@ async fn main() -> anyhow::Result<()> {
     let tracker = _ws_server.tracker().clone();
     let (admin_routes, mut kill_rx) = simply_daemon::admin::routes(tracker);
 
-    // REST server
+    // REST server — auto-routes from service annotations
     let rest_port = port + 1;
+    let rest_dispatcher = RestDispatcher::new()
+        .register(<dyn SessionApi>::service(daemon.clone()))
+        .register(<dyn ConversationApi>::service(daemon.clone()))
+        .register(<dyn AssetApi>::service(daemon.clone()))
+        .register(<dyn McpApi>::service(daemon.clone()))
+        .register(<dyn OAuthApi>::service(daemon.clone()))
+        .register(<dyn ModelApi>::service(daemon.clone()))
+        .register(<dyn VoiceApi>::service(daemon.clone()));
+
     let _rest_server = ws::rest::start(ws::rest::RestConfig {
         dispatcher: Dispatcher::new()
             .register(<dyn AssetApi>::service(daemon.clone())),
+        rest_dispatcher,
         port: rest_port,
         extra_routes: Some(admin_routes),
     }).await?;

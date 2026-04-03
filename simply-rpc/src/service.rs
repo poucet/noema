@@ -79,3 +79,63 @@ impl Default for Dispatcher {
         Self::new()
     }
 }
+
+/// Trait for services that can dispatch REST requests.
+///
+/// This is auto-implemented by the macro for any service with REST-annotated methods.
+/// Unlike `RpcService` (which has an associated `Stream` type), this is object-safe
+/// and can be collected into a `RestDispatcher`.
+#[async_trait]
+pub trait RestService: Send + Sync {
+    /// Try to dispatch an HTTP request. Returns `Some` if the path matched.
+    async fn rest_dispatch(
+        &self,
+        http_method: crate::HttpMethod,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Option<RpcResult>;
+
+    /// Get metadata for compatibility checking.
+    fn meta(&self) -> &'static crate::ServiceMeta;
+}
+
+/// Dispatcher that routes REST requests to registered services.
+#[derive(Clone, Default)]
+pub struct RestDispatcher {
+    services: Vec<Arc<dyn RestService>>,
+}
+
+impl RestDispatcher {
+    pub fn new() -> Self {
+        Self { services: Vec::new() }
+    }
+
+    /// Register a REST service.
+    pub fn register(mut self, svc: Arc<dyn RestService>) -> Self {
+        self.services.push(svc);
+        self
+    }
+
+    /// Dispatch an HTTP request. Tries each service until one matches.
+    pub async fn dispatch(
+        &self,
+        http_method: crate::HttpMethod,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Option<RpcResult> {
+        for svc in &self.services {
+            if let Some(result) = svc.rest_dispatch(http_method, path, body.clone()).await {
+                return Some(result);
+            }
+        }
+        None
+    }
+
+    /// Collect REST metadata from all registered services.
+    pub fn rest_metas(&self) -> Vec<&'static crate::RestMeta> {
+        self.services
+            .iter()
+            .flat_map(|svc| svc.meta().rest_methods.iter())
+            .collect()
+    }
+}
