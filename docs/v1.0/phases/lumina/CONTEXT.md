@@ -77,8 +77,7 @@ The existing Python bot to port from. Study its codebase to understand features,
 | `simply-rpc/src/client.rs` | RpcClient trait that RemoteDaemon implements |
 | `noema/src-tauri/src/commands/chat.rs` | How Noema uses the daemon (reference for Lumina) |
 | `noema/src-tauri/src/commands/init.rs` | Service wiring + dispatch setup (reference) |
-| `docs/designs/CORE_SERVICE.md` | WS protocol design |
-| `docs/designs/RPC_FRAMEWORK.md` | simply-rpc framework design |
+| `docs/designs/CORE_SERVICE.md` | Core service communication + RPC framework |
 
 ---
 

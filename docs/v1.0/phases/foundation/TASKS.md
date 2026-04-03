@@ -48,24 +48,48 @@
 
 ---
 
-## Stage 3 — REST-First Transport
+## Stage 3 — REST-First Transport + Single Port
 
-**Goal:** Switch all request/response methods from WebSocket to REST. WebSocket becomes streaming-only. Zero public API change — DaemonApi traits stay identical, RemoteDaemon keeps the same interface.
+**Goal:** Single port serves REST and WebSocket. All request/response methods are REST. Sessions are per-path WebSocket connections. Zero public API change for existing clients.
 
-**Design:** [RPC_FRAMEWORK.md](../../../designs/RPC_FRAMEWORK.md)
+**Design:** [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md)
+
+### Codegen (simply-rpc)
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 3.1 | ⬜ | Parse REST path annotations in `simply-rpc` proc macro (`get = "/path/{param}"`, `post`, `put`, `delete`) | P0 | M |
-| 3.2 | ⬜ | Generate `RestMeta` in `ServiceMeta` (http method, path template, method name) | P0 | S |
-| 3.3 | ⬜ | Generate `rest_dispatch` on service struct — match HTTP method + path segments → call trait method, deserialize path/body/query params | P0 | L |
-| 3.4 | ⬜ | Extract `///` doc comments into metadata for tool descriptions | P0 | S |
-| 3.5 | ⬜ | Add `RpcSchema` trait for JSON Schema overrides; generate `tool_definitions()` on service struct using doc comments + `schemars`/`RpcSchema` | P0 | M |
-| 3.6 | ⬜ | Wire REST auto-routing in `simply-daemon` REST server — iterate registered services, match from metadata (replace manual route wiring) | P0 | M |
-| 3.7 | ⬜ | Add REST annotations to all 7 existing API traits (ConversationApi, SessionApi, AssetApi, McpApi, OAuthApi, ModelApi, VoiceApi) | P0 | M |
-| 3.8 | ⬜ | Add `DaemonInfoApi` trait with `health`, `kill`, `version` — remove hardcoded admin routes | P0 | S |
-| 3.9 | ⬜ | Implement `ToolService` from generated `tool_definitions` + `rest_dispatch` — register in `McpToolRegistry` as daemon tools (in-process, no MCP server) | P0 | M |
-| 3.10 | ⬜ | Update `impl_remote_xxx!` codegen — generate HTTP client code (reqwest) for REST methods, keep WS for stream methods | P0 | L |
-| 3.11 | ⬜ | Update `RemoteDaemon` — hold base URL + lazy WS connection, HTTP for REST, WS only opened for stream methods | P0 | M |
-| 3.12 | ⬜ | Remove WebSocket dispatch for REST-annotated methods (WS now streaming-only) | P0 | S |
-| 3.13 | ⬜ | Update admin webpage to call REST endpoints via `fetch()` (list sessions, manage MCP, view models) | P1 | M |
+| 3.1 | ✅ | Parse REST path annotations (`get = "/path/{param}"`, `post`, `put`, `delete`) | P0 | M |
+| 3.2 | ✅ | Parse stream path annotations (`stream = "/path"`) — WebSocket upgrade routes | P0 | S |
+| 3.3 | ✅ | Generate `RestMeta` in `ServiceMeta` (http method, path template, description, no_tool) | P0 | S |
+| 3.4 | ✅ | Generate `rest_dispatch` on service struct — match HTTP method + path → call trait method | P0 | L |
+| 3.5 | ✅ | Extract `///` doc comments into metadata for tool descriptions | P0 | S |
+| 3.6 | ✅ | Generate `RestService` trait impl for each service (object-safe REST dispatch) | P0 | S |
+| 3.7 | ⬜ | Add `RpcSchema` trait for JSON Schema overrides; generate `tool_definitions()` | P0 | M |
+| 3.8 | ⬜ | Update `impl_remote_xxx!` — generate HTTP client code (reqwest) for REST, WS for stream | P0 | L |
+
+### Daemon wiring
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 3.9 | ✅ | Add REST annotations to all 7 existing API traits | P0 | M |
+| 3.10 | ✅ | Add stream path annotations to SessionApi (`/session/new`, `/session/{id}`, etc.) | P0 | S |
+| 3.11 | ✅ | Reshape SessionApi: fold `seed_context` into `CreateSessionOptions`, remove `reload` | P0 | S |
+| 3.12 | ✅ | Add `DaemonInfoApi` trait (`health`, `kill`, `version`) with REST annotations | P0 | S |
+| 3.13 | ✅ | Wire `RestDispatcher` in daemon REST server — auto-route all services | P0 | M |
+| 3.14 | ⬜ | Implement `ToolService` from generated tools — register in `McpToolRegistry` | P0 | M |
+| 3.15 | ⬜ | Update `RemoteDaemon` — hold base URL + lazy WS, HTTP for REST, WS for streams | P0 | M |
+| 3.16 | ⬜ | Merge REST + WS into single port (WS upgrade detection on stream paths) | P0 | M |
+| 3.17 | ⬜ | Remove old WS dispatch for REST-annotated methods | P0 | S |
+| 3.18 | ⬜ | Update admin webpage to call REST endpoints via `fetch()` | P1 | M |
+
+### Tests
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 3.T1 | ✅ | REST metadata tests (paths, HTTP methods, doc comments, no_tool) | P0 | S |
+| 3.T2 | ✅ | Direct `rest_dispatch` unit tests (GET/POST/PUT/DELETE, path params, body params) | P0 | M |
+| 3.T3 | ✅ | Client macro round-trip tests (WS dispatch) | P0 | S |
+| 3.T4 | ✅ | Raw HTTP integration tests (reqwest against real server, full CRUD) | P0 | M |
+| 3.T5 | ✅ | Stream path metadata tests | P0 | S |
+| 3.T6 | ✅ | REST + WS coexistence tests (REST dispatch on streaming trait, stream paths excluded) | P0 | S |
+| 3.T7 | ✅ | Raw WebSocket integration test (tokio-tungstenite client, real server) | P0 | M |

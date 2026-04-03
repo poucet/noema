@@ -16,8 +16,7 @@ Restructure the workspace to match the target architecture and build the daemon 
 - **simply-daemon** — the hub. REST + WebSocket server, session management, MCP registry, storage coordination.
 - **simply-rpc** — generic trait-over-network RPC framework. Proc macro auto-generates server dispatch + client impls from annotated traits.
 
-See [RPC_FRAMEWORK.md](../../../designs/RPC_FRAMEWORK.md) for the RPC design.
-See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the communication protocol.
+See [CORE_SERVICE.md](../../../designs/CORE_SERVICE.md) for the communication protocol and RPC framework.
 
 ---
 
