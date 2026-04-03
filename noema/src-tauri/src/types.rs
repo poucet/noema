@@ -321,12 +321,12 @@ pub struct McpToolInfo {
     pub server_id: String,
 }
 
-impl From<simply_daemon::api::McpToolInfo> for McpToolInfo {
-    fn from(t: simply_daemon::api::McpToolInfo) -> Self {
+impl From<simply_daemon::api::McpTool> for McpToolInfo {
+    fn from(t: simply_daemon::api::McpTool) -> Self {
         Self {
-            name: t.name,
-            description: t.description,
-            server_id: t.server_id,
+            name: t.name.to_string(),
+            description: t.description.map(|d| d.to_string()),
+            server_id: String::new(),
         }
     }
 }

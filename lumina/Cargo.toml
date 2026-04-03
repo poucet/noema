@@ -10,44 +10,37 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal crates
-config = { path = "../config" }
-lumina-macros = { path = "macros" }
-simply-daemon = { path = "../simply-daemon" }
-simply-rpc = { path = "../simply-rpc" }
+config = { workspace = true }
+lumina-macros = { workspace = true }
+simply-daemon = { workspace = true }
+simply-rpc = { workspace = true }
 
 # Discord
-serenity = { version = "0.12", default-features = false, features = [
-    "cache",
-    "client",
-    "collector",
-    "gateway",
-    "model",
-    "rustls_backend",
-] }
+serenity = { workspace = true }
 
 # Async runtime
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # Encoding
-base64 = "0.22"
+base64 = { workspace = true }
 
 # Error handling
-anyhow = "1"
+anyhow = { workspace = true }
 
 # Auto-registration
-inventory = "0.3"
+inventory = { workspace = true }
 
 # Async trait
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # MCP server
-rmcp = { version = "1.3", features = ["server", "macros"] }
-schemars = "0.8"
+rmcp = { workspace = true, features = ["server", "macros"] }
+schemars = { workspace = true }

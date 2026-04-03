@@ -1,6 +1,6 @@
-//! Unified MCP service — owns the registry, OAuth, daemon MCP server, and auto-connect.
+//! Unified MCP service — owns the registry, OAuth, and auto-connect.
 //!
-//! Both `EmbeddedDaemon` and the future standalone daemon use this.
+//! Both `EmbeddedDaemon` and the standalone daemon use this.
 //! The daemon delegates `McpApi` and `OAuthApi` to this service.
 
 use std::sync::Arc;
@@ -8,12 +8,8 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use simply_core::McpRegistry;
-use simply_core::storage::coordinator::StorageCoordinator;
-use simply_core::storage::traits::StorageTypes;
-use simply_core::storage::DocumentResolver;
 
 use crate::api::*;
-use crate::mcp::{DaemonMcpServer, ServerHandle, start_server};
 use crate::oauth::OAuthService;
 
 /// Configuration for starting the MCP service.
@@ -21,49 +17,25 @@ pub struct McpServiceConfig {
     pub oauth_callback_port: Option<u16>,
 }
 
-/// Encapsulates all MCP concerns: registry, OAuth, daemon tools server, auto-connect.
+/// Encapsulates all MCP concerns: registry, OAuth, auto-connect.
 pub struct McpService {
     registry: Arc<Mutex<McpRegistry>>,
     oauth: OAuthService,
-    _daemon_server: ServerHandle,
 }
 
 impl McpService {
     /// Create and start the MCP service.
     ///
     /// - Loads the MCP registry from config
-    /// - Starts the daemon's own MCP server (exposes tools like spawn_agent)
-    /// - Registers and connects the daemon server in the registry
     /// - Starts the OAuth callback server
     /// - Auto-connects configured MCP servers in background
-    pub async fn start<S: StorageTypes>(
-        coordinator: &Arc<StorageCoordinator<S>>,
-        document_resolver: Arc<dyn DocumentResolver>,
+    pub async fn start(
         config: McpServiceConfig,
-    ) -> anyhow::Result<Self>
-    where
-        S::Document: DocumentResolver,
-    {
+    ) -> anyhow::Result<Self> {
         // Load registry
         let registry = Arc::new(Mutex::new(
             McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default())),
         ));
-
-        // Start daemon's own MCP server
-        let mcp_server = DaemonMcpServer::new(
-            Arc::clone(coordinator),
-            Arc::clone(&registry),
-            document_resolver,
-        );
-        let server_handle = start_server(mcp_server).await?;
-        let server_url = server_handle.url();
-
-        // Register daemon tools in the registry
-        {
-            let mut reg = registry.lock().await;
-            reg.register_ephemeral("daemon-tools".to_string(), server_url);
-            reg.connect("daemon-tools").await?;
-        }
 
         // Start OAuth callback server
         let oauth = OAuthService::start(Arc::clone(&registry), config.oauth_callback_port).await?;
@@ -74,7 +46,6 @@ impl McpService {
         Ok(Self {
             registry,
             oauth,
-            _daemon_server: server_handle,
         })
     }
 
@@ -315,7 +286,6 @@ impl McpApi for McpService {
     async fn call_tool_direct(&self, request: CallToolRequestParam) -> anyhow::Result<CallToolResult> {
         let registry = self.registry.lock().await;
 
-        // Find the server that has this tool, get a caller, then release the lock
         let (tool_caller, arguments) = {
             let mut found = None;
             for (_server_id, server) in registry.connected_servers() {

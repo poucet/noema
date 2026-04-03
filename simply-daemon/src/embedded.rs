@@ -75,8 +75,6 @@ where
 
         let document_resolver: Arc<dyn DocumentResolver> = stores.document();
         let mcp = Arc::new(McpService::start(
-            &coordinator,
-            document_resolver,
             McpServiceConfig {
                 oauth_callback_port: settings.oauth_callback_port,
             },

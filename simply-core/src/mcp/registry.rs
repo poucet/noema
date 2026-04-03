@@ -35,9 +35,10 @@ impl McpToolCaller {
     ) -> Result<rmcp::model::CallToolResult> {
         let result = self
             .peer
-            .call_tool(CallToolRequestParam {
-                name: name.into(),
-                arguments,
+            .call_tool({
+                let mut req = CallToolRequestParam::new(name);
+                if let Some(args) = arguments { req = req.with_arguments(args); }
+                req
             })
             .await?;
         Ok(result)
@@ -69,9 +70,10 @@ impl ConnectedServer {
     ) -> Result<rmcp::model::CallToolResult> {
         let result = self
             .service
-            .call_tool(CallToolRequestParam {
-                name: name.into(),
-                arguments,
+            .call_tool({
+                let mut req = CallToolRequestParam::new(name);
+                if let Some(args) = arguments { req = req.with_arguments(args); }
+                req
             })
             .await?;
         Ok(result)
@@ -496,10 +498,11 @@ pub async fn start_auto_connect(
 
 /// Convert an MCP Tool to an llm ToolDefinition
 fn mcp_tool_to_definition(tool: &Tool) -> ToolDefinition {
-    // Convert the MCP JsonObject schema to schemars RootSchema
-    let input_schema = serde_json::to_value(&*tool.input_schema)
-        .and_then(|v| serde_json::from_value(v))
-        .unwrap_or_else(|_| schemars::schema_for!(serde_json::Value));
+    let schema_map: serde_json::Map<String, serde_json::Value> = serde_json::to_value(&*tool.input_schema)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    let input_schema: schemars::Schema = schema_map.into();
 
     ToolDefinition {
         name: tool.name.to_string(),

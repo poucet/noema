@@ -43,7 +43,7 @@ impl FromStr for Role {
 pub struct ToolDefinition {
     pub name: String,
     pub description: Option<String>,
-    pub input_schema: schemars::schema::RootSchema,
+    pub input_schema: schemars::Schema,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

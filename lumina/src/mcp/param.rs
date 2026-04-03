@@ -19,20 +19,19 @@ macro_rules! discord_id {
         }
 
         impl JsonSchema for $name {
-            fn schema_name() -> String {
-                stringify!($name).to_string()
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($name).into()
             }
 
-            fn json_schema(_gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-                schemars::schema::SchemaObject {
-                    instance_type: Some(schemars::schema::InstanceType::Integer.into()),
-                    metadata: Some(Box::new(schemars::schema::Metadata {
-                        description: Some($desc.to_string()),
-                        ..Default::default()
-                    })),
-                    ..Default::default()
-                }
-                .into()
+            fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                let mut map = serde_json::Map::new();
+                map.insert("type".into(), "integer".into());
+                map.insert("description".into(), $desc.into());
+                map.into()
+            }
+
+            fn inline_schema() -> bool {
+                true
             }
         }
     };

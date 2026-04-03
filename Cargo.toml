@@ -7,3 +7,57 @@ default-members = ["noema/src-tauri"]
 version = "0.3.0"
 authors = ["Chris"]
 edition = "2021"
+
+[workspace.dependencies]
+# Internal crates
+config = { path = "config" }
+simply-core = { path = "simply-core" }
+simply-rpc = { path = "simply-rpc" }
+simply-daemon = { path = "simply-daemon" }
+llm = { path = "simply-core/llm" }
+lumina-macros = { path = "lumina/macros" }
+noema-ext = { path = "noema-ext" }
+simply-audio = { path = "simply-audio" }
+noema-mcp-gdocs = { path = "noema-mcp-gdocs" }
+simply-rpc-macros = { path = "simply-rpc/macros" }
+commands_macros = { path = "commands/commands_macros" }
+llm_macros = { path = "simply-core/llm/llm_macros" }
+
+# Shared dependencies
+anyhow = "1"
+async-trait = "0.1"
+base64 = "0.22"
+chrono = "0.4"
+futures = "0.3"
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
+rmcp = { version = "1.3" }
+schemars = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serenity = { version = "0.12", default-features = false, features = [
+    "cache", "client", "collector", "gateway", "model", "rustls_backend",
+] }
+tokio = { version = "1", features = ["sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+# Other shared deps
+axum = { version = "0.8", features = ["ws"] }
+bytes = "1"
+dirs = "6.0"
+hex = "0.4"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+inventory = "0.3"
+proc-macro2 = "1"
+quote = "1"
+sha2 = "0.10"
+syn = { version = "2", features = ["full", "extra-traits"] }
+toml = "0.8"
+tokio-tungstenite = "0.26"
+tower-service = "0.3"
+url = "2"
+urlencoding = "2"

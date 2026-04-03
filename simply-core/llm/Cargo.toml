@@ -4,19 +4,19 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-anyhow = "1.0.100"
-async-trait = "0.1.89"
-base64 = "0.22"
-bytes = "1.10.1"
-futures = "0.3.31"
-reqwest = { version = "0.12.23", features = ["json", "stream"] }
-serde = "1.0.228"
-serde_json = "1.0.145"
-tracing = "0.1.41"
-llm_macros = { path = "llm_macros" }
-schemars = { version = "0.8", features = ["derive"] }
-config = { path = "../../config" }
-chrono = "0.4"
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+llm_macros = { workspace = true }
+schemars = { workspace = true }
+config = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.47.1", features = ["full"] }
+tokio = { version = "1", features = ["full"] }

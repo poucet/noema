@@ -7,7 +7,7 @@ use super::LuminaMcpServer;
 use super::param::*;
 use anyhow::Context as _;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::tool;
+use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -190,7 +190,7 @@ pub struct UserActivityParams {
 // Tool handlers — rmcp generates definitions + dispatch from these
 // ---------------------------------------------------------------------------
 
-#[rmcp::tool_router(vis = pub)]
+#[tool_router(vis = "pub(crate)")]
 impl LuminaMcpServer {
 
     // -- Messaging --
@@ -531,12 +531,13 @@ impl LuminaMcpServer {
     }
 
     async fn do_get_trending_content(&self, p: TrendingParams) -> anyhow::Result<serde_json::Value> {
-        let cache = self.cache().context("gateway cache not available yet")?;
-        let guild_ref = cache.guild(p.guild_id.serenity()).context("guild not in cache")?;
-        let text_channels: Vec<SerenityChannelId> = guild_ref.channels.values()
-            .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Text)
-            .map(|ch| ch.id).collect();
-        drop(guild_ref);
+        let text_channels: Vec<SerenityChannelId> = {
+            let cache = self.cache().context("gateway cache not available yet")?;
+            let guild_ref = cache.guild(p.guild_id.serenity()).context("guild not in cache")?;
+            guild_ref.channels.values()
+                .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Text)
+                .map(|ch| ch.id).collect()
+        };
         let hours = p.hours.unwrap_or(24);
         let min_reactions = p.min_reactions.unwrap_or(1);
         let after = snowflake_hours_ago(hours);
@@ -579,15 +580,17 @@ impl LuminaMcpServer {
     }
 
     async fn do_get_user_activity(&self, p: UserActivityParams) -> anyhow::Result<serde_json::Value> {
-        let cache = self.cache().context("gateway cache not available yet")?;
-        let guild_ref = cache.guild(p.guild_id.serenity()).context("guild not in cache")?;
-        let text_channels: Vec<SerenityChannelId> = guild_ref.channels.values()
-            .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Text)
-            .map(|ch| ch.id).collect();
-        let member_name = guild_ref.members.get(&p.user_id.serenity())
-            .map(|m| m.display_name().to_string())
-            .unwrap_or_else(|| format!("User {}", p.user_id.0));
-        drop(guild_ref);
+        let (text_channels, member_name) = {
+            let cache = self.cache().context("gateway cache not available yet")?;
+            let guild_ref = cache.guild(p.guild_id.serenity()).context("guild not in cache")?;
+            let channels: Vec<SerenityChannelId> = guild_ref.channels.values()
+                .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Text)
+                .map(|ch| ch.id).collect();
+            let name = guild_ref.members.get(&p.user_id.serenity())
+                .map(|m| m.display_name().to_string())
+                .unwrap_or_else(|| format!("User {}", p.user_id.0));
+            (channels, name)
+        };
         let days = p.days.unwrap_or(7);
         let after = snowflake_hours_ago(days * 24);
         let target = p.user_id.serenity();

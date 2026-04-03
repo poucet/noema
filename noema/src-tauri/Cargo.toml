@@ -19,33 +19,33 @@ tauri-plugin-shell = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-fs = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 ts-rs = { version = "10", features = ["serde-compat", "serde-json-impl"] }
-tokio = { version = "1", features = ["full", "fs", "io-util"] }
-futures = "0.3"
-reqwest = { version = "0.12", features = ["json", "stream"] }
-url = "2"
-uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
-base64 = "0.22"
-urlencoding = "2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { workspace = true, features = ["full", "fs", "io-util"] }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
+url = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+base64 = { workspace = true }
+urlencoding = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 tracing-appender = "0.2"
 regex = "1"
 # Local workspace dependencies
-config = { path = "../../config" }
-simply-audio = { path = "../../simply-audio", features = ["browser"] }
-noema-ext = { path = "../../noema-ext" }
-simply-daemon = { path = "../../simply-daemon" }
-simply-rpc = { path = "../../simply-rpc" }
-noema-mcp-gdocs = { path = "../../noema-mcp-gdocs" }
+config = { workspace = true }
+simply-audio = { workspace = true, features = ["browser"] }
+noema-ext = { workspace = true }
+simply-daemon = { workspace = true }
+simply-rpc = { workspace = true }
+noema-mcp-gdocs = { workspace = true }
 thiserror = "2.0.17"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"
-dirs = "6.0"
+dirs = { workspace = true }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

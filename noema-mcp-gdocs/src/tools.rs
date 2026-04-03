@@ -52,99 +52,38 @@ impl GoogleDocsServer {
         }
 
         vec![
-            Tool {
-                name: "gdocs_list".into(),
-                title: None,
-                description: Some("List Google Docs from the user's Drive".into()),
-                input_schema: make_schema(json!({
+            Tool::new_with_raw("gdocs_list", Some("List Google Docs from the user's Drive".into()), make_schema(json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional search query to filter documents" },
+                    "limit": { "type": "integer", "description": "Maximum number of documents to return (default: 20, max: 100)", "default": 20 }
+                }
+            }))),
+            Tool::new_with_raw("gdocs_extract",
+                Some("Extract a Google Doc with all tabs and images. Returns markdown content for each tab \
+                and base64-encoded images for storage by noema-core.".into()),
+                make_schema(json!({
                     "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Optional search query to filter documents"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of documents to return (default: 20, max: 100)",
-                            "default": 20
-                        }
-                    }
+                    "properties": { "doc_id": { "type": "string", "description": "The Google Doc ID" } },
+                    "required": ["doc_id"]
                 })),
-                annotations: None,
-                output_schema: None,
-                icons: None,
-                meta: None,
-            },
-            Tool {
-                name: "gdocs_extract".into(),
-                title: None,
-                description: Some(
-                    "Extract a Google Doc with all tabs and images. Returns markdown content for each tab \
-                    and base64-encoded images for storage by noema-core."
-                        .into(),
-                ),
-                input_schema: make_schema(json!({
+            ),
+            Tool::new_with_raw("gdocs_get_content",
+                Some("Get the content of a Google Doc as markdown (simple export, no multi-tab support)".into()),
+                make_schema(json!({
                     "type": "object",
                     "properties": {
-                        "doc_id": {
-                            "type": "string",
-                            "description": "The Google Doc ID"
-                        }
+                        "doc_id": { "type": "string", "description": "The Google Doc ID" },
+                        "format": { "type": "string", "enum": ["text", "markdown"], "description": "Output format (default: markdown)", "default": "markdown" }
                     },
                     "required": ["doc_id"]
                 })),
-                annotations: None,
-                output_schema: None,
-                icons: None,
-                meta: None,
-            },
-            Tool {
-                name: "gdocs_get_content".into(),
-                title: None,
-                description: Some(
-                    "Get the content of a Google Doc as markdown (simple export, no multi-tab support)"
-                        .into(),
-                ),
-                input_schema: make_schema(json!({
-                    "type": "object",
-                    "properties": {
-                        "doc_id": {
-                            "type": "string",
-                            "description": "The Google Doc ID"
-                        },
-                        "format": {
-                            "type": "string",
-                            "enum": ["text", "markdown"],
-                            "description": "Output format (default: markdown)",
-                            "default": "markdown"
-                        }
-                    },
-                    "required": ["doc_id"]
-                })),
-                annotations: None,
-                output_schema: None,
-                icons: None,
-                meta: None,
-            },
-            Tool {
-                name: "gdocs_get_info".into(),
-                title: None,
-                description: Some("Get metadata about a Google Doc".into()),
-                input_schema: make_schema(json!({
-                    "type": "object",
-                    "properties": {
-                        "doc_id": {
-                            "type": "string",
-                            "description": "The Google Doc ID"
-                        }
-                    },
-                    "required": ["doc_id"]
-                })),
-                annotations: None,
-                output_schema: None,
-                icons: None,
-                meta: None,
-            },
+            ),
+            Tool::new_with_raw("gdocs_get_info", Some("Get metadata about a Google Doc".into()), make_schema(json!({
+                "type": "object",
+                "properties": { "doc_id": { "type": "string", "description": "The Google Doc ID" } },
+                "required": ["doc_id"]
+            }))),
         ]
     }
 }
@@ -240,18 +179,12 @@ impl From<ExtractedDocument> for ExtractResponse {
 
 impl ServerHandler for GoogleDocsServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
-            server_info: Implementation::from_build_env(),
-            instructions: Some(
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::from_build_env())
+            .with_instructions(
                 "Google Docs MCP server for Noema. Provides tools to list, read, and extract Google Docs \
-                with full multi-tab and image support."
-                    .into(),
-            ),
-        }
+                with full multi-tab and image support.",
+            )
     }
 
     fn list_tools(
@@ -259,10 +192,7 @@ impl ServerHandler for GoogleDocsServer {
         _request: Option<PaginatedRequestParam>,
         _context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
-        std::future::ready(Ok(ListToolsResult {
-            tools: Self::get_tools(),
-            next_cursor: None,
-        }))
+        std::future::ready(Ok(ListToolsResult { meta: None, next_cursor: None, tools: Self::get_tools() }))
     }
 
     fn call_tool(

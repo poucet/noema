@@ -33,7 +33,7 @@ impl ServerHandle {
     /// Stop the server
     pub fn stop(self) {
         let _ = self.shutdown_tx.send(());
-    }
+    }  
 }
 
 /// Start an MCP server on a random port

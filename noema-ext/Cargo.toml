@@ -9,10 +9,10 @@ name = "pdf_extract_test"
 path = "src/bin/pdf_extract_test.rs"
 
 [dependencies]
-base64 = "0.22"
+base64 = { workspace = true }
 flate2 = "1.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
-llm = { path = "../simply-core/llm" }
+llm = { workspace = true }
 lopdf = "0.38"
 pdf-extract = "0.10"
 pdfium-render = "0.8"

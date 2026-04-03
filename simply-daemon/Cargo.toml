@@ -14,46 +14,46 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal crates
-config = { path = "../config" }
-simply-core = { path = "../simply-core", features = ["sqlite"] }
-simply-rpc = { path = "../simply-rpc" }
-llm = { path = "../simply-core/llm" }
+config = { workspace = true }
+simply-core = { workspace = true, features = ["sqlite"] }
+simply-rpc = { workspace = true }
+llm = { workspace = true }
 
 # Async runtime
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
+tokio = { workspace = true, features = ["full"] }
+async-trait = { workspace = true }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # Encoding
-base64 = "0.22"
+base64 = { workspace = true }
 
 # Error handling
-anyhow = "1"
+anyhow = { workspace = true }
 
 # OAuth / HTTP client
-reqwest = { version = "0.12", features = ["json"] }
-url = "2"
-uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
-urlencoding = "2"
+reqwest = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+urlencoding = { workspace = true }
 
 # WebSocket
-tokio-tungstenite = "0.26"
-futures-util = "0.3"
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
 
 # MCP protocol
-rmcp = { version = "1.3", features = ["server", "transport-streamable-http-server"] }
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
 
 # HTTP/WS server
-axum = { version = "0.8", features = ["ws"] }
-hyper = { version = "1", features = ["server", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
-tower-service = "0.3"
-http-body-util = "0.1"
+axum = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+tower-service = { workspace = true }
+http-body-util = { workspace = true }

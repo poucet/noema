@@ -1,12 +1,10 @@
-//! MCP — daemon tool server, registry management, and OAuth.
+//! MCP — registry management, OAuth, and MCP HTTP server utilities.
 //!
-//! - `tools` + `server` — daemon's own MCP server exposing tools to sidecars
+//! - `server` — generic MCP HTTP server (used by Lumina to host its tools)
 //! - `service` — unified MCP service (registry + OAuth + auto-connect)
 
 pub mod server;
 pub mod service;
-pub mod tools;
 
 pub use server::{start_server, start_server_on, ServerHandle};
 pub use service::{McpService, McpServiceConfig};
-pub use tools::DaemonMcpServer;
