@@ -273,10 +273,13 @@ impl RpcClient for WsConnection {
 
     async fn rest_call(
         &self,
-        _http_method: simply_rpc::HttpMethod,
+        http_method: simply_rpc::HttpMethod,
         path: &str,
-        _body: serde_json::Value,
+        body: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
-        anyhow::bail!("WsConnection does not support REST calls — use RemoteDaemon: {path}")
+        // Multiplex REST calls over WebSocket as regular RPC calls.
+        // Convention: method name = "REST.{METHOD} {path}"
+        let method = format!("REST.{:?} {}", http_method, path);
+        self.rpc_call(&method, body).await
     }
 }

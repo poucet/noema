@@ -159,9 +159,9 @@ fn make_rd_from_widgets(widgets: Vec<Widget>) -> RestDispatcher {
 fn rest_meta_generated() {
     let meta = &WIDGET_API_META;
     assert_eq!(meta.prefix, "widget");
-    assert!(!meta.rest_methods.is_empty());
+    assert!(!meta.routes.is_empty());
 
-    let rest_names: Vec<&str> = meta.rest_methods.iter().map(|m| m.method_name).collect();
+    let rest_names: Vec<&str> = meta.routes.iter().map(|m| m.method_name).collect();
     assert!(rest_names.contains(&"widget.list_widgets"));
     assert!(rest_names.contains(&"widget.get_widget"));
     assert!(rest_names.contains(&"widget.create_widget"));
@@ -179,21 +179,21 @@ fn rest_meta_generated() {
 #[test]
 fn rest_meta_http_methods_correct() {
     let meta = &WIDGET_API_META;
-    let find = |name: &str| meta.rest_methods.iter().find(|m| m.method_name == name).unwrap();
+    let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
-    assert_eq!(find("widget.list_widgets").http_method, HttpMethod::Get);
-    assert_eq!(find("widget.get_widget").http_method, HttpMethod::Get);
-    assert_eq!(find("widget.create_widget").http_method, HttpMethod::Post);
-    assert_eq!(find("widget.delete_widget").http_method, HttpMethod::Delete);
-    assert_eq!(find("widget.rename_widget").http_method, HttpMethod::Put);
-    assert_eq!(find("widget.send_command").http_method, HttpMethod::Post);
-    assert_eq!(find("widget.kill").http_method, HttpMethod::Post);
+    assert_eq!(find("widget.list_widgets").http_method(), Some(HttpMethod::Get));
+    assert_eq!(find("widget.get_widget").http_method(), Some(HttpMethod::Get));
+    assert_eq!(find("widget.create_widget").http_method(), Some(HttpMethod::Post));
+    assert_eq!(find("widget.delete_widget").http_method(), Some(HttpMethod::Delete));
+    assert_eq!(find("widget.rename_widget").http_method(), Some(HttpMethod::Put));
+    assert_eq!(find("widget.send_command").http_method(), Some(HttpMethod::Post));
+    assert_eq!(find("widget.kill").http_method(), Some(HttpMethod::Post));
 }
 
 #[test]
 fn rest_meta_path_templates_correct() {
     let meta = &WIDGET_API_META;
-    let find = |name: &str| meta.rest_methods.iter().find(|m| m.method_name == name).unwrap();
+    let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
     assert_eq!(find("widget.list_widgets").path_template, "/widget");
     assert_eq!(find("widget.get_widget").path_template, "/widget/{id}");
@@ -207,7 +207,7 @@ fn rest_meta_path_templates_correct() {
 #[test]
 fn rest_meta_doc_comments_extracted() {
     let meta = &WIDGET_API_META;
-    let find = |name: &str| meta.rest_methods.iter().find(|m| m.method_name == name).unwrap();
+    let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
     assert_eq!(find("widget.list_widgets").description, Some("List all widgets"));
     assert_eq!(find("widget.get_widget").description, Some("Get a widget by ID"));
@@ -218,7 +218,7 @@ fn rest_meta_doc_comments_extracted() {
 #[test]
 fn rest_meta_no_tool_flag() {
     let meta = &WIDGET_API_META;
-    let find = |name: &str| meta.rest_methods.iter().find(|m| m.method_name == name).unwrap();
+    let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
     assert!(!find("widget.list_widgets").no_tool);
     assert!(!find("widget.get_widget").no_tool);

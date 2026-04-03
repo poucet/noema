@@ -341,7 +341,7 @@ fn meta_generated_for_service() {
 
 #[test]
 fn rest_meta_generated() {
-    let paths: Vec<&str> = ITEM_API_META.rest_methods.iter().map(|m| m.path_template).collect();
+    let paths: Vec<&str> = ITEM_API_META.routes.iter().map(|m| m.path_template).collect();
     assert!(paths.contains(&"/items"));
     assert!(paths.contains(&"/items/{id}"));
     assert!(paths.contains(&"/items/count"));

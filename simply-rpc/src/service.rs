@@ -108,7 +108,7 @@ struct RouteEntry {
 
 /// Dispatcher that routes REST requests using matchit for path matching.
 ///
-/// Build with `register()` to add services. Each service's `RestMeta` entries
+/// Build with `register()` to add services. Each service's `RouteMeta` entries
 /// are inserted into per-HTTP-method routers. At dispatch time, matchit resolves
 /// the path, extracts params, merges with body, and calls the service.
 pub struct RestDispatcher {
@@ -127,12 +127,12 @@ impl RestDispatcher {
     /// Register a REST service. Routes are extracted from its metadata.
     pub fn register(mut self, svc: Arc<dyn RestService>) -> Self {
         let meta = svc.meta();
-        for rm in meta.rest_methods {
-            if rm.http_method == crate::HttpMethod::Stream {
-                continue; // Stream routes handled by WS layer
-            }
-            // matchit uses {param} syntax — same as our templates
-            let router = self.routers.entry(rm.http_method).or_insert_with(matchit::Router::new);
+        for rm in meta.routes {
+            let http_method = match rm.kind {
+                crate::RouteKind::Rest(m) => m,
+                crate::RouteKind::Stream => continue, // Stream routes handled by WS layer
+            };
+            let router = self.routers.entry(http_method).or_insert_with(matchit::Router::new);
             let entry = RouteEntry {
                 method_name: rm.method_name,
                 service: svc.clone(),
@@ -180,11 +180,11 @@ impl RestDispatcher {
         entry.service.rest_dispatch_by_name(entry.method_name, params).await
     }
 
-    /// Collect REST metadata from all registered services.
-    pub fn rest_metas(&self) -> Vec<&'static crate::RestMeta> {
+    /// Collect route metadata from all registered services.
+    pub fn route_metas(&self) -> Vec<&'static crate::RouteMeta> {
         self.services
             .iter()
-            .flat_map(|svc| svc.meta().rest_methods.iter())
+            .flat_map(|svc| svc.meta().routes.iter())
             .collect()
     }
 }

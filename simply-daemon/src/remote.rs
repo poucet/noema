@@ -107,9 +107,6 @@ impl RpcClient for RemoteDaemon {
             HttpMethod::Post => self.http.post(&url).json(&body).send().await?,
             HttpMethod::Put => self.http.put(&url).json(&body).send().await?,
             HttpMethod::Delete => self.http.delete(&url).send().await?,
-            HttpMethod::Stream => {
-                anyhow::bail!("stream methods should use WebSocket, not rest_call")
-            }
         };
 
         let status = resp.status();

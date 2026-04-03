@@ -6,14 +6,25 @@ use quote::{format_ident, quote};
 
 use crate::parse::{HttpMethod, ParsedMethod, ParsedTrait, ReturnKind, RpcKind};
 
-/// Convert a parse-time HttpMethod to the runtime token.
+/// Convert a parse-time HttpMethod to the runtime RouteKind token.
+fn route_kind_tokens(method: &HttpMethod) -> TokenStream {
+    match method {
+        HttpMethod::Get => quote! { ::simply_rpc::RouteKind::Rest(::simply_rpc::HttpMethod::Get) },
+        HttpMethod::Post => quote! { ::simply_rpc::RouteKind::Rest(::simply_rpc::HttpMethod::Post) },
+        HttpMethod::Put => quote! { ::simply_rpc::RouteKind::Rest(::simply_rpc::HttpMethod::Put) },
+        HttpMethod::Delete => quote! { ::simply_rpc::RouteKind::Rest(::simply_rpc::HttpMethod::Delete) },
+        HttpMethod::Stream => quote! { ::simply_rpc::RouteKind::Stream },
+    }
+}
+
+/// Convert a parse-time HttpMethod to the runtime HttpMethod token (REST only).
 fn http_method_tokens(method: &HttpMethod) -> TokenStream {
     match method {
         HttpMethod::Get => quote! { ::simply_rpc::HttpMethod::Get },
         HttpMethod::Post => quote! { ::simply_rpc::HttpMethod::Post },
         HttpMethod::Put => quote! { ::simply_rpc::HttpMethod::Put },
         HttpMethod::Delete => quote! { ::simply_rpc::HttpMethod::Delete },
-        HttpMethod::Stream => quote! { ::simply_rpc::HttpMethod::Stream },
+        HttpMethod::Stream => panic!("Stream is not an HttpMethod"),
     }
 }
 
@@ -57,13 +68,13 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         })
         .collect();
 
-    // Generate REST metadata entries
-    let rest_metas: Vec<TokenStream> = parsed
+    // Generate route metadata entries (REST + stream)
+    let route_metas: Vec<TokenStream> = parsed
         .methods
         .iter()
         .filter_map(|m| {
             let endpoint = m.rest_endpoint.as_ref()?;
-            let http_method = http_method_tokens(&endpoint.http_method);
+            let kind = route_kind_tokens(&endpoint.http_method);
             let path = &endpoint.path_template;
             let method_name = &m.method_name;
             let description = match &m.doc_comment {
@@ -72,8 +83,8 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             };
             let no_tool = m.no_tool;
             Some(quote! {
-                ::simply_rpc::RestMeta {
-                    http_method: #http_method,
+                ::simply_rpc::RouteMeta {
+                    kind: #kind,
                     path_template: #path,
                     method_name: #method_name,
                     description: #description,
@@ -95,7 +106,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         #vis const #meta_const_name: ::simply_rpc::ServiceMeta = ::simply_rpc::ServiceMeta {
             prefix: #prefix,
             methods: &[#(#method_metas),*],
-            rest_methods: &[#(#rest_metas),*],
+            routes: &[#(#route_metas),*],
         };
 
         impl dyn #trait_name {

@@ -173,13 +173,13 @@ async fn client_get_blob_not_found() {
 #[test]
 fn rest_meta_for_base64_methods() {
     let meta = &BLOB_API_META;
-    assert_eq!(meta.rest_methods.len(), 2);
+    assert_eq!(meta.routes.len(), 2);
 
-    let store = meta.rest_methods.iter().find(|m| m.method_name == "blob.store_blob").unwrap();
-    assert_eq!(store.http_method, HttpMethod::Post);
+    let store = meta.routes.iter().find(|m| m.method_name == "blob.store_blob").unwrap();
+    assert_eq!(store.http_method(), Some(HttpMethod::Post));
     assert_eq!(store.path_template, "/blob");
 
-    let get = meta.rest_methods.iter().find(|m| m.method_name == "blob.get_blob").unwrap();
-    assert_eq!(get.http_method, HttpMethod::Get);
+    let get = meta.routes.iter().find(|m| m.method_name == "blob.get_blob").unwrap();
+    assert_eq!(get.http_method(), Some(HttpMethod::Get));
     assert_eq!(get.path_template, "/blob/{id}");
 }

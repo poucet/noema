@@ -234,8 +234,8 @@ async fn service_stream_type_is_broadcast_receiver() {
 fn stream_meta_has_paths() {
     let meta = &CHANNEL_API_META;
 
-    let stream_methods: Vec<_> = meta.rest_methods.iter()
-        .filter(|m| m.http_method == HttpMethod::Stream)
+    let stream_methods: Vec<_> = meta.routes.iter()
+        .filter(|m| m.kind == simply_rpc::RouteKind::Stream)
         .collect();
     assert_eq!(stream_methods.len(), 2);
 
@@ -248,13 +248,13 @@ fn stream_meta_has_paths() {
 fn stream_and_rest_meta_coexist() {
     let meta = &CHANNEL_API_META;
 
-    let rest_methods: Vec<_> = meta.rest_methods.iter()
-        .filter(|m| m.http_method != HttpMethod::Stream)
+    let routes: Vec<_> = meta.routes.iter()
+        .filter(|m| m.kind != simply_rpc::RouteKind::Stream)
         .collect();
-    assert_eq!(rest_methods.len(), 2); // list_channels + close_channel
+    assert_eq!(routes.len(), 2); // list_channels + close_channel
 
-    let stream_methods: Vec<_> = meta.rest_methods.iter()
-        .filter(|m| m.http_method == HttpMethod::Stream)
+    let stream_methods: Vec<_> = meta.routes.iter()
+        .filter(|m| m.kind == simply_rpc::RouteKind::Stream)
         .collect();
     assert_eq!(stream_methods.len(), 2); // open_channel + subscribe
 }
@@ -262,7 +262,7 @@ fn stream_and_rest_meta_coexist() {
 #[test]
 fn stream_meta_doc_comments() {
     let meta = &CHANNEL_API_META;
-    let find = |name: &str| meta.rest_methods.iter().find(|m| m.method_name == name).unwrap();
+    let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
     assert_eq!(find("chan.open_channel").description, Some("Open a new channel. Returns info + event stream."));
     assert_eq!(find("chan.subscribe").description, Some("Subscribe to an existing channel's events."));
@@ -465,8 +465,8 @@ async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
                         if is_upgrade {
                             // Find matching stream path and dispatch
                             let meta = &CHANNEL_API_META;
-                            let stream_match = meta.rest_methods.iter()
-                                .filter(|m| m.http_method == HttpMethod::Stream)
+                            let stream_match = meta.routes.iter()
+                                .filter(|m| m.kind == simply_rpc::RouteKind::Stream)
                                 .find(|m| {
                                     path_matches(m.path_template, &path)
                                 });
