@@ -1,7 +1,7 @@
 # Voice — Tasks
 
 **Phase:** Voice
-**Status:** In Progress
+**Status:** Not Started
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Depends on:** Foundation (complete), Lumina (for Discord voice)
 
