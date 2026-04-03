@@ -11,6 +11,9 @@ pub mod param;
 mod tools;
 
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::ServerHandler;
+use rmcp::model::*;
+use rmcp::service::{RequestContext, RoleServer};
 use serenity::all::Cache;
 use serenity::http::Http;
 use std::sync::{Arc, OnceLock};
@@ -29,13 +32,20 @@ pub struct LuminaMcpServer {
 struct LuminaMcpServerInner {
     http: Arc<Http>,
     cache: OnceLock<Arc<Cache>>,
+    /// Instructions with guild/channel map, refreshed when channels change.
+    instructions: std::sync::RwLock<String>,
 }
 
 impl LuminaMcpServer {
+    const BASE_INSTRUCTIONS: &str =
+        "Lumina Discord MCP server. Provides tools for interacting with Discord \
+         channels, messages, guilds, and users.";
+
     pub fn new(http: Arc<Http>) -> Self {
         let inner = Arc::new(LuminaMcpServerInner {
             http,
             cache: OnceLock::new(),
+            instructions: std::sync::RwLock::new(Self::BASE_INSTRUCTIONS.to_string()),
         });
         Self {
             inner,
@@ -47,6 +57,61 @@ impl LuminaMcpServer {
     /// Called from the `ready` event handler.
     pub fn set_cache(&self, cache: Arc<Cache>) {
         let _ = self.inner.cache.set(cache);
+        self.refresh_instructions();
+    }
+
+    /// Rebuild the instructions string from the current gateway cache.
+    /// Call this when guild/channel state may have changed.
+    pub fn refresh_instructions(&self) {
+        let Some(cache) = self.inner.cache.get() else { return };
+
+        let mut text = String::from(Self::BASE_INSTRUCTIONS);
+        text.push_str("\n\n## Available Discord Servers & Channels\n");
+
+        for guild_id in cache.guilds() {
+            let Some(guild) = cache.guild(guild_id) else { continue };
+            text.push_str(&format!("\n### {} (guild_id: {})\n", guild.name, guild_id.get()));
+
+            // Group channels by category
+            let mut categories: std::collections::BTreeMap<Option<serenity::model::id::ChannelId>, Vec<&serenity::model::channel::GuildChannel>> =
+                std::collections::BTreeMap::new();
+
+            for ch in guild.channels.values() {
+                if ch.kind == serenity::model::channel::ChannelType::Category {
+                    continue;
+                }
+                categories.entry(ch.parent_id).or_default().push(ch);
+            }
+
+            for (parent_id, channels) in &categories {
+                if let Some(pid) = parent_id {
+                    if let Some(cat) = guild.channels.get(pid) {
+                        text.push_str(&format!("\n**{}**\n", cat.name));
+                    }
+                }
+                let mut sorted: Vec<_> = channels.iter().collect();
+                sorted.sort_by_key(|ch| ch.position);
+                for ch in sorted {
+                    let kind = match ch.kind {
+                        serenity::model::channel::ChannelType::Voice => "voice",
+                        serenity::model::channel::ChannelType::Forum => "forum",
+                        serenity::model::channel::ChannelType::Stage => "stage",
+                        _ => "text",
+                    };
+                    text.push_str(&format!("- #{} (id: {}, {})\n", ch.name, ch.id.get(), kind));
+                }
+            }
+        }
+
+        if let Ok(mut instructions) = self.inner.instructions.write() {
+            *instructions = text;
+        }
+    }
+
+    fn instructions(&self) -> String {
+        self.inner.instructions.read()
+            .map(|s| s.clone())
+            .unwrap_or_else(|_| Self::BASE_INSTRUCTIONS.to_string())
     }
 
     pub(crate) fn http(&self) -> &Arc<Http> {
@@ -63,4 +128,16 @@ impl LuminaMcpServer {
 // ---------------------------------------------------------------------------
 
 #[rmcp::tool_handler]
-impl rmcp::handler::server::ServerHandler for LuminaMcpServer {}
+impl ServerHandler for LuminaMcpServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            protocol_version: ProtocolVersion::V_2024_11_05,
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            server_info: Implementation {
+                name: "lumina-discord".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            instructions: Some(self.instructions().into()),
+        }
+    }
+}

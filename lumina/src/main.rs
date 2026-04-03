@@ -147,6 +147,30 @@ impl EventHandler for Handler {
         }
     }
 
+    async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
+        // Cache is fully populated — refresh channel map in MCP instructions
+        let data = ctx.data.read().await;
+        if let Some(mcp) = data.get::<McpServerKey>() {
+            mcp.refresh_instructions();
+            tracing::info!("refreshed MCP instructions with channel map");
+        }
+    }
+
+    async fn channel_create(&self, ctx: Context, _channel: serenity::model::channel::GuildChannel) {
+        let data = ctx.data.read().await;
+        if let Some(mcp) = data.get::<McpServerKey>() { mcp.refresh_instructions(); }
+    }
+
+    async fn channel_delete(&self, ctx: Context, _channel: serenity::model::channel::GuildChannel, _messages: Option<Vec<serenity::model::channel::Message>>) {
+        let data = ctx.data.read().await;
+        if let Some(mcp) = data.get::<McpServerKey>() { mcp.refresh_instructions(); }
+    }
+
+    async fn channel_update(&self, ctx: Context, _old: Option<serenity::model::channel::GuildChannel>, _new: serenity::model::channel::GuildChannel) {
+        let data = ctx.data.read().await;
+        if let Some(mcp) = data.get::<McpServerKey>() { mcp.refresh_instructions(); }
+    }
+
     async fn message(&self, ctx: Context, msg: serenity::model::channel::Message) {
         if msg.author.bot {
             return;
