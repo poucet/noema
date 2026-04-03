@@ -4,10 +4,36 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use llm::{ToolDefinition, ToolResultContent};
-use simply_rpc::{RestService, RouteKind};
+use llm::{IntoToolResult, ToolDefinition, ToolResultContent};
+use simply_rpc::{BinaryResponse, RestService, RouteKind};
 
 use simply_core::ToolService;
+
+// ---------------------------------------------------------------------------
+// BinaryResponse → multimodal tool result
+// ---------------------------------------------------------------------------
+
+impl IntoToolResult for BinaryResponse {
+    fn into_tool_result(self) -> Vec<ToolResultContent> {
+        use base64::Engine;
+        let data = base64::engine::general_purpose::STANDARD.encode(&self.data);
+
+        if self.mime_type.starts_with("image/") {
+            vec![ToolResultContent::image(data, self.mime_type)]
+        } else if self.mime_type.starts_with("audio/") {
+            vec![ToolResultContent::audio(data, self.mime_type)]
+        } else {
+            // Unknown binary — return as text description
+            vec![ToolResultContent::text(format!(
+                "[binary: {} bytes, {}]", self.data.len(), self.mime_type
+            ))]
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DaemonToolService
+// ---------------------------------------------------------------------------
 
 /// A `ToolService` that exposes daemon REST methods as tools.
 ///
@@ -42,7 +68,7 @@ impl ToolService for DaemonToolService {
                     Some(ToolDefinition {
                         name: rm.method_name.to_string(),
                         description: rm.description.map(|s| s.to_string()),
-                        // TODO 3.E: derive from param types via RpcSchema/schemars
+                        // TODO: derive from param types via RpcSchema/schemars
                         input_schema: Default::default(),
                     })
                 })
@@ -56,13 +82,18 @@ impl ToolService for DaemonToolService {
         arguments: serde_json::Value,
     ) -> Result<Vec<ToolResultContent>> {
         for svc in &self.services {
-            if let Some(result) = svc.rest_dispatch_by_name(name, arguments.clone()).await {
-                match result {
-                    Ok(value) => {
-                        let text = serde_json::to_string_pretty(&value)?;
-                        return Ok(vec![ToolResultContent::text(text)]);
+            let route = svc.meta().routes.iter().find(|rm| rm.method_name == name);
+            if let Some(rm) = route {
+                let result = svc.rest_dispatch_by_name(name, arguments.clone()).await;
+                if let Some(result) = result {
+                    let value = result?;
+                    if rm.binary_response {
+                        // Deserialize as BinaryResponse → proper multimodal content
+                        let binary: BinaryResponse = serde_json::from_value(value)?;
+                        return Ok(binary.into_tool_result());
+                    } else {
+                        return Ok(value.into_tool_result());
                     }
-                    Err(e) => return Err(e),
                 }
             }
         }
@@ -105,7 +136,6 @@ impl ToolService for CompositeToolService {
         arguments: serde_json::Value,
     ) -> Result<Vec<ToolResultContent>> {
         for svc in &self.services {
-            // Check if this service has the tool
             let has_tool = svc.get_definitions().await.iter().any(|d| d.name == name);
             if has_tool {
                 return svc.call_tool(name, arguments).await;
