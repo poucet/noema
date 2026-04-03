@@ -28,7 +28,7 @@ pub enum DaemonHandle {
     Host {
         daemon: Arc<dyn DaemonApi>,
         _ws_server: server::ServerHandle,
-        _rest_server: rest::RestHandle,
+        _rest_server: rest::ServerHandle,
         /// Fires when `/kill` is called on the REST API.
         kill_rx: Option<tokio::sync::mpsc::Receiver<()>>,
     },
@@ -123,8 +123,9 @@ pub async fn connect_or_host(
     let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
 
     let rest_port = port + 1;
-    let rest_server = rest::start(rest::RestConfig {
+    let rest_server = rest::start(rest::ServerConfig {
         rest_dispatcher: simply_rpc::RestDispatcher::new(),
+        ws_dispatch: None,
         port: rest_port,
         tracker,
         kill_tx,

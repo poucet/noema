@@ -44,15 +44,15 @@ async fn main() -> anyhow::Result<()> {
     let daemon_info_svc = <dyn DaemonInfoApi>::service(daemon.clone() as Arc<dyn DaemonInfoApi>);
     let daemon: Arc<dyn DaemonApi> = daemon;
 
-    // WS server — streaming sessions (separate port, to be merged)
+    // WS server — streaming sessions (still separate port, WS upgrade coming to main server)
     let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
-    let _ws_server = net::server::start(ws_dispatch, port).await?;
+    let _ws_server = net::server::start(ws_dispatch.clone(), port).await?;
     let tracker = _ws_server.tracker().clone();
 
     // Kill channel
     let (kill_tx, mut kill_rx) = mpsc::channel(1);
 
-    // REST server (axum) — all REST endpoints + admin dashboard
+    // Main server (axum) — REST + admin (+ WS upgrade in future)
     let rest_port = port + 1;
     let rest_dispatcher = RestDispatcher::new()
         .register(<dyn SessionApi>::service(daemon.clone()))
@@ -64,8 +64,9 @@ async fn main() -> anyhow::Result<()> {
         .register(<dyn VoiceApi>::service(daemon.clone()))
         .register(daemon_info_svc);
 
-    let _rest_server = net::rest::start(net::rest::RestConfig {
+    let _rest_server = net::rest::start(net::rest::ServerConfig {
         rest_dispatcher,
+        ws_dispatch: Some(ws_dispatch),
         port: rest_port,
         tracker,
         kill_tx: kill_tx.clone(),

@@ -1,7 +1,8 @@
-//! Unified HTTP server for the daemon — REST + WebSocket on a single port.
+//! Unified HTTP server — REST + WebSocket on a single port.
 //!
-//! Uses axum for routing and WebSocket upgrades. REST routes are auto-registered
-//! from `RestDispatcher`. The admin page and connection tracking are served alongside.
+//! Uses axum for routing, REST dispatch, and WebSocket upgrades.
+//! Stream paths (from `#[rpc(stream = "/path")]`) get WebSocket upgrade.
+//! Everything else is REST dispatch.
 
 use std::sync::Arc;
 
@@ -16,11 +17,12 @@ use tokio::task::JoinHandle;
 
 use simply_rpc::{HttpMethod, RestDispatcher};
 
-use crate::net::server::ConnectionTracker;
+use crate::net::server::{ConnectionTracker, DispatchFn};
 
 /// Server configuration.
-pub struct RestConfig {
+pub struct ServerConfig {
     pub rest_dispatcher: RestDispatcher,
+    pub ws_dispatch: Option<DispatchFn>,
     pub port: u16,
     pub tracker: ConnectionTracker,
     pub kill_tx: tokio::sync::mpsc::Sender<()>,
@@ -30,30 +32,30 @@ pub struct RestConfig {
 #[derive(Clone)]
 struct AppState {
     rest_dispatcher: Arc<RestDispatcher>,
+    ws_dispatch: Option<DispatchFn>,
     tracker: ConnectionTracker,
     kill_tx: tokio::sync::mpsc::Sender<()>,
 }
 
-/// Starts the unified HTTP server (REST + admin).
-pub async fn start(config: RestConfig) -> anyhow::Result<RestHandle> {
+/// Starts the unified server (REST + WS + admin).
+pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     let state = AppState {
         rest_dispatcher: Arc::new(config.rest_dispatcher),
+        ws_dispatch: config.ws_dispatch,
         tracker: config.tracker,
         kill_tx: config.kill_tx,
     };
 
     let app = Router::new()
-        // Admin routes
         .route("/", get(admin_page))
         .route("/admin", get(admin_page))
         .route("/admin/api/connections", get(admin_connections))
-        // Catch-all: REST dispatch
         .fallback(rest_handler)
         .with_state(state);
 
     let addr = format!("127.0.0.1:{}", config.port);
     let listener = TcpListener::bind(&addr).await?;
-    tracing::info!(port = config.port, "HTTP server listening");
+    tracing::info!(port = config.port, "server listening");
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -64,16 +66,16 @@ pub async fn start(config: RestConfig) -> anyhow::Result<RestHandle> {
             .ok();
     });
 
-    Ok(RestHandle { _task: handle, _shutdown: shutdown_tx, port: config.port })
+    Ok(ServerHandle { _task: handle, _shutdown: shutdown_tx, port: config.port })
 }
 
-pub struct RestHandle {
+pub struct ServerHandle {
     _task: JoinHandle<()>,
     _shutdown: tokio::sync::oneshot::Sender<()>,
     port: u16,
 }
 
-impl RestHandle {
+impl ServerHandle {
     pub fn port(&self) -> u16 { self.port }
 }
 
@@ -90,7 +92,7 @@ async fn admin_connections(State(state): State<AppState>) -> Json<Vec<crate::net
 }
 
 // ---------------------------------------------------------------------------
-// REST catch-all handler
+// Unified handler — REST fallback
 // ---------------------------------------------------------------------------
 
 async fn rest_handler(
@@ -105,7 +107,7 @@ async fn rest_handler(
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    tracing::debug!(method = %method, path = %path, "REST request");
+    tracing::debug!(method = %method, path = %path, "request");
 
     let http_method = match method {
         Method::GET => HttpMethod::Get,
@@ -126,11 +128,10 @@ async fn rest_handler(
         _ => axum::body::Bytes::new(),
     };
 
-    // Probe the route to check if it's a binary upload
+    // Check if this is a binary upload route
     let is_binary_upload = state.rest_dispatcher.is_binary_upload(http_method, &path);
 
     let body = if is_binary_upload {
-        // Binary upload: construct BinaryUpload JSON from raw bytes + Content-Type
         serde_json::to_value(simply_rpc::BinaryUpload::new(raw_bytes.to_vec(), content_type))
             .unwrap_or(serde_json::Value::Null)
     } else if raw_bytes.is_empty() {
@@ -147,7 +148,6 @@ async fn rest_handler(
     match rest_result.result {
         Ok(value) => {
             let mut response = if rest_result.meta.binary_response {
-                // BinaryResponse: decode base64 data, serve raw bytes
                 let br: simply_rpc::BinaryResponse = match serde_json::from_value(value) {
                     Ok(br) => br,
                     Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
