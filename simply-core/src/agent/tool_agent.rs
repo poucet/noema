@@ -150,6 +150,7 @@ impl Agent for ToolAgent {
 
         for iteration in 0..self.max_iterations {
             let tool_definitions = self.tools.get_definitions().await;
+            let tool_count = tool_definitions.len();
 
             let messages = context.messages().await?;
             let mut request = if tool_definitions.is_empty() {
@@ -165,7 +166,7 @@ impl Agent for ToolAgent {
                 model = model.name(),
                 iteration,
                 message_count = messages.len(),
-                tool_count = request.tools.as_ref().map_or(0, |t| t.len()),
+                tool_count,
                 "sending to LLM"
             );
             for (i, msg) in messages.iter().enumerate() {
