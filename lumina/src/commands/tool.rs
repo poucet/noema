@@ -1,8 +1,8 @@
-//! /tool — invoke any MCP tool from Discord via a modal form.
+//! /tool — invoke and browse MCP tools from Discord.
 //!
-//! 1. `/tool` with autocomplete shows available tools
-//! 2. Selecting a tool opens a modal with input fields per parameter
-//! 3. Submit executes the tool and shows the result as an embed
+//! Subcommands:
+//! - `/tool call <name>` — autocomplete + modal form → execute tool
+//! - `/tool list` — paginated embed of all available tools
 
 use async_trait::async_trait;
 use serenity::all::{
@@ -10,8 +10,11 @@ use serenity::all::{
     CreateAutocompleteResponse, CreateInteractionResponse, CreateInteractionResponseMessage,
     InputTextStyle, ResolvedOption, ResolvedValue,
 };
-use serenity::builder::{CreateActionRow, CreateCommand, CreateCommandOption, CreateEmbed, CreateInputText, CreateModal};
+use serenity::builder::{
+    CreateActionRow, CreateCommand, CreateCommandOption, CreateEmbed, CreateInputText, CreateModal,
+};
 use simply_daemon::api::{CallToolRequest, McpApi};
+use std::time::Duration;
 
 use super::LuminaContext;
 use crate::register_command;
@@ -21,7 +24,6 @@ pub struct Tool;
 
 register_command!(Tool);
 
-/// Custom ID prefix for tool modals — followed by the tool name.
 const MODAL_PREFIX: &str = "tool_call:";
 
 #[async_trait]
@@ -32,82 +34,57 @@ impl super::SlashCommand for Tool {
 
     fn register(&self) -> CreateCommand {
         CreateCommand::new("tool")
-            .description("Call an MCP tool")
+            .description("MCP tool management")
             .add_option(
-                CreateCommandOption::new(CommandOptionType::String, "name", "Tool name")
-                    .required(true)
-                    .set_autocomplete(true),
+                CreateCommandOption::new(CommandOptionType::SubCommand, "call", "Call an MCP tool")
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "name", "Tool name")
+                            .required(true)
+                            .set_autocomplete(true),
+                    ),
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::SubCommand, "list", "List all available tools"),
             )
     }
 
     async fn run(&self, lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
         let opts = cmd.data.options();
-        let tool_name = opts
-            .iter()
-            .find_map(|o| match o {
-                ResolvedOption { name: "name", value: ResolvedValue::String(s), .. } => Some(*s),
-                _ => None,
-            })
-            .ok_or_else(|| anyhow::anyhow!("missing tool name"))?;
+        let sub = opts.first().ok_or_else(|| anyhow::anyhow!("missing subcommand"))?;
 
-        // Fetch tool schema to build modal fields
-        let tools = lx.daemon.list_all_tools().await?;
-        let tool = tools
-            .iter()
-            .find(|t| t.name == tool_name)
-            .ok_or_else(|| anyhow::anyhow!("tool not found: {tool_name}"))?;
-
-        // Extract properties from JSON schema
-        let params = extract_params(&tool.input_schema);
-
-        if params.is_empty() {
-            // No params — execute immediately
-            let result = lx
-                .daemon
-                .call_tool_direct(CallToolRequest {
-                    name: tool_name.to_string(),
-                    arguments: serde_json::json!({}),
-                })
-                .await;
-            send_result_embed(lx, cmd, tool_name, result).await
-        } else {
-            // Build modal with input fields (Discord max: 5 components)
-            let mut components = Vec::new();
-            for (i, param) in params.iter().take(5).enumerate() {
-                let style = if param.name == "content" || param.name == "description" || param.name == "prompt" {
-                    InputTextStyle::Paragraph
+        match sub.name {
+            "call" => {
+                let tool_name = if let ResolvedValue::SubCommand(ref sub_opts) = sub.value {
+                    sub_opts.iter().find_map(|o| match o {
+                        ResolvedOption { name: "name", value: ResolvedValue::String(s), .. } => Some(*s),
+                        _ => None,
+                    })
                 } else {
-                    InputTextStyle::Short
-                };
-                let mut input = CreateInputText::new(style, &param.label, &param.name);
-                if let Some(desc) = &param.description {
-                    input = input.placeholder(desc);
-                }
-                input = input.required(param.required);
-                components.push(CreateActionRow::InputText(input));
+                    None
+                }.ok_or_else(|| anyhow::anyhow!("missing tool name"))?;
+
+                cmd_call(lx, cmd, tool_name).await
             }
-
-            let modal = CreateModal::new(
-                format!("{MODAL_PREFIX}{tool_name}"),
-                format!("Tool: {tool_name}"),
-            )
-            .components(components);
-
-            cmd.create_response(&lx.http, CreateInteractionResponse::Modal(modal)).await?;
-            Ok(())
+            "list" => cmd_list(lx, cmd).await,
+            other => Err(anyhow::anyhow!("unknown subcommand `{other}`")),
         }
     }
 
     async fn autocomplete(&self, lx: &LuminaContext, ac: &CommandInteraction) -> anyhow::Result<()> {
-        let partial = ac
-            .data
-            .options()
-            .iter()
-            .find_map(|o| match o {
+        let opts = ac.data.options();
+        let sub = match opts.first() {
+            Some(o) if o.name == "call" => o,
+            _ => return Ok(()),
+        };
+
+        let partial = if let ResolvedValue::SubCommand(ref sub_opts) = sub.value {
+            sub_opts.iter().find_map(|o| match o {
                 ResolvedOption { name: "name", value: ResolvedValue::String(s), .. } => Some(s.to_lowercase()),
                 _ => None,
-            })
-            .unwrap_or_default();
+            }).unwrap_or_default()
+        } else {
+            String::new()
+        };
 
         let tools = lx.daemon.list_all_tools().await.unwrap_or_default();
         let choices: Vec<AutocompleteChoice> = tools
@@ -129,66 +106,167 @@ impl super::SlashCommand for Tool {
             CreateInteractionResponse::Autocomplete(
                 CreateAutocompleteResponse::new().set_choices(choices),
             ),
-        )
-        .await?;
+        ).await?;
         Ok(())
     }
 }
 
+// ---------------------------------------------------------------------------
+// /tool call
+// ---------------------------------------------------------------------------
+
+async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str) -> anyhow::Result<()> {
+    let tools = lx.daemon.list_all_tools().await?;
+    let tool = tools
+        .iter()
+        .find(|t| t.name == tool_name)
+        .ok_or_else(|| anyhow::anyhow!("tool not found: {tool_name}"))?;
+
+    let params = extract_params(&tool.input_schema);
+
+    if params.is_empty() {
+        // No params — execute immediately
+        let result = lx.daemon.call_tool_direct(CallToolRequest {
+            name: tool_name.to_string(),
+            arguments: serde_json::json!({}),
+        }).await;
+        send_result(lx, cmd, tool_name, result).await
+    } else {
+        // Build modal with input fields (Discord max: 5 components)
+        let mut components = Vec::new();
+        for param in params.iter().take(5) {
+            let style = if matches!(param.name.as_str(), "content" | "description" | "prompt" | "question") {
+                InputTextStyle::Paragraph
+            } else {
+                InputTextStyle::Short
+            };
+            let mut input = CreateInputText::new(style, &param.label, &param.name);
+            if let Some(desc) = &param.description {
+                input = input.placeholder(desc);
+            }
+            input = input.required(param.required);
+            components.push(CreateActionRow::InputText(input));
+        }
+
+        let modal = CreateModal::new(
+            format!("{MODAL_PREFIX}{tool_name}"),
+            format!("Tool: {tool_name}"),
+        ).components(components);
+
+        cmd.create_response(&lx.http, CreateInteractionResponse::Modal(modal)).await?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// /tool list
+// ---------------------------------------------------------------------------
+
+async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
+    let tools = lx.daemon.list_all_tools().await?;
+
+    if tools.is_empty() {
+        cmd.create_response(&lx.http, CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new().content("No tools available.").ephemeral(true),
+        )).await?;
+        return Ok(());
+    }
+
+    // Group tools by server
+    let mut by_server: std::collections::BTreeMap<String, Vec<&simply_daemon::api::McpToolInfo>> =
+        std::collections::BTreeMap::new();
+    for tool in &tools {
+        by_server.entry(tool.server_id.clone()).or_default().push(tool);
+    }
+
+    // Build pages — each page lists tools from one or more servers, fitting within 4096 embed desc limit
+    let mut pages: Vec<String> = Vec::new();
+    let mut current_page = String::new();
+
+    for (server_id, server_tools) in &by_server {
+        let mut section = format!("### {server_id}\n");
+        for tool in server_tools {
+            let desc = tool.description.as_deref().unwrap_or("No description");
+            let param_count = tool.input_schema
+                .get("properties")
+                .and_then(|p| p.as_object())
+                .map(|p| p.len())
+                .unwrap_or(0);
+            section.push_str(&format!(
+                "**`{}`** — {} ({} params)\n",
+                tool.name, desc, param_count,
+            ));
+        }
+
+        if !current_page.is_empty() && current_page.len() + section.len() > 3800 {
+            pages.push(current_page);
+            current_page = String::new();
+        }
+        current_page.push_str(&section);
+        current_page.push('\n');
+    }
+    if !current_page.is_empty() {
+        pages.push(current_page);
+    }
+
+    // Use paginator for multi-page, direct embed for single page
+    if pages.len() == 1 {
+        let embed = CreateEmbed::new()
+            .title(format!("MCP Tools ({} total)", tools.len()))
+            .description(&pages[0])
+            .color(0x5865F2);
+        cmd.create_response(&lx.http, CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new().embed(embed),
+        )).await?;
+    } else {
+        // Convert to paginator-compatible text pages with embed formatting
+        let text_pages: Vec<String> = pages
+            .iter()
+            .enumerate()
+            .map(|(i, content)| {
+                format!("**MCP Tools** ({} total) — Page {}/{}\n\n{}", tools.len(), i + 1, pages.len(), content)
+            })
+            .collect();
+        crate::paginator::send_paginated(lx, cmd, &text_pages, Duration::from_secs(120)).await?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Modal handler
+// ---------------------------------------------------------------------------
+
 /// Handle a modal submission for a tool call.
 pub async fn handle_modal(lx: &LuminaContext, modal: &serenity::model::application::ModalInteraction) -> anyhow::Result<()> {
-    let tool_name = modal
-        .data
-        .custom_id
+    let tool_name = modal.data.custom_id
         .strip_prefix(MODAL_PREFIX)
         .ok_or_else(|| anyhow::anyhow!("not a tool modal"))?;
 
-    // Extract field values from modal submission
     let mut args = serde_json::Map::new();
     for row in &modal.data.components {
         if let Some(ActionRowComponent::InputText(input)) = row.components.first() {
             if let Some(ref value) = input.value {
                 if !value.is_empty() {
-                    // Try to parse as number/bool/json, fallback to string
-                    let json_value = parse_smart_value(value);
-                    args.insert(input.custom_id.clone(), json_value);
+                    args.insert(input.custom_id.clone(), parse_smart_value(value));
                 }
             }
         }
     }
 
-    // Defer response since tool calls may take time
-    modal
-        .create_response(&lx.http, CreateInteractionResponse::Defer(
-            CreateInteractionResponseMessage::new().ephemeral(false),
-        ))
-        .await?;
+    // Defer since tool calls may take time
+    modal.create_response(&lx.http, CreateInteractionResponse::Defer(
+        CreateInteractionResponseMessage::new(),
+    )).await?;
 
-    let result = lx
-        .daemon
-        .call_tool_direct(CallToolRequest {
-            name: tool_name.to_string(),
-            arguments: serde_json::Value::Object(args),
-        })
-        .await;
+    let result = lx.daemon.call_tool_direct(CallToolRequest {
+        name: tool_name.to_string(),
+        arguments: serde_json::Value::Object(args),
+    }).await;
 
-    let (color, title, body) = match result {
-        Ok(r) => {
-            let text = r.content
-                .iter()
-                .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let body = if text.len() > 4000 { format!("{}...", &text[..3997]) } else { text };
-            (0x2ECC71, format!("Tool: {tool_name}"), body)
-        }
-        Err(e) => (0xE74C3C, format!("Tool: {tool_name} (error)"), format!("{e}")),
-    };
-
+    let (color, title, body) = format_result(tool_name, result);
     let embed = CreateEmbed::new().title(title).description(body).color(color);
-    modal
-        .edit_response(&lx.http, serenity::builder::EditInteractionResponse::new().embed(embed))
-        .await?;
+    modal.edit_response(&lx.http, serenity::builder::EditInteractionResponse::new().embed(embed)).await?;
     Ok(())
 }
 
@@ -232,7 +310,6 @@ fn extract_params(schema: &serde_json::Value) -> Vec<ParamInfo> {
     params
 }
 
-/// Parse a string value smartly — integers, booleans, JSON arrays/objects, or plain string.
 fn parse_smart_value(s: &str) -> serde_json::Value {
     if let Ok(n) = s.parse::<i64>() {
         return serde_json::Value::Number(n.into());
@@ -247,8 +324,7 @@ fn parse_smart_value(s: &str) -> serde_json::Value {
         "false" => return serde_json::Value::Bool(false),
         _ => {}
     }
-    // Try JSON array/object
-    if (s.starts_with('[') || s.starts_with('{')) {
+    if s.starts_with('[') || s.starts_with('{') {
         if let Ok(v) = serde_json::from_str(s) {
             return v;
         }
@@ -256,17 +332,10 @@ fn parse_smart_value(s: &str) -> serde_json::Value {
     serde_json::Value::String(s.to_string())
 }
 
-/// Send a tool result as an embed (for no-param tools that execute immediately).
-async fn send_result_embed(
-    lx: &LuminaContext,
-    cmd: &CommandInteraction,
-    tool_name: &str,
-    result: anyhow::Result<simply_daemon::api::CallToolResult>,
-) -> anyhow::Result<()> {
-    let (color, title, body) = match result {
+fn format_result(tool_name: &str, result: anyhow::Result<simply_daemon::api::CallToolResult>) -> (u32, String, String) {
+    match result {
         Ok(r) => {
-            let text = r.content
-                .iter()
+            let text = r.content.iter()
                 .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -274,15 +343,19 @@ async fn send_result_embed(
             (0x2ECC71, format!("Tool: {tool_name}"), body)
         }
         Err(e) => (0xE74C3C, format!("Tool: {tool_name} (error)"), format!("{e}")),
-    };
+    }
+}
 
+async fn send_result(
+    lx: &LuminaContext,
+    cmd: &CommandInteraction,
+    tool_name: &str,
+    result: anyhow::Result<simply_daemon::api::CallToolResult>,
+) -> anyhow::Result<()> {
+    let (color, title, body) = format_result(tool_name, result);
     let embed = CreateEmbed::new().title(title).description(body).color(color);
-    cmd.create_response(
-        &lx.http,
-        CreateInteractionResponse::Message(
-            CreateInteractionResponseMessage::new().embed(embed),
-        ),
-    )
-    .await?;
+    cmd.create_response(&lx.http, CreateInteractionResponse::Message(
+        CreateInteractionResponseMessage::new().embed(embed),
+    )).await?;
     Ok(())
 }
