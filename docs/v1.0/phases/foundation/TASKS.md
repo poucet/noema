@@ -89,5 +89,5 @@
 | 3.C | ⬜ | Merge REST + WS into single axum port — WS upgrade on `stream` paths, REST fallback | P0 | M |
 | 3.D | ⬜ | Remove old WS dispatch for REST-annotated methods (WS becomes streaming-only) | P0 | S |
 | 3.E | ⬜ | `RpcSchema` trait for JSON Schema overrides; generate `tool_definitions()` | P0 | M |
-| 3.F | ⬜ | `ToolService` impl from generated tools — register in `McpToolRegistry` | P0 | M |
+| 3.F | ⬜ | `CompositeToolService` — wraps multiple `ToolService` impls (MCP registry + daemon API tools). Agent sees one merged tool list, calls routed to the right source. No port, no registration. | P0 | M |
 | 3.G | ⬜ | Update admin webpage to call REST endpoints via `fetch()` | P1 | M |
