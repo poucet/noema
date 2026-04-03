@@ -65,7 +65,7 @@
 |---|---|------|----------|------|
 | 3.1 | ✅ | Lumina registers as MCP service with daemon on connect | P0 | M |
 | 3.2 | ✅ | Discord MCP tools: send_message, reply_to_message, create_embed, get_channel_history, search_messages, list_channels, list_guilds, get_emoji_list, get_voice_states, get_message_stats, get_channel_peak_hours, get_trending_content, get_active_threads, get_user_activity, create_poll (via rmcp #[tool] macros + schemars) | P0 | L |
-| 3.3 | 🔄 | Populate MCP server instructions with guild/channel map from gateway cache | P0 | S |
+| 3.3 | ✅ | Populate MCP server instructions with guild/channel map from gateway cache | P0 | S |
 | 3.4 | ⬜ | Verify: Noema agent can send Discord messages through daemon → Lumina | P0 | S |
 
 ---
