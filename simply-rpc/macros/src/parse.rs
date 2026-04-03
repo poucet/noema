@@ -15,6 +15,24 @@ pub enum ReturnKind {
     StreamBare { stream_type: Type },
 }
 
+/// An HTTP method for REST dispatch.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Put,
+    Delete,
+}
+
+/// REST endpoint info parsed from annotations like `#[rpc(get = "/path/{param}")]`.
+#[derive(Debug, Clone)]
+pub struct RestEndpoint {
+    pub http_method: HttpMethod,
+    pub path_template: String,
+    /// Parameter names extracted from `{name}` segments in the path.
+    pub path_params: Vec<String>,
+}
+
 /// Classification of a method's RPC behavior.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RpcKind {
@@ -49,8 +67,14 @@ pub struct ParsedMethod {
     pub base64_params: Vec<String>,
     /// Whether the return value should be base64-encoded (`#[rpc(base64_return)]`).
     pub base64_return: bool,
-    /// Expose as HTTP GET endpoint (`#[rpc(rest_get)]`).
+    /// Expose as HTTP GET endpoint (`#[rpc(rest_get)]`) — legacy, prefer `rest_endpoint`.
     pub rest_get: bool,
+    /// REST endpoint info parsed from `#[rpc(get = "/path")]` etc.
+    pub rest_endpoint: Option<RestEndpoint>,
+    /// Whether to exclude this method from tool generation (`#[rpc(no_tool)]`).
+    pub no_tool: bool,
+    /// Doc comment extracted from `///` attributes.
+    pub doc_comment: Option<String>,
     pub method_name: String,
     pub params: Vec<ParsedParam>,
     pub return_kind: ReturnKind,
@@ -82,6 +106,7 @@ impl ParsedTrait {
             let TraitItem::Fn(method) = trait_item else { continue };
 
             let rpc_attrs = detect_rpc_attrs(&method.attrs);
+            let doc_comment = extract_doc_comment(&method.attrs);
             let method_name = format!("{}.{}", prefix, method.sig.ident);
             let params = parse_params(&method.sig)?;
             let return_kind = parse_return_type(&method.sig.output, &rpc_attrs.kind)?;
@@ -92,6 +117,9 @@ impl ParsedTrait {
                 base64_params: rpc_attrs.base64_params,
                 base64_return: rpc_attrs.base64_return,
                 rest_get: rpc_attrs.rest_get,
+                rest_endpoint: rpc_attrs.rest_endpoint,
+                no_tool: rpc_attrs.no_tool,
+                doc_comment,
                 method_name,
                 params,
                 return_kind,
@@ -134,17 +162,54 @@ struct RpcAttrs {
     base64_params: Vec<String>,
     base64_return: bool,
     rest_get: bool,
+    rest_endpoint: Option<RestEndpoint>,
+    no_tool: bool,
+}
+
+/// Extract `{name}` path parameters from a path template like `/session/{session_id}/message`.
+fn extract_path_params(path: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut rest = path;
+    while let Some(start) = rest.find('{') {
+        if let Some(end) = rest[start..].find('}') {
+            params.push(rest[start + 1..start + end].to_string());
+            rest = &rest[start + end + 1..];
+        } else {
+            break;
+        }
+    }
+    params
+}
+
+/// Try to parse a REST method annotation like `get = "/path"`.
+fn try_parse_rest(key: &str, value: &str) -> Option<RestEndpoint> {
+    let http_method = match key {
+        "get" => HttpMethod::Get,
+        "post" => HttpMethod::Post,
+        "put" => HttpMethod::Put,
+        "delete" => HttpMethod::Delete,
+        _ => return None,
+    };
+    let path_params = extract_path_params(value);
+    Some(RestEndpoint {
+        http_method,
+        path_template: value.to_string(),
+        path_params,
+    })
 }
 
 /// Detect `#[rpc(...)]` attributes on a method.
 ///
-/// Supported: `skip`, `stream`, `base64_param = "name"`, `base64_return`
+/// Supported: `skip`, `stream`, `base64_param = "name"`, `base64_return`, `rest_get`,
+/// `get = "/path"`, `post = "/path"`, `put = "/path"`, `delete = "/path"`, `no_tool`
 fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
     let mut result = RpcAttrs {
         kind: RpcKind::Normal,
         base64_params: Vec::new(),
         base64_return: false,
         rest_get: false,
+        rest_endpoint: None,
+        no_tool: false,
     };
 
     for attr in attrs {
@@ -165,20 +230,56 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
             if tokens.contains("rest_get") {
                 result.rest_get = true;
             }
-            // Parse base64_param = "name" (can appear multiple times)
-            // Simple token-level parsing: look for `base64_param = "..."` patterns
+            if tokens.contains("no_tool") {
+                result.no_tool = true;
+            }
             let token_str = tokens.replace(' ', "");
             for segment in token_str.split(',') {
                 let segment = segment.trim();
+                // Parse base64_param = "name"
                 if let Some(value) = segment.strip_prefix("base64_param=") {
                     let name = value.trim_matches('"');
                     result.base64_params.push(name.to_string());
+                }
+                // Parse REST method annotations: get="/path", post="/path", etc.
+                for method_key in &["get", "post", "put", "delete"] {
+                    if let Some(value) = segment.strip_prefix(&format!("{method_key}=")) {
+                        let path = value.trim_matches('"');
+                        if let Some(endpoint) = try_parse_rest(method_key, path) {
+                            result.rest_endpoint = Some(endpoint);
+                        }
+                    }
                 }
             }
         }
     }
 
     result
+}
+
+/// Extract `///` doc comment lines from attributes, joined into a single string.
+fn extract_doc_comment(attrs: &[syn::Attribute]) -> Option<String> {
+    let lines: Vec<String> = attrs
+        .iter()
+        .filter_map(|attr| {
+            if !attr.path().is_ident("doc") {
+                return None;
+            }
+            if let syn::Meta::NameValue(nv) = &attr.meta {
+                if let syn::Expr::Lit(expr_lit) = &nv.value {
+                    if let syn::Lit::Str(s) = &expr_lit.lit {
+                        return Some(s.value().trim().to_string());
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join(" "))
+    }
 }
 
 /// Parse method parameters, skipping `&self`.
