@@ -31,6 +31,8 @@ pub struct RouteMeta {
     pub no_tool: bool,
     /// Return type is `BinaryResponse` — serve raw bytes instead of JSON.
     pub binary_response: bool,
+    /// A parameter is `BinaryUpload` — read raw body + Content-Type header.
+    pub binary_upload: bool,
     /// Add immutable caching headers (Cache-Control + ETag).
     pub immutable_cache: bool,
 }

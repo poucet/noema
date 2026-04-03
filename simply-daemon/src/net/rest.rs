@@ -99,6 +99,11 @@ async fn rest_handler(
 ) -> Response {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
+    let content_type = req.headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
 
     tracing::debug!(method = %method, path = %path, "REST request");
 
@@ -110,20 +115,28 @@ async fn rest_handler(
         _ => return (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response(),
     };
 
-    // Read body for POST/PUT
-    let body = match http_method {
+    // Read raw body for POST/PUT
+    let raw_bytes = match http_method {
         HttpMethod::Post | HttpMethod::Put => {
-            let bytes = match axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await {
+            match axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await {
                 Ok(b) => b,
                 Err(_) => return (StatusCode::BAD_REQUEST, "failed to read body").into_response(),
-            };
-            if bytes.is_empty() {
-                serde_json::Value::Null
-            } else {
-                serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
             }
         }
-        _ => serde_json::Value::Null,
+        _ => axum::body::Bytes::new(),
+    };
+
+    // Probe the route to check if it's a binary upload
+    let is_binary_upload = state.rest_dispatcher.is_binary_upload(http_method, &path);
+
+    let body = if is_binary_upload {
+        // Binary upload: construct BinaryUpload JSON from raw bytes + Content-Type
+        serde_json::to_value(simply_rpc::BinaryUpload::new(raw_bytes.to_vec(), content_type))
+            .unwrap_or(serde_json::Value::Null)
+    } else if raw_bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&raw_bytes).unwrap_or(serde_json::Value::Null)
     };
 
     let rest_result = match state.rest_dispatcher.dispatch(http_method, &path, body).await {

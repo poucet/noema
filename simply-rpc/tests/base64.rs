@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use simply_rpc::{BinaryResponse, HttpMethod, RestDispatcher, RpcClient, RpcService};
+use simply_rpc::{BinaryResponse, BinaryUpload, HttpMethod, RestDispatcher, RpcClient, RpcService};
 
 // ---------------------------------------------------------------------------
 // Test trait with binary methods
@@ -23,9 +23,9 @@ impl std::fmt::Display for BlobId {
 #[simply_rpc::rpc_service("blob")]
 #[async_trait]
 pub trait BlobApi: Send + Sync {
-    /// Store binary data — `data` param encoded as base64 over the wire.
-    #[rpc(post = "/blob", base64_param = "data")]
-    async fn store_blob(&self, data: Vec<u8>, mime_type: &str) -> anyhow::Result<BlobId>;
+    /// Store binary data.
+    #[rpc(post = "/blob")]
+    async fn store_blob(&self, upload: BinaryUpload) -> anyhow::Result<BlobId>;
 
     /// Get binary data as a BinaryResponse.
     #[rpc(get = "/blob/{id}", immutable_cache)]
@@ -48,9 +48,9 @@ impl InMemoryBlobs {
 
 #[async_trait]
 impl BlobApi for InMemoryBlobs {
-    async fn store_blob(&self, data: Vec<u8>, mime_type: &str) -> anyhow::Result<BlobId> {
+    async fn store_blob(&self, upload: BinaryUpload) -> anyhow::Result<BlobId> {
         let id = BlobId(format!("blob_{}", self.blobs.lock().await.len()));
-        self.blobs.lock().await.push((id.clone(), mime_type.to_string(), data));
+        self.blobs.lock().await.push((id.clone(), upload.mime_type, upload.data));
         Ok(id)
     }
 
@@ -75,11 +75,12 @@ fn make_rd() -> (RestDispatcher, Arc<InMemoryBlobs>) {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn dispatch_store_blob_decodes_base64_param() {
+async fn dispatch_store_blob() {
     let (rd, _impl) = make_rd();
 
-    let b64_data = simply_rpc::encode_base64(b"hello world");
-    let params = serde_json::json!({"data": b64_data, "mime_type": "text/plain"});
+    // At dispatch level, BinaryUpload is serialized as JSON (base64 data via serde)
+    let upload = BinaryUpload::new(b"hello world".to_vec(), "text/plain");
+    let params = serde_json::to_value(&upload).unwrap();
 
     let result = rd.dispatch(HttpMethod::Post, "/blob", params).await.map(|rr| rr.result);
     let id: BlobId = serde_json::from_value(result.unwrap().unwrap()).unwrap();
@@ -90,7 +91,7 @@ async fn dispatch_store_blob_decodes_base64_param() {
 async fn dispatch_get_blob_returns_binary_response() {
     let (rd, impl_) = make_rd();
 
-    impl_.store_blob(b"binary data".to_vec(), "application/octet-stream").await.unwrap();
+    impl_.store_blob(BinaryUpload::new(b"binary data".to_vec(), "application/octet-stream")).await.unwrap();
 
     let rr = rd.dispatch(HttpMethod::Get, "/blob/blob_0", Value::Null).await.unwrap();
     // Metadata should indicate binary_response and immutable_cache
@@ -148,7 +149,7 @@ async fn client_store_and_get_blob_round_trip() {
     let client = MockBlobClient::new();
 
     let original = b"some binary content \x00\x01\x02".to_vec();
-    let id = client.store_blob(original.clone(), "application/octet-stream").await.unwrap();
+    let id = client.store_blob(BinaryUpload::new(original.clone(), "application/octet-stream")).await.unwrap();
 
     let br = client.get_blob(&id.0).await.unwrap();
     assert_eq!(br.data, original);
@@ -159,7 +160,7 @@ async fn client_store_and_get_blob_round_trip() {
 async fn client_store_blob_empty_data() {
     let client = MockBlobClient::new();
 
-    let id = client.store_blob(vec![], "text/plain").await.unwrap();
+    let id = client.store_blob(BinaryUpload::new(vec![], "text/plain")).await.unwrap();
     let br = client.get_blob(&id.0).await.unwrap();
     assert!(br.data.is_empty());
     assert_eq!(br.mime_type, "text/plain");
@@ -215,6 +216,11 @@ async fn start_blob_server() -> (String, Arc<InMemoryBlobs>) {
     async fn handler(State(state): State<AppState>, req: axum::extract::Request) -> axum::response::Response {
         let method = req.method().clone();
         let path = req.uri().path().to_string();
+        let content_type = req.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
 
         let http_method = match method {
             Method::GET => HttpMethod::Get,
@@ -222,13 +228,19 @@ async fn start_blob_server() -> (String, Arc<InMemoryBlobs>) {
             _ => return (StatusCode::METHOD_NOT_ALLOWED, "").into_response(),
         };
 
-        let body = match http_method {
-            HttpMethod::Post => {
-                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024).await.unwrap_or_default();
-                if bytes.is_empty() { serde_json::Value::Null }
-                else { serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null) }
-            }
-            _ => serde_json::Value::Null,
+        let raw_bytes = match http_method {
+            HttpMethod::Post => axum::body::to_bytes(req.into_body(), 10 * 1024 * 1024).await.unwrap_or_default(),
+            _ => bytes::Bytes::new(),
+        };
+
+        let is_binary_upload = state.rd.is_binary_upload(http_method, &path);
+        let body = if is_binary_upload {
+            serde_json::to_value(BinaryUpload::new(raw_bytes.to_vec(), content_type))
+                .unwrap_or(serde_json::Value::Null)
+        } else if raw_bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&raw_bytes).unwrap_or(serde_json::Value::Null)
         };
 
         match state.rd.dispatch(http_method, &path, body).await {
@@ -282,10 +294,11 @@ async fn start_blob_server() -> (String, Arc<InMemoryBlobs>) {
 async fn http_store_blob() {
     let (base, _impl) = start_blob_server().await;
 
-    let b64_data = simply_rpc::encode_base64(b"hello http");
+    // Send raw bytes with Content-Type header (not JSON with base64)
     let resp = reqwest::Client::new()
         .post(format!("{base}/blob"))
-        .json(&serde_json::json!({"data": b64_data, "mime_type": "text/plain"}))
+        .header("Content-Type", "text/plain")
+        .body(b"hello http".to_vec())
         .send().await.unwrap();
     assert_eq!(resp.status(), 200);
     let id: BlobId = resp.json().await.unwrap();
@@ -297,7 +310,7 @@ async fn http_get_blob_returns_raw_bytes() {
     let (base, impl_) = start_blob_server().await;
 
     // Store directly
-    impl_.store_blob(b"raw binary".to_vec(), "application/octet-stream").await.unwrap();
+    impl_.store_blob(BinaryUpload::new(b"raw binary".to_vec(), "application/octet-stream")).await.unwrap();
 
     // GET should return raw bytes, not JSON
     let resp = reqwest::get(format!("{base}/blob/blob_0")).await.unwrap();
@@ -323,11 +336,11 @@ async fn http_store_and_get_round_trip() {
     let (base, _impl) = start_blob_server().await;
     let client = reqwest::Client::new();
 
-    // Store via HTTP
+    // Store via HTTP — raw bytes
     let original = b"round trip data \x00\xff".to_vec();
-    let b64 = simply_rpc::encode_base64(&original);
     let resp = client.post(format!("{base}/blob"))
-        .json(&serde_json::json!({"data": b64, "mime_type": "image/png"}))
+        .header("Content-Type", "image/png")
+        .body(original.clone())
         .send().await.unwrap();
     let id: BlobId = resp.json().await.unwrap();
 

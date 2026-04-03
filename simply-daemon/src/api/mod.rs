@@ -28,7 +28,7 @@ pub use model::*;
 pub use voice::*;
 pub use daemon_info::*;
 pub use types::*;
-pub use simply_rpc::BinaryResponse;
+pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
 /// Convenience super-trait combining all daemon APIs.
 pub trait DaemonApi: SessionApi + ConversationApi + AssetApi + McpApi + OAuthApi + ModelApi + VoiceApi {}

@@ -66,8 +66,6 @@ pub struct ParsedParam {
 pub struct ParsedMethod {
     pub name: Ident,
     pub rpc_kind: RpcKind,
-    /// Parameter names that should be base64-encoded over the wire (`#[rpc(base64_param = "name")]`).
-    pub base64_params: Vec<String>,
     /// Endpoint info parsed from `#[rpc(get = "/path")]`, `#[rpc(stream = "/path")]`, etc.
     pub rest_endpoint: Option<RestEndpoint>,
     /// Whether to exclude this method from tool generation (`#[rpc(no_tool)]`).
@@ -84,10 +82,6 @@ pub struct ParsedMethod {
 }
 
 impl ParsedMethod {
-    /// Check if a parameter should be base64-encoded.
-    pub fn is_base64_param(&self, name: &str) -> bool {
-        self.base64_params.iter().any(|p| p == name)
-    }
 }
 
 /// A fully parsed trait.
@@ -115,7 +109,6 @@ impl ParsedTrait {
             methods.push(ParsedMethod {
                 name: method.sig.ident.clone(),
                 rpc_kind: rpc_attrs.kind,
-                base64_params: rpc_attrs.base64_params,
                 rest_endpoint: rpc_attrs.rest_endpoint,
                 no_tool: rpc_attrs.no_tool,
                 immutable_cache: rpc_attrs.immutable_cache,
@@ -159,7 +152,6 @@ impl ParsedTrait {
 /// Parsed `#[rpc(...)]` attributes.
 struct RpcAttrs {
     kind: RpcKind,
-    base64_params: Vec<String>,
     rest_endpoint: Option<RestEndpoint>,
     no_tool: bool,
     immutable_cache: bool,
@@ -200,12 +192,11 @@ fn try_parse_rest(key: &str, value: &str) -> Option<RestEndpoint> {
 
 /// Detect `#[rpc(...)]` attributes on a method.
 ///
-/// Supported: `skip`, `stream`, `base64_param = "name"`, `no_tool`, `immutable_cache`,
+/// Supported: `skip`, `stream`, `no_tool`, `immutable_cache`,
 /// `get = "/path"`, `post = "/path"`, `put = "/path"`, `delete = "/path"`, `stream = "/path"`
 fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
     let mut result = RpcAttrs {
         kind: RpcKind::Normal,
-        base64_params: Vec::new(),
         rest_endpoint: None,
         no_tool: false,
         immutable_cache: false,
@@ -236,11 +227,6 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
             let token_str = tokens.replace(' ', "");
             for segment in token_str.split(',') {
                 let segment = segment.trim();
-                // Parse base64_param = "name"
-                if let Some(value) = segment.strip_prefix("base64_param=") {
-                    let name = value.trim_matches('"');
-                    result.base64_params.push(name.to_string());
-                }
                 // Parse route annotations: get="/path", post="/path", stream="/path", etc.
                 for method_key in &["get", "post", "put", "delete", "stream"] {
                     if let Some(value) = segment.strip_prefix(&format!("{method_key}=")) {

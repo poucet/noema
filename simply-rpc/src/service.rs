@@ -192,6 +192,13 @@ impl RestDispatcher {
         Some(RestResult { result, meta: entry.route_meta })
     }
 
+    /// Check if a route expects binary upload (raw body + Content-Type).
+    pub fn is_binary_upload(&self, http_method: crate::HttpMethod, path: &str) -> bool {
+        let Some(router) = self.routers.get(&http_method) else { return false };
+        let Ok(matched) = router.at(path) else { return false };
+        matched.value.route_meta.binary_upload
+    }
+
     /// Collect route metadata from all registered services.
     pub fn route_metas(&self) -> Vec<&'static crate::RouteMeta> {
         self.services

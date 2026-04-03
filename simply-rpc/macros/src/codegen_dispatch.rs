@@ -39,6 +39,15 @@ fn is_binary_response_type(return_kind: &ReturnKind) -> bool {
     }
 }
 
+/// Check if any parameter is `BinaryUpload`.
+fn has_binary_upload_param(method: &ParsedMethod) -> bool {
+    method.params.iter().any(|p| {
+        let ty = &p.owned_type;
+        let ty_str = quote! { #ty }.to_string().replace(' ', "");
+        ty_str == "BinaryUpload" || ty_str.ends_with("::BinaryUpload")
+    })
+}
+
 /// Generate the `XxxApiService<T>` struct + `RpcService` impl + metadata constant.
 pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
     let service_name = parsed.service_name();
@@ -91,6 +100,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             let no_tool = m.no_tool;
             let immutable_cache = m.immutable_cache;
             let binary_response = is_binary_response_type(&m.return_kind);
+            let binary_upload = has_binary_upload_param(m);
             Some(quote! {
                 ::simply_rpc::RouteMeta {
                     kind: #kind,
@@ -99,6 +109,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
                     description: #description,
                     no_tool: #no_tool,
                     binary_response: #binary_response,
+                    binary_upload: #binary_upload,
                     immutable_cache: #immutable_cache,
                 }
             })
@@ -241,29 +252,13 @@ fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStre
         let owned_type = &p.owned_type;
         let name_str = name.to_string();
 
-        let deser = if method.is_base64_param(&name_str) {
-            // base64: deserialize as String, decode to Vec<u8>
-            quote! {
-                let __b64: String = match ::serde_json::from_value(params) {
-                    Ok(v) => v,
-                    Err(e) => return Some(::simply_rpc::DispatchResult::value(
-                        Err(::anyhow::anyhow!("deserialize error: {}", e))
-                    )),
-                };
-                let #name: Vec<u8> = match ::simply_rpc::decode_base64(&__b64) {
-                    Ok(v) => v,
-                    Err(e) => return Some(::simply_rpc::DispatchResult::value(Err(e))),
-                };
-            }
-        } else {
-            quote! {
-                let #name: #owned_type = match ::serde_json::from_value(params) {
-                    Ok(v) => v,
-                    Err(e) => return Some(::simply_rpc::DispatchResult::value(
-                        Err(::anyhow::anyhow!("deserialize error: {}", e))
-                    )),
-                };
-            }
+        let deser = quote! {
+            let #name: #owned_type = match ::serde_json::from_value(params) {
+                Ok(v) => v,
+                Err(e) => return Some(::simply_rpc::DispatchResult::value(
+                    Err(::anyhow::anyhow!("deserialize error: {}", e))
+                )),
+            };
         };
 
         let arg = if p.is_ref || p.is_str_ref {
@@ -276,18 +271,13 @@ fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStre
     }
 
     // Multi-param: generate a Params struct
-    // base64_param fields become String on the wire
     let struct_name = format_ident!("__RpcParams_{}", method.name);
     let fields: Vec<TokenStream> = params
         .iter()
         .map(|p| {
             let name = &p.name;
-            if method.is_base64_param(&name.to_string()) {
-                quote! { #name: String }
-            } else {
-                let owned_type = &p.owned_type;
-                quote! { #name: #owned_type }
-            }
+            let owned_type = &p.owned_type;
+            quote! { #name: #owned_type }
         })
         .collect();
 
@@ -308,14 +298,7 @@ fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStre
         .iter()
         .map(|p| {
             let name = &p.name;
-            if method.is_base64_param(&name.to_string()) {
-                quote! { {
-                    match ::simply_rpc::decode_base64(&__p.#name) {
-                        Ok(v) => v,
-                        Err(e) => return Some(::simply_rpc::DispatchResult::value(Err(e))),
-                    }
-                } }
-            } else if p.is_ref || p.is_str_ref {
+            if p.is_ref || p.is_str_ref {
                 quote! { &__p.#name }
             } else {
                 quote! { __p.#name }
@@ -366,25 +349,12 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                 let p = &all_params[0];
                 let name = &p.name;
                 let owned_type = &p.owned_type;
-                if m.is_base64_param(&name.to_string()) {
-                    param_bindings.push(quote! {
-                        let __b64: String = match ::serde_json::from_value(params.clone()) {
-                            Ok(v) => v,
-                            Err(e) => return Some(Err(::anyhow::anyhow!("deserialize error: {}", e))),
-                        };
-                        let #name: Vec<u8> = match ::simply_rpc::decode_base64(&__b64) {
-                            Ok(v) => v,
-                            Err(e) => return Some(Err(e)),
-                        };
-                    });
-                } else {
-                    param_bindings.push(quote! {
-                        let #name: #owned_type = match ::serde_json::from_value(params.clone()) {
-                            Ok(v) => v,
-                            Err(e) => return Some(Err(::anyhow::anyhow!("deserialize error: {}", e))),
-                        };
-                    });
-                }
+                param_bindings.push(quote! {
+                    let #name: #owned_type = match ::serde_json::from_value(params.clone()) {
+                        Ok(v) => v,
+                        Err(e) => return Some(Err(::anyhow::anyhow!("deserialize error: {}", e))),
+                    };
+                });
                 if p.is_ref || p.is_str_ref {
                     call_args.push(quote! { &#name });
                 } else {
@@ -397,23 +367,7 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                     let name_str = name.to_string();
                     let owned_type = &p.owned_type;
 
-                    if m.is_base64_param(&name_str) {
-                        param_bindings.push(quote! {
-                            let #name: Vec<u8> = match params.get(#name_str) {
-                                Some(v) => {
-                                    let b64: String = match ::serde_json::from_value(v.clone()) {
-                                        Ok(v) => v,
-                                        Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
-                                    };
-                                    match ::simply_rpc::decode_base64(&b64) {
-                                        Ok(v) => v,
-                                        Err(e) => return Some(Err(e)),
-                                    }
-                                },
-                                None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
-                            };
-                        });
-                    } else if p.is_str_ref {
+                    if p.is_str_ref {
                         // &str: extract as string from JSON, borrow it
                         param_bindings.push(quote! {
                             let #name: String = match params.get(#name_str) {

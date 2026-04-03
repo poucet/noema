@@ -119,30 +119,20 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
     let body_expr = if body_params.is_empty() {
         quote! { ::serde_json::Value::Null }
     } else if body_params.len() == 1 && endpoint.path_params.is_empty() {
-        // Single param, no path params → whole body is the value (matches server deser)
+        // Single param, no path params → whole body is the value
         let p = &body_params[0];
         let name = &p.name;
-        if method.is_base64_param(&name.to_string()) {
-            quote! { ::serde_json::to_value(::simply_rpc::encode_base64(&#name))? }
-        } else {
-            quote! { ::serde_json::to_value(#name)? }
-        }
+        quote! { ::serde_json::to_value(#name)? }
     } else {
         let struct_name = format_ident!("__RestClientParams_{}", method.name);
         let fields: Vec<TokenStream> = body_params.iter().map(|p| {
             let name = &p.name;
             let owned_type = &p.owned_type;
-            if method.is_base64_param(&name.to_string()) {
-                quote! { #name: String }
-            } else {
-                quote! { #name: #owned_type }
-            }
+            quote! { #name: #owned_type }
         }).collect();
         let field_inits: Vec<TokenStream> = body_params.iter().map(|p| {
             let name = &p.name;
-            if method.is_base64_param(&name.to_string()) {
-                quote! { #name: ::simply_rpc::encode_base64(&#name) }
-            } else if p.is_str_ref {
+            if p.is_str_ref {
                 quote! { #name: #name.to_string() }
             } else if p.is_ref {
                 quote! { #name: #name.clone() }
@@ -192,27 +182,17 @@ fn generate_serialize(method: &ParsedMethod) -> (TokenStream, TokenStream) {
     if params.len() == 1 {
         let p = &params[0];
         let name = &p.name;
-        if method.is_base64_param(&name.to_string()) {
-            return (quote! {}, quote! {
-                ::serde_json::to_value(::simply_rpc::encode_base64(&#name))?
-            });
-        }
         return (quote! {}, quote! { ::serde_json::to_value(#name)? });
     }
 
     // Multi-param: generate a Params struct with owned types for serialization.
-    // base64_param fields become String on the wire.
     let struct_name = format_ident!("__RpcClientParams_{}", method.name);
     let fields: Vec<TokenStream> = params
         .iter()
         .map(|p| {
             let name = &p.name;
-            if method.is_base64_param(&name.to_string()) {
-                quote! { #name: String }
-            } else {
-                let owned_type = &p.owned_type;
-                quote! { #name: #owned_type }
-            }
+            let owned_type = &p.owned_type;
+            quote! { #name: #owned_type }
         })
         .collect();
 
@@ -220,9 +200,7 @@ fn generate_serialize(method: &ParsedMethod) -> (TokenStream, TokenStream) {
         .iter()
         .map(|p| {
             let name = &p.name;
-            if method.is_base64_param(&name.to_string()) {
-                quote! { #name: ::simply_rpc::encode_base64(&#name) }
-            } else if p.is_str_ref {
+            if p.is_str_ref {
                 quote! { #name: #name.to_string() }
             } else if p.is_ref {
                 quote! { #name: #name.clone() }

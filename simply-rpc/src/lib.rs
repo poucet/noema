@@ -19,7 +19,7 @@ pub use client::RpcClient;
 pub use context::DispatchResult;
 pub use helpers::{base64_bytes, call_raw, call_unit, call_val, decode_base64, encode_base64};
 pub use meta::{check_compat, HttpMethod, MethodMeta, RouteKind, RouteMeta, ServiceMeta, ServiceMetaWire};
-pub use response::BinaryResponse;
+pub use response::{BinaryResponse, BinaryUpload};
 pub use service::{Dispatcher, RestDispatcher, RestResult, RestService, RpcService};
 
 /// Result type for RPC dispatch — `Ok(Value)` or error.
