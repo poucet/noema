@@ -14,6 +14,8 @@ pub mod meta;
 pub mod protocol;
 mod response;
 mod service;
+pub mod ws_client;
+pub mod ws_server;
 
 pub use client::RpcClient;
 pub use context::DispatchResult;

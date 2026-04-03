@@ -6,7 +6,7 @@ pub mod rest;
 pub(crate) mod client;
 pub mod discovery;
 
-pub use client::ConnectionState;
+pub use simply_rpc::ws_client::ConnectionState;
 pub use discovery::{connect_or_host, DaemonHandle, ServiceBuilders};
 pub use server::ServerHandle;
 pub use rest::RestHandle;

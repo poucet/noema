@@ -17,7 +17,7 @@ use crate::embedded::EmbeddedDaemon;
 use crate::remote::RemoteDaemon;
 use crate::storage::SqliteStores;
 
-use super::client::ConnectionState;
+use simply_rpc::ws_client::ConnectionState;
 use super::{rest, server};
 
 const DEFAULT_DAEMON_PORT: u16 = 9800;

@@ -1,44 +1,33 @@
 //! RemoteDaemon — implements `DaemonApi` over REST + WebSocket.
 //!
 //! REST for request/response methods, WebSocket for streaming.
-//! This is the client-side counterpart to the daemon server.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use simply_rpc::{HttpMethod, RpcClient};
+use simply_rpc::ws_client::ConnectionState;
 use tokio::sync::{broadcast, watch};
 
 use crate::api::*;
-use crate::net::client::WsConnection;
-use crate::net::ConnectionState;
+use crate::net::client::{DaemonWsConnection, daemon_demux};
 
 /// A daemon client that talks to a remote daemon over REST + WebSocket.
-///
-/// Implements all `DaemonApi` traits via generated dispatch.
-/// REST methods use HTTP (reqwest), stream methods use WebSocket.
-/// Reconnects automatically with exponential backoff when the daemon restarts.
 pub struct RemoteDaemon {
-    conn: WsConnection,
+    conn: DaemonWsConnection,
     http: reqwest::Client,
     base_url: String,
 }
 
 impl RemoteDaemon {
-    /// Connect to a running daemon at the given address.
     pub async fn connect(addr: &str) -> anyhow::Result<Arc<Self>> {
         Self::connect_as(addr, "unknown").await
     }
 
-    /// Connect and identify with a client name (shown in admin dashboard).
     pub async fn connect_as(addr: &str, name: &str) -> anyhow::Result<Arc<Self>> {
-        let conn = WsConnection::connect(addr).await?;
-        // Identify to the server (best-effort, don't fail on error)
+        let conn = DaemonWsConnection::connect(addr, daemon_demux()).await?;
         let _ = conn.rpc_call("client.identify", serde_json::json!({ "name": name })).await;
 
-        // Derive REST base URL from WebSocket address
-        // WS addr is like "ws://127.0.0.1:9800" or "127.0.0.1:9800"
-        // REST is on port+1
         let base_url = derive_rest_url(addr);
 
         Ok(Arc::new(Self {
@@ -48,24 +37,19 @@ impl RemoteDaemon {
         }))
     }
 
-    /// Convert to a trait object. Use this when you need `Arc<dyn DaemonApi>`.
     pub fn into_daemon(self: Arc<Self>) -> Arc<dyn DaemonApi> {
         self
     }
 
-    /// Current connection state.
     pub fn connection_state(&self) -> ConnectionState {
         self.conn.connection_state()
     }
 
-    /// Watch connection state changes (for UI status indicators).
     pub fn watch_connection_state(&self) -> watch::Receiver<ConnectionState> {
         self.conn.watch_state()
     }
 }
 
-/// Derive the REST base URL from the WebSocket address.
-/// WS: "ws://127.0.0.1:9800" or "127.0.0.1:9800" → REST: "http://127.0.0.1:9801"
 fn derive_rest_url(ws_addr: &str) -> String {
     let addr = ws_addr
         .trim_start_matches("ws://")
@@ -123,10 +107,6 @@ impl RpcClient for RemoteDaemon {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Generated trait implementations — one line each
-// ---------------------------------------------------------------------------
 
 impl_remote_session_api!(RemoteDaemon);
 impl_remote_conversation_api!(RemoteDaemon);
