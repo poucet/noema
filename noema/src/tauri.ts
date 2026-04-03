@@ -11,7 +11,6 @@ import type {
   DocumentTabResponse,
   DisplayMessage,
   InputContentBlock,
-  ToolConfig,
   UserMessageEvent,
   StreamingMessageEvent,
   MessageCompleteEvent,
@@ -34,24 +33,22 @@ export async function getMessages(conversationId: string): Promise<DisplayMessag
 }
 
 export async function sendMessage(
-  conversationId: string,
+  sessionId: string,
   content: InputContentBlock[],
-  toolConfig?: ToolConfig
 ): Promise<void> {
-  return invoke<void>("send_message", { conversationId, content, toolConfig });
+  return invoke<void>("send_message", { sessionId, content });
 }
 
-
-export async function clearHistory(): Promise<void> {
-  return invoke<void>("clear_history");
+export async function closeSession(sessionId: string): Promise<void> {
+  return invoke<void>("close_session", { sessionId });
 }
 
 export async function setModel(
-  conversationId: string,
+  sessionId: string,
   modelId: string,
   provider: string
 ): Promise<string> {
-  return invoke<string>("set_model", { conversationId, modelId, provider });
+  return invoke<string>("set_model", { sessionId, modelId, provider });
 }
 
 export async function listModels(): Promise<ModelInfo[]> {
@@ -62,14 +59,16 @@ export async function listConversations(): Promise<ConversationInfo[]> {
   return invoke<ConversationInfo[]>("list_conversations");
 }
 
+/// Returns [sessionId, messages].
 export async function loadConversation(
   conversationId: string
-): Promise<DisplayMessage[]> {
-  return invoke<DisplayMessage[]>("load_conversation", { conversationId });
+): Promise<[string, DisplayMessage[]]> {
+  return invoke<[string, DisplayMessage[]]>("load_conversation", { conversationId });
 }
 
-export async function newConversation(name?: string): Promise<string> {
-  return invoke<string>("new_conversation", { name });
+/// Returns [conversationId, sessionId].
+export async function newConversation(name?: string): Promise<[string, string]> {
+  return invoke<[string, string]>("new_conversation", { name });
 }
 
 export async function deleteConversation(
@@ -472,12 +471,4 @@ export async function getSpanMessages(
   return invoke<DisplayMessage[]>("get_span_messages", { spanId });
 }
 
-// Fork management
-// Matches the backend ForkInfoResponse type
-export interface ForkInfo {
-  conversationId: string;
-  forkedAtTurnId: string;
-  turnCount: number;
-  createdAt: number;
-}
 

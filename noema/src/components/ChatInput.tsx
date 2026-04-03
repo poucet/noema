@@ -3,7 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { isSupportedAttachmentType } from "../mime_types";
-import type { Attachment, DocumentInfoResponse, InputContentBlock, ToolConfig } from "../generated";
+import type { Attachment, DocumentInfoResponse, InputContentBlock } from "../generated";
 import * as tauri from "../tauri";
 
 export type VoiceStatus = "disabled" | "enabled" | "listening" | "transcribing" | "buffering";
@@ -21,7 +21,7 @@ type EditorBlock =
   | { type: "documentRef"; id: string; title: string };
 
 interface ChatInputProps {
-  onSend: (content: InputContentBlock[], toolConfig?: ToolConfig) => void;
+  onSend: (content: InputContentBlock[]) => void;
   disabled?: boolean;
   voiceAvailable?: boolean;
   voiceStatus?: VoiceStatus;
@@ -532,8 +532,7 @@ export function ChatInput({
 
     if (contentBlocks.length > 0) {
       // Build tool config based on current toggle state
-      const toolConfig: ToolConfig = { enabled: toolsEnabled, serverIds: null, toolNames: null };
-      onSend(contentBlocks, toolConfig);
+      onSend(contentBlocks);
       needsDomSyncRef.current = true;
       setBlocks([{ type: "text", text: "" }]);
       setAttachments([]);

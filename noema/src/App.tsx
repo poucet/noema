@@ -7,8 +7,7 @@ import { ModelSelector } from "./components/ModelSelector";
 import { FavoriteModelChips } from "./components/FavoriteModelChips";
 import { Settings } from "./components/Settings";
 import { DocumentPanel } from "./components/DocumentPanel";
-import { ViewSelector } from "./components/ViewSelector";
-import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock, ToolConfig } from "./generated";
+import type { DisplayMessage, ModelInfo, ConversationInfo, InputContentBlock } from "./generated";
 import * as tauri from "./tauri";
 import { useVoiceInput } from "./hooks/useVoiceInput";
 import { appLog } from "./utils/log";
@@ -20,6 +19,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationInfo[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState("");
+  const [currentSessionId, setCurrentSessionId] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [currentModel, setCurrentModel] = useState("");
   const [currentModelId, setCurrentModelId] = useState(""); // Full model ID (provider/model)
@@ -52,8 +52,7 @@ function App() {
   // Voice input hook - handles browser audio capture and Whisper transcription
   const handleVoiceTranscription = (text: string) => {
     // Voice transcriptions use current tools state
-    const toolConfig: ToolConfig = { enabled: toolsEnabled, serverIds: null, toolNames: null };
-    handleSendMessage([{ type: "text", text }], toolConfig);
+    handleSendMessage([{ type: "text", text }]);
   };
 
   const handleVoiceError = (err: string) => {
@@ -122,9 +121,10 @@ function App() {
           // Try to load the most recent conversation
           try {
             convId = convos[0].id;
-            const msgs = await tauri.loadConversation(convId);
+            const [sessionId, msgs] = await tauri.loadConversation(convId);
             setMessages(Array.isArray(msgs) ? msgs : []);
             setCurrentConversationId(convId);
+            setCurrentSessionId(sessionId);
             conversationLoaded = true;
           } catch (err) {
             // Conversation in list doesn't exist (stale data), fall through to create new one
@@ -206,8 +206,8 @@ function App() {
       // Only update if this event is for the current conversation
       setCurrentConversationId((currentId) => {
         if (currentId === conversationId) {
-          // Reload messages from storage to get alternates info
-          tauri.loadConversation(conversationId).then((msgs) => {
+          // Reload messages from storage
+          tauri.getMessages(conversationId).then((msgs) => {
             setMessages(Array.isArray(msgs) ? msgs : []);
           }).catch(console.error);
           setStreamingMessage(null);
@@ -329,7 +329,7 @@ function App() {
     };
   }, []);
 
-  const handleSendMessage = async (content: InputContentBlock[], toolConfig?: ToolConfig) => {
+  const handleSendMessage = async (content: InputContentBlock[]) => {
     try {
       setError(null);
 
@@ -340,11 +340,11 @@ function App() {
         parallelResponsesRef.current = new Map();
         // TODO: Parallel comparison mode - spawn multiple engines with different models
         // For now, just send to primary model
-        await tauri.sendMessage(currentConversationId, content, toolConfig);
+        await tauri.sendMessage(currentSessionId, content);
         // Clear selection after sending
         setSelectedModelsForComparison([]);
       } else {
-        await tauri.sendMessage(currentConversationId, content, toolConfig);
+        await tauri.sendMessage(currentSessionId, content);
       }
     } catch (err) {
       appLog.error("Send message error", String(err));
@@ -354,8 +354,9 @@ function App() {
 
   const handleNewConversation = async () => {
     try {
-      const id = await tauri.newConversation();
-      setCurrentConversationId(id);
+      const [convId, sessionId] = await tauri.newConversation();
+      setCurrentConversationId(convId);
+      setCurrentSessionId(sessionId);
       setMessages([]);
       setIsConversationPrivate(false); // New conversations start as non-private
       const convos = await tauri.listConversations();
@@ -368,8 +369,9 @@ function App() {
 
   const handleSelectConversation = async (id: string) => {
     try {
-      const msgs = await tauri.loadConversation(id);
+      const [sessionId, msgs] = await tauri.loadConversation(id);
       setCurrentConversationId(id);
+      setCurrentSessionId(sessionId);
       setMessages(Array.isArray(msgs) ? msgs : []);
     } catch (err) {
       appLog.error("Select conversation error", String(err));
@@ -386,13 +388,15 @@ function App() {
         const otherConversation = conversations.find((c) => c.id !== id);
         if (otherConversation) {
           // Switch to another existing conversation
-          const msgs = await tauri.loadConversation(otherConversation.id);
+          const [sid, msgs] = await tauri.loadConversation(otherConversation.id);
           setCurrentConversationId(otherConversation.id);
+          setCurrentSessionId(sid);
           setMessages(Array.isArray(msgs) ? msgs : []);
         } else {
           // No other conversations, create a new one
-          const newId = await tauri.newConversation();
-          setCurrentConversationId(newId);
+          const [newConvId, newSid] = await tauri.newConversation();
+          setCurrentConversationId(newConvId);
+          setCurrentSessionId(newSid);
           setMessages([]);
         }
       }
@@ -420,7 +424,7 @@ function App() {
 
   const handleSelectModel = async (modelId: string, provider: string) => {
     try {
-      await tauri.setModel(currentConversationId, modelId, provider);
+      await tauri.setModel(currentSessionId, modelId, provider);
       setCurrentModelId(`${provider}/${modelId}`);
     } catch (err) {
       appLog.error("Select model error", String(err));
@@ -479,14 +483,20 @@ function App() {
 
       // Pick the most recent conversation, or create a new one
       let convId: string;
+      let sessionId: string;
       if (convos.length > 0) {
         convId = convos[0].id;
+        const [sid, msgs] = await tauri.loadConversation(convId);
+        sessionId = sid;
+        setMessages(Array.isArray(msgs) ? msgs : []);
       } else {
-        convId = await tauri.newConversation();
+        const [cid, sid] = await tauri.newConversation();
+        convId = cid;
+        sessionId = sid;
+        setMessages([]);
       }
       setCurrentConversationId(convId);
-      const msgs = await tauri.loadConversation(convId);
-      setMessages(Array.isArray(msgs) ? msgs : []);
+      setCurrentSessionId(sessionId);
       tauri.listModels().then(setModels).catch(console.error);
       tauri.getFavoriteModels().then(setFavoriteModels).catch(console.error);
       setIsInitialized(true);
