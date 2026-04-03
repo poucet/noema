@@ -405,10 +405,10 @@ impl<S: StorageTypes> AssetApi for EmbeddedDaemon<S>
 where
     S::Document: DocumentResolver,
 {
-    async fn store_asset(&self, data: Vec<u8>, media_type: &str) -> anyhow::Result<AssetId> {
+    async fn store_asset(&self, data: Vec<u8>, mime_type: &str) -> anyhow::Result<AssetId> {
         use base64::{engine::general_purpose::STANDARD, Engine};
         let b64 = STANDARD.encode(&data);
-        self.coordinator.store_asset(&b64, media_type).await
+        self.coordinator.store_asset(&b64, mime_type).await
     }
 
     async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> {

@@ -25,7 +25,7 @@ impl std::fmt::Display for BlobId {
 pub trait BlobApi: Send + Sync {
     /// Store binary data — `data` param encoded as base64 over the wire.
     #[rpc(post = "/blob", base64_param = "data")]
-    async fn store_blob(&self, data: Vec<u8>, media_type: &str) -> anyhow::Result<BlobId>;
+    async fn store_blob(&self, data: Vec<u8>, mime_type: &str) -> anyhow::Result<BlobId>;
 
     /// Get binary data as a BinaryResponse.
     #[rpc(get = "/blob/{id}", immutable_cache)]
@@ -48,9 +48,9 @@ impl InMemoryBlobs {
 
 #[async_trait]
 impl BlobApi for InMemoryBlobs {
-    async fn store_blob(&self, data: Vec<u8>, media_type: &str) -> anyhow::Result<BlobId> {
+    async fn store_blob(&self, data: Vec<u8>, mime_type: &str) -> anyhow::Result<BlobId> {
         let id = BlobId(format!("blob_{}", self.blobs.lock().await.len()));
-        self.blobs.lock().await.push((id.clone(), media_type.to_string(), data));
+        self.blobs.lock().await.push((id.clone(), mime_type.to_string(), data));
         Ok(id)
     }
 
@@ -79,7 +79,7 @@ async fn dispatch_store_blob_decodes_base64_param() {
     let (rd, _impl) = make_rd();
 
     let b64_data = simply_rpc::encode_base64(b"hello world");
-    let params = serde_json::json!({"data": b64_data, "media_type": "text/plain"});
+    let params = serde_json::json!({"data": b64_data, "mime_type": "text/plain"});
 
     let result = rd.dispatch(HttpMethod::Post, "/blob", params).await.map(|rr| rr.result);
     let id: BlobId = serde_json::from_value(result.unwrap().unwrap()).unwrap();
@@ -285,7 +285,7 @@ async fn http_store_blob() {
     let b64_data = simply_rpc::encode_base64(b"hello http");
     let resp = reqwest::Client::new()
         .post(format!("{base}/blob"))
-        .json(&serde_json::json!({"data": b64_data, "media_type": "text/plain"}))
+        .json(&serde_json::json!({"data": b64_data, "mime_type": "text/plain"}))
         .send().await.unwrap();
     assert_eq!(resp.status(), 200);
     let id: BlobId = resp.json().await.unwrap();
@@ -327,7 +327,7 @@ async fn http_store_and_get_round_trip() {
     let original = b"round trip data \x00\xff".to_vec();
     let b64 = simply_rpc::encode_base64(&original);
     let resp = client.post(format!("{base}/blob"))
-        .json(&serde_json::json!({"data": b64, "media_type": "image/png"}))
+        .json(&serde_json::json!({"data": b64, "mime_type": "image/png"}))
         .send().await.unwrap();
     let id: BlobId = resp.json().await.unwrap();
 
