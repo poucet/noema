@@ -32,25 +32,41 @@ Built the daemon as a working service:
 
 1. **In-process** — `EmbeddedDaemon` implements 7 API traits directly. Noema wired to it, validating the API surface.
 2. **Standalone binary** — `simply-daemon` binary with config, signal handling, structured logging.
-3. **WebSocket + REST** — Generic WS server (takes dispatch callback), REST for assets + management (`/health`, `/kill`).
-4. **RPC framework** — `simply-rpc` crate with proc macro: `#[rpc_service("prefix")]` auto-generates dispatch + client macros. Supports `#[rpc(stream)]`, `#[rpc(base64_param/return)]`, `#[rpc(rest_get)]`, `#[rpc(skip)]`.
-5. **RemoteDaemon** — client-side WS implementation with 7 one-liner macro invocations.
+3. **WebSocket + REST** — Generic WS server (takes dispatch callback), REST for assets + management.
+4. **RPC framework** — `simply-rpc` crate with proc macro: `#[rpc_service("prefix")]` auto-generates dispatch + client macros.
+5. **RemoteDaemon** — client-side WS + HTTP implementation.
 
-### Stage 3 — REST-First Transport (in progress)
+### Stage 3 — REST-First Transport (complete)
 
-Switch all request/response methods from WebSocket to REST. WebSocket becomes streaming-only. **Zero public API change** — `DaemonApi` traits and `RemoteDaemon` keep the same interface; only the transport changes.
+All request/response methods use REST. WebSocket is streaming-only (SessionApi). Zero public API change for existing clients.
 
-1. **Codegen** — extend `simply-rpc` proc macro to parse REST path annotations (`get = "/path/{param}"`), generate `RestMeta`, `rest_dispatch`, and `ToolDefinition` from doc comments + param schemas.
-2. **REST server** — auto-route from `ServiceMeta` metadata, replacing manual route wiring.
-3. **Trait annotations** — add REST annotations to all 7 existing API traits. Add `DaemonInfoApi` for `/health`, `/kill`, `/version`.
-4. **Tool generation** — REST methods implement `ToolService` trait (in-process, no MCP server), registered in `McpToolRegistry` alongside external tools.
-5. **Client codegen** — `impl_remote_xxx!` generates HTTP client code for REST methods, WebSocket code for stream methods. `RemoteDaemon` holds base URL + lazy WS.
-6. **Cleanup** — remove WebSocket dispatch for REST-annotated methods, remove hardcoded admin routes.
-7. **Admin page** — update dashboard to call REST endpoints via `fetch()`.
+1. **REST annotations** — `#[rpc(get = "/path/{param}")]`, `#[rpc(post = "/path")]`, `#[rpc(put)]`, `#[rpc(delete)]` on all API traits. `#[rpc(stream = "/path")]` for WebSocket streams.
+2. **Route metadata** — `RouteMeta` with `RouteKind::Rest(HttpMethod)` / `RouteKind::Stream`, plus `binary_response`, `binary_upload`, `immutable_cache`, `no_tool` flags.
+3. **REST dispatch** — `RestDispatcher` with `matchit` crate for URL routing, `RestResult` carries `RouteMeta` for response encoding.
+4. **Axum server** — replaced hand-rolled hyper with axum. REST + admin on single port.
+5. **Binary transfer** — `BinaryResponse` (detected from return type) + `BinaryUpload` for native HTTP binary transfer. `immutable_cache` adds Cache-Control + ETag.
+6. **Client codegen** — `impl_remote_xxx!` generates reqwest HTTP calls for REST, WS for streams. `RemoteDaemon` uses both transports.
+7. **Tool generation** — `DaemonToolService` exposes REST methods as `ToolService` tools. `CompositeToolService` merges multiple tool sources.
+8. **Transport in simply-rpc** — `WsConnection<E>`, `NotificationDemux<E>`, `WsServer`, protocol types all live in simply-rpc.
+9. **DaemonInfoApi** — `/daemon` (health), `/daemon/kill`, `/daemon/version`.
+10. **Admin page** — dashboard calls REST endpoints via `fetch()`.
+11. **90 tests** — metadata, dispatch, client round-trip, raw HTTP (reqwest), raw WS (tungstenite), binary transfer.
+
+### Stage 4 — Service Extraction (complete)
+
+Broke EmbeddedDaemon monolith into focused service objects.
+
+1. **McpService** implements `McpApi` + `OAuthApi` directly (no more delegation layer).
+2. **Extracted services** — `ModelService`, `AssetService`, `VoiceService`, `DaemonInfoService` each implement their API trait.
+3. **EmbeddedDaemon** keeps `SessionApi` + `ConversationApi` (tightly coupled to session state), delegates rest for `DaemonApi` compat.
+4. **main.rs** registers individual services with `RestDispatcher` instead of the monolith.
 
 ### Deferred
 
-- **DocumentApi / GDocs sidecar** — deferred to content phase (sidecar design TBD)
+- **DocumentApi / GDocs sidecar** — deferred to Content phase (sidecar design TBD)
 - **Peer registry** — deferred to Lumina phase (needed when multiple clients connect)
-- **Voice pipeline** — moved to voice phase
+- **Voice pipeline** — moved to Voice phase
 - **Auth (remote access)** — deferred post-v1. REST binds to localhost only for now.
+- **Single-port merge** — WS upgrade in axum handler (currently separate WS server port)
+- **RpcSchema** — proper JSON Schema derivation for tool input schemas (currently placeholder)
+- **Binary upload query params** — `#[rpc(post = "/asset?mime_type", body = raw)]` syntax
