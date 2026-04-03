@@ -40,14 +40,14 @@ Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) are converging
 1. **Core service protocol** — Three interfaces: WebSocket + JSON for rich clients (Noema, Lumina), REST for trigger services, MCP outbound for action services. See [CORE_SERVICE.md](../designs/CORE_SERVICE.md).
 2. **Storage model** — Lumina features map onto UCM primitives. No separate databases. See [ARCHITECTURE.md](../designs/ARCHITECTURE.md#features-on-ucm--content-as-convention).
 3. **Command system** — Separate: serenity `#[command]` for Discord, separate MCP tool definitions. No unified macro.
+4. **Config unification** — Shared `config/` crate with `Settings::load()` + `.env` fallback.
+5. **UCM schema extensions** — Existing UCM primitives cover it. Content conventions (todo, note, etc.) are just frontmatter on documents.
+6. **Core service lifecycle** — `simply-daemon` runs as standalone binary. Noema uses `EmbeddedDaemon` (in-process). Lumina uses `RemoteDaemon` (WS+REST).
+7. **Repo name** — keeping `noema` as the GitHub repo for now.
 
 ## Open Questions
 
-1. **Repo name** — keeping `noema` as the GitHub repo for now.
-2. **Songbird DAVE status** — need to verify songbird's current DAVE protocol support. If incomplete, may need to contribute upstream or work around.
-3. ~~**Config unification**~~ — Resolved: shared `config/` crate with `Settings::load()` + `.env` fallback.
-4. ~~**UCM schema extensions**~~ — Resolved: existing UCM primitives cover it. Content conventions (todo, note, etc.) are just frontmatter on documents.
-5. ~~**Core service lifecycle**~~ — Resolved: `simply-daemon` runs as standalone binary. Noema uses `EmbeddedDaemon` (in-process). Lumina uses `RemoteDaemon` (WS+REST).
+1. **Songbird DAVE status** — need to verify songbird's current DAVE protocol support. If incomplete, may need to contribute upstream or work around.
 
 ---
 
