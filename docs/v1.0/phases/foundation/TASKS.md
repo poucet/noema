@@ -68,6 +68,7 @@
 | 3.8 | ✅ | `BinaryResponse` type — detected from return type, `immutable_cache` annotation | P0 | M |
 | 3.9 | ✅ | Remove obsolete `base64_return` and `rest_get` annotations | P0 | S |
 | 3.10 | ⬜ | `RpcSchema` trait for JSON Schema overrides; generate `tool_definitions()` | P0 | M |
+| 3.11a | ⬜ | Native binary upload/download — raw HTTP body instead of base64 encoding. Upload: `POST /path?metadata=...` with raw bytes. Download: `BinaryResponse` (done). Remove `base64_param`. | P0 | M |
 
 ### Server + transport
 
