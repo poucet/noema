@@ -16,6 +16,7 @@
 #[macro_use] mod oauth;
 #[macro_use] mod model;
 #[macro_use] mod voice;
+#[macro_use] mod daemon_info;
 pub mod types;
 
 pub use session::*;
@@ -25,6 +26,7 @@ pub use mcp::*;
 pub use oauth::*;
 pub use model::*;
 pub use voice::*;
+pub use daemon_info::*;
 pub use types::*;
 
 /// Convenience super-trait combining all daemon APIs.

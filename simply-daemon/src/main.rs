@@ -40,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
     // Open storage and create daemon
     let stores = Arc::new(SqliteStores::open()?);
     let daemon = EmbeddedDaemon::new(stores).await?;
+    // Keep concrete type for DaemonInfoApi before erasing to DaemonApi
+    let daemon_info_svc = <dyn DaemonInfoApi>::service(daemon.clone() as Arc<dyn DaemonInfoApi>);
     let daemon: Arc<dyn DaemonApi> = daemon;
 
     // WS server — per-connection state, handles streams
@@ -59,7 +61,8 @@ async fn main() -> anyhow::Result<()> {
         .register(<dyn McpApi>::service(daemon.clone()))
         .register(<dyn OAuthApi>::service(daemon.clone()))
         .register(<dyn ModelApi>::service(daemon.clone()))
-        .register(<dyn VoiceApi>::service(daemon.clone()));
+        .register(<dyn VoiceApi>::service(daemon.clone()))
+        .register(daemon_info_svc);
 
     let _rest_server = ws::rest::start(ws::rest::RestConfig {
         dispatcher: Dispatcher::new()

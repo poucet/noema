@@ -625,3 +625,25 @@ where
         Ok(())
     }
 }
+
+#[async_trait]
+impl<S: StorageTypes> DaemonInfoApi for EmbeddedDaemon<S>
+where
+    S::Document: DocumentResolver,
+{
+    async fn health(&self) -> anyhow::Result<DaemonHealth> {
+        Ok(DaemonHealth {
+            status: "ok".to_string(),
+        })
+    }
+
+    async fn kill(&self) -> anyhow::Result<()> {
+        // Kill is handled at the server level, not here.
+        // The REST server intercepts this and triggers shutdown.
+        Ok(())
+    }
+
+    async fn version(&self) -> anyhow::Result<String> {
+        Ok(env!("CARGO_PKG_VERSION").to_string())
+    }
+}
