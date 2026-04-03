@@ -49,4 +49,5 @@ inventory = "0.3"
 async-trait = "0.1"
 
 # MCP server
-rmcp = { version = "0.9", features = ["server"] }
+rmcp = { version = "0.9", features = ["server", "macros"] }
+schemars = "0.8"
