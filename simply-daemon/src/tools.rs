@@ -9,6 +9,17 @@ use simply_rpc::{ContentPart, RestService, RouteKind};
 
 use simply_core::ToolService;
 
+// IntoContent for types from external crates (can't derive there).
+simply_rpc::impl_json_content!(
+    crate::api::AssetId,
+    crate::api::ConversationId,
+    llm::ModelInfo,
+    llm::ProviderInfo,
+    simply_core::storage::ResolvedMessage,
+    rmcp::model::CallToolResult,
+    rmcp::model::Tool,
+);
+
 /// Convert `ContentPart` (from RPC dispatch) to `ToolResultContent` (for LLM agents).
 fn content_part_to_tool_result(part: ContentPart) -> ToolResultContent {
     match part {

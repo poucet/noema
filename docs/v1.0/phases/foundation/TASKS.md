@@ -107,12 +107,12 @@
 
 ---
 
-## Future — Tool Result Content Mapping
+## Future — Typed Content Dispatch
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| F.1 | ✅ | `IntoToolResult` trait: map types (e.g. `BinaryResponse`) to proper `ToolResultContent` (image/audio by mime type) instead of JSON-stringifying everything in `DaemonToolService::call_tool` | P1 | S |
-| F.2 | ✅ | Implement `IntoToolResult` for `BinaryResponse` (route to image/audio/blob by mime type) | P1 | S |
-| F.3 | ✅ | Wire `DaemonToolService::call_tool` to use trait dispatch instead of `to_string_pretty` for all results | P1 | S |
-| F.4 | ⬜ | `FromContent` trait: convert MCP content blocks (image/audio) into API param types (e.g. `BinaryUpload`) for tool call input path | P1 | M |
-| F.5 | ⬜ | Generate `rest_dispatch_from_content` in RPC macro — accepts `Vec<ContentPart>` as tool call input, routes binary content to `BinaryUpload` params | P1 | M |
+| F.1 | ✅ | `IntoContent` trait + `ContentPart` enum in simply-rpc: types declare how they become content (JSON or binary) | P1 | S |
+| F.2 | ✅ | `IntoContent` for `BinaryResponse` (→ `ContentPart::Binary`), `impl_json_content!` macro for standard types | P1 | S |
+| F.3 | ✅ | RPC macro generates `rest_dispatch_as_content`: calls `IntoContent` on concrete return types, no runtime branching | P1 | S |
+| F.4 | ✅ | Add `IntoContent` impls for all daemon API return types (McpServerInfo, SessionInfo, etc.) via `impl_json_content!` | P1 | S |
+| F.5 | ⬜ | `FromContent` on `BinaryUpload`: convert MCP image/audio content blocks into `BinaryUpload` for tool calls like `store_asset` | P1 | S |

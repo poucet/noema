@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 /// Information returned when starting an OAuth flow.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, simply_rpc::IntoContent)]
 pub struct OAuthFlowInfo {
     /// The authorization URL the user should open in their browser.
     pub auth_url: String,

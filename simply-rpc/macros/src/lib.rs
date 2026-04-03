@@ -35,6 +35,30 @@ pub fn rpc_service(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+/// Derive `IntoContent` for a `Serialize` type — produces `ContentPart::Json`.
+///
+/// ```rust,ignore
+/// #[derive(Serialize, IntoContent)]
+/// pub struct SessionInfo { ... }
+/// ```
+#[proc_macro_derive(IntoContent)]
+pub fn derive_into_content(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let expanded = quote::quote! {
+        impl #impl_generics ::simply_rpc::IntoContent for #name #ty_generics #where_clause {
+            fn into_content(self) -> Vec<::simply_rpc::ContentPart> {
+                let v = ::serde_json::to_value(&self).unwrap_or_default();
+                vec![::simply_rpc::ContentPart::Json(v)]
+            }
+        }
+    };
+
+    expanded.into()
+}
+
 fn generate(
     prefix: String,
     mut input: syn::ItemTrait,

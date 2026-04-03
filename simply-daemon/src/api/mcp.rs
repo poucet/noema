@@ -9,7 +9,7 @@ pub use rmcp::model::{
 };
 
 /// Information about a configured MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, simply_rpc::IntoContent)]
 pub struct McpServerInfo {
     pub id: String,
     pub name: String,
