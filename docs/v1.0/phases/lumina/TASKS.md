@@ -70,27 +70,15 @@
 
 ---
 
-## Stage 4 — Admin & Access Control
+## ~~Stage 4 — Admin & Access Control~~ (PUNTED)
 
-**Goal:** Port admin commands and role-based access control.
-
-| # | | Task | Priority | Size |
-|---|---|------|----------|------|
-| 4.1 | ⬜ | Port AdminCog: `/admin set-access`, `/admin list-access` | P1 | S |
-| 4.2 | ⬜ | Access level system (Full Access, Chat Only, No Access) | P1 | S |
-| 4.3 | ⬜ | Permission checks in command handlers | P1 | S |
+**Deferred** — not needed for current workflow. Revisit when multi-user access is required.
 
 ---
 
-## Stage 5 — Schedule
+## ~~Stage 5 — Schedule~~ (DEFERRED → Events phase)
 
-**Goal:** Port scheduled prompt execution system.
-
-| # | | Task | Priority | Size |
-|---|---|------|----------|------|
-| 5.1 | ⬜ | Port ScheduleCog: `/schedule create` (interval, daily, weekly, monthly, cron, one_time) | P1 | M |
-| 5.2 | ⬜ | `/schedule edit`, `list`, `delete`, `test` | P1 | S |
-| 5.3 | ⬜ | Schedule service startup on bot ready | P1 | S |
+**Deferred** — schedule system belongs in the Events phase where it can build on the intents/triggers architecture.
 
 ---
 
