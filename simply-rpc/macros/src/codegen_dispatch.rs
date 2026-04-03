@@ -66,14 +66,10 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         .map(|m| {
             let name = &m.method_name;
             let hash = signature_hash(m);
-            let rest_get = m.rest_get;
-            let base64_return = m.base64_return;
             quote! {
                 ::simply_rpc::MethodMeta {
                     name: #name,
                     signature_hash: #hash,
-                    rest_get: #rest_get,
-                    base64_return: #base64_return,
                 }
             }
         })
@@ -457,18 +453,7 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                     }
                 },
                 ReturnKind::ResultValue { .. } => {
-                    if m.base64_return {
-                        quote! {
-                            match #call {
-                                Ok(bytes) => Some(Ok(::serde_json::Value::String(
-                                    ::simply_rpc::encode_base64(&bytes)
-                                ))),
-                                Err(e) => Some(Err(e)),
-                            }
-                        }
-                    } else {
-                        quote! { Some(::simply_rpc::call_val(#call)) }
-                    }
+                    quote! { Some(::simply_rpc::call_val(#call)) }
                 },
                 ReturnKind::RawValue { .. } => quote! { Some(::simply_rpc::call_raw(#call)) },
                 _ => return None,
@@ -499,20 +484,6 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
 fn generate_dispatch_body(method: &ParsedMethod, call_args: &[TokenStream]) -> TokenStream {
     let fn_name = &method.name;
     let call = quote! { self.0.#fn_name(#(#call_args),*).await };
-
-    // For base64_return methods returning Result<Vec<u8>>, encode the result
-    if method.base64_return {
-        if let ReturnKind::ResultValue { .. } = &method.return_kind {
-            return quote! {
-                Some(::simply_rpc::DispatchResult::value(match #call {
-                    Ok(bytes) => Ok(::serde_json::Value::String(
-                        ::simply_rpc::encode_base64(&bytes)
-                    )),
-                    Err(e) => Err(e),
-                }))
-            };
-        }
-    }
 
     match &method.return_kind {
         ReturnKind::ResultUnit => {

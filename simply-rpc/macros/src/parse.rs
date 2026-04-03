@@ -68,10 +68,6 @@ pub struct ParsedMethod {
     pub rpc_kind: RpcKind,
     /// Parameter names that should be base64-encoded over the wire (`#[rpc(base64_param = "name")]`).
     pub base64_params: Vec<String>,
-    /// Whether the return value should be base64-encoded (`#[rpc(base64_return)]`).
-    pub base64_return: bool,
-    /// Expose as HTTP GET endpoint (`#[rpc(rest_get)]`) — legacy, prefer `rest_endpoint`.
-    pub rest_get: bool,
     /// Endpoint info parsed from `#[rpc(get = "/path")]`, `#[rpc(stream = "/path")]`, etc.
     pub rest_endpoint: Option<RestEndpoint>,
     /// Whether to exclude this method from tool generation (`#[rpc(no_tool)]`).
@@ -120,8 +116,6 @@ impl ParsedTrait {
                 name: method.sig.ident.clone(),
                 rpc_kind: rpc_attrs.kind,
                 base64_params: rpc_attrs.base64_params,
-                base64_return: rpc_attrs.base64_return,
-                rest_get: rpc_attrs.rest_get,
                 rest_endpoint: rpc_attrs.rest_endpoint,
                 no_tool: rpc_attrs.no_tool,
                 immutable_cache: rpc_attrs.immutable_cache,
@@ -166,8 +160,6 @@ impl ParsedTrait {
 struct RpcAttrs {
     kind: RpcKind,
     base64_params: Vec<String>,
-    base64_return: bool,
-    rest_get: bool,
     rest_endpoint: Option<RestEndpoint>,
     no_tool: bool,
     immutable_cache: bool,
@@ -208,14 +200,12 @@ fn try_parse_rest(key: &str, value: &str) -> Option<RestEndpoint> {
 
 /// Detect `#[rpc(...)]` attributes on a method.
 ///
-/// Supported: `skip`, `stream`, `base64_param = "name"`, `base64_return`, `rest_get`,
-/// `get = "/path"`, `post = "/path"`, `put = "/path"`, `delete = "/path"`, `no_tool`
+/// Supported: `skip`, `stream`, `base64_param = "name"`, `no_tool`, `immutable_cache`,
+/// `get = "/path"`, `post = "/path"`, `put = "/path"`, `delete = "/path"`, `stream = "/path"`
 fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
     let mut result = RpcAttrs {
         kind: RpcKind::Normal,
         base64_params: Vec::new(),
-        base64_return: false,
-        rest_get: false,
         rest_endpoint: None,
         no_tool: false,
         immutable_cache: false,
@@ -236,12 +226,6 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
                 if token_str_check.split(',').any(|s| s.trim() == "stream") {
                     result.kind = RpcKind::Stream;
                 }
-            }
-            if tokens.contains("base64_return") {
-                result.base64_return = true;
-            }
-            if tokens.contains("rest_get") {
-                result.rest_get = true;
             }
             if tokens.contains("no_tool") {
                 result.no_tool = true;

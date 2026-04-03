@@ -159,18 +159,6 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
         }
     };
 
-    // Result handling
-    if method.base64_return {
-        if let ReturnKind::ResultValue { .. } = &method.return_kind {
-            return quote! {
-                let __path = #path_expr;
-                let __r = self.rest_call(#http_method, &__path, #body_expr).await?;
-                let __b64: String = ::serde_json::from_value(__r)?;
-                Ok(::simply_rpc::decode_base64(&__b64)?)
-            };
-        }
-    }
-
     match &method.return_kind {
         ReturnKind::ResultUnit => quote! {
             let __path = #path_expr;
@@ -273,18 +261,6 @@ fn generate_client_body(
     serialize: &TokenStream,
     rpc_params: &TokenStream,
 ) -> TokenStream {
-    // For base64_return methods, decode the base64 response
-    if method.base64_return {
-        if let ReturnKind::ResultValue { .. } = &method.return_kind {
-            return quote! {
-                #serialize
-                let __r = self.rpc_call(#method_str, #rpc_params).await?;
-                let __b64: String = ::serde_json::from_value(__r)?;
-                Ok(::simply_rpc::decode_base64(&__b64)?)
-            };
-        }
-    }
-
     match &method.return_kind {
         ReturnKind::ResultUnit => {
             quote! {
