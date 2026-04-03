@@ -21,6 +21,9 @@ fn value_to_tool_result(value: serde_json::Value, binary_response: bool) -> Vec<
             } else if binary.mime_type.starts_with("audio/") {
                 return vec![ToolResultContent::audio(data, binary.mime_type)];
             }
+            // Unknown binary — serialize as JSON text
+            let text = format!("[binary: {} bytes, {}]", binary.data.len(), binary.mime_type);
+            return vec![ToolResultContent::text(text)];
         }
     }
     let text = serde_json::to_string_pretty(&value).unwrap_or_default();
