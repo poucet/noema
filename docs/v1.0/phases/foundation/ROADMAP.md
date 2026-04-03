@@ -61,6 +61,15 @@ Broke EmbeddedDaemon monolith into focused service objects.
 3. **EmbeddedDaemon** keeps `SessionApi` + `ConversationApi` (tightly coupled to session state), delegates rest for `DaemonApi` compat.
 4. **main.rs** registers individual services with `RestDispatcher` instead of the monolith.
 
+### Stage F — Typed Content Dispatch (complete)
+
+Trait-based content conversion for the RPC → MCP boundary. Types declare how they serialize (output) and deserialize (input) as MCP content.
+
+1. **`IntoContent` trait + `ContentPart` enum** — `BinaryResponse` → binary, everything else → JSON. `#[derive(IntoContent)]` proc macro.
+2. **`rest_dispatch_as_content`** — RPC macro generates typed content dispatch. Calls `IntoContent` on concrete return types before type erasure.
+3. **`FromContent` trait** — inverse direction. `BinaryUpload` decodes MCP image/audio content (base64 → bytes).
+4. **`DaemonToolService`** uses `rest_dispatch_as_content` → `ContentPart` → `ToolResultContent`. No runtime metadata branching.
+
 ### Deferred
 
 - **DocumentApi / GDocs sidecar** — deferred to Content phase (sidecar design TBD)

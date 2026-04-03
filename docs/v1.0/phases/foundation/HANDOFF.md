@@ -59,6 +59,13 @@ This phase is done. The daemon is a REST-first service with WebSocket streaming,
 - **DaemonToolService** — exposes REST methods as `ToolService` tools (from `RouteMeta`)
 - **CompositeToolService** — merges multiple `ToolService` impls (MCP + daemon tools)
 
+### Typed content dispatch (Stage F)
+- **`IntoContent` trait** — types declare how they become `ContentPart` (JSON or binary). `BinaryResponse` → `ContentPart::Binary`, everything else → `ContentPart::Json`.
+- **`FromContent` trait** — inverse: `ContentPart` → API param types. `BinaryUpload` decodes MCP image/audio content blocks.
+- **`#[derive(IntoContent)]`** — proc macro in simply-rpc for easy JSON impls.
+- **`rest_dispatch_as_content`** — RPC macro generates typed content dispatch alongside `rest_dispatch_by_name`. Calls `IntoContent` on the concrete return type — no runtime branching.
+- **`ContentPart` enum** — `Json(Value)` or `Binary { data, mime_type }`. Bridges RPC dispatch and MCP tool result conversion.
+
 ---
 
 ## What's deferred
@@ -86,7 +93,7 @@ Who connects fetch -> store for domain features like GDocs? Three options docume
 - C: Sidecar calls back via MCP (clean separation, bidirectional MCP)
 
 ### MCP service registration from clients
-Lumina (Stage 3) needs to register Discord tools with the daemon so other clients can use them. The daemon's `McpApi` currently only manages external MCP servers — need a path for clients to register as tool providers.
+~~Lumina (Stage 3) needs to register Discord tools with the daemon so other clients can use them.~~ **Done** — `register_ephemeral_mcp` / `unregister_ephemeral_mcp` on `McpApi`. Lumina registers on connect, daemon connects back to Lumina's MCP server.
 
 ### Connection lifecycle
 - Client reconnection after flaky connections (connection ID + session resumption)
