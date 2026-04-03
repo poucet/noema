@@ -1,7 +1,8 @@
 //! In-process implementation of the daemon API traits.
 //!
-//! Both ephemeral and persistent sessions use `SessionManager` — the difference
-//! is the `ConversationContext` injected at creation time.
+//! EmbeddedDaemon holds individual service objects that each implement their
+//! API trait directly. SessionApi and ConversationApi are implemented here
+//! (tightly coupled to session state). All other traits delegate to services.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,10 +10,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
-use llm::ChatModel;
-
 use simply_core::storage::coordinator::StorageCoordinator;
-use simply_core::storage::ids::{AssetId, ConversationId, UserId};
+use simply_core::storage::ids::ConversationId;
 use simply_core::storage::session::ResolvedMessage;
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_core::storage::DocumentResolver;
@@ -22,6 +21,7 @@ use simply_core::{
 
 use crate::api::*;
 use crate::mcp::{McpService, McpServiceConfig};
+use crate::services::*;
 
 // ---------------------------------------------------------------------------
 // Session bookkeeping
@@ -38,12 +38,18 @@ struct ManagedSession {
 // ---------------------------------------------------------------------------
 
 pub struct EmbeddedDaemon<S: StorageTypes> {
+    // Session + Conversation state (tightly coupled, kept here)
     coordinator: Arc<StorageCoordinator<S>>,
     stores: Arc<dyn Stores<S>>,
-    mcp: McpService,
     sessions: Mutex<HashMap<SessionId, ManagedSession>>,
-    default_model_id: Mutex<String>,
-    user_id: UserId,
+    user_id: simply_core::storage::ids::UserId,
+
+    // Individual services
+    mcp: Arc<McpService>,
+    model: Arc<ModelService>,
+    asset: Arc<AssetService<S>>,
+    voice: Arc<VoiceService>,
+    daemon_info: Arc<DaemonInfoService>,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -68,28 +74,50 @@ where
             .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
 
         let document_resolver: Arc<dyn DocumentResolver> = stores.document();
-        let mcp = McpService::start(
+        let mcp = Arc::new(McpService::start(
             &coordinator,
             document_resolver,
             McpServiceConfig {
                 oauth_callback_port: settings.oauth_callback_port,
             },
         )
-        .await?;
+        .await?);
+
+        let model = Arc::new(ModelService::new(default_model_id));
+        let asset = Arc::new(AssetService::new(Arc::clone(&coordinator), Arc::clone(&stores)));
+        let voice = Arc::new(VoiceService);
+        let daemon_info = Arc::new(DaemonInfoService);
 
         let daemon = Arc::new(Self {
             coordinator,
             stores,
-            mcp,
             sessions: Mutex::new(HashMap::new()),
-            default_model_id: Mutex::new(default_model_id.to_string()),
             user_id,
+            mcp,
+            model,
+            asset,
+            voice,
+            daemon_info,
         });
 
         Self::spawn_session_reaper(Arc::clone(&daemon));
 
         Ok(daemon)
     }
+
+    // -- Service accessors for main.rs / RestDispatcher registration ----------
+
+    pub fn mcp_service(&self) -> Arc<McpService> { Arc::clone(&self.mcp) }
+    pub fn model_service(&self) -> Arc<ModelService> { Arc::clone(&self.model) }
+    pub fn asset_service(&self) -> Arc<AssetService<S>> { Arc::clone(&self.asset) }
+    pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
+    pub fn daemon_info_service(&self) -> Arc<DaemonInfoService> { Arc::clone(&self.daemon_info) }
+
+    pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
+    pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
+    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> { &self.coordinator }
+
+    // -- Internal helpers -----------------------------------------------------
 
     fn spawn_session_reaper(daemon: Arc<Self>) {
         tokio::spawn(async move {
@@ -178,7 +206,7 @@ where
     async fn resolve_user(
         stores: &dyn Stores<S>,
         settings: &config::Settings,
-    ) -> anyhow::Result<UserId>
+    ) -> anyhow::Result<simply_core::storage::ids::UserId>
     where
         S::User: simply_core::storage::traits::UserStore,
     {
@@ -201,11 +229,6 @@ where
         Ok(user.id)
     }
 
-    pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
-    pub fn mcp_service(&self) -> &McpService { &self.mcp }
-    pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
-    pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> { &self.coordinator }
-
     fn make_session_info(session_id: &SessionId, persistence: Persistence, model_id: String) -> SessionInfo {
         SessionInfo {
             id: session_id.clone(),
@@ -222,7 +245,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// SessionApi
+// SessionApi — implemented directly (owns session state)
 // ---------------------------------------------------------------------------
 
 #[async_trait]
@@ -250,7 +273,7 @@ where
         let session_id = SessionId::generate();
         let model_id = match options.model_id {
             Some(id) => id,
-            None => self.default_model_id.lock().await.clone(),
+            None => self.model.default_model().await,
         };
         let model = llm::create_model(&model_id)?;
         let seed_messages = Self::convert_seed(options.seed);
@@ -329,7 +352,6 @@ where
         Ok(())
     }
 
-
     async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()> {
         tracing::info!(event_type = %event.event_type, "inbound event received");
         Ok(())
@@ -337,7 +359,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// ConversationApi
+// ConversationApi — implemented directly (needs session state for delete)
 // ---------------------------------------------------------------------------
 
 #[async_trait]
@@ -397,33 +419,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// AssetApi
-// ---------------------------------------------------------------------------
-
-#[async_trait]
-impl<S: StorageTypes> AssetApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
-{
-    async fn store_asset(&self, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetId> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        let b64 = STANDARD.encode(&upload.data);
-        self.coordinator.store_asset(&b64, &upload.mime_type).await
-    }
-
-    async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> {
-        use simply_core::storage::traits::AssetStore;
-        let data = self.coordinator.get_blob(hash).await?;
-        let mime_type = self.stores.asset()
-            .get_by_blob_hash(hash).await?
-            .map(|a| a.mime_type.clone())
-            .unwrap_or_else(|| "application/octet-stream".to_string());
-        Ok(simply_rpc::BinaryResponse { data, mime_type })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// McpApi
+// Delegated traits — forward to inner services for DaemonApi compat
 // ---------------------------------------------------------------------------
 
 #[async_trait]
@@ -442,10 +438,6 @@ where S::Document: DocumentResolver,
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.start_mcp_retry(server_id).await }
 }
 
-// ---------------------------------------------------------------------------
-// OAuthApi
-// ---------------------------------------------------------------------------
-
 #[async_trait]
 impl<S: StorageTypes> OAuthApi for EmbeddedDaemon<S>
 where S::Document: DocumentResolver,
@@ -456,64 +448,37 @@ where S::Document: DocumentResolver,
     async fn resolve_oauth_state(&self, state: &str) -> Option<String> { self.mcp.resolve_oauth_state(state).await }
 }
 
-// ---------------------------------------------------------------------------
-// ModelApi
-// ---------------------------------------------------------------------------
-
 #[async_trait]
 impl<S: StorageTypes> ModelApi for EmbeddedDaemon<S>
 where S::Document: DocumentResolver,
 {
-    async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>> {
-        let mut all = Vec::new();
-        for (_, result) in llm::list_all_models().await {
-            if let Ok(models) = result { all.extend(models); }
-        }
-        Ok(all)
-    }
-    async fn list_providers(&self) -> Vec<llm::ProviderInfo> { llm::list_providers() }
-    async fn default_model_id(&self) -> String { self.default_model_id.lock().await.clone() }
-    async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> {
-        let _ = llm::create_model(model_id)?;
-        *self.default_model_id.lock().await = model_id.to_string();
-        Ok(())
-    }
+    async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>> { self.model.list_models().await }
+    async fn list_providers(&self) -> Vec<llm::ProviderInfo> { self.model.list_providers().await }
+    async fn default_model_id(&self) -> String { self.model.default_model_id().await }
+    async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> { self.model.set_default_model(model_id).await }
 }
 
-// ---------------------------------------------------------------------------
-// VoiceApi
-// ---------------------------------------------------------------------------
+#[async_trait]
+impl<S: StorageTypes> AssetApi for EmbeddedDaemon<S>
+where S::Document: DocumentResolver,
+{
+    async fn store_asset(&self, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetId> { self.asset.store_asset(upload).await }
+    async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> { self.asset.get_blob(hash).await }
+}
 
 #[async_trait]
 impl<S: StorageTypes> VoiceApi for EmbeddedDaemon<S>
 where S::Document: DocumentResolver,
 {
-    async fn voice_connect(&self, _session_id: &SessionId) -> anyhow::Result<VoiceHandle> {
-        let (audio_tx, _) = mpsc::channel(32);
-        let (_, voice_rx) = mpsc::channel(32);
-        Ok(VoiceHandle { audio_in: audio_tx, events: voice_rx })
-    }
-    async fn voice_disconnect(&self, _session_id: &SessionId) -> anyhow::Result<()> { Ok(()) }
+    async fn voice_connect(&self, session_id: &SessionId) -> anyhow::Result<VoiceHandle> { self.voice.voice_connect(session_id).await }
+    async fn voice_disconnect(&self, session_id: &SessionId) -> anyhow::Result<()> { self.voice.voice_disconnect(session_id).await }
 }
 
 #[async_trait]
 impl<S: StorageTypes> DaemonInfoApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
+where S::Document: DocumentResolver,
 {
-    async fn health(&self) -> anyhow::Result<DaemonHealth> {
-        Ok(DaemonHealth {
-            status: "ok".to_string(),
-        })
-    }
-
-    async fn kill(&self) -> anyhow::Result<()> {
-        // Kill is handled at the server level, not here.
-        // The REST server intercepts this and triggers shutdown.
-        Ok(())
-    }
-
-    async fn version(&self) -> anyhow::Result<String> {
-        Ok(env!("CARGO_PKG_VERSION").to_string())
-    }
+    async fn health(&self) -> anyhow::Result<DaemonHealth> { self.daemon_info.health().await }
+    async fn kill(&self) -> anyhow::Result<()> { self.daemon_info.kill().await }
+    async fn version(&self) -> anyhow::Result<String> { self.daemon_info.version().await }
 }

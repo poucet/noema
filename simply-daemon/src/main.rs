@@ -41,11 +41,19 @@ async fn main() -> anyhow::Result<()> {
     // Open storage and create daemon
     let stores = Arc::new(SqliteStores::open()?);
     let daemon = EmbeddedDaemon::new(stores).await?;
-    let daemon_info_svc = <dyn DaemonInfoApi>::service(daemon.clone() as Arc<dyn DaemonInfoApi>);
-    let daemon: Arc<dyn DaemonApi> = daemon;
+
+    // Extract individual services
+    let session_svc: Arc<dyn SessionApi> = daemon.clone();
+    let conversation_svc: Arc<dyn ConversationApi> = daemon.clone();
+    let mcp_svc: Arc<dyn McpApi> = daemon.mcp_service();
+    let oauth_svc: Arc<dyn OAuthApi> = daemon.mcp_service();
+    let model_svc: Arc<dyn ModelApi> = daemon.model_service();
+    let asset_svc: Arc<dyn AssetApi> = daemon.asset_service();
+    let voice_svc: Arc<dyn VoiceApi> = daemon.voice_service();
+    let daemon_info_svc: Arc<dyn DaemonInfoApi> = daemon.daemon_info_service();
 
     // WS server — streaming sessions (still separate port, WS upgrade coming to main server)
-    let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
+    let ws_dispatch = build_ws_dispatch(Arc::clone(&session_svc));
     let _ws_server = net::server::start(ws_dispatch.clone(), port).await?;
     let tracker = _ws_server.tracker().clone();
 
@@ -55,14 +63,14 @@ async fn main() -> anyhow::Result<()> {
     // Main server (axum) — REST + admin (+ WS upgrade in future)
     let rest_port = port + 1;
     let rest_dispatcher = RestDispatcher::new()
-        .register(<dyn SessionApi>::service(daemon.clone()))
-        .register(<dyn ConversationApi>::service(daemon.clone()))
-        .register(<dyn AssetApi>::service(daemon.clone()))
-        .register(<dyn McpApi>::service(daemon.clone()))
-        .register(<dyn OAuthApi>::service(daemon.clone()))
-        .register(<dyn ModelApi>::service(daemon.clone()))
-        .register(<dyn VoiceApi>::service(daemon.clone()))
-        .register(daemon_info_svc);
+        .register(<dyn SessionApi>::service(session_svc.clone()))
+        .register(<dyn ConversationApi>::service(conversation_svc))
+        .register(<dyn AssetApi>::service(asset_svc))
+        .register(<dyn McpApi>::service(mcp_svc))
+        .register(<dyn OAuthApi>::service(oauth_svc))
+        .register(<dyn ModelApi>::service(model_svc))
+        .register(<dyn VoiceApi>::service(voice_svc))
+        .register(<dyn DaemonInfoApi>::service(daemon_info_svc));
 
     let _rest_server = net::rest::start(net::rest::ServerConfig {
         rest_dispatcher,
@@ -81,17 +89,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     tracing::info!("shutting down");
-    daemon.close_all_sessions().await?;
+    session_svc.close_all_sessions().await?;
     tracing::info!("shutdown complete");
 
     Ok(())
 }
 
 /// Build the WS dispatch function — streaming sessions only.
-///
-/// All non-streaming methods use REST. WS only handles SessionApi stream methods.
-fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> net::server::DispatchFn {
-    let session_svc = <dyn SessionApi>::service(daemon.clone());
+fn build_ws_dispatch(session_api: Arc<dyn SessionApi>) -> net::server::DispatchFn {
+    let session_svc = <dyn SessionApi>::service(session_api);
 
     Arc::new(move |method: String, params: serde_json::Value, write_tx: mpsc::Sender<String>| {
         let session_svc = session_svc.clone();

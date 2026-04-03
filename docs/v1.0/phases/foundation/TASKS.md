@@ -91,3 +91,16 @@
 | 3.E | ✅ | `DaemonToolService` — exposes REST methods as tools (schema derivation via RpcSchema deferred) | P0 | M |
 | 3.F | ✅ | `CompositeToolService` — wraps multiple `ToolService` impls, agent sees merged tool list | P0 | M |
 | 3.G | ✅ | Admin webpage calls REST endpoints — sessions, models, kill via `fetch()` | P1 | M |
+
+---
+
+## Stage 4 — Service Extraction
+
+**Goal:** Break EmbeddedDaemon monolith into focused service objects. Each internal service implements its API trait directly. `main.rs` registers individual services with RestDispatcher. EmbeddedDaemon keeps SessionApi + ConversationApi (tightly coupled) and delegates the rest for `DaemonApi` backward compat.
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 4.1 | ✅ | `McpService` implements `McpApi` + `OAuthApi` directly (move inherent methods to trait impls) | P0 | S |
+| 4.2 | ✅ | Extract `ModelService`, `AssetService`, `VoiceService`, `DaemonInfoService` | P0 | M |
+| 4.3 | ✅ | Refactor `EmbeddedDaemon` — hold `Arc` services, expose accessors, thin delegation for `DaemonApi` | P0 | M |
+| 4.4 | ✅ | `main.rs` registers individual services with `RestDispatcher` | P0 | S |

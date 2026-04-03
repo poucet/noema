@@ -4,6 +4,7 @@
 //! The daemon delegates `McpApi` and `OAuthApi` to this service.
 
 use std::sync::Arc;
+use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use simply_core::McpRegistry;
@@ -87,11 +88,15 @@ impl McpService {
         self.oauth.redirect_uri()
     }
 
-    // -----------------------------------------------------------------------
-    // McpApi methods
-    // -----------------------------------------------------------------------
+}
 
-    pub async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> {
+// ---------------------------------------------------------------------------
+// McpApi
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl McpApi for McpService {
+    async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> {
         let registry = self.registry.lock().await;
         let mut servers = Vec::new();
         for (id, config) in registry.list_servers() {
@@ -131,7 +136,7 @@ impl McpService {
         Ok(servers)
     }
 
-    pub async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> {
+    async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> {
         let auth = match request.auth_type.as_str() {
             "token" => simply_core::AuthMethod::Token {
                 token: request.auth_token.unwrap_or_default(),
@@ -187,14 +192,14 @@ impl McpService {
         Ok(())
     }
 
-    pub async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
+    async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
         registry.remove_server(server_id).await?;
         registry.save_config()?;
         Ok(())
     }
 
-    pub async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
+    async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
         let mut registry = self.registry.lock().await;
         registry.connect(server_id).await?;
         Ok(registry
@@ -203,13 +208,13 @@ impl McpService {
             .unwrap_or(0))
     }
 
-    pub async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
+    async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
         registry.disconnect(server_id).await?;
         Ok(())
     }
 
-    pub async fn get_mcp_server_tools(
+    async fn get_mcp_server_tools(
         &self,
         server_id: &str,
     ) -> anyhow::Result<Vec<McpToolInfo>> {
@@ -228,7 +233,7 @@ impl McpService {
             .collect())
     }
 
-    pub async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
+    async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
         let mut registry = self.registry.lock().await;
         let _ = registry.disconnect(server_id).await;
         registry.connect(server_id).await?;
@@ -238,7 +243,7 @@ impl McpService {
             .unwrap_or(0))
     }
 
-    pub async fn update_mcp_server_settings(
+    async fn update_mcp_server_settings(
         &self,
         server_id: &str,
         request: UpdateMcpServerRequest,
@@ -262,13 +267,13 @@ impl McpService {
         Ok(())
     }
 
-    pub async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
+    async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
         registry.cancel_retry(server_id);
         Ok(())
     }
 
-    pub async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
+    async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> {
         let config = {
             let registry = self.registry.lock().await;
             registry
@@ -287,15 +292,19 @@ impl McpService {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------
-    // OAuthApi methods
-    // -----------------------------------------------------------------------
+}
 
-    pub async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
+// ---------------------------------------------------------------------------
+// OAuthApi
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl OAuthApi for McpService {
+    async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
         self.oauth.start_flow(server_id).await
     }
 
-    pub async fn complete_oauth(
+    async fn complete_oauth(
         &self,
         server_id: &str,
         code: &str,
@@ -304,7 +313,7 @@ impl McpService {
         self.oauth.complete_with_state(server_id, code, state).await
     }
 
-    pub async fn complete_oauth_with_code(
+    async fn complete_oauth_with_code(
         &self,
         server_id: &str,
         code: &str,
@@ -312,7 +321,7 @@ impl McpService {
         self.oauth.complete_with_code(server_id, code).await
     }
 
-    pub async fn resolve_oauth_state(&self, state: &str) -> Option<String> {
+    async fn resolve_oauth_state(&self, state: &str) -> Option<String> {
         self.oauth.resolve_state(state).await
     }
 }
