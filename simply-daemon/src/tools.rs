@@ -13,18 +13,20 @@ use simply_core::ToolService;
 /// to determine if the result is binary (image/audio) or JSON text.
 fn value_to_tool_result(value: serde_json::Value, binary_response: bool) -> Vec<ToolResultContent> {
     if binary_response {
-        if let Ok(binary) = serde_json::from_value::<BinaryResponse>(value) {
-            use base64::Engine;
-            let data = base64::engine::general_purpose::STANDARD.encode(&binary.data);
-            if binary.mime_type.starts_with("image/") {
-                return vec![ToolResultContent::image(data, binary.mime_type)];
-            } else if binary.mime_type.starts_with("audio/") {
-                return vec![ToolResultContent::audio(data, binary.mime_type)];
+        use base64::Engine;
+        return match serde_json::from_value::<BinaryResponse>(value) {
+            Ok(binary) => {
+                let data = base64::engine::general_purpose::STANDARD.encode(&binary.data);
+                if binary.mime_type.starts_with("image/") {
+                    vec![ToolResultContent::image(data, binary.mime_type)]
+                } else if binary.mime_type.starts_with("audio/") {
+                    vec![ToolResultContent::audio(data, binary.mime_type)]
+                } else {
+                    vec![ToolResultContent::text(format!("[binary: {} bytes, {}]", binary.data.len(), binary.mime_type))]
+                }
             }
-            // Unknown binary — serialize as JSON text
-            let text = format!("[binary: {} bytes, {}]", binary.data.len(), binary.mime_type);
-            return vec![ToolResultContent::text(text)];
-        }
+            Err(e) => vec![ToolResultContent::text(format!("failed to parse binary response: {e}"))],
+        };
     }
     let text = serde_json::to_string_pretty(&value).unwrap_or_default();
     vec![ToolResultContent::text(text)]
