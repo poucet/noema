@@ -60,36 +60,50 @@
 |---|---|------|----------|------|
 | 3.1 | ✅ | Parse REST path annotations (`get = "/path/{param}"`, `post`, `put`, `delete`) | P0 | M |
 | 3.2 | ✅ | Parse stream path annotations (`stream = "/path"`) — WebSocket upgrade routes | P0 | S |
-| 3.3 | ✅ | Generate `RestMeta` in `ServiceMeta` (http method, path template, description, no_tool) | P0 | S |
-| 3.4 | ✅ | Generate `rest_dispatch` on service struct — match HTTP method + path → call trait method | P0 | L |
+| 3.3 | ✅ | Generate `RouteMeta` in `ServiceMeta` with `RouteKind::Rest(HttpMethod)` or `RouteKind::Stream` | P0 | S |
+| 3.4 | ✅ | Generate `rest_dispatch_by_name` — match method name → call trait method, deserialize params | P0 | L |
 | 3.5 | ✅ | Extract `///` doc comments into metadata for tool descriptions | P0 | S |
-| 3.6 | ✅ | Generate `RestService` trait impl for each service (object-safe REST dispatch) | P0 | S |
-| 3.7 | ⬜ | Add `RpcSchema` trait for JSON Schema overrides; generate `tool_definitions()` | P0 | M |
-| 3.8 | ⬜ | Update `impl_remote_xxx!` — generate HTTP client code (reqwest) for REST, WS for stream | P0 | L |
+| 3.6 | ✅ | Generate `RestService` trait impl (object-safe dispatch by method name) | P0 | S |
+| 3.7 | ✅ | Generate REST client code in `impl_remote_xxx!` — `rest_call` for REST methods, `rpc_call` for stream | P0 | L |
+| 3.8 | ✅ | `BinaryResponse` type — detected from return type, `immutable_cache` annotation | P0 | M |
+| 3.9 | ✅ | Remove obsolete `base64_return` and `rest_get` annotations | P0 | S |
+| 3.10 | ⬜ | `RpcSchema` trait for JSON Schema overrides; generate `tool_definitions()` | P0 | M |
+
+### Server + transport
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| 3.11 | ✅ | `RestDispatcher` with matchit routing (literal-before-param priority) | P0 | M |
+| 3.12 | ✅ | Axum HTTP server replaces hand-rolled hyper (daemon + tests) | P0 | M |
+| 3.13 | ✅ | `RestResult` carries `RouteMeta` for response encoding (binary, cache headers) | P0 | S |
+| 3.14 | ✅ | Move generic protocol types (`WsRequest`, `WsResponse`, etc.) to simply-rpc | P0 | S |
+| 3.15 | ✅ | Rename `ws/` → `net/` in daemon | P0 | S |
+| 3.16 | ⬜ | Move WS transport (`WsConnection`, `server.rs`) to simply-rpc (generic over Stream type) | P0 | L |
+| 3.17 | ⬜ | Merge REST + WS into single axum port (WS upgrade on stream paths) | P0 | M |
 
 ### Daemon wiring
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 3.9 | ✅ | Add REST annotations to all 7 existing API traits | P0 | M |
-| 3.10 | ✅ | Add stream path annotations to SessionApi (`/session/new`, `/session/{id}`, etc.) | P0 | S |
-| 3.11 | ✅ | Reshape SessionApi: fold `seed_context` into `CreateSessionOptions`, remove `reload` | P0 | S |
-| 3.12 | ✅ | Add `DaemonInfoApi` trait (`health`, `kill`, `version`) with REST annotations | P0 | S |
-| 3.13 | ✅ | Wire `RestDispatcher` in daemon REST server — auto-route all services | P0 | M |
-| 3.14 | ⬜ | Implement `ToolService` from generated tools — register in `McpToolRegistry` | P0 | M |
-| 3.15 | ⬜ | Update `RemoteDaemon` — hold base URL + lazy WS, HTTP for REST, WS for streams | P0 | M |
-| 3.16 | ⬜ | Merge REST + WS into single port (WS upgrade detection on stream paths) | P0 | M |
-| 3.17 | ⬜ | Remove old WS dispatch for REST-annotated methods | P0 | S |
-| 3.18 | ⬜ | Update admin webpage to call REST endpoints via `fetch()` | P1 | M |
+| 3.18 | ✅ | Add REST annotations to all API traits | P0 | M |
+| 3.19 | ✅ | Add stream path annotations to SessionApi (`/session/new`, `/session/{id}`) | P0 | S |
+| 3.20 | ✅ | Reshape SessionApi: fold `seed_context` into `CreateSessionOptions`, remove `reload` | P0 | S |
+| 3.21 | ✅ | Add `DaemonInfoApi` trait (`health`, `kill`, `version`) | P0 | S |
+| 3.22 | ✅ | Wire `RestDispatcher` with all services in daemon + `DaemonInfoApi` | P0 | M |
+| 3.23 | ✅ | `RemoteDaemon` uses reqwest for REST via `rest_call`, WS for streams | P0 | M |
+| 3.24 | ✅ | `WsConnection.rest_call` multiplexes REST over WebSocket | P0 | S |
+| 3.25 | ⬜ | Implement `ToolService` from generated tools — register in `McpToolRegistry` | P0 | M |
+| 3.26 | ⬜ | Remove old WS dispatch for REST-annotated methods | P0 | S |
+| 3.27 | ⬜ | Update admin webpage to call REST endpoints via `fetch()` | P1 | M |
 
-### Tests
+### Tests (90 total)
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 3.T1 | ✅ | REST metadata tests (paths, HTTP methods, doc comments, no_tool) | P0 | S |
-| 3.T2 | ✅ | Direct `rest_dispatch` unit tests (GET/POST/PUT/DELETE, path params, body params) | P0 | M |
-| 3.T3 | ✅ | Client macro round-trip tests (WS dispatch) | P0 | S |
-| 3.T4 | ✅ | Raw HTTP integration tests (reqwest against real server, full CRUD) | P0 | M |
-| 3.T5 | ✅ | Stream path metadata tests | P0 | S |
-| 3.T6 | ✅ | REST + WS coexistence tests (REST dispatch on streaming trait, stream paths excluded) | P0 | S |
-| 3.T7 | ✅ | Raw WebSocket integration test (tokio-tungstenite client, real server) | P0 | M |
+| 3.T1 | ✅ | REST metadata tests (paths, HTTP methods, doc comments, no_tool, binary_response, immutable_cache) | P0 | S |
+| 3.T2 | ✅ | RestDispatcher unit tests (GET/POST/PUT/DELETE, path params, body params, matchit routing) | P0 | M |
+| 3.T3 | ✅ | Client macro round-trip tests (REST `rest_call` + WS `rpc_call`) | P0 | S |
+| 3.T4 | ✅ | Raw HTTP integration tests — reqwest against axum server, full CRUD | P0 | M |
+| 3.T5 | ✅ | Stream path metadata + REST/WS coexistence tests | P0 | S |
+| 3.T6 | ✅ | Raw WebSocket integration test (tokio-tungstenite) | P0 | M |
+| 3.T7 | ✅ | BinaryResponse raw HTTP tests — store, get raw bytes, caching headers, round-trip | P0 | M |
