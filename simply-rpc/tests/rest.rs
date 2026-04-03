@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, RpcService};
+use simply_rpc::{HttpMethod, RestDispatcher, RestService, RpcClient, RpcService};
 
 // ---------------------------------------------------------------------------
 // Test types
@@ -393,4 +393,243 @@ async fn ws_dispatch_still_works_for_non_rest() {
     assert!(dr.is_some());
     let count: usize = serde_json::from_value(dr.unwrap().result.unwrap()).unwrap();
     assert_eq!(count, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Client macro tests — round-trip through WS dispatch (existing transport)
+// ---------------------------------------------------------------------------
+
+/// Mock RPC client that dispatches locally through the service's WS dispatch.
+struct MockWsClient {
+    svc: WidgetApiService<InMemoryWidgets>,
+}
+
+#[async_trait]
+impl RpcClient for MockWsClient {
+    type Stream = tokio::sync::broadcast::Receiver<String>;
+
+    async fn rpc_call(&self, method: &str, params: Value) -> anyhow::Result<Value> {
+        match self.svc.dispatch(method, params).await {
+            Some(dr) => dr.result,
+            None => Err(anyhow::anyhow!("unknown method: {method}")),
+        }
+    }
+
+    async fn register_stream(&self, _id: &str) -> Self::Stream {
+        // Dummy stream for testing
+        let (tx, rx) = tokio::sync::broadcast::channel(1);
+        drop(tx);
+        rx
+    }
+
+    async fn unregister_stream(&self, _id: &str) {}
+}
+
+impl_remote_widget_api!(MockWsClient);
+
+#[tokio::test]
+async fn client_list_widgets() {
+    let client = MockWsClient {
+        svc: make_svc(vec![
+            Widget { id: "a".into(), label: "A".into() },
+            Widget { id: "b".into(), label: "B".into() },
+        ]),
+    };
+
+    let items = client.list_widgets().await.unwrap();
+    assert_eq!(items.len(), 2);
+}
+
+#[tokio::test]
+async fn client_get_widget() {
+    let client = MockWsClient {
+        svc: make_svc(vec![Widget { id: "x".into(), label: "X".into() }]),
+    };
+
+    let widget = client.get_widget("x").await.unwrap();
+    assert_eq!(widget.id, "x");
+    assert_eq!(widget.label, "X");
+}
+
+#[tokio::test]
+async fn client_create_widget() {
+    let client = MockWsClient {
+        svc: make_svc(vec![]),
+    };
+
+    let created = client
+        .create_widget(Widget { id: "new".into(), label: "New".into() })
+        .await
+        .unwrap();
+    assert_eq!(created.id, "new");
+
+    let items = client.list_widgets().await.unwrap();
+    assert_eq!(items.len(), 1);
+}
+
+#[tokio::test]
+async fn client_delete_widget() {
+    let client = MockWsClient {
+        svc: make_svc(vec![Widget { id: "d".into(), label: "D".into() }]),
+    };
+
+    client.delete_widget("d").await.unwrap();
+    let items = client.list_widgets().await.unwrap();
+    assert!(items.is_empty());
+}
+
+#[tokio::test]
+async fn client_rename_widget() {
+    let client = MockWsClient {
+        svc: make_svc(vec![Widget { id: "1".into(), label: "Old".into() }]),
+    };
+
+    client.rename_widget("1", "New").await.unwrap();
+    let widget = client.get_widget("1").await.unwrap();
+    assert_eq!(widget.label, "New");
+}
+
+#[tokio::test]
+async fn client_send_command() {
+    let client = MockWsClient {
+        svc: make_svc(vec![]),
+    };
+
+    let result = client.send_command("abc", "reboot").await.unwrap();
+    assert_eq!(result, "abc:reboot");
+}
+
+#[tokio::test]
+async fn client_skip_method_errors() {
+    let client = MockWsClient {
+        svc: make_svc(vec![]),
+    };
+
+    let result = client.internal_op().await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not available over RPC"));
+}
+
+#[tokio::test]
+async fn client_error_propagated() {
+    let client = MockWsClient {
+        svc: make_svc(vec![]),
+    };
+
+    let result = client.get_widget("missing").await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
+}
+
+// ---------------------------------------------------------------------------
+// RestDispatcher tests — simulates raw HTTP request routing
+// ---------------------------------------------------------------------------
+
+fn make_rest_dispatcher(widgets: Vec<Widget>) -> RestDispatcher {
+    let svc = Arc::new(make_svc(widgets));
+    RestDispatcher::new().register(svc as Arc<dyn RestService>)
+}
+
+#[tokio::test]
+async fn http_get_collection() {
+    let rd = make_rest_dispatcher(vec![
+        Widget { id: "1".into(), label: "A".into() },
+        Widget { id: "2".into(), label: "B".into() },
+    ]);
+
+    let result = rd.dispatch(HttpMethod::Get, "/widget", Value::Null).await;
+    let items: Vec<Widget> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
+    assert_eq!(items.len(), 2);
+}
+
+#[tokio::test]
+async fn http_get_single_by_path() {
+    let rd = make_rest_dispatcher(vec![Widget { id: "abc".into(), label: "Thing".into() }]);
+
+    let result = rd.dispatch(HttpMethod::Get, "/widget/abc", Value::Null).await;
+    let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
+    assert_eq!(widget.id, "abc");
+}
+
+#[tokio::test]
+async fn http_post_with_json_body() {
+    let rd = make_rest_dispatcher(vec![]);
+
+    let body = json!({"id": "w1", "label": "Widget One"});
+    let result = rd.dispatch(HttpMethod::Post, "/widget", body).await;
+    let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
+    assert_eq!(widget.id, "w1");
+    assert_eq!(widget.label, "Widget One");
+}
+
+#[tokio::test]
+async fn http_delete_by_path() {
+    let rd = make_rest_dispatcher(vec![Widget { id: "x".into(), label: "X".into() }]);
+
+    let result = rd.dispatch(HttpMethod::Delete, "/widget/x", Value::Null).await;
+    assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
+
+    // Verify deleted
+    let result = rd.dispatch(HttpMethod::Get, "/widget", Value::Null).await;
+    let items: Vec<Widget> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
+    assert!(items.is_empty());
+}
+
+#[tokio::test]
+async fn http_put_path_and_body() {
+    let rd = make_rest_dispatcher(vec![Widget { id: "1".into(), label: "Old".into() }]);
+
+    let result = rd.dispatch(HttpMethod::Put, "/widget/1", json!({"label": "New"})).await;
+    assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
+
+    let result = rd.dispatch(HttpMethod::Get, "/widget/1", Value::Null).await;
+    let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
+    assert_eq!(widget.label, "New");
+}
+
+#[tokio::test]
+async fn http_post_nested_path() {
+    let rd = make_rest_dispatcher(vec![]);
+
+    let result = rd.dispatch(HttpMethod::Post, "/widget/w1/command", json!({"action": "go"})).await;
+    let response: String = serde_json::from_value(result.unwrap().unwrap()).unwrap();
+    assert_eq!(response, "w1:go");
+}
+
+#[tokio::test]
+async fn http_post_no_params() {
+    let rd = make_rest_dispatcher(vec![]);
+
+    let result = rd.dispatch(HttpMethod::Post, "/widget/kill", Value::Null).await;
+    assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
+}
+
+#[tokio::test]
+async fn http_unknown_path_returns_none() {
+    let rd = make_rest_dispatcher(vec![]);
+
+    let result = rd.dispatch(HttpMethod::Get, "/unknown/path", Value::Null).await;
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn http_error_propagated() {
+    let rd = make_rest_dispatcher(vec![]);
+
+    let result = rd.dispatch(HttpMethod::Get, "/widget/missing", Value::Null).await;
+    assert!(result.unwrap().is_err());
+}
+
+#[tokio::test]
+async fn rest_meta_available_from_dispatcher() {
+    let rd = make_rest_dispatcher(vec![]);
+
+    let metas = rd.rest_metas();
+    assert!(!metas.is_empty());
+
+    let paths: Vec<&str> = metas.iter().map(|m| m.path_template).collect();
+    assert!(paths.contains(&"/widget"));
+    assert!(paths.contains(&"/widget/{id}"));
+    assert!(paths.contains(&"/widget/{id}/command"));
+    assert!(paths.contains(&"/widget/kill"));
 }
