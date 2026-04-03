@@ -28,6 +28,17 @@ fn http_method_tokens(method: &HttpMethod) -> TokenStream {
     }
 }
 
+/// Check if a return type is `BinaryResponse` (or `Result<BinaryResponse>`).
+fn is_binary_response_type(return_kind: &ReturnKind) -> bool {
+    match return_kind {
+        ReturnKind::ResultValue { inner } | ReturnKind::RawValue { inner } => {
+            let ty_str = quote! { #inner }.to_string().replace(' ', "");
+            ty_str == "BinaryResponse" || ty_str.ends_with("::BinaryResponse")
+        }
+        _ => false,
+    }
+}
+
 /// Generate the `XxxApiService<T>` struct + `RpcService` impl + metadata constant.
 pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
     let service_name = parsed.service_name();
@@ -82,6 +93,8 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
                 None => quote! { None },
             };
             let no_tool = m.no_tool;
+            let immutable_cache = m.immutable_cache;
+            let binary_response = is_binary_response_type(&m.return_kind);
             Some(quote! {
                 ::simply_rpc::RouteMeta {
                     kind: #kind,
@@ -89,6 +102,8 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
                     method_name: #method_name,
                     description: #description,
                     no_tool: #no_tool,
+                    binary_response: #binary_response,
+                    immutable_cache: #immutable_cache,
                 }
             })
         })

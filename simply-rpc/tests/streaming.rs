@@ -282,7 +282,7 @@ async fn rest_dispatch_list_on_streaming_trait() {
     let rd = make_channel_rd(Arc::new(InMemoryChannels::new()));
 
     // REST methods work through RestDispatcher
-    let result = rd.dispatch(HttpMethod::Get, "/chan", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/chan", Value::Null).await.map(|rr| rr.result);
     let channels: Vec<ChannelInfo> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert!(channels.is_empty());
 }
@@ -297,7 +297,7 @@ async fn rest_dispatch_delete_on_streaming_trait() {
     svc.dispatch("chan.open_channel", json!("rest_del")).await.unwrap();
 
     // Delete via REST dispatch
-    let result = rd.dispatch(HttpMethod::Delete, "/chan/ch_rest_del", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Delete, "/chan/ch_rest_del", Value::Null).await.map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
@@ -306,7 +306,7 @@ async fn rest_dispatch_stream_path_returns_none() {
     let rd = make_channel_rd(Arc::new(InMemoryChannels::new()));
 
     // Stream paths should NOT be dispatched as REST
-    let result = rd.dispatch(HttpMethod::Get, "/chan/new", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/chan/new", Value::Null).await.map(|rr| rr.result);
     assert!(result.is_none(), "stream paths should not match REST dispatch");
 }
 
@@ -358,7 +358,7 @@ impl RpcClient for MockStreamClient {
         body: Value,
     ) -> anyhow::Result<Value> {
         match self.rd.dispatch(http_method, path, body).await {
-            Some(result) => result,
+            Some(rr) => rr.result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
     }
@@ -457,12 +457,14 @@ async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
         };
 
         match rd.dispatch(http_method, &path, body).await {
-            Some(Ok(value)) => AxumJson(value).into_response(),
-            Some(Err(e)) => {
-                let msg = e.to_string();
-                let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
-                (status, msg).into_response()
-            }
+            Some(rr) => match rr.result {
+                Ok(value) => AxumJson(value).into_response(),
+                Err(e) => {
+                    let msg = e.to_string();
+                    let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
+                    (status, msg).into_response()
+                }
+            },
             None => (StatusCode::NOT_FOUND, "not found").into_response(),
         }
     }

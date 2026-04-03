@@ -126,31 +126,39 @@ async fn rest_handler(
         _ => serde_json::Value::Null,
     };
 
-    match state.rest_dispatcher.dispatch(http_method, &path, body).await {
-        Some(Ok(value)) => {
-            // Binary blob response: "data" (base64) + "mime_type" fields
-            if let (Some(data_val), Some(mime_val)) = (value.get("data"), value.get("mime_type")) {
-                let b64 = data_val.as_str().unwrap_or_default();
-                let mime_type = mime_val.as_str().unwrap_or("application/octet-stream");
-                match simply_rpc::decode_base64(b64) {
-                    Ok(data) => {
-                        let param = path.rsplit('/').next().unwrap_or("");
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header("Content-Type", mime_type)
-                            .header("Content-Length", data.len().to_string())
-                            .header("Cache-Control", "public, max-age=31536000, immutable")
-                            .header("ETag", format!("\"{param}\""))
-                            .body(Body::from(data))
-                            .unwrap()
-                    }
-                    Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "base64 decode error").into_response(),
-                }
+    let rest_result = match state.rest_dispatcher.dispatch(http_method, &path, body).await {
+        Some(r) => r,
+        None => return (StatusCode::NOT_FOUND, "not found").into_response(),
+    };
+
+    match rest_result.result {
+        Ok(value) => {
+            let mut response = if rest_result.meta.binary_response {
+                // BinaryResponse: decode base64 data, serve raw bytes
+                let br: simply_rpc::BinaryResponse = match serde_json::from_value(value) {
+                    Ok(br) => br,
+                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+                };
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", &br.mime_type)
+                    .header("Content-Length", br.data.len().to_string())
+                    .body(Body::from(br.data))
+                    .unwrap()
             } else {
                 Json(value).into_response()
+            };
+
+            if rest_result.meta.immutable_cache {
+                let etag = path.rsplit('/').next().unwrap_or("");
+                let headers = response.headers_mut();
+                headers.insert("Cache-Control", "public, max-age=31536000, immutable".parse().unwrap());
+                headers.insert("ETag", format!("\"{etag}\"").parse().unwrap());
             }
+
+            response
         }
-        Some(Err(e)) => {
+        Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") || msg.contains("No such file") {
                 (StatusCode::NOT_FOUND, msg).into_response()
@@ -158,6 +166,5 @@ async fn rest_handler(
                 (StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()
             }
         }
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
 }

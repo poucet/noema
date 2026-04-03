@@ -104,6 +104,14 @@ struct RouteEntry {
     method_name: &'static str,
     /// The service that handles this method
     service: Arc<dyn RestService>,
+    /// Metadata about this route (binary_response, immutable_cache, etc.)
+    route_meta: &'static crate::RouteMeta,
+}
+
+/// Result of a REST dispatch — the RPC result plus route metadata for response encoding.
+pub struct RestResult {
+    pub result: RpcResult,
+    pub meta: &'static crate::RouteMeta,
 }
 
 /// Dispatcher that routes REST requests using matchit for path matching.
@@ -136,6 +144,7 @@ impl RestDispatcher {
             let entry = RouteEntry {
                 method_name: rm.method_name,
                 service: svc.clone(),
+                route_meta: rm,
             };
             if let Err(e) = router.insert(rm.path_template, entry) {
                 panic!("failed to register route {} {}: {}", rm.path_template, rm.method_name, e);
@@ -147,12 +156,15 @@ impl RestDispatcher {
 
     /// Dispatch an HTTP request. Uses matchit to resolve path, extract params,
     /// merge with body, and call the appropriate service.
+    ///
+    /// Returns `RestResult` with both the RPC result and route metadata
+    /// (so the server knows how to encode the response — JSON, binary, etc.)
     pub async fn dispatch(
         &self,
         http_method: crate::HttpMethod,
         path: &str,
         body: Value,
-    ) -> Option<RpcResult> {
+    ) -> Option<RestResult> {
         let router = self.routers.get(&http_method)?;
         let matched = router.at(path).ok()?;
         let entry = matched.value;
@@ -165,7 +177,6 @@ impl RestDispatcher {
                 Value::Object(map) => map,
                 Value::Null => serde_json::Map::new(),
                 other => {
-                    // Single body value — wrap it (shouldn't normally happen with path params)
                     let mut map = serde_json::Map::new();
                     map.insert("_body".to_string(), other);
                     map
@@ -177,7 +188,8 @@ impl RestDispatcher {
             Value::Object(obj)
         };
 
-        entry.service.rest_dispatch_by_name(entry.method_name, params).await
+        let result = entry.service.rest_dispatch_by_name(entry.method_name, params).await?;
+        Some(RestResult { result, meta: entry.route_meta })
     }
 
     /// Collect route metadata from all registered services.

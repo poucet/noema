@@ -119,7 +119,7 @@ async fn dispatch_list_no_params() {
         Item { id: "1".into(), name: "Alpha".into() },
         Item { id: "2".into(), name: "Beta".into() },
     ]);
-    let result = rd.dispatch(HttpMethod::Get, "/items", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/items", Value::Null).await.map(|rr| rr.result);
     let items: Vec<Item> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].name, "Alpha");
@@ -128,7 +128,7 @@ async fn dispatch_list_no_params() {
 #[tokio::test]
 async fn dispatch_single_str_ref_param() {
     let rd = make_rd(vec![Item { id: "abc".into(), name: "Thing".into() }]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/abc", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/items/abc", Value::Null).await.map(|rr| rr.result);
     let item: Item = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(item.id, "abc");
     assert_eq!(item.name, "Thing");
@@ -137,10 +137,10 @@ async fn dispatch_single_str_ref_param() {
 #[tokio::test]
 async fn dispatch_owned_param() {
     let rd = make_rd(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/items", json!({"id": "x", "name": "X"})).await;
+    let result = rd.dispatch(HttpMethod::Post, "/items", json!({"id": "x", "name": "X"})).await.map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 
-    let result = rd.dispatch(HttpMethod::Get, "/items", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/items", Value::Null).await.map(|rr| rr.result);
     let items: Vec<Item> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, "x");
@@ -149,10 +149,10 @@ async fn dispatch_owned_param() {
 #[tokio::test]
 async fn dispatch_multi_params() {
     let rd = make_rd(vec![Item { id: "1".into(), name: "Old".into() }]);
-    let result = rd.dispatch(HttpMethod::Put, "/items/1", json!({"name": "New"})).await;
+    let result = rd.dispatch(HttpMethod::Put, "/items/1", json!({"name": "New"})).await.map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 
-    let result = rd.dispatch(HttpMethod::Get, "/items/1", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/items/1", Value::Null).await.map(|rr| rr.result);
     let item: Item = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(item.name, "New");
 }
@@ -163,7 +163,7 @@ async fn dispatch_raw_return() {
         Item { id: "1".into(), name: "A".into() },
         Item { id: "2".into(), name: "B".into() },
     ]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/count", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/items/count", Value::Null).await.map(|rr| rr.result);
     let count: usize = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(count, 2);
 }
@@ -184,7 +184,7 @@ async fn dispatch_skip_method_not_dispatched() {
 #[tokio::test]
 async fn dispatch_error_propagated() {
     let rd = make_rd(vec![]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/missing", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/items/missing", Value::Null).await.map(|rr| rr.result);
     assert!(result.unwrap().is_err());
 }
 
@@ -192,7 +192,7 @@ async fn dispatch_error_propagated() {
 async fn dispatch_bad_params_returns_error() {
     let rd = make_rd(vec![]);
     // rename_item expects {name} in body but we send null
-    let result = rd.dispatch(HttpMethod::Put, "/items/1", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Put, "/items/1", Value::Null).await.map(|rr| rr.result);
     assert!(result.unwrap().is_err());
 }
 
@@ -209,7 +209,7 @@ fn make_rest_dispatcher(items: Vec<Item>) -> RestDispatcher {
 #[tokio::test]
 async fn rest_dispatcher_routes_correctly() {
     let rd = make_rest_dispatcher(vec![Item { id: "1".into(), name: "One".into() }]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/count", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/items/count", Value::Null).await.map(|rr| rr.result);
     let count: usize = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(count, 1);
 }
@@ -217,7 +217,7 @@ async fn rest_dispatcher_routes_correctly() {
 #[tokio::test]
 async fn rest_dispatcher_unknown_path_returns_none() {
     let rd = make_rest_dispatcher(vec![]);
-    let result = rd.dispatch(HttpMethod::Get, "/nope/nothing", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/nope/nothing", Value::Null).await.map(|rr| rr.result);
     assert!(result.is_none());
 }
 
@@ -253,7 +253,7 @@ impl RpcClient for MockClient {
         body: Value,
     ) -> anyhow::Result<Value> {
         match self.rd.dispatch(http_method, path, body).await {
-            Some(result) => result,
+            Some(rr) => rr.result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
     }

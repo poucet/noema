@@ -235,7 +235,7 @@ async fn rest_dispatch_get_collection() {
         Widget { id: "1".into(), label: "A".into() },
         Widget { id: "2".into(), label: "B".into() },
     ]);
-    let result = rd.dispatch(HttpMethod::Get, "/widget", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/widget", Value::Null).await.map(|rr| rr.result);
     let items: Vec<Widget> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(items.len(), 2);
 }
@@ -243,7 +243,7 @@ async fn rest_dispatch_get_collection() {
 #[tokio::test]
 async fn rest_dispatch_get_single() {
     let rd = make_rd_from_widgets(vec![Widget { id: "abc".into(), label: "Thing".into() }]);
-    let result = rd.dispatch(HttpMethod::Get, "/widget/abc", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/widget/abc", Value::Null).await.map(|rr| rr.result);
     let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(widget.id, "abc");
 }
@@ -251,7 +251,7 @@ async fn rest_dispatch_get_single() {
 #[tokio::test]
 async fn rest_dispatch_post_body() {
     let rd = make_rd_from_widgets(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/widget", json!({"id": "new", "label": "New Widget"})).await;
+    let result = rd.dispatch(HttpMethod::Post, "/widget", json!({"id": "new", "label": "New Widget"})).await.map(|rr| rr.result);
     let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(widget.id, "new");
 }
@@ -259,16 +259,16 @@ async fn rest_dispatch_post_body() {
 #[tokio::test]
 async fn rest_dispatch_delete() {
     let rd = make_rd_from_widgets(vec![Widget { id: "del".into(), label: "D".into() }]);
-    let result = rd.dispatch(HttpMethod::Delete, "/widget/del", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Delete, "/widget/del", Value::Null).await.map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
 #[tokio::test]
 async fn rest_dispatch_put_path_and_body() {
     let rd = make_rd_from_widgets(vec![Widget { id: "1".into(), label: "Old".into() }]);
-    let result = rd.dispatch(HttpMethod::Put, "/widget/1", json!({"label": "New"})).await;
+    let result = rd.dispatch(HttpMethod::Put, "/widget/1", json!({"label": "New"})).await.map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
-    let result = rd.dispatch(HttpMethod::Get, "/widget/1", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/widget/1", Value::Null).await.map(|rr| rr.result);
     let w: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(w.label, "New");
 }
@@ -276,7 +276,7 @@ async fn rest_dispatch_put_path_and_body() {
 #[tokio::test]
 async fn rest_dispatch_nested_path() {
     let rd = make_rd_from_widgets(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/widget/w1/command", json!({"action": "restart"})).await;
+    let result = rd.dispatch(HttpMethod::Post, "/widget/w1/command", json!({"action": "restart"})).await.map(|rr| rr.result);
     let r: String = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(r, "w1:restart");
 }
@@ -284,7 +284,7 @@ async fn rest_dispatch_nested_path() {
 #[tokio::test]
 async fn rest_dispatch_post_no_params() {
     let rd = make_rd_from_widgets(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/widget/kill", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Post, "/widget/kill", Value::Null).await.map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
@@ -338,7 +338,7 @@ impl RpcClient for MockWsClient {
         body: Value,
     ) -> anyhow::Result<Value> {
         match self.rd.dispatch(http_method, path, body).await {
-            Some(result) => result,
+            Some(rr) => rr.result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
     }
@@ -439,12 +439,14 @@ async fn start_test_server(widgets: Vec<Widget>) -> String {
         };
 
         match rd.dispatch(http_method, &path, body).await {
-            Some(Ok(value)) => AxumJson(value).into_response(),
-            Some(Err(e)) => {
-                let msg = e.to_string();
-                let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
-                (status, msg).into_response()
-            }
+            Some(rr) => match rr.result {
+                Ok(value) => AxumJson(value).into_response(),
+                Err(e) => {
+                    let msg = e.to_string();
+                    let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
+                    (status, msg).into_response()
+                }
+            },
             None => (StatusCode::NOT_FOUND, "not found").into_response(),
         }
     }

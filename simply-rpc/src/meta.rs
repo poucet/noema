@@ -29,6 +29,10 @@ pub struct RouteMeta {
     pub description: Option<&'static str>,
     /// Whether this method is excluded from tool generation.
     pub no_tool: bool,
+    /// Return type is `BinaryResponse` — serve raw bytes instead of JSON.
+    pub binary_response: bool,
+    /// Add immutable caching headers (Cache-Control + ETag).
+    pub immutable_cache: bool,
 }
 
 impl RouteMeta {

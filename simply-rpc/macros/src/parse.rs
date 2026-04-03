@@ -76,6 +76,8 @@ pub struct ParsedMethod {
     pub rest_endpoint: Option<RestEndpoint>,
     /// Whether to exclude this method from tool generation (`#[rpc(no_tool)]`).
     pub no_tool: bool,
+    /// Response is immutably cacheable (`#[rpc(immutable_cache)]`). Adds Cache-Control + ETag headers.
+    pub immutable_cache: bool,
     /// Doc comment extracted from `///` attributes.
     pub doc_comment: Option<String>,
     pub method_name: String,
@@ -122,6 +124,7 @@ impl ParsedTrait {
                 rest_get: rpc_attrs.rest_get,
                 rest_endpoint: rpc_attrs.rest_endpoint,
                 no_tool: rpc_attrs.no_tool,
+                immutable_cache: rpc_attrs.immutable_cache,
                 doc_comment,
                 method_name,
                 params,
@@ -167,6 +170,7 @@ struct RpcAttrs {
     rest_get: bool,
     rest_endpoint: Option<RestEndpoint>,
     no_tool: bool,
+    immutable_cache: bool,
 }
 
 /// Extract `{name}` path parameters from a path template like `/session/{session_id}/message`.
@@ -214,6 +218,7 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
         rest_get: false,
         rest_endpoint: None,
         no_tool: false,
+        immutable_cache: false,
     };
 
     for attr in attrs {
@@ -240,6 +245,9 @@ fn detect_rpc_attrs(attrs: &[syn::Attribute]) -> RpcAttrs {
             }
             if tokens.contains("no_tool") {
                 result.no_tool = true;
+            }
+            if tokens.contains("immutable_cache") {
+                result.immutable_cache = true;
             }
             let token_str = tokens.replace(' ', "");
             for segment in token_str.split(',') {
