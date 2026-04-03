@@ -273,7 +273,7 @@ where
             document_resolver,
             simply_core::ExecutionContext::default(),
             evt_tx,
-        );
+        ).await?;
 
         self.sessions.lock().await.insert(session_id.clone(), ManagedSession {
             info: info.clone(),
@@ -328,6 +328,7 @@ where
         managed.info.model_id = model_id.to_string();
         Ok(())
     }
+
 
     async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()> {
         tracing::info!(event_type = %event.event_type, "inbound event received");

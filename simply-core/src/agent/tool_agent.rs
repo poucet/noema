@@ -160,6 +160,27 @@ impl Agent for ToolAgent {
 
             self.resolve_documents(&mut request).await;
 
+            // Log what we're sending to the LLM
+            tracing::info!(
+                model = model.name(),
+                iteration,
+                message_count = messages.len(),
+                tool_count = request.tools.as_ref().map_or(0, |t| t.len()),
+                "sending to LLM"
+            );
+            for (i, msg) in messages.iter().enumerate() {
+                let preview: String = msg.payload.content.iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::Text { text } => Some(text.chars().take(40).collect::<String>()),
+                        ContentBlock::ToolCall(tc) => Some(format!("[tool:{}]", tc.name)),
+                        ContentBlock::ToolResult(_) => Some("[tool_result]".to_string()),
+                        _ => None,
+                    })
+                    .next()
+                    .unwrap_or_default();
+                tracing::debug!(i, role = ?msg.role, preview, "  msg");
+            }
+
             let mut stream = model.stream_chat(&request).await?;
 
             let mut accumulated_text = String::new();

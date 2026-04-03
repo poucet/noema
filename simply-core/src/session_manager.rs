@@ -108,7 +108,10 @@ impl SessionManager {
     }
 
     /// Create a session from persistence mode, seed messages, and optional system prompt.
-    pub fn create<S: StorageTypes + 'static>(
+    ///
+    /// For `Persistent`: opens the existing conversation from storage (loads history).
+    /// For `Ephemeral`: creates an in-memory context.
+    pub async fn create<S: StorageTypes + 'static>(
         session_id: impl Into<String>,
         persistence: Persistence,
         seed: Vec<ChatMessage>,
@@ -119,7 +122,7 @@ impl SessionManager {
         document_resolver: Arc<dyn DocumentResolver>,
         execution_context: ExecutionContext,
         event_tx: SessionEventSender,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         match persistence {
             Persistence::Ephemeral => {
                 let mut ctx = match system_prompt {
@@ -129,14 +132,14 @@ impl SessionManager {
                 for msg in seed {
                     ctx.add(msg);
                 }
-                Self::new(session_id, ctx, model, tools, document_resolver, execution_context, event_tx)
+                Ok(Self::new(session_id, ctx, model, tools, document_resolver, execution_context, event_tx))
             }
             Persistence::Persistent { conversation_id } => {
-                let mut ctx = Session::new(coordinator, conversation_id);
+                let mut ctx = Session::open(coordinator, conversation_id).await?;
                 for msg in seed {
                     ctx.add(msg);
                 }
-                Self::new(session_id, ctx, model, tools, document_resolver, execution_context, event_tx)
+                Ok(Self::new(session_id, ctx, model, tools, document_resolver, execution_context, event_tx))
             }
         }
     }
