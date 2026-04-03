@@ -15,6 +15,13 @@ use serenity::prelude::*;
 use simply_daemon::api::{DaemonApi, McpApi, RegisterEphemeralRequest};
 use simply_daemon::RemoteDaemon;
 
+/// Key for storing the MCP server in serenity's TypeMap (to inject cache on ready).
+pub struct McpServerKey;
+
+impl TypeMapKey for McpServerKey {
+    type Value = mcp::LuminaMcpServer;
+}
+
 /// Key for storing the daemon connection in serenity's TypeMap.
 pub struct DaemonKey;
 
@@ -65,8 +72,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("connected to simply-daemon");
 
     // Start Lumina's MCP server and register with daemon
-    let mcp_server = mcp::LuminaMcpServer::new();
-    let _mcp_handle = simply_daemon::mcp::start_server(mcp_server).await?;
+    let http = Arc::new(serenity::http::Http::new(&token));
+    let mcp_server = mcp::LuminaMcpServer::new(http);
+    let _mcp_handle = simply_daemon::mcp::start_server(mcp_server.clone()).await?;
     let mcp_url = _mcp_handle.url();
     tracing::info!(url = %mcp_url, "lumina MCP server started");
 
@@ -97,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
         .type_map_insert::<ConfigKey>(lumina_cfg)
         .type_map_insert::<CommandRegistry>(registry)
         .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new()))
+        .type_map_insert::<McpServerKey>(mcp_server)
         .await?;
 
     tracing::info!("lumina starting");
@@ -114,6 +123,15 @@ struct Handler {
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
         tracing::info!(user = %ready.user.name, "connected to Discord — use .sync to register commands");
+
+        // Inject the gateway cache into the MCP server so cache-dependent tools work
+        {
+            let data = ctx.data.read().await;
+            if let Some(mcp) = data.get::<McpServerKey>() {
+                mcp.set_cache(ctx.cache.clone());
+                tracing::info!("injected gateway cache into lumina MCP server");
+            }
+        }
 
         if let Some(channel_id) = self.status_channel_id {
             // Purge last message, then post status — mirrors Python Lumina behavior
