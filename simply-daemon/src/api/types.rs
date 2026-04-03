@@ -103,7 +103,7 @@ pub struct InboundEvent {
 }
 
 /// Information about a stored conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, simply_rpc::IntoContent)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationInfo {
     pub id: ConversationId,
     pub name: Option<String>,

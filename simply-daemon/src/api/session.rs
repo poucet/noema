@@ -19,7 +19,7 @@ pub struct CreateSessionOptions {
 }
 
 /// Information about a session.
-#[derive(Debug, Clone, Serialize, Deserialize, simply_rpc::IntoContent)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub id: SessionId,
     pub persistence: Persistence,

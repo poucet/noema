@@ -118,7 +118,6 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
 
     // Generate rest_dispatch match arms
     let rest_dispatch_arms = generate_rest_dispatch_arms(parsed);
-    let content_dispatch_arms = generate_content_dispatch_arms(parsed);
 
     Ok(quote! {
         /// Auto-generated RPC service wrapper (internal — use `TraitName::service()` instead).
@@ -152,14 +151,6 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
                 params: ::serde_json::Value,
             ) -> Option<::simply_rpc::RpcResult> {
                 #rest_dispatch_arms
-            }
-
-            async fn rest_dispatch_as_content(
-                &self,
-                method_name: &str,
-                params: ::serde_json::Value,
-            ) -> Option<::anyhow::Result<Vec<::simply_rpc::ContentPart>>> {
-                #content_dispatch_arms
             }
 
             fn meta(&self) -> &'static ::simply_rpc::ServiceMeta {
@@ -419,123 +410,6 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                     quote! { Some(::simply_rpc::call_val(#call)) }
                 },
                 ReturnKind::RawValue { .. } => quote! { Some(::simply_rpc::call_raw(#call)) },
-                _ => return None,
-            };
-
-            Some(quote! {
-                #method_name => {
-                    #(#param_bindings)*
-                    return #result_wrap;
-                }
-            })
-        })
-        .collect();
-
-    if arms.is_empty() {
-        quote! { None }
-    } else {
-        quote! {
-            match method_name {
-                #(#arms)*
-                _ => None,
-            }
-        }
-    }
-}
-
-/// Generate `rest_dispatch_as_content` match arms.
-///
-/// Same param deserialization as `rest_dispatch_by_name`, but converts
-/// results via `IntoContent::into_content()` on the concrete return type.
-fn generate_content_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
-    let arms: Vec<TokenStream> = parsed
-        .methods
-        .iter()
-        .filter_map(|m| {
-            let endpoint = m.rest_endpoint.as_ref()?;
-            if endpoint.http_method == HttpMethod::Stream {
-                return None;
-            }
-
-            let method_name = &m.method_name;
-            let fn_name = &m.name;
-            let has_path_params = !endpoint.path_params.is_empty();
-            let all_params = &m.params;
-
-            // Reuse the same param deserialization logic
-            let mut param_bindings = Vec::new();
-            let mut call_args = Vec::new();
-
-            if all_params.is_empty() {
-                // No params
-            } else if all_params.len() == 1 && !has_path_params {
-                let p = &all_params[0];
-                let name = &p.name;
-                let owned_type = &p.owned_type;
-                param_bindings.push(quote! {
-                    let #name: #owned_type = match ::serde_json::from_value(params.clone()) {
-                        Ok(v) => v,
-                        Err(e) => return Some(Err(::anyhow::anyhow!("deserialize error: {}", e))),
-                    };
-                });
-                if p.is_ref || p.is_str_ref {
-                    call_args.push(quote! { &#name });
-                } else {
-                    call_args.push(quote! { #name });
-                }
-            } else {
-                for p in all_params {
-                    let name = &p.name;
-                    let name_str = name.to_string();
-                    let owned_type = &p.owned_type;
-                    if p.is_str_ref {
-                        param_bindings.push(quote! {
-                            let #name: String = match params.get(#name_str) {
-                                Some(v) => match ::serde_json::from_value(v.clone()) {
-                                    Ok(v) => v,
-                                    Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
-                                },
-                                None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
-                            };
-                        });
-                    } else {
-                        param_bindings.push(quote! {
-                            let #name: #owned_type = match params.get(#name_str) {
-                                Some(v) => match ::serde_json::from_value(v.clone()) {
-                                    Ok(v) => v,
-                                    Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
-                                },
-                                None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
-                            };
-                        });
-                    }
-                    if p.is_ref || p.is_str_ref {
-                        call_args.push(quote! { &#name });
-                    } else {
-                        call_args.push(quote! { #name });
-                    }
-                }
-            }
-
-            let call = quote! { self.0.#fn_name(#(#call_args),*).await };
-
-            // Convert result via IntoContent on the concrete type
-            let result_wrap = match &m.return_kind {
-                ReturnKind::ResultUnit => quote! {
-                    match #call {
-                        Ok(()) => Some(Ok(vec![])),
-                        Err(e) => Some(Err(e)),
-                    }
-                },
-                ReturnKind::ResultValue { .. } => quote! {
-                    match #call {
-                        Ok(v) => Some(Ok(::simply_rpc::IntoContent::into_content(v))),
-                        Err(e) => Some(Err(e)),
-                    }
-                },
-                ReturnKind::RawValue { .. } => quote! {
-                    Some(Ok(::simply_rpc::IntoContent::into_content(#call)))
-                },
                 _ => return None,
             };
 
