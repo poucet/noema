@@ -349,6 +349,7 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
             // Build the trait method call
             let fn_name = &m.name;
             let mut call_args = Vec::new();
+            let mut path_param_bindings = Vec::new();
 
             // Params not in path come from body (JSON object fields)
             let body_params: Vec<_> = m.params.iter().filter(|p| {
@@ -388,35 +389,33 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                 quote! { #(#field_extractions)* }
             };
 
-            // Build call args in the original parameter order
+            // Build call args in the original parameter order.
+            // Path params that are &T need to be deserialized into `let` bindings
+            // BEFORE the call so the references remain valid.
             for p in &m.params {
                 let name = &p.name;
                 let name_str = name.to_string();
                 if let Some((_, ident)) = param_extractions.iter().find(|(n, _)| n == &name_str) {
-                    // Path param — extracted as &str, need to deserialize to owned type
+                    // Path param — extracted as &str from URL segments
                     let owned_type = &p.owned_type;
                     if p.is_str_ref {
                         call_args.push(quote! { #ident });
-                    } else if p.is_ref {
-                        let local = format_ident!("__local_{}", name);
-                        call_args.push(quote! { {
+                    } else {
+                        // Deserialize path param into an owned binding, then borrow it
+                        let local = format_ident!("__owned_{}", name);
+                        path_param_bindings.push(quote! {
                             let #local: #owned_type = match ::serde_json::from_value(
                                 ::serde_json::Value::String(#ident.to_string())
                             ) {
                                 Ok(v) => v,
                                 Err(e) => return Some(Err(::anyhow::anyhow!("path param '{}': {}", #name_str, e))),
                             };
-                            &#local
-                        } });
-                    } else {
-                        call_args.push(quote! { {
-                            match ::serde_json::from_value::<#owned_type>(
-                                ::serde_json::Value::String(#ident.to_string())
-                            ) {
-                                Ok(v) => v,
-                                Err(e) => return Some(Err(::anyhow::anyhow!("path param '{}': {}", #name_str, e))),
-                            }
-                        } });
+                        });
+                        if p.is_ref {
+                            call_args.push(quote! { &#local });
+                        } else {
+                            call_args.push(quote! { #local });
+                        }
                     }
                 } else if p.is_ref || p.is_str_ref {
                     call_args.push(quote! { &#name });
@@ -460,6 +459,7 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                     let __segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
                     if __segments.len() == #segment_count {
                         #(#segment_checks)*
+                        #(#path_param_bindings)*
                         #body_deser
                         return #result_wrap;
                     }

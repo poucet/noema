@@ -11,14 +11,18 @@ use super::types::{ConversationId, ConversationInfo};
 #[async_trait]
 pub trait ConversationApi: Send + Sync {
     /// Create a new conversation. Returns the conversation ID.
+    #[rpc(post = "/conversation")]
     async fn create_conversation(&self, name: Option<String>) -> anyhow::Result<ConversationId>;
 
     /// List all conversations for the current user.
+    #[rpc(get = "/conversation")]
     async fn list_conversations(&self) -> anyhow::Result<Vec<ConversationInfo>>;
 
     /// Delete a conversation (closes session if open, deletes entity).
+    #[rpc(delete = "/conversation/{conversation_id}")]
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()>;
 
     /// Rename a conversation.
+    #[rpc(put = "/conversation/{conversation_id}")]
     async fn rename_conversation(&self, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()>;
 }

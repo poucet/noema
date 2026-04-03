@@ -94,12 +94,15 @@ pub trait SessionApi: Send + Sync {
     ) -> anyhow::Result<broadcast::Receiver<DaemonEvent>>;
 
     /// Close a session and free its memory.
+    #[rpc(delete = "/session/{session_id}")]
     async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()>;
 
     /// Close all sessions (client disconnect cleanup).
+    #[rpc(delete = "/session")]
     async fn close_all_sessions(&self) -> anyhow::Result<()>;
 
     /// Replay context into a session (e.g., Discord history).
+    #[rpc(post = "/session/{session_id}/context")]
     async fn seed_context(
         &self,
         session_id: &SessionId,
@@ -107,9 +110,11 @@ pub trait SessionApi: Send + Sync {
     ) -> anyhow::Result<()>;
 
     /// List active sessions.
+    #[rpc(get = "/session")]
     async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>>;
 
     /// Change persistence mode.
+    #[rpc(put = "/session/{session_id}/persistence")]
     async fn set_persistence(
         &self,
         session_id: &SessionId,
@@ -117,6 +122,7 @@ pub trait SessionApi: Send + Sync {
     ) -> anyhow::Result<()>;
 
     /// Send a user message. Events arrive on the session's broadcast receiver.
+    #[rpc(post = "/session/{session_id}/message")]
     async fn send_message(
         &self,
         session_id: &SessionId,
@@ -124,17 +130,21 @@ pub trait SessionApi: Send + Sync {
     ) -> anyhow::Result<()>;
 
     /// Get messages for display (resolved content with turn IDs).
+    #[rpc(get = "/session/{session_id}/messages")]
     async fn get_messages(
         &self,
         session_id: &SessionId,
     ) -> anyhow::Result<Vec<ResolvedMessage>>;
 
     /// Change the model for a session.
+    #[rpc(put = "/session/{session_id}/model")]
     async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()>;
 
     /// Reload messages from storage (e.g., after span selection change).
+    #[rpc(post = "/session/{session_id}/reload")]
     async fn reload(&self, session_id: &SessionId) -> anyhow::Result<()>;
 
     /// Push an inbound event into the daemon.
+    #[rpc(post = "/session/event")]
     async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()>;
 }

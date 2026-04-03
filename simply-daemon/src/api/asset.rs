@@ -16,10 +16,10 @@ pub struct BlobResponse {
 #[async_trait]
 pub trait AssetApi: Send + Sync {
     /// Store binary content. Returns an `AssetId` for use in `InputContent::AssetRef`.
-    #[rpc(base64_param = "data")]
+    #[rpc(base64_param = "data", post = "/asset")]
     async fn store_asset(&self, data: Vec<u8>, media_type: &str) -> anyhow::Result<AssetId>;
 
     /// Get blob data + mime type by content hash.
-    #[rpc(rest_get)]
+    #[rpc(rest_get, get = "/asset/{hash}")]
     async fn get_blob(&self, hash: &BlobHash) -> anyhow::Result<BlobResponse>;
 }

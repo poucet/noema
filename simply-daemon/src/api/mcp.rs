@@ -52,28 +52,36 @@ pub struct UpdateMcpServerRequest {
 #[async_trait]
 pub trait McpApi: Send + Sync {
     /// List all configured MCP servers with their status.
+    #[rpc(get = "/mcp")]
     async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>>;
 
     /// Add a new MCP server configuration.
     /// If `auth_type` is "auto" or empty, probes `.well-known` to detect OAuth.
+    #[rpc(post = "/mcp")]
     async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()>;
 
     /// Remove an MCP server configuration.
+    #[rpc(delete = "/mcp/{server_id}")]
     async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()>;
 
     /// Connect to an MCP server. Returns tool count.
+    #[rpc(post = "/mcp/{server_id}/connect")]
     async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize>;
 
     /// Disconnect from an MCP server.
+    #[rpc(post = "/mcp/{server_id}/disconnect")]
     async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()>;
 
     /// Get tools provided by a specific MCP server.
+    #[rpc(get = "/mcp/{server_id}/tools")]
     async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpToolInfo>>;
 
     /// Test connection to an MCP server. Returns tool count.
+    #[rpc(post = "/mcp/{server_id}/test")]
     async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize>;
 
     /// Update settings for an MCP server.
+    #[rpc(put = "/mcp/{server_id}")]
     async fn update_mcp_server_settings(
         &self,
         server_id: &str,
@@ -81,8 +89,10 @@ pub trait McpApi: Send + Sync {
     ) -> anyhow::Result<()>;
 
     /// Stop retry attempts for an MCP server.
+    #[rpc(post = "/mcp/{server_id}/stop-retry")]
     async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()>;
 
     /// Start retry attempts for an MCP server.
+    #[rpc(post = "/mcp/{server_id}/retry")]
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()>;
 }

@@ -45,5 +45,6 @@ pub trait VoiceApi: Send + Sync {
     async fn voice_connect(&self, session_id: &SessionId) -> anyhow::Result<VoiceHandle>;
 
     /// Disconnect a voice stream from a session.
+    #[rpc(delete = "/voice/{session_id}")]
     async fn voice_disconnect(&self, session_id: &SessionId) -> anyhow::Result<()>;
 }
