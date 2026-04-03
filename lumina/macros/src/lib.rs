@@ -406,6 +406,296 @@ fn generate_command(attrs: CommandAttrs, func: ItemFn) -> syn::Result<TokenStrea
 }
 
 // ===========================================================================
+// #[mcp_tools] — generate MCP tool definitions + dispatch from annotated impl
+// ===========================================================================
+
+/// Marker attribute for MCP tool methods inside an `#[mcp_tools]` impl block.
+/// Parsed by `#[mcp_tools]`, not used standalone.
+#[proc_macro_attribute]
+pub fn mcp_tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Identity — the real work is done by #[mcp_tools]
+    item
+}
+
+/// Generate MCP tool definitions and dispatch from annotated methods.
+///
+/// Methods annotated with `#[mcp_tool(description = "...")]` are registered as
+/// MCP tools. Parameter types must implement `McpParam` (provides JSON schema,
+/// description, and deserialization). `Option<T>` marks a parameter as optional.
+///
+/// Generates:
+/// - `mcp_definitions() -> Vec<Tool>` — tool schemas from function signatures
+/// - `mcp_dispatch(&self, name, args) -> Result<Value>` — routes calls to handlers
+///
+/// ```ignore
+/// #[mcp_tools]
+/// impl MyServer {
+///     #[mcp_tool(description = "List all channels in a guild")]
+///     async fn list_channels(&self, guild_id: GuildId) -> Result<Value> {
+///         // ...
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn mcp_tools(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let impl_block = parse_macro_input!(item as syn::ItemImpl);
+    match generate_mcp_tools(impl_block) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+struct McpToolInfo {
+    method_name: syn::Ident,
+    tool_name: String,
+    description: String,
+    params: Vec<McpParamInfo>,
+}
+
+struct McpParamInfo {
+    name: String,
+    /// The concrete type (inner type if Option<T>)
+    type_tokens: TokenStream2,
+    required: bool,
+    description: Option<String>,
+}
+
+fn parse_mcp_param_type(ty: &Type) -> (TokenStream2, bool) {
+    if let Type::Path(tp) = ty {
+        if let Some(seg) = tp.path.segments.last() {
+            if seg.ident == "Option" {
+                if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                    if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                        return (quote! { #inner }, false);
+                    }
+                }
+            }
+        }
+    }
+    (quote! { #ty }, true)
+}
+
+fn parse_mcp_tools_from_method(method: &syn::ImplItemFn) -> syn::Result<McpToolInfo> {
+    let mcp_attr = method
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("mcp_tool"))
+        .ok_or_else(|| syn::Error::new_spanned(&method.sig.ident, "missing #[mcp_tool]"))?;
+
+    let attrs: CommandAttrs = mcp_attr.parse_args()?;
+    let method_name = method.sig.ident.clone();
+    let tool_name = attrs.name.unwrap_or_else(|| method_name.to_string());
+
+    let mut params = Vec::new();
+    for arg in method.sig.inputs.iter().skip(1) {
+        // skip &self
+        if let FnArg::Typed(pat_type) = arg {
+            let param_name = if let Pat::Ident(pi) = pat_type.pat.as_ref() {
+                pi.ident.to_string()
+            } else {
+                return Err(syn::Error::new_spanned(&pat_type.pat, "expected identifier"));
+            };
+
+            let (type_tokens, required) = parse_mcp_param_type(&pat_type.ty);
+            let description = get_describe_attr(&pat_type.attrs);
+
+            params.push(McpParamInfo {
+                name: param_name,
+                type_tokens,
+                required,
+                description,
+            });
+        }
+    }
+
+    Ok(McpToolInfo {
+        method_name,
+        tool_name,
+        description: attrs.description,
+        params,
+    })
+}
+
+fn gen_mcp_tool_definition(tool: &McpToolInfo) -> TokenStream2 {
+    let name = &tool.tool_name;
+    let desc = &tool.description;
+
+    let prop_entries: Vec<TokenStream2> = tool
+        .params
+        .iter()
+        .map(|p| {
+            let param_name = &p.name;
+            let ty = &p.type_tokens;
+
+            if let Some(desc) = &p.description {
+                quote! {
+                    {
+                        let mut s = <#ty as crate::mcp::McpParam>::schema();
+                        if let serde_json::Value::Object(ref mut m) = s {
+                            m.insert("description".into(), serde_json::Value::String(#desc.into()));
+                        }
+                        __props.insert(#param_name.into(), s);
+                    }
+                }
+            } else {
+                quote! {
+                    {
+                        let mut s = <#ty as crate::mcp::McpParam>::schema();
+                        let d = <#ty as crate::mcp::McpParam>::default_description();
+                        if !d.is_empty() {
+                            if let serde_json::Value::Object(ref mut m) = s {
+                                m.insert("description".into(), serde_json::Value::String(d.into()));
+                            }
+                        }
+                        __props.insert(#param_name.into(), s);
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let required_names: Vec<&str> = tool
+        .params
+        .iter()
+        .filter(|p| p.required)
+        .map(|p| p.name.as_str())
+        .collect();
+
+    quote! {
+        {
+            let mut __props = serde_json::Map::new();
+            #(#prop_entries)*
+
+            let mut __schema = serde_json::Map::new();
+            __schema.insert("type".into(), serde_json::Value::String("object".into()));
+            __schema.insert("properties".into(), serde_json::Value::Object(__props));
+            __schema.insert("required".into(), serde_json::json!([#(#required_names),*]));
+
+            rmcp::model::Tool {
+                name: #name.into(),
+                title: None,
+                description: Some(#desc.into()),
+                input_schema: std::sync::Arc::new(__schema),
+                annotations: None,
+                output_schema: None,
+                icons: None,
+                meta: None,
+            }
+        }
+    }
+}
+
+fn gen_mcp_dispatch_wrapper(tool: &McpToolInfo) -> TokenStream2 {
+    let method_name = &tool.method_name;
+    let wrapper_name = format_ident!("__mcp_dispatch_{}", method_name);
+
+    let extractions: Vec<TokenStream2> = tool
+        .params
+        .iter()
+        .map(|p| {
+            let var = format_ident!("{}", p.name);
+            let param_name = &p.name;
+            let ty = &p.type_tokens;
+            let err = format!("missing required parameter: {}", p.name);
+
+            if p.required {
+                quote! {
+                    let #var = <#ty as crate::mcp::McpParam>::from_value(
+                        __args.get(#param_name).ok_or_else(|| anyhow::anyhow!(#err))?
+                    )?;
+                }
+            } else {
+                quote! {
+                    let #var = __args.get(#param_name)
+                        .map(|v| <#ty as crate::mcp::McpParam>::from_value(v))
+                        .transpose()?;
+                }
+            }
+        })
+        .collect();
+
+    let call_args: Vec<TokenStream2> = tool
+        .params
+        .iter()
+        .map(|p| {
+            let var = format_ident!("{}", p.name);
+            quote! { #var }
+        })
+        .collect();
+
+    quote! {
+        async fn #wrapper_name(
+            &self,
+            __args: serde_json::Map<String, serde_json::Value>,
+        ) -> anyhow::Result<serde_json::Value> {
+            #(#extractions)*
+            self.#method_name(#(#call_args),*).await
+        }
+    }
+}
+
+fn generate_mcp_tools(mut impl_block: syn::ItemImpl) -> syn::Result<TokenStream2> {
+    let self_ty = &impl_block.self_ty;
+
+    // Collect tool info from annotated methods
+    let mut tools = Vec::new();
+    for item in &impl_block.items {
+        if let syn::ImplItem::Fn(method) = item {
+            if method.attrs.iter().any(|a| a.path().is_ident("mcp_tool")) {
+                tools.push(parse_mcp_tools_from_method(method)?);
+            }
+        }
+    }
+
+    // Strip #[mcp_tool] and #[describe] attributes
+    for item in &mut impl_block.items {
+        if let syn::ImplItem::Fn(method) = item {
+            method.attrs.retain(|a| !a.path().is_ident("mcp_tool"));
+            for arg in method.sig.inputs.iter_mut() {
+                if let FnArg::Typed(pat_type) = arg {
+                    pat_type.attrs.retain(|a| !a.path().is_ident("describe"));
+                }
+            }
+        }
+    }
+
+    let tool_defs: Vec<TokenStream2> = tools.iter().map(gen_mcp_tool_definition).collect();
+    let dispatch_wrappers: Vec<TokenStream2> = tools.iter().map(gen_mcp_dispatch_wrapper).collect();
+
+    let dispatch_arms: Vec<TokenStream2> = tools
+        .iter()
+        .map(|t| {
+            let name = &t.tool_name;
+            let wrapper = format_ident!("__mcp_dispatch_{}", t.method_name);
+            quote! { #name => self.#wrapper(__args).await }
+        })
+        .collect();
+
+    Ok(quote! {
+        #impl_block
+
+        impl #self_ty {
+            pub fn mcp_definitions() -> Vec<rmcp::model::Tool> {
+                vec![#(#tool_defs),*]
+            }
+
+            pub async fn mcp_dispatch(
+                &self,
+                __name: &str,
+                __args: serde_json::Map<String, serde_json::Value>,
+            ) -> anyhow::Result<serde_json::Value> {
+                match __name {
+                    #(#dispatch_arms,)*
+                    _ => Err(anyhow::anyhow!("unknown tool: {}", __name)),
+                }
+            }
+
+            #(#dispatch_wrappers)*
+        }
+    })
+}
+
+// ===========================================================================
 // #[command_group] codegen
 // ===========================================================================
 
