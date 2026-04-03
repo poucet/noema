@@ -68,6 +68,8 @@
 | 3.3 | ✅ | Populate MCP server instructions with guild/channel map from gateway cache | P0 | S |
 | 3.4 | ⬜ | Verify: Noema agent can send Discord messages through daemon → Lumina | P0 | S |
 
+> **Phase paused** — switching to Voice phase. Stage 3 functional, 3.4 verify pending manual test.
+
 ---
 
 ## ~~Stage 4 — Admin & Access Control~~ (PUNTED)
