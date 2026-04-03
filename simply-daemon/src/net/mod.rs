@@ -1,4 +1,4 @@
-//! WebSocket server, REST server, client transport, and daemon discovery.
+//! Networking layer — HTTP/REST server, WebSocket server, client transport, and daemon discovery.
 
 pub mod protocol;
 pub mod server;

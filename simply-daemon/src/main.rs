@@ -8,7 +8,7 @@ use std::sync::Arc;
 use simply_daemon::api::*;
 use simply_daemon::embedded::EmbeddedDaemon;
 use simply_daemon::storage::SqliteStores;
-use simply_daemon::ws;
+use simply_daemon::net;
 use simply_rpc::{Dispatcher, RestDispatcher, RpcService};
 use tokio::sync::mpsc;
 
@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 
     // WS server — streaming sessions (separate port, to be merged)
     let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
-    let _ws_server = ws::server::start(ws_dispatch, port).await?;
+    let _ws_server = net::server::start(ws_dispatch, port).await?;
     let tracker = _ws_server.tracker().clone();
 
     // Kill channel
@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
         .register(<dyn VoiceApi>::service(daemon.clone()))
         .register(daemon_info_svc);
 
-    let _rest_server = ws::rest::start(ws::rest::RestConfig {
+    let _rest_server = net::rest::start(net::rest::RestConfig {
         rest_dispatcher,
         port: rest_port,
         tracker,
@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
 ///
 /// SessionApi dispatched separately (produces streams → event forwarders).
 /// Everything else goes through a Dispatcher.
-fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> ws::server::DispatchFn {
+fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> net::server::DispatchFn {
     let session_svc = <dyn SessionApi>::service(daemon.clone());
 
     let dispatcher = Dispatcher::new()
@@ -139,10 +139,10 @@ fn extract_session_id(
     }
 }
 
-fn to_ws_response(result: simply_rpc::RpcResult) -> ws::protocol::WsResponse {
+fn to_ws_response(result: simply_rpc::RpcResult) -> net::protocol::WsResponse {
     match result {
-        Ok(v) => ws::protocol::WsResponse { id: 0, result: Some(v), error: None },
-        Err(e) => ws::protocol::WsResponse::err(0, e),
+        Ok(v) => net::protocol::WsResponse { id: 0, result: Some(v), error: None },
+        Err(e) => net::protocol::WsResponse::err(0, e),
     }
 }
 
@@ -156,9 +156,9 @@ fn spawn_event_forwarder(
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    let notif = ws::protocol::WsNotification {
+                    let notif = net::protocol::WsNotification {
                         method: "session.event".to_string(),
-                        params: serde_json::to_value(ws::protocol::SessionEventParams {
+                        params: serde_json::to_value(net::protocol::SessionEventParams {
                             session_id: sid.clone(), event,
                         }).unwrap_or_default(),
                     };

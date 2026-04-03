@@ -11,6 +11,7 @@ mod client;
 mod context;
 mod helpers;
 pub mod meta;
+pub mod protocol;
 mod response;
 mod service;
 

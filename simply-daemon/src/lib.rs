@@ -17,10 +17,10 @@ pub mod oauth;
 pub mod remote;
 pub mod session;
 pub mod storage;
-pub mod ws;
+pub mod net;
 
 /// Re-exported types for clients.
 pub use api::types as types;
 pub use remote::RemoteDaemon;
 pub use session::DaemonSession;
-pub use ws::ConnectionState;
+pub use net::ConnectionState;

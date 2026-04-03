@@ -1,8 +1,8 @@
 //! Application initialization command
 
 use simply_daemon::api::*;
-use simply_daemon::ws;
-use simply_daemon::ws::discovery::ServiceBuilders;
+use simply_daemon::net;
+use simply_daemon::net::discovery::ServiceBuilders;
 use simply_rpc::{Dispatcher, RpcService};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
@@ -36,7 +36,7 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     let daemon_port = port.unwrap_or(9800);
     let rest_port = daemon_port + 1;
 
-    let handle = ws::connect_or_host(port, service_builders())
+    let handle = net::connect_or_host(port, service_builders())
         .await
         .map_err(|e| format!("Failed to initialize daemon: {}", e))?;
 
@@ -73,7 +73,7 @@ fn service_builders() -> ServiceBuilders {
 }
 
 /// Build the WS dispatch function.
-fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> ws::server::DispatchFn {
+fn build_ws_dispatch(daemon: Arc<dyn DaemonApi>) -> net::server::DispatchFn {
     let session_svc = <dyn SessionApi>::service(daemon.clone());
 
     let dispatcher = Dispatcher::new()
@@ -120,10 +120,10 @@ fn extract_session_id(
     }
 }
 
-fn to_ws_response(result: simply_rpc::RpcResult) -> ws::protocol::WsResponse {
+fn to_ws_response(result: simply_rpc::RpcResult) -> net::protocol::WsResponse {
     match result {
-        Ok(v) => ws::protocol::WsResponse { id: 0, result: Some(v), error: None },
-        Err(e) => ws::protocol::WsResponse::err(0, e),
+        Ok(v) => net::protocol::WsResponse { id: 0, result: Some(v), error: None },
+        Err(e) => net::protocol::WsResponse::err(0, e),
     }
 }
 
@@ -137,9 +137,9 @@ fn spawn_event_forwarder(
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    let notif = ws::protocol::WsNotification {
+                    let notif = net::protocol::WsNotification {
                         method: "session.event".to_string(),
-                        params: serde_json::to_value(ws::protocol::SessionEventParams {
+                        params: serde_json::to_value(net::protocol::SessionEventParams {
                             session_id: sid.clone(), event,
                         }).unwrap_or_default(),
                     };

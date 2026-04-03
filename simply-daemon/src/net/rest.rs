@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 
 use simply_rpc::{HttpMethod, RestDispatcher};
 
-use crate::ws::server::ConnectionTracker;
+use crate::net::server::ConnectionTracker;
 
 /// Server configuration.
 pub struct RestConfig {
@@ -85,7 +85,7 @@ async fn admin_page() -> Html<&'static str> {
     Html(include_str!("../admin/admin.html"))
 }
 
-async fn admin_connections(State(state): State<AppState>) -> Json<Vec<crate::ws::server::ConnectionInfo>> {
+async fn admin_connections(State(state): State<AppState>) -> Json<Vec<crate::net::server::ConnectionInfo>> {
     Json(state.tracker.list().await)
 }
 

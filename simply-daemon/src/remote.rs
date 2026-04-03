@@ -10,8 +10,8 @@ use simply_rpc::{HttpMethod, RpcClient};
 use tokio::sync::{broadcast, watch};
 
 use crate::api::*;
-use crate::ws::client::WsConnection;
-use crate::ws::ConnectionState;
+use crate::net::client::WsConnection;
+use crate::net::ConnectionState;
 
 /// A daemon client that talks to a remote daemon over REST + WebSocket.
 ///

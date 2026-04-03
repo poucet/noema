@@ -4,7 +4,7 @@ use simply_audio::BrowserAudioController;
 use simply_audio::VoiceCoordinator;
 use simply_daemon::api::DaemonApi;
 use simply_daemon::types::ConversationId;
-use simply_daemon::ws::DaemonHandle;
+use simply_daemon::net::DaemonHandle;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
