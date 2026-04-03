@@ -63,7 +63,24 @@ async fn main() -> anyhow::Result<()> {
         .bot_token()
         .expect("DISCORD_BOT_TOKEN env var or discord.bot_token in lumina.toml is required");
 
- 
+    // Connect to existing daemon or start embedded
+    let _daemon_handle = net::connect_or_host(
+        settings.daemon_port,
+        net::discovery::ServiceBuilders {
+            ws_dispatch: Box::new(|_| {
+                use simply_daemon::net::server::DispatchFn;
+                let f: DispatchFn = Arc::new(|_method, _params, _write| {
+                    Box::pin(async { simply_rpc::protocol::WsResponse::ok(0, serde_json::Value::Null) })
+                });
+                f
+            }),
+            rest_dispatcher: Box::new(|_| simply_rpc::Dispatcher::new()),
+            client_name: "lumina".to_string(),
+        },
+    ).await?;
+    tracing::info!(host = _daemon_handle.is_host(), "daemon ready");
+
+    let daemon = _daemon_handle.daemon();
 
     // Start Lumina's MCP server and register with daemon
     let http = Arc::new(serenity::http::Http::new(&token));
