@@ -104,3 +104,13 @@
 | 4.2 | ✅ | Extract `ModelService`, `AssetService`, `VoiceService`, `DaemonInfoService` | P0 | M |
 | 4.3 | ✅ | Refactor `EmbeddedDaemon` — hold `Arc` services, expose accessors, thin delegation for `DaemonApi` | P0 | M |
 | 4.4 | ✅ | `main.rs` registers individual services with `RestDispatcher` | P0 | S |
+
+---
+
+## Future — Tool Result Content Mapping
+
+| # | | Task | Priority | Size |
+|---|---|------|----------|------|
+| F.1 | ⬜ | `IntoToolResult` trait: map types (e.g. `BinaryResponse`) to proper `ToolResultContent` (image/audio by mime type) instead of JSON-stringifying everything in `DaemonToolService::call_tool` | P1 | S |
+| F.2 | ⬜ | Implement `IntoToolResult` for `BinaryResponse` (route to image/audio/blob by mime type) | P1 | S |
+| F.3 | ⬜ | Wire `DaemonToolService::call_tool` to use trait dispatch instead of `to_string_pretty` for all results | P1 | S |
