@@ -358,7 +358,6 @@ function App() {
       setCurrentConversationId(convId);
       setCurrentSessionId(sessionId);
       setMessages([]);
-      setIsConversationPrivate(false); // New conversations start as non-private
       const convos = await tauri.listConversations();
       setConversations(convos);
     } catch (err) {
