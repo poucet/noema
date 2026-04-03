@@ -1,8 +1,19 @@
 # Agentic System — Event & Intent Engine
 
-**Status:** Draft
-**Version:** 1.0
+**Status:** Draft — Events phase not started
+**Version:** 1.1
 **Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
+
+---
+
+## Current State
+
+None of the event/intent system is built yet. The Events phase depends on Foundation (complete) and soft-depends on Content. Lumina's schedule system (Python ScheduleCog) was deferred to this phase.
+
+What exists that feeds into this design:
+- `DaemonEvent` enum (session events: TextDelta, ToolCall, TurnComplete, etc.)
+- `InboundEvent` type on SessionApi (stub for push events)
+- MCP tool infrastructure (actions are MCP tools in the current architecture)
 
 ---
 

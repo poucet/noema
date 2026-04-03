@@ -1,6 +1,6 @@
 # Design 1: Simply Platform — Rust Unification
 
-**Status**: planned
+**Status**: in progress
 **Features:** [FEATURES.md](FEATURES.md)
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Architecture:** [designs/ARCHITECTURE.md](../designs/ARCHITECTURE.md)
@@ -43,11 +43,11 @@ Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) are converging
 
 ## Open Questions
 
-1. **Repo name** — `simply-platform`? `simply`? `simply-ai`? Keep `noema` for now since that's the GitHub repo?
+1. **Repo name** — keeping `noema` as the GitHub repo for now.
 2. **Songbird DAVE status** — need to verify songbird's current DAVE protocol support. If incomplete, may need to contribute upstream or work around.
-3. **Config unification** — Noema uses encrypted API key storage. Lumina uses `.env`. Converge on one approach?
-4. **UCM schema extensions** — do we need new entity/document types or metadata fields to support Lumina features (schedules, access control)? Or do existing UCM primitives cover it?
-5. **Core service lifecycle** — does simply-core start independently (systemd/launchd), or does the first client (Noema or Lumina) spawn it?
+3. ~~**Config unification**~~ — Resolved: shared `config/` crate with `Settings::load()` + `.env` fallback.
+4. ~~**UCM schema extensions**~~ — Resolved: existing UCM primitives cover it. Content conventions (todo, note, etc.) are just frontmatter on documents.
+5. ~~**Core service lifecycle**~~ — Resolved: `simply-daemon` runs as standalone binary. Noema uses `EmbeddedDaemon` (in-process). Lumina uses `RemoteDaemon` (WS+REST).
 
 ---
 

@@ -1,9 +1,24 @@
 # Action System — Unified Capability & Composition
 
-**Status:** Draft
-**Version:** 1.0
+**Status:** Draft — partially implemented
+**Version:** 1.1
 **Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
 **Related:** [AGENTIC.md](AGENTIC.md), [CORE_SERVICE.md](CORE_SERVICE.md)
+
+---
+
+## Current State (as of Lumina Stage 3)
+
+The full `ActionDef` + chain engine described below is the long-term design. What's built so far:
+
+- **MCP is the action protocol** — tools from MCP servers (including Lumina's Discord tools) are the primary action mechanism. No separate `ActionDef` trait yet.
+- **Dynamic MCP registration** — `register_ephemeral_mcp` / `unregister_ephemeral_mcp` on `McpApi`. Lumina registers Discord tools on connect.
+- **Typed content dispatch** — `IntoContent` / `FromContent` traits in simply-rpc. `BinaryResponse` → `ContentPart::Binary`, `BinaryUpload` ← MCP image/audio content. RPC macro generates `rest_dispatch_as_content`.
+- **Tool invocation** — `list_all_tools` + `call_tool_direct` on `McpApi` using rmcp types (`Tool`, `CallToolRequestParam`, `CallToolResult`).
+- **DaemonToolService** — exposes REST API methods as tools via `rest_dispatch_as_content` → `ContentPart` → `ToolResultContent`.
+- **rmcp `#[tool]` macros** — Lumina uses rmcp's built-in `#[tool]` / `#[tool_router]` / `#[tool_handler]` for tool definition.
+
+What's NOT built yet: `ActionDef` trait, action registry (beyond MCP), chains, transforms, suspension, intent integration.
 
 ---
 
