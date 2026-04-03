@@ -80,55 +80,104 @@ impl Default for Dispatcher {
     }
 }
 
-/// Trait for services that can dispatch REST requests.
+/// Trait for services that can dispatch REST requests by method name.
 ///
-/// This is auto-implemented by the macro for any service with REST-annotated methods.
-/// Unlike `RpcService` (which has an associated `Stream` type), this is object-safe
-/// and can be collected into a `RestDispatcher`.
+/// Auto-implemented by the macro. The service handles deserialization and
+/// trait method calls. Path matching is handled by `RestDispatcher` using matchit.
 #[async_trait]
 pub trait RestService: Send + Sync {
-    /// Try to dispatch an HTTP request. Returns `Some` if the path matched.
-    async fn rest_dispatch(
+    /// Dispatch a REST request by method name (e.g. "items.get_item").
+    /// `params` is a JSON object with all parameters (path params merged with body).
+    async fn rest_dispatch_by_name(
         &self,
-        http_method: crate::HttpMethod,
-        path: &str,
-        body: serde_json::Value,
+        method_name: &str,
+        params: Value,
     ) -> Option<RpcResult>;
 
-    /// Get metadata for compatibility checking.
+    /// Get metadata for route registration and compatibility checking.
     fn meta(&self) -> &'static crate::ServiceMeta;
 }
 
-/// Dispatcher that routes REST requests to registered services.
-#[derive(Clone, Default)]
+/// Route entry stored in the matchit router.
+struct RouteEntry {
+    /// The RPC method name (e.g. "items.get_item")
+    method_name: &'static str,
+    /// The service that handles this method
+    service: Arc<dyn RestService>,
+}
+
+/// Dispatcher that routes REST requests using matchit for path matching.
+///
+/// Build with `register()` to add services. Each service's `RestMeta` entries
+/// are inserted into per-HTTP-method routers. At dispatch time, matchit resolves
+/// the path, extracts params, merges with body, and calls the service.
 pub struct RestDispatcher {
+    routers: HashMap<crate::HttpMethod, matchit::Router<RouteEntry>>,
     services: Vec<Arc<dyn RestService>>,
 }
 
 impl RestDispatcher {
     pub fn new() -> Self {
-        Self { services: Vec::new() }
+        Self {
+            routers: HashMap::new(),
+            services: Vec::new(),
+        }
     }
 
-    /// Register a REST service.
+    /// Register a REST service. Routes are extracted from its metadata.
     pub fn register(mut self, svc: Arc<dyn RestService>) -> Self {
+        let meta = svc.meta();
+        for rm in meta.rest_methods {
+            if rm.http_method == crate::HttpMethod::Stream {
+                continue; // Stream routes handled by WS layer
+            }
+            // matchit uses {param} syntax — same as our templates
+            let router = self.routers.entry(rm.http_method).or_insert_with(matchit::Router::new);
+            let entry = RouteEntry {
+                method_name: rm.method_name,
+                service: svc.clone(),
+            };
+            if let Err(e) = router.insert(rm.path_template, entry) {
+                panic!("failed to register route {} {}: {}", rm.path_template, rm.method_name, e);
+            }
+        }
         self.services.push(svc);
         self
     }
 
-    /// Dispatch an HTTP request. Tries each service until one matches.
+    /// Dispatch an HTTP request. Uses matchit to resolve path, extract params,
+    /// merge with body, and call the appropriate service.
     pub async fn dispatch(
         &self,
         http_method: crate::HttpMethod,
         path: &str,
-        body: serde_json::Value,
+        body: Value,
     ) -> Option<RpcResult> {
-        for svc in &self.services {
-            if let Some(result) = svc.rest_dispatch(http_method, path, body.clone()).await {
-                return Some(result);
+        let router = self.routers.get(&http_method)?;
+        let matched = router.at(path).ok()?;
+        let entry = matched.value;
+
+        // Merge path params into body (or create object if body is null)
+        let params = if matched.params.is_empty() {
+            body
+        } else {
+            let mut obj = match body {
+                Value::Object(map) => map,
+                Value::Null => serde_json::Map::new(),
+                other => {
+                    // Single body value — wrap it (shouldn't normally happen with path params)
+                    let mut map = serde_json::Map::new();
+                    map.insert("_body".to_string(), other);
+                    map
+                }
+            };
+            for (key, value) in matched.params.iter() {
+                obj.insert(key.to_string(), Value::String(value.to_string()));
             }
-        }
-        None
+            Value::Object(obj)
+        };
+
+        entry.service.rest_dispatch_by_name(entry.method_name, params).await
     }
 
     /// Collect REST metadata from all registered services.
@@ -137,5 +186,11 @@ impl RestDispatcher {
             .iter()
             .flat_map(|svc| svc.meta().rest_methods.iter())
             .collect()
+    }
+}
+
+impl Default for RestDispatcher {
+    fn default() -> Self {
+        Self::new()
     }
 }

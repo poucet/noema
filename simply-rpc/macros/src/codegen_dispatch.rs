@@ -110,29 +110,14 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             }
         }
 
-        impl<T: #trait_name + ?Sized + 'static> #service_name<T> {
-            /// Dispatch an HTTP REST request to a trait method.
-            ///
-            /// Returns `Some(json_value)` if the path matched, `None` otherwise.
-            pub async fn rest_dispatch(
-                &self,
-                http_method: ::simply_rpc::HttpMethod,
-                path: &str,
-                body: ::serde_json::Value,
-            ) -> Option<::simply_rpc::RpcResult> {
-                #rest_dispatch_arms
-            }
-        }
-
         #[::async_trait::async_trait]
         impl<T: #trait_name + ?Sized + 'static> ::simply_rpc::RestService for #service_name<T> {
-            async fn rest_dispatch(
+            async fn rest_dispatch_by_name(
                 &self,
-                http_method: ::simply_rpc::HttpMethod,
-                path: &str,
-                body: ::serde_json::Value,
+                method_name: &str,
+                params: ::serde_json::Value,
             ) -> Option<::simply_rpc::RpcResult> {
-                self.rest_dispatch(http_method, path, body).await
+                #rest_dispatch_arms
             }
 
             fn meta(&self) -> &'static ::simply_rpc::ServiceMeta {
@@ -325,123 +310,115 @@ fn is_vec_u8(ty: &syn::Type) -> bool {
     s == "Vec<u8>"
 }
 
-/// Generate the body of `rest_dispatch` — a series of if-let match arms for each REST endpoint.
+/// Generate the body of `rest_dispatch_by_name` — a match on method name.
 ///
-/// For each REST-annotated method, generates pattern matching on the HTTP method and path,
-/// extracts path params by position, deserializes remaining params from body/query,
-/// calls the trait method, and wraps the result.
+/// The `RestDispatcher` (using matchit) handles path matching and param extraction.
+/// By the time this is called, `params` is a flat JSON object with all parameters
+/// (path params as strings, body params as-is).
 fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
     let arms: Vec<TokenStream> = parsed
         .methods
         .iter()
         .filter_map(|m| {
             let endpoint = m.rest_endpoint.as_ref()?;
-            // Stream endpoints are handled by the WebSocket layer, not REST dispatch
             if endpoint.http_method == HttpMethod::Stream {
                 return None;
             }
-            let http_method_check = http_method_tokens(&endpoint.http_method);
 
-            // Build a path pattern: split template into segments, each is either
-            // a literal string match or a `{param}` capture.
-            let template = &endpoint.path_template;
-            let segments: Vec<&str> = template.trim_start_matches('/').split('/').collect();
-            let segment_count = segments.len();
-
-            // Generate segment matching code
-            let mut segment_checks = Vec::new();
-            let mut param_extractions = Vec::new();
-
-            for (i, seg) in segments.iter().enumerate() {
-                if seg.starts_with('{') && seg.ends_with('}') {
-                    let param_name = &seg[1..seg.len() - 1];
-                    let param_ident = format_ident!("__path_{}", param_name);
-                    param_extractions.push((param_name.to_string(), param_ident.clone()));
-                    segment_checks.push(quote! {
-                        let #param_ident = __segments[#i];
-                    });
-                } else {
-                    segment_checks.push(quote! {
-                        if __segments[#i] != #seg { return None; }
-                    });
-                }
-            }
-
-            // Build the trait method call
+            let method_name = &m.method_name;
             let fn_name = &m.name;
+
+            // All params come from the merged JSON object.
+            // For methods with no params or a single non-path param with no path params,
+            // the body may be the raw value. Otherwise it's a JSON object.
+            let has_path_params = !endpoint.path_params.is_empty();
+            let all_params = &m.params;
+
+            let mut param_bindings = Vec::new();
             let mut call_args = Vec::new();
-            let mut path_param_bindings = Vec::new();
 
-            // Params not in path come from body (JSON object fields)
-            let body_params: Vec<_> = m.params.iter().filter(|p| {
-                !endpoint.path_params.contains(&p.name.to_string())
-            }).collect();
-
-            // Deserialize body params if needed
-            let body_deser = if body_params.is_empty() {
-                quote! {}
-            } else if body_params.len() == 1 && endpoint.path_params.is_empty() {
-                // Single non-path param, whole body is the value
-                let p = &body_params[0];
+            if all_params.is_empty() {
+                // No params — nothing to deserialize
+            } else if all_params.len() == 1 && !has_path_params {
+                // Single param, no path params — params IS the value directly
+                let p = &all_params[0];
                 let name = &p.name;
                 let owned_type = &p.owned_type;
-                quote! {
-                    let #name: #owned_type = match ::serde_json::from_value(body) {
-                        Ok(v) => v,
-                        Err(e) => return Some(Err(::anyhow::anyhow!("deserialize error: {}", e))),
-                    };
-                }
-            } else {
-                // Multiple body params — extract from JSON object
-                let field_extractions: Vec<TokenStream> = body_params.iter().map(|p| {
-                    let name = &p.name;
-                    let name_str = name.to_string();
-                    let owned_type = &p.owned_type;
-                    quote! {
-                        let #name: #owned_type = match body.get(#name_str) {
-                            Some(v) => match ::serde_json::from_value(v.clone()) {
-                                Ok(v) => v,
-                                Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
-                            },
-                            None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
+                if m.is_base64_param(&name.to_string()) {
+                    param_bindings.push(quote! {
+                        let __b64: String = match ::serde_json::from_value(params.clone()) {
+                            Ok(v) => v,
+                            Err(e) => return Some(Err(::anyhow::anyhow!("deserialize error: {}", e))),
                         };
-                    }
-                }).collect();
-                quote! { #(#field_extractions)* }
-            };
-
-            // Build call args in the original parameter order.
-            // Path params that are &T need to be deserialized into `let` bindings
-            // BEFORE the call so the references remain valid.
-            for p in &m.params {
-                let name = &p.name;
-                let name_str = name.to_string();
-                if let Some((_, ident)) = param_extractions.iter().find(|(n, _)| n == &name_str) {
-                    // Path param — extracted as &str from URL segments
-                    let owned_type = &p.owned_type;
-                    if p.is_str_ref {
-                        call_args.push(quote! { #ident });
-                    } else {
-                        // Deserialize path param into an owned binding, then borrow it
-                        let local = format_ident!("__owned_{}", name);
-                        path_param_bindings.push(quote! {
-                            let #local: #owned_type = match ::serde_json::from_value(
-                                ::serde_json::Value::String(#ident.to_string())
-                            ) {
-                                Ok(v) => v,
-                                Err(e) => return Some(Err(::anyhow::anyhow!("path param '{}': {}", #name_str, e))),
-                            };
-                        });
-                        if p.is_ref {
-                            call_args.push(quote! { &#local });
-                        } else {
-                            call_args.push(quote! { #local });
-                        }
-                    }
-                } else if p.is_ref || p.is_str_ref {
+                        let #name: Vec<u8> = match ::simply_rpc::decode_base64(&__b64) {
+                            Ok(v) => v,
+                            Err(e) => return Some(Err(e)),
+                        };
+                    });
+                } else {
+                    param_bindings.push(quote! {
+                        let #name: #owned_type = match ::serde_json::from_value(params.clone()) {
+                            Ok(v) => v,
+                            Err(e) => return Some(Err(::anyhow::anyhow!("deserialize error: {}", e))),
+                        };
+                    });
+                }
+                if p.is_ref || p.is_str_ref {
                     call_args.push(quote! { &#name });
                 } else {
                     call_args.push(quote! { #name });
+                }
+            } else {
+                // Multiple params or has path params — extract each from JSON object
+                for p in all_params {
+                    let name = &p.name;
+                    let name_str = name.to_string();
+                    let owned_type = &p.owned_type;
+
+                    if m.is_base64_param(&name_str) {
+                        param_bindings.push(quote! {
+                            let #name: Vec<u8> = match params.get(#name_str) {
+                                Some(v) => {
+                                    let b64: String = match ::serde_json::from_value(v.clone()) {
+                                        Ok(v) => v,
+                                        Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
+                                    };
+                                    match ::simply_rpc::decode_base64(&b64) {
+                                        Ok(v) => v,
+                                        Err(e) => return Some(Err(e)),
+                                    }
+                                },
+                                None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
+                            };
+                        });
+                    } else if p.is_str_ref {
+                        // &str: extract as string from JSON, borrow it
+                        param_bindings.push(quote! {
+                            let #name: String = match params.get(#name_str) {
+                                Some(v) => match ::serde_json::from_value(v.clone()) {
+                                    Ok(v) => v,
+                                    Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
+                                },
+                                None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
+                            };
+                        });
+                    } else {
+                        param_bindings.push(quote! {
+                            let #name: #owned_type = match params.get(#name_str) {
+                                Some(v) => match ::serde_json::from_value(v.clone()) {
+                                    Ok(v) => v,
+                                    Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
+                                },
+                                None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
+                            };
+                        });
+                    }
+
+                    if p.is_ref || p.is_str_ref {
+                        call_args.push(quote! { &#name });
+                    } else {
+                        call_args.push(quote! { #name });
+                    }
                 }
             }
 
@@ -464,26 +441,17 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                             }
                         }
                     } else {
-                        quote! {
-                            Some(::simply_rpc::call_val(#call))
-                        }
+                        quote! { Some(::simply_rpc::call_val(#call)) }
                     }
                 },
-                ReturnKind::RawValue { .. } => quote! {
-                    Some(::simply_rpc::call_raw(#call))
-                },
-                _ => return None, // Stream methods don't get REST dispatch
+                ReturnKind::RawValue { .. } => quote! { Some(::simply_rpc::call_raw(#call)) },
+                _ => return None,
             };
 
             Some(quote! {
-                if http_method == #http_method_check {
-                    let __segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-                    if __segments.len() == #segment_count {
-                        #(#segment_checks)*
-                        #(#path_param_bindings)*
-                        #body_deser
-                        return #result_wrap;
-                    }
+                #method_name => {
+                    #(#param_bindings)*
+                    return #result_wrap;
                 }
             })
         })
@@ -493,8 +461,10 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
         quote! { None }
     } else {
         quote! {
-            #(#arms)*
-            None
+            match method_name {
+                #(#arms)*
+                _ => None,
+            }
         }
     }
 }

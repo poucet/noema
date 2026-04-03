@@ -11,7 +11,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, RpcClient, RpcService};
+use simply_rpc::{HttpMethod, RestDispatcher, RpcClient, RpcService};
 use tokio::sync::broadcast;
 
 // ---------------------------------------------------------------------------
@@ -272,12 +272,17 @@ fn stream_meta_doc_comments() {
 // PART 5: REST dispatch works for non-stream methods on the same trait
 // ===========================================================================
 
+fn make_channel_rd(impl_: Arc<InMemoryChannels>) -> RestDispatcher {
+    let svc = <dyn ChannelApi>::service(impl_);
+    RestDispatcher::new().register(svc)
+}
+
 #[tokio::test]
 async fn rest_dispatch_list_on_streaming_trait() {
-    let svc = ChannelApiService(Arc::new(InMemoryChannels::new()));
+    let rd = make_channel_rd(Arc::new(InMemoryChannels::new()));
 
-    // REST methods work through rest_dispatch
-    let result = svc.rest_dispatch(HttpMethod::Get, "/chan", Value::Null).await;
+    // REST methods work through RestDispatcher
+    let result = rd.dispatch(HttpMethod::Get, "/chan", Value::Null).await;
     let channels: Vec<ChannelInfo> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert!(channels.is_empty());
 }
@@ -286,21 +291,22 @@ async fn rest_dispatch_list_on_streaming_trait() {
 async fn rest_dispatch_delete_on_streaming_trait() {
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = ChannelApiService(impl_.clone());
+    let rd = make_channel_rd(impl_.clone());
 
     // Create via WS dispatch
     svc.dispatch("chan.open_channel", json!("rest_del")).await.unwrap();
 
     // Delete via REST dispatch
-    let result = svc.rest_dispatch(HttpMethod::Delete, "/chan/ch_rest_del", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Delete, "/chan/ch_rest_del", Value::Null).await;
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
 #[tokio::test]
 async fn rest_dispatch_stream_path_returns_none() {
-    let svc = ChannelApiService(Arc::new(InMemoryChannels::new()));
+    let rd = make_channel_rd(Arc::new(InMemoryChannels::new()));
 
     // Stream paths should NOT be dispatched as REST
-    let result = svc.rest_dispatch(HttpMethod::Get, "/chan/new", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/chan/new", Value::Null).await;
     assert!(result.is_none(), "stream paths should not match REST dispatch");
 }
 
@@ -309,8 +315,18 @@ async fn rest_dispatch_stream_path_returns_none() {
 // ===========================================================================
 
 struct MockStreamClient {
-    svc: ChannelApiService<InMemoryChannels>,
+    rd: RestDispatcher,
+    svc: Arc<ChannelApiService<dyn ChannelApi>>,
     impl_: Arc<InMemoryChannels>,
+}
+
+impl MockStreamClient {
+    fn new() -> Self {
+        let impl_ = Arc::new(InMemoryChannels::new());
+        let svc = <dyn ChannelApi>::service(impl_.clone());
+        let rd = RestDispatcher::new().register(svc.clone());
+        Self { rd, svc, impl_ }
+    }
 }
 
 #[async_trait]
@@ -341,7 +357,7 @@ impl RpcClient for MockStreamClient {
         path: &str,
         body: Value,
     ) -> anyhow::Result<Value> {
-        match self.svc.rest_dispatch(http_method, path, body).await {
+        match self.rd.dispatch(http_method, path, body).await {
             Some(result) => result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
@@ -352,17 +368,13 @@ impl_remote_channel_api!(MockStreamClient);
 
 #[tokio::test]
 async fn client_open_channel_returns_info_and_stream() {
-    let impl_ = Arc::new(InMemoryChannels::new());
-    let client = MockStreamClient {
-        svc: ChannelApiService(impl_.clone()),
-        impl_: impl_.clone(),
-    };
+    let client = MockStreamClient::new();
 
     let (info, mut rx) = client.open_channel("client_test").await.unwrap();
     assert_eq!(info.id, "ch_client_test");
 
     {
-        let channels = impl_.channels.lock().await;
+        let channels = client.impl_.channels.lock().await;
         let (_, tx) = channels.iter().find(|(i, _)| i.id == "ch_client_test").unwrap();
         tx.send(ChannelEvent("from_client".into())).unwrap();
     }
@@ -373,17 +385,13 @@ async fn client_open_channel_returns_info_and_stream() {
 
 #[tokio::test]
 async fn client_subscribe_returns_stream() {
-    let impl_ = Arc::new(InMemoryChannels::new());
-    let client = MockStreamClient {
-        svc: ChannelApiService(impl_.clone()),
-        impl_: impl_.clone(),
-    };
+    let client = MockStreamClient::new();
 
     client.open_channel("sub_test").await.unwrap();
     let mut rx = client.subscribe("ch_sub_test").await.unwrap();
 
     {
-        let channels = impl_.channels.lock().await;
+        let channels = client.impl_.channels.lock().await;
         let (_, tx) = channels.iter().find(|(i, _)| i.id == "ch_sub_test").unwrap();
         tx.send(ChannelEvent("subscribed".into())).unwrap();
     }
@@ -394,11 +402,7 @@ async fn client_subscribe_returns_stream() {
 
 #[tokio::test]
 async fn client_non_stream_methods_work() {
-    let impl_ = Arc::new(InMemoryChannels::new());
-    let client = MockStreamClient {
-        svc: ChannelApiService(impl_.clone()),
-        impl_: impl_.clone(),
-    };
+    let client = MockStreamClient::new();
 
     assert!(client.list_channels().await.unwrap().is_empty());
 
@@ -416,8 +420,6 @@ async fn client_non_stream_methods_work() {
 // Client uses only tokio-tungstenite + serde_json — no simply-rpc client code.
 // ===========================================================================
 
-use simply_rpc::RestService;
-
 /// Start a test server that handles both REST and WebSocket upgrades on stream paths.
 /// Returns the base URL (e.g. "http://127.0.0.1:12345").
 async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
@@ -429,9 +431,9 @@ async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
     use http_body_util::{BodyExt, Full};
 
     let impl_ = Arc::new(InMemoryChannels::new());
-    let svc = Arc::new(ChannelApiService(impl_.clone()));
+    let svc = <dyn ChannelApi>::service(impl_.clone());
     let rest_svc = Arc::new(
-        simply_rpc::RestDispatcher::new().register(svc.clone() as Arc<dyn RestService>),
+        RestDispatcher::new().register(svc.clone()),
     );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

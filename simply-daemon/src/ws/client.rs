@@ -270,4 +270,13 @@ impl RpcClient for WsConnection {
         let sid = SessionId::new(id);
         self.session_senders.lock().await.remove(&sid);
     }
+
+    async fn rest_call(
+        &self,
+        _http_method: simply_rpc::HttpMethod,
+        path: &str,
+        _body: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        anyhow::bail!("WsConnection does not support REST calls — use RemoteDaemon: {path}")
+    }
 }

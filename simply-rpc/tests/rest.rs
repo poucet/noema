@@ -145,6 +145,12 @@ fn make_svc(widgets: Vec<Widget>) -> WidgetApiService<InMemoryWidgets> {
     WidgetApiService(Arc::new(InMemoryWidgets::new(widgets)))
 }
 
+fn make_rd_from_widgets(widgets: Vec<Widget>) -> RestDispatcher {
+    let impl_ = Arc::new(InMemoryWidgets::new(widgets));
+    let svc = <dyn WidgetApi>::service(impl_);
+    RestDispatcher::new().register(svc)
+}
+
 // ===========================================================================
 // PART 1: Metadata tests
 // ===========================================================================
@@ -220,73 +226,72 @@ fn rest_meta_no_tool_flag() {
 }
 
 // ===========================================================================
-// PART 2: Direct rest_dispatch tests (unit-level, no server)
+// PART 2: RestDispatcher tests (matchit routing)
 // ===========================================================================
 
 #[tokio::test]
 async fn rest_dispatch_get_collection() {
-    let svc = make_svc(vec![
+    let rd = make_rd_from_widgets(vec![
         Widget { id: "1".into(), label: "A".into() },
         Widget { id: "2".into(), label: "B".into() },
     ]);
-    let result = svc.rest_dispatch(HttpMethod::Get, "/widget", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/widget", Value::Null).await;
     let items: Vec<Widget> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(items.len(), 2);
 }
 
 #[tokio::test]
 async fn rest_dispatch_get_single() {
-    let svc = make_svc(vec![Widget { id: "abc".into(), label: "Thing".into() }]);
-    let result = svc.rest_dispatch(HttpMethod::Get, "/widget/abc", Value::Null).await;
+    let rd = make_rd_from_widgets(vec![Widget { id: "abc".into(), label: "Thing".into() }]);
+    let result = rd.dispatch(HttpMethod::Get, "/widget/abc", Value::Null).await;
     let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(widget.id, "abc");
 }
 
 #[tokio::test]
 async fn rest_dispatch_post_body() {
-    let svc = make_svc(vec![]);
-    let body = json!({"id": "new", "label": "New Widget"});
-    let result = svc.rest_dispatch(HttpMethod::Post, "/widget", body).await;
+    let rd = make_rd_from_widgets(vec![]);
+    let result = rd.dispatch(HttpMethod::Post, "/widget", json!({"id": "new", "label": "New Widget"})).await;
     let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(widget.id, "new");
 }
 
 #[tokio::test]
 async fn rest_dispatch_delete() {
-    let svc = make_svc(vec![Widget { id: "del".into(), label: "D".into() }]);
-    let result = svc.rest_dispatch(HttpMethod::Delete, "/widget/del", Value::Null).await;
+    let rd = make_rd_from_widgets(vec![Widget { id: "del".into(), label: "D".into() }]);
+    let result = rd.dispatch(HttpMethod::Delete, "/widget/del", Value::Null).await;
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
 #[tokio::test]
 async fn rest_dispatch_put_path_and_body() {
-    let svc = make_svc(vec![Widget { id: "1".into(), label: "Old".into() }]);
-    let result = svc.rest_dispatch(HttpMethod::Put, "/widget/1", json!({"label": "New"})).await;
+    let rd = make_rd_from_widgets(vec![Widget { id: "1".into(), label: "Old".into() }]);
+    let result = rd.dispatch(HttpMethod::Put, "/widget/1", json!({"label": "New"})).await;
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
-    let result = svc.rest_dispatch(HttpMethod::Get, "/widget/1", Value::Null).await;
+    let result = rd.dispatch(HttpMethod::Get, "/widget/1", Value::Null).await;
     let w: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(w.label, "New");
 }
 
 #[tokio::test]
 async fn rest_dispatch_nested_path() {
-    let svc = make_svc(vec![]);
-    let result = svc.rest_dispatch(HttpMethod::Post, "/widget/w1/command", json!({"action": "restart"})).await;
+    let rd = make_rd_from_widgets(vec![]);
+    let result = rd.dispatch(HttpMethod::Post, "/widget/w1/command", json!({"action": "restart"})).await;
     let r: String = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(r, "w1:restart");
 }
 
 #[tokio::test]
 async fn rest_dispatch_post_no_params() {
-    let svc = make_svc(vec![]);
-    let result = svc.rest_dispatch(HttpMethod::Post, "/widget/kill", Value::Null).await;
+    let rd = make_rd_from_widgets(vec![]);
+    let result = rd.dispatch(HttpMethod::Post, "/widget/kill", Value::Null).await;
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
 #[tokio::test]
 async fn rest_dispatch_unknown_path_returns_none() {
-    let svc = make_svc(vec![]);
-    assert!(svc.rest_dispatch(HttpMethod::Get, "/other/path", Value::Null).await.is_none());
+    let rd = make_rd_from_widgets(vec![]);
+    assert!(rd.dispatch(HttpMethod::Get, "/other/path", Value::Null).await.is_none());
 }
 
 // ===========================================================================
@@ -294,7 +299,17 @@ async fn rest_dispatch_unknown_path_returns_none() {
 // ===========================================================================
 
 struct MockWsClient {
-    svc: WidgetApiService<InMemoryWidgets>,
+    rd: RestDispatcher,
+    svc: Arc<WidgetApiService<dyn WidgetApi>>,
+}
+
+impl MockWsClient {
+    fn new(widgets: Vec<Widget>) -> Self {
+        let impl_ = Arc::new(InMemoryWidgets::new(widgets));
+        let svc = <dyn WidgetApi>::service(impl_);
+        let rd = RestDispatcher::new().register(svc.clone());
+        Self { rd, svc }
+    }
 }
 
 #[async_trait]
@@ -322,7 +337,7 @@ impl RpcClient for MockWsClient {
         path: &str,
         body: Value,
     ) -> anyhow::Result<Value> {
-        match self.svc.rest_dispatch(http_method, path, body).await {
+        match self.rd.dispatch(http_method, path, body).await {
             Some(result) => result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
@@ -333,56 +348,50 @@ impl_remote_widget_api!(MockWsClient);
 
 #[tokio::test]
 async fn client_list_widgets() {
-    let client = MockWsClient { svc: make_svc(vec![
+    let client = MockWsClient::new(vec![
         Widget { id: "a".into(), label: "A".into() },
-    ]) };
+    ]);
     let items = client.list_widgets().await.unwrap();
     assert_eq!(items.len(), 1);
 }
 
 #[tokio::test]
 async fn client_get_widget() {
-    let client = MockWsClient { svc: make_svc(vec![
-        Widget { id: "x".into(), label: "X".into() },
-    ]) };
+    let client = MockWsClient::new(vec![Widget { id: "x".into(), label: "X".into() }]);
     let w = client.get_widget("x").await.unwrap();
     assert_eq!(w.label, "X");
 }
 
 #[tokio::test]
 async fn client_create_and_list() {
-    let client = MockWsClient { svc: make_svc(vec![]) };
+    let client = MockWsClient::new(vec![]);
     client.create_widget(Widget { id: "n".into(), label: "N".into() }).await.unwrap();
     assert_eq!(client.list_widgets().await.unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn client_delete_widget() {
-    let client = MockWsClient { svc: make_svc(vec![
-        Widget { id: "d".into(), label: "D".into() },
-    ]) };
+    let client = MockWsClient::new(vec![Widget { id: "d".into(), label: "D".into() }]);
     client.delete_widget("d").await.unwrap();
     assert!(client.list_widgets().await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn client_rename_widget() {
-    let client = MockWsClient { svc: make_svc(vec![
-        Widget { id: "1".into(), label: "Old".into() },
-    ]) };
+    let client = MockWsClient::new(vec![Widget { id: "1".into(), label: "Old".into() }]);
     client.rename_widget("1", "New").await.unwrap();
     assert_eq!(client.get_widget("1").await.unwrap().label, "New");
 }
 
 #[tokio::test]
 async fn client_send_command() {
-    let client = MockWsClient { svc: make_svc(vec![]) };
+    let client = MockWsClient::new(vec![]);
     assert_eq!(client.send_command("abc", "reboot").await.unwrap(), "abc:reboot");
 }
 
 #[tokio::test]
 async fn client_skip_method_errors() {
-    let client = MockWsClient { svc: make_svc(vec![]) };
+    let client = MockWsClient::new(vec![]);
     let err = client.internal_op().await.unwrap_err();
     assert!(err.to_string().contains("not available over RPC"));
 }
@@ -403,10 +412,9 @@ async fn start_test_server(widgets: Vec<Widget>) -> String {
     use hyper_util::rt::TokioIo;
     use http_body_util::{BodyExt, Full};
 
-    let svc = Arc::new(make_svc(widgets));
-    let dispatcher = Arc::new(
-        RestDispatcher::new().register(svc as Arc<dyn RestService>),
-    );
+    let impl_ = Arc::new(InMemoryWidgets::new(widgets));
+    let svc = <dyn WidgetApi>::service(impl_);
+    let dispatcher = Arc::new(RestDispatcher::new().register(svc));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
