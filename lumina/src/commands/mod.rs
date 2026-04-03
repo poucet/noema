@@ -7,6 +7,7 @@
 mod chat;
 mod model;
 mod ping;
+pub mod tool;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

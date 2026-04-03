@@ -229,6 +229,7 @@ impl McpApi for McpService {
                 name: t.name.to_string(),
                 description: t.description.as_deref().map(|s| s.to_string()),
                 server_id: server_id.to_string(),
+                input_schema: serde_json::to_value(&*t.input_schema).unwrap_or_default(),
             })
             .collect())
     }
@@ -309,6 +310,37 @@ impl McpApi for McpService {
         registry.unregister_ephemeral(server_id).await;
         tracing::info!(id = %server_id, "ephemeral MCP service unregistered");
         Ok(())
+    }
+
+    async fn list_all_tools(&self) -> anyhow::Result<Vec<McpToolInfo>> {
+        let registry = self.registry.lock().await;
+        let mut tools = Vec::new();
+        for (server_id, server) in registry.connected_servers() {
+            for tool in &server.tools {
+                let input_schema = serde_json::to_value(&*tool.input_schema).ok();
+                tools.push(McpToolInfo {
+                    name: tool.name.to_string(),
+                    description: tool.description.as_deref().map(|s| s.to_string()),
+                    server_id: server_id.to_string(),
+                    input_schema,
+                });
+            }
+        }
+        Ok(tools)
+    }
+
+    async fn call_tool_direct(&self, request: CallToolRequest) -> anyhow::Result<CallToolResult> {
+        use simply_core::agent::ToolService;
+        let tool_service = simply_core::mcp::McpToolRegistry::new(Arc::clone(&self.registry));
+        let results = tool_service.call_tool(&request.name, request.arguments).await?;
+        let content: Vec<serde_json::Value> = results
+            .into_iter()
+            .map(|r| serde_json::to_value(r).unwrap_or_default())
+            .collect();
+        Ok(CallToolResult {
+            content,
+            is_error: false,
+        })
     }
 }
 

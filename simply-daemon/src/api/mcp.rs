@@ -24,6 +24,22 @@ pub struct McpToolInfo {
     pub name: String,
     pub description: Option<String>,
     pub server_id: String,
+    /// JSON schema for the tool's input parameters.
+    pub input_schema: serde_json::Value,
+}
+
+/// Request to call a tool by name (routed through the ToolService).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallToolRequest {
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// Result of a tool call — each entry is a serialized ToolResultContent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallToolResult {
+    pub content: Vec<serde_json::Value>,
+    pub is_error: bool,
 }
 
 /// Request to add a new MCP server.
@@ -112,4 +128,12 @@ pub trait McpApi: Send + Sync {
     /// Unregister an ephemeral MCP server and disconnect.
     #[rpc(delete = "/mcp/ephemeral/{server_id}")]
     async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()>;
+
+    /// List all tools across all connected servers (includes schemas).
+    #[rpc(get = "/mcp/tools")]
+    async fn list_all_tools(&self) -> anyhow::Result<Vec<McpToolInfo>>;
+
+    /// Call a tool by name (routed via ToolService to the providing server).
+    #[rpc(post = "/mcp/tools/call")]
+    async fn call_tool_direct(&self, request: CallToolRequest) -> anyhow::Result<CallToolResult>;
 }

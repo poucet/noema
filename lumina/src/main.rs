@@ -226,6 +226,14 @@ impl EventHandler for Handler {
                 let registry = data.get::<CommandRegistry>().expect("CommandRegistry missing");
                 registry.dispatch_autocomplete(&lx, &ac).await;
             }
+            serenity::model::application::Interaction::Modal(modal) => {
+                if modal.data.custom_id.starts_with("tool_call:") {
+                    let lx = commands::LuminaContext::from_serenity(&ctx).await;
+                    if let Err(e) = commands::tool::handle_modal(&lx, &modal).await {
+                        tracing::error!(error = %e, "tool modal failed");
+                    }
+                }
+            }
             _ => {}
         }
     }
