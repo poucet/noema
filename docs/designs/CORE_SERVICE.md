@@ -1,6 +1,6 @@
 # Core Service Communication
 
-**Status:** Draft
+**Status:** Draft (updated for REST-first transport)
 **Version:** 1.0
 **Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
 
@@ -8,11 +8,13 @@
 
 ## Overview
 
-`simply-daemon` is the hub. It owns agent orchestration (via `simply-core`), UCM storage, event/intent engine, voice pipeline, and session management. It exposes three interfaces for different needs:
+`simply-daemon` is the hub. It owns agent orchestration (via `simply-core`), UCM storage, event/intent engine, voice pipeline, and session management. It exposes three interfaces:
 
-- **WebSocket + JSON** — rich clients (Noema, Lumina) that need sessions, streaming, multimodal content
-- **REST inbound** — trigger services that push events (curl-friendly, fire-and-forget)
-- **MCP outbound** — action services that the daemon connects to and calls tools on
+- **REST** — primary interface for all request/response operations. Used by rich clients (Noema, Lumina), admin webpage, and trigger services.
+- **WebSocket** — streaming only. Session event streams (agent responses, tool calls) and future bidirectional channels (voice).
+- **MCP outbound** — action services that the daemon connects to and calls tools on.
+
+Additionally, daemon REST methods are exposed as **in-process tools** via the `ToolService` trait, so agents can call daemon capabilities (list conversations, manage MCP servers, etc.) the same way they call external MCP tools.
 
 `simply-core` is a library crate internal to the daemon: LLM providers, MCP client/server, agent orchestration. No external crate depends on it.
 
@@ -29,108 +31,98 @@ simply-daemon
 ├─ UCM storage (SQLite, blobs)
 ├─ Session manager (in-memory conversation state)
 ├─ Client registry (connected peers + capabilities)
-├─ Global MCP tool registry
+├─ Global MCP tool registry (external MCP + daemon tools via ToolService)
 ├─ Event bus + intent engine
 ├─ Voice pipeline
 │
-├─ WebSocket + JSON — rich clients
-│   ▲           ▲           ▲
-│   Noema       Lumina      Future clients
+├─ REST — all request/response operations
+│   ▲           ▲           ▲           ▲
+│   Noema       Lumina      Admin page  Trigger services
 │
-├─ REST inbound — trigger services
+├─ WebSocket — streaming only
 │   ▲           ▲
-│   github      shell script
-│   watcher     cron job
+│   Noema       Lumina      (session events, voice)
 │
 └─ MCP outbound — action services
     ▼           ▼
-    github      droplets
-    watcher     any MCP server
+    github      any MCP server
+    watcher
 ```
 
 ---
 
-## Interface 1: WebSocket + JSON — Rich Clients
+## Interface 1: REST — Primary Request/Response
 
-For Noema, Lumina, and future clients that need interactive, multimodal, real-time communication.
-
-### Why WebSocket?
-
-- **Universal** — every platform has WebSocket support. Tauri, browsers, serenity bots, Python scripts.
-- **No translation layers** — Noema's React frontend can talk to the daemon directly. No Tauri proxy needed for chat.
-- **Bidirectional** — send messages and receive streamed responses over one connection.
-- **Binary support** — WebSocket supports binary frames natively for non-realtime multimodal (images, files).
-- **Type safety via Rust** — message types defined in Rust, exported to TypeScript for frontend consumption.
-
-### Client → Daemon
-
-| Message | Purpose |
-|---------|---------|
-| **CreateSession** | Start a new conversation (ephemeral or persistent) |
-| **ResumeSession** | Reconnect to existing session (after daemon restart) |
-| **SeedContext** | Provide conversation history (Lumina: Discord messages, Noema: ephemeral messages) |
-| **SendMessage** | New user message for the agent (can include images, file references) |
-| **SetPersistence** | Toggle conversation persistence (ephemeral ↔ UCM-backed) at any time |
-| **RegisterMcp** | Register MCP tools (platform-specific or shared — all shared by default) |
-| **RegisterEventSource** | Register platform-specific event sources |
-
-### Daemon → Client
-
-| Message | Purpose |
-|---------|---------|
-| **AgentResponse** | Agent's response (streamed tokens) |
-| **AgentMultimodal** | Non-realtime multimodal content (generated image, file, etc.) |
-| **ToolCall** | Agent wants to call a client-registered MCP tool |
-| **EventNotification** | An intent fired that targets this client's platform |
-| **SessionState** | Confirmation of session creation, persistence changes, etc. |
-
-### Noema Specifically
-
-```
-Noema
-├─ React frontend
-│   ├─ WebSocket → simply-daemon (chat, sessions, agent responses)
-│   └─ Tauri IPC → src-tauri (slash commands, OS integration, file access)
-├─ src-tauri
-│   └─ Local system access only (no chat proxy)
-```
-
-The React frontend talks directly to the daemon for all conversation/agent work. Tauri handles OS-level concerns: slash commands, file pickers, window management, notifications.
-
-### Multimodal
-
-Two kinds, different transports:
-
-1. **Non-realtime** (images, files, documents) — sent as message content over WebSocket. Base64, blob references, or URLs.
-2. **Realtime voice** — separate transport per platform. CPAL (desktop mic), songbird (Discord), WebRTC (browser). Audio streams do NOT go through the WebSocket.
-
----
-
-## Interface 2: REST Inbound — Trigger Services
-
-For services that push events into the daemon. The simplest possible API — a shell script with curl works.
-
-### Endpoints
-
-```
-POST /events
-  { "type": "github.pr_opened", "payload": { "repo": "...", "pr": 42 } }
-
-POST /register
-  { "name": "github-watcher", "mcp_endpoint": "localhost:9001",
-    "events": ["github.pr_opened", "github.push"] }
-
-DELETE /register/{name}
-
-GET /health
-```
+All non-streaming daemon operations are REST endpoints, auto-generated from trait annotations. See [RPC_FRAMEWORK.md](RPC_FRAMEWORK.md) for the annotation system.
 
 ### Characteristics
 
-- **Stateless** — no persistent connection needed. POST and exit.
-- **Curl-friendly** — `curl -X POST http://localhost:PORT/events -d '{"type": "github.push", ...}'`
-- **No ordering guarantees** — events are processed as they arrive.
-- **Auth** — simple token-based auth for local services.
+- **Standard HTTP** — GET/POST/PUT/DELETE with JSON bodies. Explorable with curl, browser, any HTTP client.
+- **Macro-driven routing** — paths declared in trait annotations, no manual route wiring.
+- **Admin-friendly** — the admin webpage calls the same REST endpoints via `fetch()`.
+- **Curl-friendly** — trigger services push events with `POST /session/event`.
+
+### Auth (v1)
+
+**Localhost only.** The REST server binds to `127.0.0.1` — all callers are trusted. No auth middleware.
+
+**Future (post-v1):** Localhost remains trusted. Remote access adds OAuth for admin and app tokens for Noema/Lumina.
+
+### Client usage
+
+Rich clients (Noema, Lumina) use REST for all non-streaming operations via `RemoteDaemon`, which generates HTTP calls from the same trait annotations. The public `DaemonApi` traits are unchanged — callers don't know the transport.
+
+### Trigger services
+
+Fire-and-forget event delivery:
+
+```
+POST /session/event
+  { "type": "github.pr_opened", "payload": { "repo": "...", "pr": 42 } }
+```
+
+---
+
+## Interface 2: WebSocket — Streaming Only
+
+For real-time event streams. WebSocket is used exclusively for `#[rpc(stream)]` methods.
+
+### What streams over WebSocket
+
+- **Session events** — `create_session`, `resume_session`, `subscribe_session` return a `broadcast::Receiver<DaemonEvent>` carrying streamed tokens, tool calls, turn completions.
+- **Future:** voice channels, video streams.
+
+### What does NOT use WebSocket
+
+All request/response operations (CRUD, configuration, queries) use REST. This includes:
+- Sending messages (`POST /session/{id}/message`)
+- Managing sessions, conversations, MCP servers, models
+- Health checks, admin operations
+
+### Protocol
+
+```rust
+struct WsRequest {
+    id: u64,
+    method: String,  // e.g., "session.create_session"
+    params: serde_json::Value,
+}
+
+struct WsResponse {
+    id: u64,
+    result: Option<Value>,
+    error: Option<WsError>,
+}
+
+struct WsNotification {  // Server → Client push (stream events)
+    method: String,
+    params: Value,
+}
+```
+
+### Client identification
+
+Built-in method: `client.identify(name)`. Server tracks connection ID + name for admin dashboard.
 
 ---
 
@@ -141,7 +133,7 @@ For services that expose tools the daemon's agent can call. The daemon connects 
 ### How It Works
 
 1. Service starts up and exposes an MCP server (standard MCP protocol)
-2. Service registers with the daemon via REST: `POST /register { name, mcp_endpoint }`
+2. Service registers with the daemon via REST: `POST /mcp` with endpoint URL
 3. Daemon connects to the MCP server, discovers available tools
 4. Tools become available in the daemon's global tool registry — usable by any session on any client
 5. When the daemon needs to call a tool, it invokes it via the MCP connection
@@ -150,7 +142,7 @@ For services that expose tools the daemon's agent can call. The daemon connects 
 ### Dynamic Registration
 
 Action services can come and go at runtime:
-- Register via REST `POST /register` with an MCP endpoint
+- Register via REST with an MCP endpoint
 - Daemon connects, discovers tools
 - Service shuts down → MCP connection drops → tools become unavailable → actions deferred
 - Service restarts → re-registers → daemon reconnects → tools available again
@@ -173,19 +165,38 @@ Both runtime registration and UCM configuration work. UCM config is loaded at da
 
 ### A Service Can Be Both Trigger and Action
 
-A GitHub watcher is a trigger service (pushes `github.pr_opened` events via REST) AND an action service (exposes `comment_pr`, `create_issue` tools via MCP). Both interfaces compose naturally.
+A GitHub watcher is a trigger service (pushes events via REST `POST /session/event`) AND an action service (exposes tools via MCP). Both interfaces compose naturally.
+
+---
+
+## Daemon as Tool Provider
+
+REST methods on daemon traits are automatically exposed as tools via the `ToolService` trait:
+
+```rust
+pub trait ToolService: Send + Sync {
+    async fn get_definitions(&self) -> Vec<ToolDefinition>;
+    async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<Vec<ToolResultContent>>;
+}
+```
+
+This is **in-process only** — no MCP server, no port, no protocol overhead. The daemon generates a `ToolService` impl from its REST-annotated trait methods (tool names, descriptions from doc comments, schemas from parameter types). This impl is registered in `McpToolRegistry` alongside external MCP tools.
+
+**Result:** agents see daemon capabilities (list conversations, manage MCP servers, etc.) and external tools identically. Adding a new REST method to any daemon trait automatically makes it available as a tool.
+
+Methods marked `#[rpc(no_tool)]` (e.g., `kill`) are excluded.
 
 ---
 
 ## MCP Tool Registry — Global and Shared
 
-All MCP tools are registered in a single global registry, regardless of who registered them:
+All tools are registered in a single global registry, regardless of source:
 
+- **Daemon tools** (via `ToolService`): conversation CRUD, session management, model queries, etc.
 - **Client-registered tools** (via WebSocket `RegisterMcp`): Discord tools from Lumina, filesystem tools from Noema, etc.
-- **Service-registered tools** (via MCP outbound): GitHub tools, Droplets tools, any external MCP server.
-- **Daemon-built-in tools**: document CRUD, search, intent management.
+- **Service-registered tools** (via MCP outbound): GitHub tools, any external MCP server.
 
-**All tools are shared by default.** If you connect your Droplets MCP service from Noema, it's available to Lumina sessions too. The agent sees all tools regardless of which client is driving the session.
+**All tools are shared by default.** The agent sees all tools regardless of which client is driving the session.
 
 Platform-specific tools (like `send_discord_message`) naturally only *work* when Lumina is connected — but they're still visible to all sessions. If the agent calls a tool whose owning client/service is disconnected, the action is deferred until reconnection (or fails after timeout).
 
@@ -195,9 +206,9 @@ Platform-specific tools (like `send_discord_message`) naturally only *work* when
 
 The daemon maintains a registry of all connected peers:
 
-- **Rich clients** (WebSocket): which platforms are online, what tools and event sources they've registered
+- **Rich clients** (REST + WebSocket): which platforms are online, what tools and event sources they've registered
 - **Action services** (MCP): which services are connected, what tools they expose
-- **Trigger services** (REST): registered event sources (liveness via MCP connection or TTL)
+- **Trigger services** (REST): registered event sources
 
 When an intent fires or an agent calls a tool:
 1. Daemon checks the registry for the tool/action target
@@ -211,8 +222,7 @@ When an intent fires or an agent calls a tool:
 Sessions are the daemon's unit of conversation state. They live in memory and are optionally backed by UCM storage.
 
 - **Ephemeral by default differs per platform** — Lumina defaults ephemeral (Discord is source of truth), Noema defaults persistent (UCM). Toggleable at any time.
-- **Persistence is per-conversation** — "save this conversation" from Discord writes in-memory state to UCM. A scratchpad in Noema creates an ephemeral session.
-- **Sub-agent workflows can use UCM independently** — even if the parent conversation is ephemeral, a sub-agent doing multi-step tool work may store intermediate state in UCM.
+- **Persistence is per-conversation** — "save this conversation" from Discord writes in-memory state to UCM.
 - **After daemon restart, clients re-seed** — Lumina re-sends recent Discord messages, Noema reloads from UCM (persistent) or re-sends from memory (ephemeral).
 
 ---
@@ -223,25 +233,45 @@ The daemon can restart independently of clients. Clients must handle disconnecti
 
 ### Client Auto-Reconnect
 
-When a WebSocket connection drops, the client:
+When a WebSocket connection drops (for streaming), the client:
 
 1. Detects disconnection (WebSocket close / error)
-2. Enters reconnection loop with **exponential backoff** (e.g., 100ms → 200ms → 400ms → ... capped at 30s)
+2. Enters reconnection loop with **exponential backoff** (100ms → 200ms → 400ms → ... capped at 30s)
 3. On successful reconnect: re-registers MCP tools and event sources, resumes or re-seeds sessions
-4. UI shows connection status (disconnected / reconnecting / connected) — the client remains usable for local operations during disconnection
+4. UI shows connection status — the client remains usable for local operations during disconnection
+
+REST calls are stateless and retry-friendly — a daemon restart just means a brief period of failed HTTP requests until it comes back.
 
 ### Daemon Statelessness Across Restarts
 
-The daemon does not assume clients stay connected across its own restarts. On startup:
-
+On startup:
 - UCM-backed sessions are reloadable from storage
-- Ephemeral sessions are lost — clients re-seed from their own state (Discord history, in-memory messages)
+- Ephemeral sessions are lost — clients re-seed from their own state
 - MCP tool registrations are re-established by clients on reconnect
-- The daemon does not persist WebSocket session state to disk
+- The daemon does not persist connection state to disk
 
-### Ordering
+---
 
-The client drives recovery. The daemon accepts fresh connections and treats reconnecting clients the same as new ones. Session resumption (matching a new connection to a prior session) uses session IDs, not connection identity.
+## Noema Specifically
+
+```
+Noema
+├─ React frontend
+│   ├─ REST → simply-daemon (all request/response: send message, list sessions, etc.)
+│   ├─ WebSocket → simply-daemon (session event streams only)
+│   └─ Tauri IPC → src-tauri (slash commands, OS integration, file access)
+├─ src-tauri
+│   └─ Local system access only (no chat proxy)
+```
+
+The React frontend talks directly to the daemon for all conversation/agent work. Tauri handles OS-level concerns.
+
+### Multimodal
+
+Two kinds, different transports:
+
+1. **Non-realtime** (images, files, documents) — sent as message content via REST. Base64, blob references, or URLs.
+2. **Realtime voice** — separate transport per platform. CPAL (desktop mic), songbird (Discord), WebRTC (browser). Audio streams do NOT go through REST or the primary WebSocket.
 
 ---
 
@@ -249,14 +279,14 @@ The client drives recovery. The daemon accepts fresh connections and treats reco
 
 Create a new crate that:
 1. Handles platform-specific I/O (gateway, commands, audio)
-2. Opens a WebSocket connection to simply-daemon
+2. Uses `RemoteDaemon` (REST + lazy WebSocket) — public trait API unchanged
 3. Registers platform-specific MCP tools (shared globally)
 4. Registers platform-specific event sources
-5. Handles `ToolCall` and `EventNotification` messages from the daemon
+5. Handles session events via WebSocket stream subscription
 
 ## Adding a New Integration Service
 
 1. Expose an MCP server with your tools
-2. `POST /register` to the daemon with your MCP endpoint
-3. Optionally push events via `POST /events`
+2. Register with the daemon via REST: `POST /mcp` with your endpoint
+3. Optionally push events via `POST /session/event`
 4. That's it — your tools are available to all sessions
