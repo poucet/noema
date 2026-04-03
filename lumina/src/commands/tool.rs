@@ -11,9 +11,10 @@ use serenity::all::{
     InputTextStyle, ResolvedOption, ResolvedValue,
 };
 use serenity::builder::{
-    CreateActionRow, CreateCommand, CreateCommandOption, CreateEmbed, CreateInputText, CreateModal,
+    CreateActionRow, CreateCommand, CreateCommandOption, CreateEmbed, CreateInputText,
+    CreateMessage, CreateModal,
 };
-use simply_daemon::api::{CallToolRequest, McpApi};
+use simply_daemon::api::{CallToolRequestParam, McpApi};
 use std::time::Duration;
 
 use super::LuminaContext;
@@ -92,12 +93,13 @@ impl super::SlashCommand for Tool {
             .filter(|t| partial.is_empty() || t.name.to_lowercase().contains(&partial))
             .take(25)
             .map(|t| {
-                let display = match &t.description {
-                    Some(d) if d.len() <= 80 => format!("{} — {}", t.name, d),
-                    Some(d) => format!("{} — {}...", t.name, &d[..77]),
-                    None => t.name.clone(),
+                let name = t.name.as_ref();
+                let display = match t.description.as_deref() {
+                    Some(d) if d.len() <= 80 => format!("{name} — {d}"),
+                    Some(d) => format!("{name} — {}...", &d[..77]),
+                    None => name.to_string(),
                 };
-                AutocompleteChoice::new(display, t.name)
+                AutocompleteChoice::new(display, name.to_string())
             })
             .collect();
 
@@ -119,16 +121,17 @@ async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str)
     let tools = lx.daemon.list_all_tools().await?;
     let tool = tools
         .iter()
-        .find(|t| t.name == tool_name)
+        .find(|t| t.name.as_ref() == tool_name)
         .ok_or_else(|| anyhow::anyhow!("tool not found: {tool_name}"))?;
 
-    let params = extract_params(&tool.input_schema);
+    let schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
+    let params = extract_params(&schema);
 
     if params.is_empty() {
         // No params — execute immediately
-        let result = lx.daemon.call_tool_direct(CallToolRequest {
-            name: tool_name.to_string(),
-            arguments: serde_json::json!({}),
+        let result = lx.daemon.call_tool_direct(CallToolRequestParam {
+            name: tool_name.into(),
+            arguments: None,
         }).await;
         send_result(lx, cmd, tool_name, result).await
     } else {
@@ -172,61 +175,31 @@ async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
         return Ok(());
     }
 
-    // Group tools by server
-    let mut by_server: std::collections::BTreeMap<String, Vec<&simply_daemon::api::McpToolInfo>> =
-        std::collections::BTreeMap::new();
+    let mut text = String::new();
     for tool in &tools {
-        by_server.entry(tool.server_id.clone()).or_default().push(tool);
+        let name = tool.name.as_ref();
+        let desc = tool.description.as_deref().unwrap_or("No description");
+        let param_count = tool.input_schema.get("properties")
+            .and_then(|p| p.as_object())
+            .map(|p| p.len())
+            .unwrap_or(0);
+        text.push_str(&format!("**`{name}`** — {desc} ({param_count} params)\n"));
     }
 
-    // Build pages — each page lists tools from one or more servers, fitting within 4096 embed desc limit
-    let mut pages: Vec<String> = Vec::new();
-    let mut current_page = String::new();
+    let pages = crate::paginator::paginate_text(&text, 3800);
 
-    for (server_id, server_tools) in &by_server {
-        let mut section = format!("### {server_id}\n");
-        for tool in server_tools {
-            let desc = tool.description.as_deref().unwrap_or("No description");
-            let param_count = tool.input_schema
-                .get("properties")
-                .and_then(|p| p.as_object())
-                .map(|p| p.len())
-                .unwrap_or(0);
-            section.push_str(&format!(
-                "**`{}`** — {} ({} params)\n",
-                tool.name, desc, param_count,
-            ));
-        }
-
-        if !current_page.is_empty() && current_page.len() + section.len() > 3800 {
-            pages.push(current_page);
-            current_page = String::new();
-        }
-        current_page.push_str(&section);
-        current_page.push('\n');
-    }
-    if !current_page.is_empty() {
-        pages.push(current_page);
-    }
-
-    // Use paginator for multi-page, direct embed for single page
-    if pages.len() == 1 {
+    if pages.len() <= 1 {
         let embed = CreateEmbed::new()
             .title(format!("MCP Tools ({} total)", tools.len()))
-            .description(&pages[0])
+            .description(pages.first().map(|s| s.as_str()).unwrap_or(""))
             .color(0x5865F2);
         cmd.create_response(&lx.http, CreateInteractionResponse::Message(
             CreateInteractionResponseMessage::new().embed(embed),
         )).await?;
     } else {
-        // Convert to paginator-compatible text pages with embed formatting
-        let text_pages: Vec<String> = pages
-            .iter()
-            .enumerate()
-            .map(|(i, content)| {
-                format!("**MCP Tools** ({} total) — Page {}/{}\n\n{}", tools.len(), i + 1, pages.len(), content)
-            })
-            .collect();
+        let text_pages: Vec<String> = pages.iter().enumerate().map(|(i, content)| {
+            format!("**MCP Tools** ({} total) — Page {}/{}\n\n{}", tools.len(), i + 1, pages.len(), content)
+        }).collect();
         crate::paginator::send_paginated(lx, cmd, &text_pages, Duration::from_secs(120)).await?;
     }
 
@@ -259,14 +232,13 @@ pub async fn handle_modal(lx: &LuminaContext, modal: &serenity::model::applicati
         CreateInteractionResponseMessage::new(),
     )).await?;
 
-    let result = lx.daemon.call_tool_direct(CallToolRequest {
-        name: tool_name.to_string(),
-        arguments: serde_json::Value::Object(args),
+    let result = lx.daemon.call_tool_direct(CallToolRequestParam {
+        name: tool_name.into(),
+        arguments: Some(args),
     }).await;
 
-    let (color, title, body) = format_result(tool_name, result);
-    let embed = CreateEmbed::new().title(title).description(body).color(color);
-    modal.edit_response(&lx.http, serenity::builder::EditInteractionResponse::new().embed(embed)).await?;
+    send_tool_result(lx, modal.channel_id, tool_name, result).await?;
+    modal.delete_response(&lx.http).await.ok();
     Ok(())
 }
 
@@ -332,18 +304,84 @@ fn parse_smart_value(s: &str) -> serde_json::Value {
     serde_json::Value::String(s.to_string())
 }
 
-fn format_result(tool_name: &str, result: anyhow::Result<simply_daemon::api::CallToolResult>) -> (u32, String, String) {
+/// Format a CallToolResult into Discord messages (embed + optional attachments).
+async fn send_tool_result(
+    lx: &LuminaContext,
+    channel_id: serenity::model::id::ChannelId,
+    tool_name: &str,
+    result: anyhow::Result<simply_daemon::api::CallToolResult>,
+) -> anyhow::Result<()> {
     match result {
         Ok(r) => {
-            let text = r.content.iter()
-                .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let body = if text.len() > 4000 { format!("{}...", &text[..3997]) } else { text };
-            (0x2ECC71, format!("Tool: {tool_name}"), body)
+            let is_error = r.is_error.unwrap_or(false);
+            let color = if is_error { 0xE74C3C } else { 0x2ECC71 };
+            let mut text_parts = Vec::new();
+
+            for content in &r.content {
+                match &content.raw {
+                    rmcp::model::RawContent::Text(t) => {
+                        text_parts.push(t.text.to_string());
+                    }
+                    rmcp::model::RawContent::Image(img) => {
+                        if let Ok(bytes) = base64_decode(&img.data) {
+                            let ext = img.mime_type.split('/').last().unwrap_or("png");
+                            let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("result.{ext}"));
+                            channel_id.send_message(&lx.http, CreateMessage::new().add_file(attachment)).await?;
+                        }
+                    }
+                    rmcp::model::RawContent::Audio(audio) => {
+                        if let Ok(bytes) = base64_decode(&audio.data) {
+                            let ext = audio.mime_type.split('/').last().unwrap_or("mp3");
+                            let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("result.{ext}"));
+                            channel_id.send_message(&lx.http, CreateMessage::new().add_file(attachment)).await?;
+                        }
+                    }
+                    rmcp::model::RawContent::Resource(res) => {
+                        match &res.resource {
+                            rmcp::model::ResourceContents::TextResourceContents { text, .. } => {
+                                text_parts.push(text.to_string());
+                            }
+                            rmcp::model::ResourceContents::BlobResourceContents { blob, mime_type, .. } => {
+                                if let Ok(bytes) = base64_decode(blob) {
+                                    let ext = mime_type.as_deref().and_then(|m| m.split('/').last()).unwrap_or("bin");
+                                    let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("result.{ext}"));
+                                    channel_id.send_message(&lx.http, CreateMessage::new().add_file(attachment)).await?;
+                                }
+                            }
+                        }
+                    }
+                    rmcp::model::RawContent::ResourceLink(link) => {
+                        text_parts.push(format!("Resource: {}", link.uri));
+                    }
+                }
+            }
+
+            if let Some(structured) = &r.structured_content {
+                text_parts.push(serde_json::to_string_pretty(structured).unwrap_or_default());
+            }
+
+            let body = text_parts.join("\n");
+            let body = if body.len() > 4000 { format!("{}...", &body[..3997]) } else { body };
+            let embed = CreateEmbed::new()
+                .title(format!("Tool: {tool_name}"))
+                .description(body)
+                .color(color);
+            channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
         }
-        Err(e) => (0xE74C3C, format!("Tool: {tool_name} (error)"), format!("{e}")),
+        Err(e) => {
+            let embed = CreateEmbed::new()
+                .title(format!("Tool: {tool_name} (error)"))
+                .description(format!("{e}"))
+                .color(0xE74C3C);
+            channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
+        }
     }
+    Ok(())
+}
+
+fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
 }
 
 async fn send_result(
@@ -352,10 +390,12 @@ async fn send_result(
     tool_name: &str,
     result: anyhow::Result<simply_daemon::api::CallToolResult>,
 ) -> anyhow::Result<()> {
-    let (color, title, body) = format_result(tool_name, result);
-    let embed = CreateEmbed::new().title(title).description(body).color(color);
-    cmd.create_response(&lx.http, CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new().embed(embed),
+    // Acknowledge first, then send result to the channel
+    cmd.create_response(&lx.http, CreateInteractionResponse::Defer(
+        CreateInteractionResponseMessage::new(),
     )).await?;
+    send_tool_result(lx, cmd.channel_id, tool_name, result).await?;
+    // Delete the deferred "thinking" message
+    cmd.delete_response(&lx.http).await.ok();
     Ok(())
 }

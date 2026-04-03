@@ -217,21 +217,12 @@ impl McpApi for McpService {
     async fn get_mcp_server_tools(
         &self,
         server_id: &str,
-    ) -> anyhow::Result<Vec<McpToolInfo>> {
+    ) -> anyhow::Result<Vec<McpTool>> {
         let registry = self.registry.lock().await;
         let conn = registry
             .get_connection(server_id)
             .ok_or_else(|| anyhow::anyhow!("server not connected: {server_id}"))?;
-        Ok(conn
-            .tools
-            .iter()
-            .map(|t| McpToolInfo {
-                name: t.name.to_string(),
-                description: t.description.as_deref().map(|s| s.to_string()),
-                server_id: server_id.to_string(),
-                input_schema: serde_json::to_value(&*t.input_schema).unwrap_or_default(),
-            })
-            .collect())
+        Ok(conn.tools.clone())
     }
 
     async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> {
@@ -312,35 +303,36 @@ impl McpApi for McpService {
         Ok(())
     }
 
-    async fn list_all_tools(&self) -> anyhow::Result<Vec<McpToolInfo>> {
+    async fn list_all_tools(&self) -> anyhow::Result<Vec<McpTool>> {
         let registry = self.registry.lock().await;
         let mut tools = Vec::new();
-        for (server_id, server) in registry.connected_servers() {
-            for tool in &server.tools {
-                let input_schema = serde_json::to_value(&*tool.input_schema).ok();
-                tools.push(McpToolInfo {
-                    name: tool.name.to_string(),
-                    description: tool.description.as_deref().map(|s| s.to_string()),
-                    server_id: server_id.to_string(),
-                    input_schema,
-                });
-            }
+        for (_server_id, server) in registry.connected_servers() {
+            tools.extend(server.tools.iter().cloned());
         }
         Ok(tools)
     }
 
-    async fn call_tool_direct(&self, request: CallToolRequest) -> anyhow::Result<CallToolResult> {
-        use simply_core::agent::ToolService;
-        let tool_service = simply_core::mcp::McpToolRegistry::new(Arc::clone(&self.registry));
-        let results = tool_service.call_tool(&request.name, request.arguments).await?;
-        let content: Vec<serde_json::Value> = results
-            .into_iter()
-            .map(|r| serde_json::to_value(r).unwrap_or_default())
-            .collect();
-        Ok(CallToolResult {
-            content,
-            is_error: false,
-        })
+    async fn call_tool_direct(&self, request: CallToolRequestParam) -> anyhow::Result<CallToolResult> {
+        let registry = self.registry.lock().await;
+
+        // Find the server that has this tool, get a caller, then release the lock
+        let (tool_caller, arguments) = {
+            let mut found = None;
+            for (_server_id, server) in registry.connected_servers() {
+                if server.tools.iter().any(|t| t.name == request.name) {
+                    found = Some((server.tool_caller(), request.arguments.clone()));
+                    break;
+                }
+            }
+            found.ok_or_else(|| anyhow::anyhow!("tool not found: {}", request.name))?
+        };
+        drop(registry);
+
+        let result = tool_caller.call_tool(
+            request.name.to_string(),
+            arguments,
+        ).await?;
+        Ok(result)
     }
 }
 
