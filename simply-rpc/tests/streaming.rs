@@ -420,119 +420,62 @@ async fn client_non_stream_methods_work() {
 // Client uses only tokio-tungstenite + serde_json — no simply-rpc client code.
 // ===========================================================================
 
-/// Start a test server that handles both REST and WebSocket upgrades on stream paths.
-/// Returns the base URL (e.g. "http://127.0.0.1:12345").
+/// Start a test server that handles REST via axum.
+/// Returns the base URL and the shared impl for direct event injection.
 async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
-    use hyper::server::conn::http1;
-    use hyper::service::service_fn;
-    use hyper::{Request, Response, StatusCode};
-    use hyper::body::Incoming;
-    use hyper_util::rt::TokioIo;
-    use http_body_util::{BodyExt, Full};
+    use axum::extract::State;
+    use axum::http::{Method, StatusCode};
+    use axum::response::{IntoResponse, Json as AxumJson};
+    use axum::Router;
 
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = <dyn ChannelApi>::service(impl_.clone());
-    let rest_svc = Arc::new(
-        RestDispatcher::new().register(svc.clone()),
-    );
+    let dispatcher = Arc::new(RestDispatcher::new().register(svc));
+
+    async fn handler(
+        State(rd): State<Arc<RestDispatcher>>,
+        req: axum::extract::Request,
+    ) -> axum::response::Response {
+        let method = req.method().clone();
+        let path = req.uri().path().to_string();
+
+        let http_method = match method {
+            Method::GET => HttpMethod::Get,
+            Method::POST => HttpMethod::Post,
+            Method::PUT => HttpMethod::Put,
+            Method::DELETE => HttpMethod::Delete,
+            _ => return (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response(),
+        };
+
+        let body = match http_method {
+            HttpMethod::Post | HttpMethod::Put => {
+                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024).await.unwrap_or_default();
+                if bytes.is_empty() { Value::Null }
+                else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) }
+            }
+            _ => Value::Null,
+        };
+
+        match rd.dispatch(http_method, &path, body).await {
+            Some(Ok(value)) => AxumJson(value).into_response(),
+            Some(Err(e)) => {
+                let msg = e.to_string();
+                let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
+                (status, msg).into_response()
+            }
+            None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        }
+    }
+
+    let app = Router::new()
+        .fallback(handler)
+        .with_state(dispatcher);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
 
-    let impl_for_server = impl_.clone();
     tokio::spawn(async move {
-        loop {
-            let Ok((stream, _)) = listener.accept().await else { break };
-            let svc = svc.clone();
-            let rest_svc = rest_svc.clone();
-            let impl_ = impl_for_server.clone();
-            tokio::spawn(async move {
-                let service = service_fn(move |req: Request<Incoming>| {
-                    let svc = svc.clone();
-                    let rest_svc = rest_svc.clone();
-                    let impl_ = impl_.clone();
-                    async move {
-                        let path = req.uri().path().to_string();
-                        let method_str = req.method().to_string();
-
-                        // Check for WebSocket upgrade
-                        let is_upgrade = req.headers()
-                            .get("upgrade")
-                            .and_then(|v| v.to_str().ok())
-                            .map(|v| v.eq_ignore_ascii_case("websocket"))
-                            .unwrap_or(false);
-
-                        if is_upgrade {
-                            // Find matching stream path and dispatch
-                            let meta = &CHANNEL_API_META;
-                            let stream_match = meta.routes.iter()
-                                .filter(|m| m.kind == simply_rpc::RouteKind::Stream)
-                                .find(|m| {
-                                    path_matches(m.path_template, &path)
-                                });
-
-                            let _ = stream_match; // Validated in other tests
-
-                            // For now, return 501 for actual WS upgrades (tested via dispatch)
-                            return Ok::<_, std::convert::Infallible>(
-                                Response::builder().status(501)
-                                    .body(Full::new(hyper::body::Bytes::from("ws upgrade tested via dispatch")))
-                                    .unwrap()
-                            );
-                        }
-
-                        // REST dispatch
-                        let http_method = match method_str.as_str() {
-                            "GET" => HttpMethod::Get,
-                            "POST" => HttpMethod::Post,
-                            "PUT" => HttpMethod::Put,
-                            "DELETE" => HttpMethod::Delete,
-                            _ => return Ok(Response::builder().status(405)
-                                .body(Full::new(hyper::body::Bytes::from("method not allowed")))
-                                .unwrap()),
-                        };
-
-                        let body = match http_method {
-                            HttpMethod::Post | HttpMethod::Put => {
-                                match req.collect().await {
-                                    Ok(c) => {
-                                        let bytes = c.to_bytes();
-                                        if bytes.is_empty() { Value::Null }
-                                        else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) }
-                                    }
-                                    Err(_) => Value::Null,
-                                }
-                            }
-                            _ => Value::Null,
-                        };
-
-                        match rest_svc.dispatch(http_method, &path, body).await {
-                            Some(Ok(value)) => {
-                                let json = serde_json::to_vec(&value).unwrap_or_default();
-                                Ok(Response::builder()
-                                    .status(StatusCode::OK)
-                                    .header("Content-Type", "application/json")
-                                    .body(Full::new(hyper::body::Bytes::from(json)))
-                                    .unwrap())
-                            }
-                            Some(Err(e)) => {
-                                let msg = e.to_string();
-                                let status = if msg.contains("not found") { 404 } else { 500 };
-                                Ok(Response::builder().status(status)
-                                    .body(Full::new(hyper::body::Bytes::from(msg)))
-                                    .unwrap())
-                            }
-                            None => Ok(Response::builder().status(404)
-                                .body(Full::new(hyper::body::Bytes::from("not found")))
-                                .unwrap()),
-                        }
-                    }
-                });
-                let _ = http1::Builder::new()
-                    .serve_connection(TokioIo::new(stream), service)
-                    .await;
-            });
-        }
+        axum::serve(listener, app).await.ok();
     });
 
     (format!("http://127.0.0.1:{port}"), impl_)

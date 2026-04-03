@@ -120,14 +120,14 @@ pub async fn connect_or_host(
     let ws_server = server::start(ws_dispatch, port).await?;
 
     let tracker = ws_server.tracker().clone();
-    let (admin_routes, kill_rx) = crate::admin::routes(tracker);
+    let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
 
     let rest_port = port + 1;
     let rest_server = rest::start(rest::RestConfig {
-        dispatcher: (builders.rest_dispatcher)(Arc::clone(&daemon)),
         rest_dispatcher: simply_rpc::RestDispatcher::new(),
         port: rest_port,
-        extra_routes: Some(admin_routes),
+        tracker,
+        kill_tx,
     }).await?;
 
     Ok(DaemonHandle::Host {

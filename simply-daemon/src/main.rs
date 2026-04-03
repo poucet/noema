@@ -1,6 +1,7 @@
 //! Simply Daemon — standalone runner.
 //!
-//! Hosts the daemon as a separate process. Clients connect via WebSocket.
+//! Hosts the daemon as a separate process. Single port for REST + admin.
+//! WebSocket server on a separate port for streaming (to be merged).
 
 use std::sync::Arc;
 
@@ -40,19 +41,18 @@ async fn main() -> anyhow::Result<()> {
     // Open storage and create daemon
     let stores = Arc::new(SqliteStores::open()?);
     let daemon = EmbeddedDaemon::new(stores).await?;
-    // Keep concrete type for DaemonInfoApi before erasing to DaemonApi
     let daemon_info_svc = <dyn DaemonInfoApi>::service(daemon.clone() as Arc<dyn DaemonInfoApi>);
     let daemon: Arc<dyn DaemonApi> = daemon;
 
-    // WS server — per-connection state, handles streams
+    // WS server — streaming sessions (separate port, to be merged)
     let ws_dispatch = build_ws_dispatch(Arc::clone(&daemon));
     let _ws_server = ws::server::start(ws_dispatch, port).await?;
-
-    // Admin routes (health, kill, dashboard)
     let tracker = _ws_server.tracker().clone();
-    let (admin_routes, mut kill_rx) = simply_daemon::admin::routes(tracker);
 
-    // REST server — auto-routes from service annotations
+    // Kill channel
+    let (kill_tx, mut kill_rx) = mpsc::channel(1);
+
+    // REST server (axum) — all REST endpoints + admin dashboard
     let rest_port = port + 1;
     let rest_dispatcher = RestDispatcher::new()
         .register(<dyn SessionApi>::service(daemon.clone()))
@@ -65,11 +65,10 @@ async fn main() -> anyhow::Result<()> {
         .register(daemon_info_svc);
 
     let _rest_server = ws::rest::start(ws::rest::RestConfig {
-        dispatcher: Dispatcher::new()
-            .register(<dyn AssetApi>::service(daemon.clone())),
         rest_dispatcher,
         port: rest_port,
-        extra_routes: Some(admin_routes),
+        tracker,
+        kill_tx: kill_tx.clone(),
     }).await?;
 
     tracing::info!(ws_port = port, rest_port = rest_port, "daemon ready");

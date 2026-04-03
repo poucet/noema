@@ -405,88 +405,59 @@ async fn client_skip_method_errors() {
 /// Start a real HTTP server backed by `RestDispatcher` on an OS-assigned port.
 /// Returns the base URL (e.g. "http://127.0.0.1:12345").
 async fn start_test_server(widgets: Vec<Widget>) -> String {
-    use hyper::server::conn::http1;
-    use hyper::service::service_fn;
-    use hyper::{Request, Response, StatusCode};
-    use hyper::body::Incoming;
-    use hyper_util::rt::TokioIo;
-    use http_body_util::{BodyExt, Full};
+    use axum::extract::State;
+    use axum::http::{Method, StatusCode};
+    use axum::response::{IntoResponse, Json as AxumJson};
+    use axum::Router;
 
     let impl_ = Arc::new(InMemoryWidgets::new(widgets));
     let svc = <dyn WidgetApi>::service(impl_);
     let dispatcher = Arc::new(RestDispatcher::new().register(svc));
 
+    async fn handler(
+        State(rd): State<Arc<RestDispatcher>>,
+        req: axum::extract::Request,
+    ) -> axum::response::Response {
+        let method = req.method().clone();
+        let path = req.uri().path().to_string();
+
+        let http_method = match method {
+            Method::GET => HttpMethod::Get,
+            Method::POST => HttpMethod::Post,
+            Method::PUT => HttpMethod::Put,
+            Method::DELETE => HttpMethod::Delete,
+            _ => return (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response(),
+        };
+
+        let body = match http_method {
+            HttpMethod::Post | HttpMethod::Put => {
+                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024).await.unwrap_or_default();
+                if bytes.is_empty() { Value::Null }
+                else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) }
+            }
+            _ => Value::Null,
+        };
+
+        match rd.dispatch(http_method, &path, body).await {
+            Some(Ok(value)) => AxumJson(value).into_response(),
+            Some(Err(e)) => {
+                let msg = e.to_string();
+                let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
+                (status, msg).into_response()
+            }
+            None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        }
+    }
+
+    let app = Router::new()
+        .fallback(handler)
+        .with_state(dispatcher);
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
 
     tokio::spawn(async move {
-        loop {
-            let Ok((stream, _)) = listener.accept().await else { break };
-            let dispatcher = Arc::clone(&dispatcher);
-            tokio::spawn(async move {
-                let service = service_fn(move |req: Request<Incoming>| {
-                    let dispatcher = Arc::clone(&dispatcher);
-                    async move {
-                        let method_str = req.method().to_string();
-                        let path = req.uri().path().to_string();
-
-                        let http_method = match method_str.as_str() {
-                            "GET" => HttpMethod::Get,
-                            "POST" => HttpMethod::Post,
-                            "PUT" => HttpMethod::Put,
-                            "DELETE" => HttpMethod::Delete,
-                            _ => return Ok::<_, std::convert::Infallible>(
-                                Response::builder().status(405)
-                                    .body(Full::new(hyper::body::Bytes::from("method not allowed")))
-                                    .unwrap()
-                            ),
-                        };
-
-                        let body = match http_method {
-                            HttpMethod::Post | HttpMethod::Put => {
-                                match req.collect().await {
-                                    Ok(collected) => {
-                                        let bytes = collected.to_bytes();
-                                        if bytes.is_empty() { Value::Null }
-                                        else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) }
-                                    }
-                                    Err(_) => Value::Null,
-                                }
-                            }
-                            _ => Value::Null,
-                        };
-
-                        match dispatcher.dispatch(http_method, &path, body).await {
-                            Some(Ok(value)) => {
-                                let json = serde_json::to_vec(&value).unwrap_or_default();
-                                Ok(Response::builder()
-                                    .status(StatusCode::OK)
-                                    .header("Content-Type", "application/json")
-                                    .body(Full::new(hyper::body::Bytes::from(json)))
-                                    .unwrap())
-                            }
-                            Some(Err(e)) => {
-                                let msg = e.to_string();
-                                let status = if msg.contains("not found") { 404 } else { 500 };
-                                Ok(Response::builder()
-                                    .status(status)
-                                    .body(Full::new(hyper::body::Bytes::from(msg)))
-                                    .unwrap())
-                            }
-                            None => {
-                                Ok(Response::builder()
-                                    .status(StatusCode::NOT_FOUND)
-                                    .body(Full::new(hyper::body::Bytes::from("not found")))
-                                    .unwrap())
-                            }
-                        }
-                    }
-                });
-                let _ = http1::Builder::new()
-                    .serve_connection(TokioIo::new(stream), service)
-                    .await;
-            });
-        }
+        axum::serve(listener, app).await.ok();
     });
 
     format!("http://127.0.0.1:{port}")
