@@ -31,6 +31,9 @@ pub trait AssetStore: Send + Sync {
     /// Check if an asset exists
     async fn exists(&self, id: &AssetId) -> Result<bool>;
 
+    /// List all asset IDs.
+    async fn list(&self) -> Result<Vec<AssetId>>;
+
     /// Delete an asset by ID
     ///
     /// Note: This only removes the metadata. The caller should also remove

@@ -77,10 +77,36 @@ impl<S: StorageTypes> AssetApi for AssetService<S>
 where
     S::Document: DocumentResolver,
 {
-    async fn store_asset(&self, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetId> {
+    async fn store_asset(&self, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetInfo> {
         use base64::{engine::general_purpose::STANDARD, Engine};
+        use simply_core::storage::traits::AssetStore;
         let b64 = STANDARD.encode(&upload.data);
-        self.coordinator.store_asset(&b64, &upload.mime_type).await
+        let id = self.coordinator.store_asset(&b64, &upload.mime_type).await?;
+        let stored = self.stores.asset().get(&id).await?
+            .ok_or_else(|| anyhow::anyhow!("asset not found after store"))?;
+        Ok(AssetInfo {
+            id,
+            blob_hash: stored.blob_hash.clone(),
+            mime_type: stored.mime_type.clone(),
+            size_bytes: stored.size_bytes,
+        })
+    }
+
+    async fn list_assets(&self) -> anyhow::Result<Vec<AssetId>> {
+        use simply_core::storage::traits::AssetStore;
+        self.stores.asset().list().await
+    }
+
+    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<AssetInfo> {
+        use simply_core::storage::traits::AssetStore;
+        let stored = self.stores.asset().get(id).await?
+            .ok_or_else(|| anyhow::anyhow!("asset not found: {id}"))?;
+        Ok(AssetInfo {
+            id: id.clone(),
+            blob_hash: stored.blob_hash.clone(),
+            mime_type: stored.mime_type.clone(),
+            size_bytes: stored.size_bytes,
+        })
     }
 
     async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> {

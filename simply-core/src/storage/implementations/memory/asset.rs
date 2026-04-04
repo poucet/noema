@@ -59,6 +59,10 @@ impl AssetStore for MemoryAssetStore {
         Ok(self.assets.lock().unwrap().contains_key(id))
     }
 
+    async fn list(&self) -> Result<Vec<AssetId>> {
+        Ok(self.assets.lock().unwrap().keys().cloned().collect())
+    }
+
     async fn delete(&self, id: &AssetId) -> Result<bool> {
         Ok(self.assets.lock().unwrap().remove(id).is_some())
     }

@@ -87,8 +87,9 @@ pub async fn store_asset(
         .decode(&data)
         .map_err(|e| format!("Failed to decode data: {}", e))?;
 
-    daemon
+    let info = daemon
         .store_asset(simply_rpc::BinaryUpload::new(bytes, mime_type))
         .await
-        .map_err(|e| format!("Failed to store asset: {}", e))
+        .map_err(|e| format!("Failed to store asset: {}", e))?;
+    Ok(info.id)
 }

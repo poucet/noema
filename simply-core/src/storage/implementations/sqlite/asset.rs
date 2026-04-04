@@ -116,6 +116,16 @@ impl AssetStore for SqliteStore {
         Ok(exists)
     }
 
+    async fn list(&self) -> Result<Vec<AssetId>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM assets ORDER BY created_at DESC")?;
+        let ids = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            Ok(AssetId::from_string(id))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(ids)
+    }
+
     async fn delete(&self, id: &AssetId) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
         let deleted = conn.execute("DELETE FROM assets WHERE id = ?1", params![id.as_str()])?;

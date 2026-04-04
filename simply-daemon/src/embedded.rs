@@ -464,7 +464,9 @@ where S::Document: DocumentResolver,
 impl<S: StorageTypes> AssetApi for EmbeddedDaemon<S>
 where S::Document: DocumentResolver,
 {
-    async fn store_asset(&self, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetId> { self.asset.store_asset(upload).await }
+    async fn store_asset(&self, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetInfo> { self.asset.store_asset(upload).await }
+    async fn list_assets(&self) -> anyhow::Result<Vec<AssetId>> { self.asset.list_assets().await }
+    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<AssetInfo> { self.asset.get_asset(id).await }
     async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> { self.asset.get_blob(hash).await }
 }
 
