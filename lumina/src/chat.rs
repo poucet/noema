@@ -16,6 +16,8 @@ const DEFAULT_HISTORY_LIMIT: u16 = 1000;
 const SYSTEM_PROMPT: &str = "\
 You are Lumina, an intelligent AI assistant on Discord.
 
+The messages in this conversation are your actual conversation history with the user(s) in this channel. You can refer back to anything said earlier — it is your memory of this conversation.
+
 When formatting your response:
 - For channel references: <#channel_id>
 - For user mentions: <@user_id>
