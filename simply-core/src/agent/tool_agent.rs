@@ -152,11 +152,22 @@ impl Agent for ToolAgent {
             let tool_definitions = self.tools.get_definitions().await;
             let tool_count = tool_definitions.len();
 
+            // Get system prompt before borrowing messages
+            let system_prompt = context.system_prompt().map(|s| s.to_string());
             let messages = context.messages().await?;
+
+            let mut all_messages: Vec<ChatMessage> = Vec::new();
+            if let Some(prompt) = system_prompt {
+                all_messages.push(ChatMessage::system(ChatPayload::new(vec![
+                    ContentBlock::Text { text: prompt },
+                ])));
+            }
+            all_messages.extend(messages.iter().cloned());
+
             let mut request = if tool_definitions.is_empty() {
-                ChatRequest::new(messages.iter())
+                ChatRequest::new(all_messages.iter())
             } else {
-                ChatRequest::with_tools(messages.iter(), tool_definitions)
+                ChatRequest::with_tools(all_messages.iter(), tool_definitions)
             };
 
             self.resolve_documents(&mut request).await;
@@ -165,11 +176,11 @@ impl Agent for ToolAgent {
             tracing::info!(
                 model = model.name(),
                 iteration,
-                message_count = messages.len(),
+                message_count = all_messages.len(),
                 tool_count,
                 "sending to LLM"
             );
-            for (i, msg) in messages.iter().enumerate() {
+            for (i, msg) in all_messages.iter().enumerate() {
                 let preview: String = msg.payload.content.iter()
                     .filter_map(|b| match b {
                         ContentBlock::Text { text } => Some(text.chars().take(40).collect::<String>()),
