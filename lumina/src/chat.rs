@@ -125,10 +125,12 @@ async fn load_channel_history(
     }
 
     // Discord returns newest-first, we need oldest-first
+    // Skip bot messages that appear before any user message (e.g. welcome messages)
     let mut seed: Vec<SeedMessage> = all_messages
         .iter()
         .rev()
         .filter(|m| !m.content.is_empty())
+        .skip_while(|m| m.author.id.get() == bot_user_id) // skip leading bot messages
         .map(|m| {
             let role = if m.author.id.get() == bot_user_id {
                 Role::Assistant
