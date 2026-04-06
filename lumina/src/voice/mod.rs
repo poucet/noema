@@ -76,7 +76,10 @@ impl VoiceManager {
     }
 
     pub async fn set_tts_provider(&self, id: String) {
-        self.config.lock().await.tts_provider = Some(id);
+        let mut config = self.config.lock().await;
+        config.tts_provider = Some(id);
+        // Reset voice when provider changes — voice IDs are provider-specific
+        config.tts_voice = None;
     }
 
     pub async fn set_tts_voice(&self, id: String) {

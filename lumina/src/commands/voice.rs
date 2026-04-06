@@ -23,7 +23,8 @@ mod voice {
             .map_err(|e| anyhow::anyhow!(e))?;
 
         let voice_mgr = get_voice_manager(lx).await?;
-        let text_channel = cmd.channel_id;
+        // Post transcripts to the voice channel's text chat
+        let text_channel = voice_channel;
 
         let manager = songbird::get(&lx.ctx).await
             .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
@@ -36,7 +37,7 @@ mod voice {
             call, Arc::clone(&lx.http),
         ).await?;
 
-        lx.reply(cmd, "Joined voice. Transcribing to this channel...").await
+        lx.reply(cmd, "Joined voice. Transcribing to the voice channel...").await
     }
 
     #[sub_command(description = "Join your voice channel for a voice conversation")]
@@ -45,16 +46,21 @@ mod voice {
             .map_err(|e| anyhow::anyhow!(e))?;
 
         let voice_mgr = get_voice_manager(lx).await?;
-        let text_channel = cmd.channel_id;
+        let origin_channel = cmd.channel_id;
 
-        let history = load_channel_seed(lx, text_channel).await;
+        // Seed from the channel where /voice listen was called
+        let history = load_channel_seed(lx, origin_channel).await;
 
         let system_prompt = format!(
             "You are Lumina, an AI assistant in a live voice conversation on Discord.\n\
-             Channel: <#{}>\nGuild: {}\n\n\
-             Keep responses concise — they will be spoken aloud via TTS.",
-            text_channel, guild_id,
+             Guild: {}\n\n\
+             Keep responses concise — they will be spoken aloud via TTS.\n\
+             Do not use markdown formatting, emojis, or special characters — plain text only.",
+            guild_id,
         );
+
+        // Post transcripts to the voice channel's text chat, not the originating channel
+        let text_channel = voice_channel;
 
         let session = simply_daemon::DaemonSession::create(
             voice_mgr.daemon().clone(),
