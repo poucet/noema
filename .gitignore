@@ -8,7 +8,6 @@ daemon.log
 noema.log
 node_modules/
 *.swp
-simply
 *.pid
 lumina.log
 logs/
