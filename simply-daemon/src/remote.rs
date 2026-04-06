@@ -94,7 +94,7 @@ impl simply_core::ToolService for RemoteMcpApi {
     ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
         let result = McpApi::call_tool_direct(
             self,
-            CallToolRequestParams::new(name.to_string())
+            CallToolRequestParam::new(name.to_string())
                 .with_arguments(arguments.as_object().cloned().unwrap_or_default()),
         ).await?;
         Ok(result.content.into_iter().filter_map(|c| {
