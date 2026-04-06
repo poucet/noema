@@ -46,6 +46,9 @@ inventory = { workspace = true }
 # Async trait
 async-trait = { workspace = true }
 
+# Random
+rand = "0.9"
+
 # MCP server
 rmcp = { workspace = true, features = ["server", "macros"] }
 schemars = { workspace = true }

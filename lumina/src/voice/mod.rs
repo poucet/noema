@@ -194,8 +194,10 @@ impl VoiceManager {
                 tracing::debug!(provider = %tts_provider_id, "TTS: no configured voice, fetching list");
                 match self.daemon.voice().list_voices(&tts_provider_id).await {
                     Ok(voices) if !voices.is_empty() => {
-                        tracing::debug!(count = voices.len(), "TTS: got voices");
-                        voices[0].id.clone()
+                        use rand::Rng;
+                        let idx = rand::rng().random_range(0..voices.len());
+                        tracing::info!(count = voices.len(), picked = %voices[idx].name, "TTS: picked random voice");
+                        voices[idx].id.clone()
                     }
                     _ => String::new(),
                 }
