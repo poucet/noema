@@ -264,6 +264,17 @@ pub async fn synthesize_speech(
     })
 }
 
+/// List available TTS voices for a provider.
+#[tauri::command]
+pub async fn list_tts_voices(
+    state: State<'_, Arc<AppState>>,
+    provider_id: String,
+) -> Result<Vec<simply_voice::Voice>, String> {
+    let daemon = state.get_daemon()?;
+    daemon.voice().list_voices(&provider_id).await
+        .map_err(|e| format!("Failed to list voices: {e}"))
+}
+
 #[derive(serde::Serialize)]
 pub struct SynthesizeResult {
     pub samples: Vec<f32>,

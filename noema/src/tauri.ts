@@ -317,6 +317,10 @@ export async function synthesizeSpeech(text: string, providerId: string, voice?:
   return invoke<SynthesizeResult>("synthesize_speech", { text, providerId, voice });
 }
 
+export async function listTtsVoices(providerId: string): Promise<{ id: string; name: string }[]> {
+  return invoke<{ id: string; name: string }[]>("list_tts_voices", { providerId });
+}
+
 // File commands
 export async function saveFile(
   data: string,

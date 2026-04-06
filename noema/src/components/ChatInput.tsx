@@ -26,9 +26,6 @@ interface ChatInputProps {
   voiceAvailable?: boolean;
   voiceStatus?: VoiceStatus;
   voiceBufferedCount?: number;
-  voiceProviders?: tauri.VoiceProviderInfo[];
-  selectedVoiceProvider?: string | null;
-  onSelectVoiceProvider?: (id: string) => void;
   onToggleVoice?: () => void;
   /** Prefilled text (e.g., when forking from a user message to let them edit) */
   prefilledText?: string;
@@ -126,9 +123,6 @@ export function ChatInput({
   voiceAvailable = false,
   voiceStatus = "disabled",
   voiceBufferedCount = 0,
-  voiceProviders = [],
-  selectedVoiceProvider = null,
-  onSelectVoiceProvider,
   onToggleVoice,
   prefilledText = "",
   onClearPrefill,
@@ -858,19 +852,6 @@ export function ChatInput({
             </div>
           )}
           <div className="flex items-center gap-1">
-            {voiceProviders.length > 1 && voiceStatus === "disabled" && (
-              <select
-                value={selectedVoiceProvider ?? ""}
-                onChange={(e) => onSelectVoiceProvider?.(e.target.value)}
-                disabled={disabled}
-                className="h-9 px-2 text-xs bg-surface border border-gray-600 rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-teal-500 max-w-[120px]"
-                title="Select voice provider"
-              >
-                {voiceProviders.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            )}
             <button
               type="button"
               onClick={onToggleVoice}
@@ -882,7 +863,7 @@ export function ChatInput({
                   : !voiceAvailable
                     ? "Voice input not available"
                     : voiceStatus === "disabled"
-                      ? `Enable voice input (${voiceProviders.find((p) => p.id === selectedVoiceProvider)?.name ?? "no provider"})`
+                      ? "Enable voice input"
                     : voiceStatus === "listening"
                       ? "Listening..."
                       : voiceStatus === "transcribing"

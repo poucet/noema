@@ -611,7 +611,17 @@ function App() {
 
       {/* Settings Modal */}
       {showSettings && (
-        <Settings onClose={() => setShowSettings(false)} />
+        <Settings
+          onClose={() => setShowSettings(false)}
+          voiceConfig={{
+            sttProvider: voice.sttProvider,
+            ttsProvider: voice.ttsProvider,
+            ttsVoice: voice.ttsVoice,
+            onSttProviderChange: voice.setSttProvider,
+            onTtsProviderChange: voice.setTtsProvider,
+            onTtsVoiceChange: voice.setTtsVoice,
+          }}
+        />
       )}
 
       {/* Document Panel */}
@@ -818,9 +828,6 @@ function App() {
               voiceAvailable={voice.isAvailable}
               voiceStatus={voice.status}
               voiceBufferedCount={voice.bufferedCount}
-              voiceProviders={voice.providers}
-              selectedVoiceProvider={voice.selectedProvider}
-              onSelectVoiceProvider={voice.setSelectedProvider}
               onToggleVoice={voice.toggle}
               toolsEnabled={toolsEnabled}
               onToggleTools={handleToggleTools}

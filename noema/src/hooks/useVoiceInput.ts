@@ -14,7 +14,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const [bufferedCount, setBufferedCount] = useState(0);
   const [isAvailable, setIsAvailable] = useState(false);
   const [providers, setProviders] = useState<tauri.VoiceProviderInfo[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [sttProvider, setSttProvider] = useState<string | null>(null);
+  const [ttsProvider, setTtsProvider] = useState<string | null>(null);
+  const [ttsVoice, setTtsVoice] = useState<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
@@ -117,24 +119,25 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
 
   const startRecording = useCallback(async () => {
     // Lazy-load providers if not yet loaded
-    let provider = selectedProvider;
+    let provider = sttProvider;
     if (!provider) {
       try {
         const list = await tauri.listVoiceProviders();
         setProviders(list);
-        if (list.length > 0) {
-          provider = list[0].id;
-          setSelectedProvider(provider);
+        const firstStt = list.find((p) => p.capabilities.includes("stt"));
+        if (firstStt) {
+          provider = firstStt.id;
+          setSttProvider(provider);
           setIsAvailable(true);
         }
       } catch { /* ignore */ }
     }
     if (!provider) {
-      onErrorRef.current?.("No voice providers available");
+      onErrorRef.current?.("No STT providers available");
       return;
     }
 
-    voiceLog.info("Starting recording", { provider });
+    voiceLog.info("Starting recording", { sttProvider: provider });
     // Clear dedup ref for new recording session
     lastTranscriptionRef.current = null;
     try {
@@ -209,7 +212,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       onErrorRef.current?.(message);
       setStatus("disabled");
     }
-  }, [selectedProvider, providers]);
+  }, [sttProvider]);
 
   const stopRecording = useCallback(async () => {
     voiceLog.info("Stopping recording");
@@ -243,8 +246,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       const list = await tauri.listVoiceProviders();
       setProviders(list);
       if (list.length > 0) {
-        setSelectedProvider((prev) => prev ?? list[0].id);
         setIsAvailable(true);
+        // Auto-select first STT and TTS providers if not set
+        const firstStt = list.find((p) => p.capabilities.includes("stt"));
+        const firstTts = list.find((p) => p.capabilities.includes("tts"));
+        setSttProvider((prev) => prev ?? firstStt?.id ?? null);
+        setTtsProvider((prev) => prev ?? firstTts?.id ?? null);
       }
     } catch { /* daemon not ready */ }
   }, []);
@@ -271,20 +278,15 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     }
     ttsInFlightRef.current = true;
 
-    // Find a provider with TTS capability (prefer selected, fall back to any)
-    const provider = providers.find(
-      (p) => p.id === selectedProvider && p.capabilities.includes("tts")
-    ) ?? providers.find((p) => p.capabilities.includes("tts"));
-
-    if (!provider) {
-      voiceLog.debug("TTS: no provider with TTS capability");
+    if (!ttsProvider) {
+      voiceLog.debug("TTS: no TTS provider configured");
       ttsInFlightRef.current = false;
       return;
     }
 
     try {
-      voiceLog.info("TTS: synthesizing", { provider: provider.id, length: text.length });
-      const result = await tauri.synthesizeSpeech(text, provider.id);
+      voiceLog.info("TTS: synthesizing", { provider: ttsProvider, voice: ttsVoice, length: text.length });
+      const result = await tauri.synthesizeSpeech(text, ttsProvider, ttsVoice ?? undefined);
       voiceLog.info("TTS: got samples", { count: result.samples.length, sampleRate: result.sampleRate });
 
       if (result.samples.length === 0) {
@@ -328,8 +330,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     bufferedCount,
     isAvailable,
     providers,
-    selectedProvider,
-    setSelectedProvider,
+    sttProvider,
+    setSttProvider,
+    ttsProvider,
+    setTtsProvider,
+    ttsVoice,
+    setTtsVoice,
     refreshProviders,
     toggle,
     startRecording,

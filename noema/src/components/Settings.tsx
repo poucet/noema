@@ -2,12 +2,23 @@ import { useState } from "react";
 import { McpSettingsContent } from "./McpSettingsContent";
 import { ApiKeySettings } from "./ApiKeySettings";
 import { GoogleDocsSettings } from "./GoogleDocsSettings";
+import { VoiceSettings } from "./VoiceSettings";
 
-type TabId = "mcp" | "apikeys" | "gdocs";
+type TabId = "mcp" | "apikeys" | "voice" | "gdocs";
+
+interface VoiceConfig {
+  sttProvider: string | null;
+  ttsProvider: string | null;
+  ttsVoice: string | null;
+  onSttProviderChange: (id: string) => void;
+  onTtsProviderChange: (id: string) => void;
+  onTtsVoiceChange: (id: string) => void;
+}
 
 interface SettingsProps {
   onClose: () => void;
   initialTab?: TabId;
+  voiceConfig?: VoiceConfig;
 }
 
 interface TabConfig {
@@ -18,10 +29,11 @@ interface TabConfig {
 const tabs: TabConfig[] = [
   { id: "mcp", label: "MCP Servers" },
   { id: "apikeys", label: "API Keys" },
+  { id: "voice", label: "Voice" },
   { id: "gdocs", label: "Google Docs" },
 ];
 
-export function Settings({ onClose, initialTab = "mcp" }: SettingsProps) {
+export function Settings({ onClose, initialTab = "mcp", voiceConfig }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
 
   return (
@@ -73,6 +85,16 @@ export function Settings({ onClose, initialTab = "mcp" }: SettingsProps) {
         <div className="flex-1 overflow-y-auto p-6">
           {activeTab === "mcp" && <McpSettingsContent />}
           {activeTab === "apikeys" && <ApiKeySettings />}
+          {activeTab === "voice" && voiceConfig && (
+            <VoiceSettings
+              sttProvider={voiceConfig.sttProvider}
+              ttsProvider={voiceConfig.ttsProvider}
+              ttsVoice={voiceConfig.ttsVoice}
+              onSttProviderChange={voiceConfig.onSttProviderChange}
+              onTtsProviderChange={voiceConfig.onTtsProviderChange}
+              onTtsVoiceChange={voiceConfig.onTtsVoiceChange}
+            />
+          )}
           {activeTab === "gdocs" && <GoogleDocsSettings />}
         </div>
       </div>

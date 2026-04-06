@@ -183,6 +183,7 @@ pub fn run() {
             commands::voice::process_audio_chunk,
             commands::voice::stop_voice_session,
             commands::voice::synthesize_speech,
+            commands::voice::list_tts_voices,
             // File/Asset commands
             commands::files::save_file,
             // Logging
