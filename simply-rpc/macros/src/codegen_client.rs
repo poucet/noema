@@ -87,8 +87,7 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
                 async fn #fn_name(#inputs) #output {
                     #serialize
                     self.0.rpc_call(#method_str, #rpc_params).await?;
-                    let __path = #path_expr;
-                    let (__raw_tx, mut __raw_rx) = self.0.register_stream(#method_str, &__path).await?;
+                    let (__raw_tx, mut __raw_rx) = self.0.register_stream(#method_str).await?;
 
                     // Wrap raw channels with typed serialization
                     let (__typed_tx, mut __typed_rx) = ::tokio::sync::mpsc::channel::<#input_type>(64);
