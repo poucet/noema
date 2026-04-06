@@ -22,6 +22,9 @@ impl PathManager {
         if let Some(d) = DATA_DIR_OVERRIDE.get() {
             return Some(d.clone());
         }
+        if let Ok(dir) = std::env::var("NOEMA_DATA_DIR") {
+            return Some(PathBuf::from(dir));
+        }
         // Use ~/.local/share/noema on all desktop platforms
         dirs::home_dir().map(|h| h.join(".local/share/noema"))
     }

@@ -12,3 +12,4 @@ simply
 *.pid
 lumina.log
 logs/
+tests/results/
