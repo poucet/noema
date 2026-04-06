@@ -3,7 +3,7 @@
 //! Audio capture (CPAL/browser) happens in Noema. Audio is streamed to the
 //! daemon's VoiceApi which runs VAD → STT → events back to the client.
 
-use simply_voice::{AudioChunk, VoiceEvent};
+use simply_voice::{AudioChunk, VoiceEvent, VoiceInput};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use std::path::PathBuf;
@@ -131,14 +131,14 @@ pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>
     }
 
     let daemon = state.get_daemon()?;
-    let session_id = simply_daemon::api::types::SessionId::generate();
 
-    let handle = daemon.voice().voice_connect(&session_id, &provider_id).await
+    let handle = daemon.voice().voice_connect(&provider_id).await
         .map_err(|e| format!("Failed to connect voice: {e}"))?;
 
-    *state.voice_audio_tx.lock().await = Some(handle.audio_in);
+    let (input_tx, event_rx) = handle.into_parts();
+    *state.voice_audio_tx.lock().await = Some(input_tx);
 
-    spawn_voice_event_loop(app.clone(), handle.events);
+    spawn_voice_event_loop(app.clone(), event_rx);
 
     app.emit("voice_status", "enabled").ok();
     log_message("Voice session started (daemon pipeline)");
@@ -165,8 +165,8 @@ pub async fn process_audio_chunk(
         })
         .collect();
 
-    let chunk = AudioChunk::new(bytes);
-    tx.send(chunk).await.map_err(|_| "Voice session closed".to_string())?;
+    let input = VoiceInput::Audio(AudioChunk::new(bytes));
+    tx.send(input).await.map_err(|_| "Voice session closed".to_string())?;
 
     Ok(())
 }

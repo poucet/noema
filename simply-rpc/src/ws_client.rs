@@ -46,6 +46,8 @@ pub struct WsConnection<E: Clone + Send + 'static> {
     live: Arc<Mutex<Option<LiveConnection>>>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
     stream_senders: Arc<Mutex<HashMap<String, broadcast::Sender<E>>>>,
+    /// Raw JSON notification sinks for bidi streams, keyed by notification method name.
+    raw_sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
     next_id: AtomicU64,
     state_rx: watch::Receiver<ConnectionState>,
     _reconnect_task: JoinHandle<()>,
@@ -60,11 +62,14 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
             Arc::new(Mutex::new(HashMap::new()));
         let stream_senders: Arc<Mutex<HashMap<String, broadcast::Sender<E>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let raw_sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let live: Arc<Mutex<Option<LiveConnection>>> = Arc::new(Mutex::new(None));
 
         let (state_tx, state_rx) = watch::channel(ConnectionState::Connected);
         let initial = establish_connection(
             addr, Arc::clone(&pending), Arc::clone(&stream_senders),
+            Arc::clone(&raw_sinks),
             Arc::clone(&live), state_tx.clone(), Arc::clone(&demux),
         ).await?;
         *live.lock().await = Some(initial);
@@ -74,6 +79,7 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
             let live = Arc::clone(&live);
             let pending = Arc::clone(&pending);
             let stream_senders = Arc::clone(&stream_senders);
+            let raw_sinks = Arc::clone(&raw_sinks);
             let state_tx = state_tx.clone();
             let mut state_rx = state_rx.clone();
 
@@ -97,6 +103,7 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
 
                         match establish_connection(
                             &addr, Arc::clone(&pending), Arc::clone(&stream_senders),
+                            Arc::clone(&raw_sinks),
                             Arc::clone(&live), state_tx.clone(), Arc::clone(&demux),
                         ).await {
                             Ok(conn) => {
@@ -119,6 +126,7 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
             live,
             pending,
             stream_senders,
+            raw_sinks,
             next_id: AtomicU64::new(1),
             state_rx,
             _reconnect_task: reconnect_task,
@@ -134,12 +142,49 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
     pub fn watch_state(&self) -> watch::Receiver<ConnectionState> {
         self.state_rx.clone()
     }
+
+    /// Get a clone of the write channel (for sending messages from spawned tasks).
+    pub async fn write_tx(&self) -> Option<mpsc::Sender<String>> {
+        self.live.lock().await.as_ref().map(|c| c.write_tx.clone())
+    }
+
+    /// Send a fire-and-forget notification (no id, no response expected).
+    pub async fn send_notification(&self, method: &str, params: serde_json::Value) -> anyhow::Result<()> {
+        let notif = WsNotification {
+            method: method.to_string(),
+            params,
+        };
+        let write_tx = {
+            let live = self.live.lock().await;
+            match live.as_ref() {
+                Some(conn) => conn.write_tx.clone(),
+                None => return Err(anyhow::anyhow!("disconnected")),
+            }
+        };
+        write_tx
+            .send(serde_json::to_string(&notif)?)
+            .await
+            .map_err(|_| anyhow::anyhow!("connection closed"))
+    }
+
+    /// Register a raw JSON sink for notifications matching a specific method.
+    pub async fn register_raw_sink(&self, method: &str) -> mpsc::Receiver<serde_json::Value> {
+        let (tx, rx) = mpsc::channel(64);
+        self.raw_sinks.lock().await.insert(method.to_string(), tx);
+        rx
+    }
+
+    /// Unregister a raw sink.
+    pub async fn unregister_raw_sink(&self, method: &str) {
+        self.raw_sinks.lock().await.remove(method);
+    }
 }
 
 async fn establish_connection<E: Clone + Send + 'static>(
     addr: &str,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
     stream_senders: Arc<Mutex<HashMap<String, broadcast::Sender<E>>>>,
+    raw_sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
     live: Arc<Mutex<Option<LiveConnection>>>,
     state_tx: watch::Sender<ConnectionState>,
     demux: NotificationDemux<E>,
@@ -186,10 +231,17 @@ async fn establish_connection<E: Clone + Send + 'static>(
                 }
             } else if incoming.is_notification() {
                 let method = incoming.method.as_deref().unwrap();
-                if let Some((stream_id, event)) = demux(method, incoming.params) {
+                // Try typed demux first (session events etc.)
+                if let Some((stream_id, event)) = demux(method, incoming.params.clone()) {
                     let senders = stream_senders.lock().await;
                     if let Some(tx) = senders.get(&stream_id) {
                         let _ = tx.send(event);
+                    }
+                } else {
+                    // Try raw sinks (bidi stream events)
+                    let sinks = raw_sinks.lock().await;
+                    if let Some(tx) = sinks.get(method) {
+                        let _ = tx.send(incoming.params).await;
                     }
                 }
             }

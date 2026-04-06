@@ -62,6 +62,58 @@ impl RpcClient for RemoteDaemon {
         self.conn.unregister_stream(id).await
     }
 
+    async fn register_bidi_stream<T, U>(
+        &self,
+        method: &str,
+        _path: &str,
+    ) -> anyhow::Result<simply_rpc::StreamHandle<T, U>>
+    where
+        T: serde::Serialize + Send + 'static,
+        U: serde::de::DeserializeOwned + Send + 'static,
+    {
+        let event_method = format!("{method}.event");
+        let input_method = format!("{method}.input");
+
+        // Subscribe to events from the server
+        let mut raw_rx = self.conn.register_raw_sink(&event_method).await;
+
+        // Get a write channel for sending notifications
+        let write_tx = self.conn.write_tx().await
+            .ok_or_else(|| anyhow::anyhow!("disconnected"))?;
+
+        // Create channels for the StreamHandle
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::channel::<T>(64);
+        let (output_tx, output_rx) = tokio::sync::mpsc::channel::<U>(64);
+
+        // Forward input: T → serialize → send as WS notification
+        tokio::spawn(async move {
+            while let Some(msg) = input_rx.recv().await {
+                let notif = simply_rpc::protocol::WsNotification {
+                    method: input_method.clone(),
+                    params: serde_json::to_value(&msg).unwrap_or_default(),
+                };
+                let text = serde_json::to_string(&notif).unwrap_or_default();
+                if write_tx.send(text).await.is_err() { break; }
+            }
+        });
+
+        // Forward events: raw JSON → deserialize as U → output_tx
+        tokio::spawn(async move {
+            while let Some(value) = raw_rx.recv().await {
+                match serde_json::from_value::<U>(value) {
+                    Ok(event) => {
+                        if output_tx.send(event).await.is_err() { break; }
+                    }
+                    Err(e) => {
+                        tracing::warn!("bidi stream deserialize error: {e}");
+                    }
+                }
+            }
+        });
+
+        Ok(simply_rpc::StreamHandle::new(input_tx, output_rx))
+    }
+
     async fn rest_call(
         &self,
         http_method: HttpMethod,
@@ -98,77 +150,7 @@ impl_remote_asset_api!(RemoteDaemon);
 impl_remote_mcp_api!(RemoteDaemon);
 impl_remote_o_auth_api!(RemoteDaemon);
 impl_remote_model_api!(RemoteDaemon);
-// VoiceApi — manually implemented (voice_connect uses a dedicated WS connection)
-#[async_trait]
-impl VoiceApi for RemoteDaemon {
-    async fn list_voice_providers(&self) -> anyhow::Result<Vec<VoiceProviderInfo>> {
-        let r = self.rest_call(
-            simply_rpc::HttpMethod::Get,
-            "/voice/provider",
-            serde_json::Value::Null,
-        ).await?;
-        Ok(serde_json::from_value(r)?)
-    }
-
-    async fn voice_connect(
-        &self,
-        _session_id: &SessionId,
-        provider_id: &str,
-    ) -> anyhow::Result<VoiceHandle> {
-        use futures_util::{SinkExt, StreamExt};
-        use tokio_tungstenite::{connect_async, tungstenite::Message};
-
-        // Build WS URL from REST base URL
-        let ws_url = self.base_url
-            .replace("http://", "ws://")
-            .replace("https://", "wss://");
-        let url = format!("{ws_url}/voice/stream/{provider_id}");
-
-        let (ws_stream, _) = connect_async(&url).await?;
-        let (mut ws_sink, mut ws_source) = ws_stream.split();
-
-        let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel::<simply_voice::AudioChunk>(64);
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel::<simply_voice::VoiceEvent>(64);
-
-        // Forward audio chunks → WS as binary frames
-        tokio::spawn(async move {
-            while let Some(chunk) = audio_rx.recv().await {
-                if ws_sink.send(Message::Binary(chunk.data.to_vec().into())).await.is_err() {
-                    break;
-                }
-            }
-            let _ = ws_sink.close().await;
-        });
-
-        // Forward WS text frames → voice events
-        tokio::spawn(async move {
-            while let Some(msg) = ws_source.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(event) = serde_json::from_str::<simply_voice::VoiceEvent>(&text) {
-                            if event_tx.send(event).await.is_err() {
-                                break;
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) | Err(_) => break,
-                    _ => {}
-                }
-            }
-        });
-
-        Ok(VoiceHandle { audio_in: audio_tx, events: event_rx })
-    }
-
-    async fn voice_disconnect(&self, session_id: &SessionId) -> anyhow::Result<()> {
-        self.rest_call(
-            simply_rpc::HttpMethod::Delete,
-            &format!("/voice/{session_id}"),
-            serde_json::Value::Null,
-        ).await?;
-        Ok(())
-    }
-}
+impl_remote_voice_api!(RemoteDaemon);
 impl_remote_core_api!(RemoteDaemon);
 
 impl Daemon for RemoteDaemon {

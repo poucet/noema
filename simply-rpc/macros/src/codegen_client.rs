@@ -66,6 +66,42 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
                 }
             });
         }
+
+        // StreamBidi with a path → generate bidi WS connection via rpc_call + register_bidi_stream
+        if let ReturnKind::StreamBidi { input_type, output_type } = &method.return_kind {
+            let method_str = &method.method_name;
+            let path_template = &endpoint.path_template;
+
+            // Build path with interpolation
+            let path_expr = if endpoint.path_params.is_empty() {
+                quote! { #path_template.to_string() }
+            } else {
+                let mut format_str = path_template.clone();
+                let mut format_args = Vec::new();
+                for param_name in &endpoint.path_params {
+                    let placeholder = format!("{{{param_name}}}");
+                    format_str = format_str.replace(&placeholder, "{}");
+                    let param_ident = format_ident!("{}", param_name);
+                    format_args.push(quote! { #param_ident });
+                }
+                quote! { format!(#format_str, #(#format_args),*) }
+            };
+
+            let (serialize, rpc_params) = generate_serialize(method);
+
+            return Ok(quote! {
+                async fn #fn_name(#inputs) #output {
+                    use ::simply_rpc::RpcClient;
+                    #serialize
+                    // Call via RPC to set up the server side, then register the bidi stream
+                    self.rpc_call(#method_str, #rpc_params).await?;
+                    let __path = #path_expr;
+                    let __handle: ::simply_rpc::StreamHandle<#input_type, #output_type> =
+                        self.register_bidi_stream(#method_str, &__path).await?;
+                    Ok(__handle)
+                }
+            });
+        }
     }
 
     // Stream or unannotated methods → WS rpc_call (existing behavior)
@@ -304,14 +340,12 @@ fn generate_client_body(
             }
         }
         ReturnKind::StreamBidi { input_type, output_type } => {
-            // Result<StreamHandle<T, U>> — open a bidi stream via RPC
-            // The RPC call sets up the server side. Then we register for
-            // incoming events (U) and get a way to send messages (T).
+            // StreamBidi without a stream endpoint — use method name as path fallback
             quote! {
                 #serialize
                 self.rpc_call(#method_str, #rpc_params).await?;
                 let __handle: ::simply_rpc::StreamHandle<#input_type, #output_type> =
-                    self.register_bidi_stream(#method_str).await?;
+                    self.register_bidi_stream(#method_str, "").await?;
                 Ok(__handle)
             }
         }

@@ -3,7 +3,7 @@
 use simply_daemon::api::Daemon;
 use simply_daemon::types::ConversationId;
 use simply_daemon::net::DaemonHandle;
-use simply_voice::AudioChunk;
+use simply_voice::VoiceInput;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,9 +18,9 @@ pub struct AppState {
     pub _daemon_handle: OnceCell<DaemonHandle>,
     /// REST base URL for the daemon (e.g. "http://127.0.0.1:9800")
     pub rest_base_url: OnceCell<String>,
-    /// Sender to push audio chunks to the daemon's voice pipeline.
+    /// Sender to push voice input to the daemon's voice pipeline.
     /// Some = voice session active, None = inactive.
-    pub voice_audio_tx: Mutex<Option<mpsc::Sender<AudioChunk>>>,
+    pub voice_audio_tx: Mutex<Option<mpsc::Sender<VoiceInput>>>,
     pub voice_conversation: Mutex<Option<ConversationId>>,
     pub processing: Mutex<HashMap<ConversationId, bool>>,
     pub forwarders: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,

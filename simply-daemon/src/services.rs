@@ -205,18 +205,22 @@ impl VoiceService {
     }
 }
 
-/// Spawn the STT pipeline: VAD → SttProvider → VoiceEvents.
+/// Spawn the STT pipeline: VoiceInput → VAD → SttProvider → VoiceEvents.
 fn spawn_stt_pipeline(
     stt: Arc<dyn simply_voice::SttProvider>,
-    mut audio_rx: mpsc::Receiver<simply_voice::AudioChunk>,
+    mut input_rx: mpsc::Receiver<simply_voice::VoiceInput>,
     event_tx: mpsc::Sender<simply_voice::VoiceEvent>,
 ) {
     tokio::spawn(async move {
-        use simply_voice::{VadEvent, VoiceActivityDetector, VoiceEvent, AudioChunk};
+        use simply_voice::{VadEvent, VoiceActivityDetector, VoiceEvent, VoiceInput, AudioChunk};
 
         let mut vad = VoiceActivityDetector::new();
 
-        while let Some(chunk) = audio_rx.recv().await {
+        while let Some(input) = input_rx.recv().await {
+            let chunk = match input {
+                VoiceInput::Audio(c) => c,
+            };
+
             let samples: Vec<i16> = chunk.data.chunks_exact(2)
                 .map(|c| i16::from_le_bytes([c[0], c[1]]))
                 .collect();
@@ -251,14 +255,14 @@ fn spawn_stt_pipeline(
     });
 }
 
-/// Spawn the realtime pipeline: audio → RealtimeProvider → VoiceEvents.
+/// Spawn the realtime pipeline: VoiceInput → RealtimeProvider → VoiceEvents.
 fn spawn_realtime_pipeline(
     realtime: Arc<dyn simply_voice::RealtimeProvider>,
-    mut audio_rx: mpsc::Receiver<simply_voice::AudioChunk>,
+    mut input_rx: mpsc::Receiver<simply_voice::VoiceInput>,
     event_tx: mpsc::Sender<simply_voice::VoiceEvent>,
 ) {
     tokio::spawn(async move {
-        use simply_voice::{RealtimeConfig, RealtimeEvent, RealtimeInput, VoiceEvent};
+        use simply_voice::{RealtimeConfig, RealtimeEvent, RealtimeInput, VoiceEvent, VoiceInput};
 
         let config = RealtimeConfig::default();
         let (rt_tx, mut rt_rx) = match realtime.connect(config).await {
@@ -269,16 +273,17 @@ fn spawn_realtime_pipeline(
             }
         };
 
-        // Forward audio to realtime provider
+        // Forward input to realtime provider
         let rt_tx_clone = rt_tx.clone();
         tokio::spawn(async move {
-            while let Some(chunk) = audio_rx.recv().await {
-                if rt_tx_clone.send(RealtimeInput::Audio(chunk)).await.is_err() {
+            while let Some(input) = input_rx.recv().await {
+                let rt_input = match input {
+                    VoiceInput::Audio(chunk) => RealtimeInput::Audio(chunk),
+                };
+                if rt_tx_clone.send(rt_input).await.is_err() {
                     break;
                 }
             }
-            // Input ended
-            drop(rt_tx_clone);
         });
 
         // Forward realtime events to voice events
@@ -302,26 +307,26 @@ impl VoiceApi for VoiceService {
         Ok(self.providers.values().map(|p| p.info.clone()).collect())
     }
 
-    async fn voice_connect(&self, _session_id: &SessionId, provider_id: &str) -> anyhow::Result<VoiceHandle> {
+    async fn voice_connect(&self, provider_id: &str) -> anyhow::Result<simply_rpc::StreamHandle<simply_voice::VoiceInput, simply_voice::VoiceEvent>> {
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
 
-        let (audio_tx, audio_rx) = mpsc::channel::<simply_voice::AudioChunk>(64);
+        let (input_tx, input_rx) = mpsc::channel::<simply_voice::VoiceInput>(64);
         let (event_tx, event_rx) = mpsc::channel::<simply_voice::VoiceEvent>(64);
 
         // Prefer realtime if available, fall back to STT pipeline
         if let Some(ref realtime) = provider.realtime {
-            spawn_realtime_pipeline(Arc::clone(realtime), audio_rx, event_tx);
+            spawn_realtime_pipeline(Arc::clone(realtime), input_rx, event_tx);
         } else if let Some(ref stt) = provider.stt {
-            spawn_stt_pipeline(Arc::clone(stt), audio_rx, event_tx);
+            spawn_stt_pipeline(Arc::clone(stt), input_rx, event_tx);
         } else {
             anyhow::bail!("provider '{provider_id}' has no STT or realtime capability");
         }
 
-        Ok(VoiceHandle { audio_in: audio_tx, events: event_rx })
+        Ok(simply_rpc::StreamHandle::new(input_tx, event_rx))
     }
 
-    async fn voice_disconnect(&self, _session_id: &SessionId) -> anyhow::Result<()> {
+    async fn voice_disconnect(&self, _session_id: &str) -> anyhow::Result<()> {
         Ok(())
     }
 }
