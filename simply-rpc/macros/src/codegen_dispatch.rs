@@ -530,17 +530,22 @@ fn generate_ws_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
 
             if all_params.is_empty() {
                 // nothing
-            } else if all_params.len() == 1 && !has_path_params {
+            } else if all_params.len() == 1 {
+                // Single param — try direct deserialization first, then object field lookup
                 let p = &all_params[0];
                 let name = &p.name;
+                let name_str = name.to_string();
                 let owned_type = &p.owned_type;
                 param_bindings.push(quote! {
-                    let #name: #owned_type = match ::serde_json::from_value(params.clone()) {
+                    let #name: #owned_type = match ::serde_json::from_value::<#owned_type>(params.clone()) {
                         Ok(v) => v,
-                        Err(e) => return Some(::simply_rpc::WsDispatchResult {
-                            result: Err(::anyhow::anyhow!("deserialize error: {}", e)),
-                            input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
-                        }),
+                        Err(_) => match params.get(#name_str).and_then(|v| ::serde_json::from_value::<#owned_type>(v.clone()).ok()) {
+                            Some(v) => v,
+                            None => return Some(::simply_rpc::WsDispatchResult {
+                                result: Err(::anyhow::anyhow!("missing or invalid field: {}", #name_str)),
+                                input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
+                            }),
+                        },
                     };
                 });
                 if p.is_ref || p.is_str_ref {
