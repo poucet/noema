@@ -112,9 +112,17 @@ fn spawn_voice_event_loop(
     });
 }
 
+/// List available voice providers.
+#[tauri::command]
+pub async fn list_voice_providers(state: State<'_, Arc<AppState>>) -> Result<Vec<simply_daemon::api::VoiceProviderInfo>, String> {
+    let daemon = state.get_daemon()?;
+    daemon.voice().list_voice_providers().await
+        .map_err(|e| format!("Failed to list voice providers: {e}"))
+}
+
 /// Start a browser voice session — connects to the daemon's VoiceApi.
 #[tauri::command]
-pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>, provider_id: String) -> Result<(), String> {
     {
         let existing = state.voice_audio_tx.lock().await;
         if existing.is_some() {
@@ -125,7 +133,7 @@ pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>
     let daemon = state.get_daemon()?;
     let session_id = simply_daemon::api::types::SessionId::generate();
 
-    let handle = daemon.voice().voice_connect(&session_id).await
+    let handle = daemon.voice().voice_connect(&session_id, &provider_id).await
         .map_err(|e| format!("Failed to connect voice: {e}"))?;
 
     *state.voice_audio_tx.lock().await = Some(handle.audio_in);

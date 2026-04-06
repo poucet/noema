@@ -12,7 +12,7 @@
 `simply-daemon` is the hub. It owns agent orchestration (via `simply-core`), UCM storage, event/intent engine, voice pipeline, and session management. All communication flows through a single port:
 
 - **REST** — request/response operations (CRUD, configuration, queries). Auto-generated from trait annotations.
-- **WebSocket** — streaming sessions. Client upgrades at a session path (`/session/new`, `/session/{id}`), receives events, can send messages.
+- **WebSocket** — streaming sessions and bidirectional streams. Client upgrades at stream paths, receives events, can send messages.
 - **MCP outbound** — action services that the daemon connects to and calls tools on.
 
 Additionally, REST methods are exposed as **in-process tools** via the `ToolService` trait, so agents see daemon capabilities and external MCP tools identically.
@@ -33,13 +33,13 @@ simply-daemon (single port)
 ├─ Session manager (in-memory conversation state)
 ├─ Global MCP tool registry (external MCP + daemon tools via ToolService)
 ├─ Event bus + intent engine
-├─ Voice pipeline
+├─ Voice pipeline (simply-voice)
 │
 ├─ REST — request/response (all HTTP methods)
 │   ▲           ▲           ▲           ▲
 │   Noema       Lumina      Admin page  Trigger services
 │
-├─ WebSocket — streaming sessions (upgrade at /session/*)
+├─ WebSocket — streaming sessions + bidi streams
 │   ▲           ▲
 │   Noema       Lumina
 │
@@ -56,8 +56,8 @@ simply-daemon (single port)
 A proc macro `#[rpc_service("prefix")]` annotates async traits and auto-generates:
 
 1. **REST dispatch** — routes HTTP requests to trait methods based on path annotations
-2. **WebSocket dispatch** — handles stream methods for bidirectional communication
-3. **REST metadata** — `RestMeta` entries for auto-routing and tool generation
+2. **WebSocket dispatch** — handles stream methods with bidirectional support
+3. **Route metadata** — `RouteMeta` entries for auto-routing and tool generation
 4. **Tool definitions** — `ToolDefinition` for each REST method (descriptions from doc comments, schemas from params)
 5. **Client impl macro** — `impl_remote_xxx!` generates HTTP/WS client code
 6. **Compatibility metadata** — per-method signature hashes for version checking
@@ -90,7 +90,7 @@ pub trait ConversationApi: Send + Sync {
 | `#[rpc(post = "/path")]` | HTTP POST at the given path |
 | `#[rpc(put = "/path")]` | HTTP PUT at the given path |
 | `#[rpc(delete = "/path")]` | HTTP DELETE at the given path |
-| `#[rpc(stream = "/path")]` | WebSocket upgrade at the given path |
+| `#[rpc(stream = "/path")]` | WebSocket stream at the given path (bidirectional) |
 | `#[rpc(skip)]` | Not dispatched; client gets `bail!()` stub (in-process only) |
 | `#[rpc(no_tool)]` | Exclude from tool generation. Combinable with other annotations. |
 | `#[rpc(base64_param = "name")]` | Named `Vec<u8>` param encoded as base64 over the wire |
@@ -102,31 +102,59 @@ pub trait ConversationApi: Send + Sync {
 #[rpc(get    = "/conversation")]                    // GET /conversation
 #[rpc(delete = "/conversation/{id}")]               // DELETE /conversation/{id}
 #[rpc(post   = "/session/{session_id}/message")]    // POST /session/{session_id}/message
-#[rpc(stream = "/session/new")]                     // WS upgrade at /session/new
-#[rpc(stream = "/session/{session_id}")]            // WS upgrade at /session/{id}
+#[rpc(stream = "/session/new")]                     // WS stream at /session/new
+#[rpc(stream = "/voice/stream/{provider_id}")]      // WS stream with path params
 ```
 
 - `{name}` segments match method parameters by name
 - Remaining parameters come from the request body (POST/PUT) or query string (GET)
-- Stream methods accept WebSocket upgrade; the initial value is sent as the first WS message, then events stream
+- Stream methods accept WebSocket upgrade; all streams are bidirectional
+
+### Stream return types
+
+Stream methods support three return patterns:
+
+```rust
+// Tuple: initial value + event stream (e.g., sessions)
+#[rpc(stream = "/session/new")]
+async fn create_session(&self, opts: CreateSessionOptions)
+    -> Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
+
+// Bare: event stream only
+#[rpc(stream = "/session/{id}/subscribe")]
+async fn subscribe_session(&self, id: &SessionId)
+    -> Result<broadcast::Receiver<DaemonEvent>>;
+
+// StreamHandle: fully bidirectional (e.g., voice)
+#[rpc(stream = "/voice/stream/{provider_id}")]
+async fn voice_connect(&self, provider_id: &str)
+    -> Result<StreamHandle<VoiceInput, VoiceEvent>>;
+```
+
+`StreamHandle<T, U>` is a bidirectional channel:
+- `T` = messages the client sends (serialized as JSON)
+- `U` = messages the server sends (serialized as JSON)
+- Binary data uses `#[serde(with = "simply_rpc::base64_bytes")]` for base64 encoding
+
+The macro generates all WS bridging code — forwarders for server→client events, deserializers for client→server input.
 
 ### Transport routing
 
-All on a **single port**. The server checks the request:
+All on a **single port**. The `ServiceRouter` checks the request:
 
 1. If `Upgrade: websocket` header and path matches a `stream` annotation → WebSocket upgrade
 2. Otherwise → REST dispatch by HTTP method + path
 
 A method is on exactly one transport:
 - **REST** — `get`, `post`, `put`, `delete` annotations
-- **WebSocket** — `stream` annotation (bidirectional: server pushes events, client can send commands)
-- **In-process only** — `skip` (e.g., `voice_connect` returning non-serializable handles)
+- **WebSocket** — `stream` annotation (bidirectional)
+- **In-process only** — `skip` (rare, for non-serializable types)
 
 ---
 
 ## REST — Request/Response
 
-All non-streaming operations. Auto-routed from trait annotations via `RestDispatcher`.
+All non-streaming operations. Auto-routed from trait annotations via `ServiceRouter`.
 
 ### Characteristics
 
@@ -142,23 +170,33 @@ All non-streaming operations. Auto-routed from trait annotations via `RestDispat
 
 ---
 
-## WebSocket — Streaming Sessions
+## WebSocket — Streaming & Bidirectional
 
-Sessions are established via WebSocket upgrade at specific paths. Each session is its own WebSocket connection.
+Sessions and voice use WebSocket for real-time communication. Each stream is its own logical connection over the shared WS.
 
 ### Session lifecycle
 
 | Path | Method | What happens |
 |---|---|---|
 | `ws://host/session/new` | `create_session` | Create new session. Server sends `SessionInfo`, then streams `DaemonEvent`. |
-| `ws://host/session/{id}` | `resume_session` | Resume from storage. Server sends `SessionInfo`, then streams events. |
-| `ws://host/session/{id}/subscribe` | `subscribe_session` | Subscribe to events (multiple listeners). Server streams `DaemonEvent`. |
+| `ws://host/session/{id}/subscribe` | `subscribe_session` | Subscribe to events. Server streams `DaemonEvent`. |
 
-### Bidirectional
+### Voice streams
 
-The session WebSocket is bidirectional:
-- **Server → Client:** `SessionInfo` (first message), then `DaemonEvent` stream (tokens, tool calls, turn completions)
-- **Client → Server:** `send_message` (with `session_id` for future multiplexing support)
+| Path | Method | What happens |
+|---|---|---|
+| `ws://host/voice/stream/{provider_id}` | `voice_connect` | Bidirectional voice stream. Client sends `VoiceInput`, server sends `VoiceEvent`. |
+
+### Bidirectional protocol
+
+All streams are bidirectional. Messages flow as JSON text frames:
+
+- **Server → Client:** notifications with `{ "method": "voice.voice_connect.event", "params": ... }`
+- **Client → Server:** notifications with `{ "method": "voice.voice_connect.input", "params": ... }`
+
+For `StreamHandle<T, U>` methods, the macro generates:
+- A deserializer that converts incoming JSON to `T` and sends to the service
+- A forwarder that serializes `U` events as JSON notifications to the client
 
 ### Context seeding
 
@@ -220,13 +258,10 @@ All tools in a single registry, regardless of source:
 
 | Method | Annotation | Endpoint |
 |---|---|---|
-| `create_session` | `stream = "/session/new"` | WS upgrade |
-| `resume_session` | `stream = "/session/{session_id}"` | WS upgrade |
-| `subscribe_session` | `stream = "/session/{session_id}/subscribe"` | WS upgrade |
+| `create_session` | `stream = "/session/new"` | WS stream |
+| `subscribe_session` | `stream = "/session/{session_id}/subscribe"` | WS stream |
 | `list_sessions` | `get = "/session"` | GET |
-| `get_messages` | `get = "/session/{session_id}/messages"` | GET |
 | `send_message` | `post = "/session/{session_id}/message"` | POST |
-| `set_persistence` | `put = "/session/{session_id}/persistence"` | PUT |
 | `set_model` | `put = "/session/{session_id}/model"` | PUT |
 | `close_session` | `delete = "/session/{session_id}"` | DELETE |
 | `close_all_sessions` | `delete = "/session"` | DELETE |
@@ -285,10 +320,11 @@ All tools in a single registry, regardless of source:
 
 | Method | Annotation | Endpoint |
 |---|---|---|
-| `voice_connect` | `skip` | In-process only |
+| `list_voice_providers` | `get = "/voice/provider"` | GET |
+| `voice_connect` | `stream = "/voice/stream/{provider_id}"` | WS bidi stream |
 | `voice_disconnect` | `delete = "/voice/{session_id}"` | DELETE |
 
-### DaemonInfoApi (`daemon`)
+### CoreApi (`core`)
 
 | Method | Annotation | Endpoint |
 |---|---|---|
@@ -303,24 +339,27 @@ All tools in a single registry, regardless of source:
 ### Server wiring
 
 ```rust
-// Single port serves both REST and WebSocket
-let rest_dispatcher = RestDispatcher::new()
+// ServiceRouter handles both REST and WS stream routing
+let router = Arc::new(ServiceRouter::new()
     .register(<dyn SessionApi>::service(daemon.clone()))
     .register(<dyn ConversationApi>::service(daemon.clone()))
-    .register(<dyn AssetApi>::service(daemon.clone()))
+    .register(<dyn VoiceApi>::service(daemon.voice_service()))
     // ... all services
+);
 
-// Server checks each request:
-// 1. WebSocket upgrade + stream path match → upgrade
-// 2. Otherwise → REST dispatch
+// Single port serves everything:
+// 1. WS upgrade + stream path match → bidirectional stream
+// 2. WS upgrade at /ws → JSON-RPC (session commands)
+// 3. Otherwise → REST dispatch
 ```
 
 ### Client wiring
 
 ```rust
 // RemoteDaemon holds base URL + lazy WS connections
-impl_remote_session_api!(RemoteDaemon);    // HTTP for REST methods, WS for stream
+impl_remote_session_api!(RemoteDaemon);      // HTTP for REST, WS for stream
 impl_remote_conversation_api!(RemoteDaemon); // HTTP only (no streams)
+impl_remote_voice_api!(RemoteDaemon);        // HTTP for REST, WS bidi for stream
 // ... one line per trait
 ```
 
@@ -365,21 +404,22 @@ simply-rpc/
   macros/src/
     lib.rs                 # #[rpc_service("prefix")] proc macro entry
     parse.rs               # Parse annotations, classify params/returns
-    codegen_dispatch.rs    # Generate service struct, RpcService, RestService, REST dispatch, metadata
+    codegen_dispatch.rs    # Generate service struct, RpcService, RestService, WS dispatch, metadata
     codegen_client.rs      # Generate impl_remote_xxx! macro
   src/
     lib.rs                 # Re-exports
-    service.rs             # RpcService, RestService, Dispatcher, RestDispatcher
+    service.rs             # RpcService, RestService, ServiceRouter
     client.rs              # RpcClient trait
     context.rs             # DispatchResult<S>
+    stream.rs              # StreamHandle<T, U> — bidirectional stream type
     helpers.rs             # call_unit, call_val, call_raw, base64
-    meta.rs                # ServiceMeta, MethodMeta, RestMeta, HttpMethod, check_compat
+    meta.rs                # ServiceMeta, MethodMeta, RouteMeta, HttpMethod, check_compat
 
 simply-daemon/src/
   remote.rs                # RemoteDaemon — base URL + lazy WS
-  ws/
-    server.rs              # HTTP + WebSocket server (single port)
-    rest.rs                # REST dispatch wiring
+  net/
+    rest.rs                # HTTP + WebSocket server (single port, unified handler)
+    server.rs              # ConnectionTracker
     discovery.rs           # connect_or_host()
   api/
     session.rs             # SessionApi — stream + REST
@@ -388,9 +428,7 @@ simply-daemon/src/
     mcp.rs                 # McpApi — REST
     oauth.rs               # OAuthApi — REST
     model.rs               # ModelApi — REST
-    voice.rs               # VoiceApi — REST + skip
-    daemon_info.rs         # DaemonInfoApi — REST
-  admin/
-    mod.rs                 # Admin HTML page at /
+    voice.rs               # VoiceApi — REST + bidi stream
+    core.rs                # CoreApi — REST
   main.rs                  # Service wiring
 ```

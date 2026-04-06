@@ -30,60 +30,19 @@ pub trait RpcService: Send + Sync {
     ) -> Option<DispatchResult<Self::Stream>>;
 }
 
-/// Pre-built dispatcher with prefix → service lookup.
-/// For services with `Stream = ()` only.
-///
-/// For stream-producing services, dispatch them individually before falling through to this.
-#[derive(Clone)]
-pub struct Dispatcher {
-    services: HashMap<String, Arc<dyn RpcService<Stream = ()>>>,
-}
 
-impl Dispatcher {
-    pub fn new() -> Self {
-        Self {
-            services: HashMap::new(),
-        }
-    }
-
-    /// Register a service. Panics on duplicate prefix.
-    pub fn register(mut self, svc: Arc<dyn RpcService<Stream = ()>>) -> Self {
-        let prefix = svc.prefix().to_string();
-        if self.services.contains_key(&prefix) {
-            panic!("duplicate RPC service prefix: {prefix}");
-        }
-        self.services.insert(prefix, svc);
-        self
-    }
-
-    /// Dispatch a method call. Extracts prefix from the method name and routes directly.
-    pub async fn dispatch(&self, method: &str, params: Value) -> RpcResult {
-        let prefix = method.split('.').next().unwrap_or("");
-        match self.services.get(prefix) {
-            Some(svc) => match svc.dispatch(method, params).await {
-                Some(dr) => dr.result,
-                None => Err(anyhow::anyhow!("unknown method: {method}")),
-            },
-            None => Err(anyhow::anyhow!("unknown method: {method}")),
-        }
-    }
-
-    /// Collect metadata from all registered services (for compatibility handshake).
-    pub fn service_metas(&self) -> Vec<&'static crate::ServiceMeta> {
-        self.services.values().map(|svc| svc.meta()).collect()
-    }
-}
-
-impl Default for Dispatcher {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Result of a WS stream dispatch.
+pub struct WsDispatchResult {
+    pub result: RpcResult,
+    /// Sink for incoming client messages. The WS handler deserializes
+    /// incoming JSON and sends it here. All streams are bidirectional.
+    pub input_sink: tokio::sync::mpsc::Sender<serde_json::Value>,
 }
 
 /// Trait for services that can dispatch REST requests by method name.
 ///
 /// Auto-implemented by the macro. The service handles deserialization and
-/// trait method calls. Path matching is handled by `RestDispatcher` using matchit.
+/// trait method calls. Path matching is handled by `ServiceRouter` using matchit.
 #[async_trait]
 pub trait RestService: Send + Sync {
     /// Dispatch a REST request by method name (e.g. "items.get_item").
@@ -93,6 +52,20 @@ pub trait RestService: Send + Sync {
         method_name: &str,
         params: Value,
     ) -> Option<RpcResult>;
+
+    /// Dispatch a WS stream request by method name.
+    /// `write_tx` is the WS write channel — stream events are forwarded here.
+    /// Returns the initial RPC result + optional input sink for bidi streams.
+    async fn ws_dispatch_by_name(
+        &self,
+        method_name: &str,
+        params: Value,
+        write_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Option<WsDispatchResult> {
+        // Default: no stream methods — fall through
+        let _ = (method_name, params, write_tx);
+        None
+    }
 
     /// Get metadata for route registration and compatibility checking.
     fn meta(&self) -> &'static crate::ServiceMeta;
@@ -119,46 +92,49 @@ pub struct RestResult {
 /// Build with `register()` to add services. Each service's `RouteMeta` entries
 /// are inserted into per-HTTP-method routers. At dispatch time, matchit resolves
 /// the path, extracts params, merges with body, and calls the service.
-pub struct RestDispatcher {
+pub struct ServiceRouter {
     routers: HashMap<crate::HttpMethod, matchit::Router<RouteEntry>>,
+    stream_router: matchit::Router<RouteEntry>,
     services: Vec<Arc<dyn RestService>>,
 }
 
-impl RestDispatcher {
+impl ServiceRouter {
     pub fn new() -> Self {
         Self {
             routers: HashMap::new(),
+            stream_router: matchit::Router::new(),
             services: Vec::new(),
         }
     }
 
-    /// Register a REST service. Routes are extracted from its metadata.
+    /// Register a service. REST and stream routes are extracted from its metadata.
     pub fn register(mut self, svc: Arc<dyn RestService>) -> Self {
         let meta = svc.meta();
         for rm in meta.routes {
-            let http_method = match rm.kind {
-                crate::RouteKind::Rest(m) => m,
-                crate::RouteKind::Stream => continue, // Stream routes handled by WS layer
-            };
-            let router = self.routers.entry(http_method).or_insert_with(matchit::Router::new);
             let entry = RouteEntry {
                 method_name: rm.method_name,
                 service: svc.clone(),
                 route_meta: rm,
             };
-            if let Err(e) = router.insert(rm.path_template, entry) {
-                panic!("failed to register route {} {}: {}", rm.path_template, rm.method_name, e);
+            match rm.kind {
+                crate::RouteKind::Rest(m) => {
+                    let router = self.routers.entry(m).or_insert_with(matchit::Router::new);
+                    if let Err(e) = router.insert(rm.path_template, entry) {
+                        panic!("failed to register route {} {}: {}", rm.path_template, rm.method_name, e);
+                    }
+                }
+                crate::RouteKind::Stream => {
+                    if let Err(e) = self.stream_router.insert(rm.path_template, entry) {
+                        panic!("failed to register stream route {} {}: {}", rm.path_template, rm.method_name, e);
+                    }
+                }
             }
         }
         self.services.push(svc);
         self
     }
 
-    /// Dispatch an HTTP request. Uses matchit to resolve path, extract params,
-    /// merge with body, and call the appropriate service.
-    ///
-    /// Returns `RestResult` with both the RPC result and route metadata
-    /// (so the server knows how to encode the response — JSON, binary, etc.)
+    /// Dispatch an HTTP request.
     pub async fn dispatch(
         &self,
         http_method: crate::HttpMethod,
@@ -168,28 +144,29 @@ impl RestDispatcher {
         let router = self.routers.get(&http_method)?;
         let matched = router.at(path).ok()?;
         let entry = matched.value;
-
-        // Merge path params into body (or create object if body is null)
-        let params = if matched.params.is_empty() {
-            body
-        } else {
-            let mut obj = match body {
-                Value::Object(map) => map,
-                Value::Null => serde_json::Map::new(),
-                other => {
-                    let mut map = serde_json::Map::new();
-                    map.insert("_body".to_string(), other);
-                    map
-                }
-            };
-            for (key, value) in matched.params.iter() {
-                obj.insert(key.to_string(), Value::String(value.to_string()));
-            }
-            Value::Object(obj)
-        };
-
+        let params = Self::merge_params(&matched.params, body);
         let result = entry.service.rest_dispatch_by_name(entry.method_name, params).await?;
         Some(RestResult { result, meta: entry.route_meta })
+    }
+
+    /// Dispatch a WS stream request by path.
+    /// The `write_tx` is used to send stream events back to the client.
+    /// Returns `WsDispatchResult` with the initial result and an input sink.
+    pub async fn ws_dispatch(
+        &self,
+        path: &str,
+        body: Value,
+        write_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Option<WsDispatchResult> {
+        let matched = self.stream_router.at(path).ok()?;
+        let entry = matched.value;
+        let params = Self::merge_params(&matched.params, body);
+        entry.service.ws_dispatch_by_name(entry.method_name, params, write_tx).await
+    }
+
+    /// Check if a path matches a registered stream route.
+    pub fn has_stream_route(&self, path: &str) -> bool {
+        self.stream_router.at(path).is_ok()
     }
 
     /// Check if a route expects binary upload (raw body + Content-Type).
@@ -206,9 +183,59 @@ impl RestDispatcher {
             .flat_map(|svc| svc.meta().routes.iter())
             .collect()
     }
+
+    /// Dispatch a regular RPC call by method name (e.g. "voice.list_voice_providers").
+    /// Used by the WS handler for non-stream methods.
+    pub async fn dispatch_by_method(
+        &self,
+        method_name: &str,
+        params: Value,
+    ) -> Option<RpcResult> {
+        for svc in &self.services {
+            if let Some(result) = svc.rest_dispatch_by_name(method_name, params.clone()).await {
+                return Some(result);
+            }
+        }
+        None
+    }
+
+    /// Dispatch a WS stream call by method name (e.g. "voice.voice_connect").
+    /// Used by the WS handler for stream methods.
+    pub async fn ws_dispatch_by_method(
+        &self,
+        method_name: &str,
+        params: Value,
+        write_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Option<WsDispatchResult> {
+        for svc in &self.services {
+            if let Some(result) = svc.ws_dispatch_by_name(method_name, params.clone(), write_tx.clone()).await {
+                return Some(result);
+            }
+        }
+        None
+    }
+
+    fn merge_params(path_params: &matchit::Params, body: Value) -> Value {
+        if path_params.is_empty() {
+            return body;
+        }
+        let mut obj = match body {
+            Value::Object(map) => map,
+            Value::Null => serde_json::Map::new(),
+            other => {
+                let mut map = serde_json::Map::new();
+                map.insert("_body".to_string(), other);
+                map
+            }
+        };
+        for (key, value) in path_params.iter() {
+            obj.insert(key.to_string(), Value::String(value.to_string()));
+        }
+        Value::Object(obj)
+    }
 }
 
-impl Default for RestDispatcher {
+impl Default for ServiceRouter {
     fn default() -> Self {
         Self::new()
     }

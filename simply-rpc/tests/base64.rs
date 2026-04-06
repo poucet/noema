@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use simply_rpc::{BinaryResponse, BinaryUpload, HttpMethod, RestDispatcher, RpcClient, RpcService};
+use simply_rpc::{BinaryResponse, BinaryUpload, HttpMethod, ServiceRouter, RpcClient, RpcService};
 
 // ---------------------------------------------------------------------------
 // Test trait with binary methods
@@ -64,10 +64,10 @@ impl BlobApi for InMemoryBlobs {
     }
 }
 
-fn make_rd() -> (RestDispatcher, Arc<InMemoryBlobs>) {
+fn make_rd() -> (ServiceRouter, Arc<InMemoryBlobs>) {
     let impl_ = Arc::new(InMemoryBlobs::new());
     let svc = <dyn BlobApi>::service(impl_.clone());
-    (RestDispatcher::new().register(svc), impl_)
+    (ServiceRouter::new().register(svc), impl_)
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ async fn dispatch_get_blob_returns_binary_response() {
 // ---------------------------------------------------------------------------
 
 struct MockBlobClient {
-    rd: RestDispatcher,
+    rd: ServiceRouter,
 }
 
 impl MockBlobClient {
@@ -208,10 +208,10 @@ async fn start_blob_server() -> (String, Arc<InMemoryBlobs>) {
 
     let impl_ = Arc::new(InMemoryBlobs::new());
     let svc = <dyn BlobApi>::service(impl_.clone());
-    let dispatcher = Arc::new(RestDispatcher::new().register(svc));
+    let dispatcher = Arc::new(ServiceRouter::new().register(svc));
 
     #[derive(Clone)]
-    struct AppState { rd: Arc<RestDispatcher> }
+    struct AppState { rd: Arc<ServiceRouter> }
 
     async fn handler(State(state): State<AppState>, req: axum::extract::Request) -> axum::response::Response {
         let method = req.method().clone();

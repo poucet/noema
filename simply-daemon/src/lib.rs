@@ -20,8 +20,6 @@ pub mod session;
 pub mod storage;
 pub mod net;
 pub mod tools;
-pub mod ws_dispatch;
-
 /// Re-exported types for clients.
 pub use api::types as types;
 pub use simply_core::ToolService;

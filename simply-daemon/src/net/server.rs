@@ -10,25 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
 use serde::Serialize;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 
-use super::protocol::WsResponse;
-
-/// Dispatch function signature.
-///
-/// Called for each incoming RPC request. The `write_tx` sender allows the
-/// dispatch logic to send async notifications (e.g. session event streams).
-///
-/// Built by the caller (e.g. `discovery.rs`) from specific services.
-pub type DispatchFn = Arc<
-    dyn Fn(
-            String,                    // method
-            serde_json::Value,         // params
-            mpsc::Sender<String>,      // write channel for notifications
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = WsResponse> + Send>>
-        + Send
-        + Sync,
->;
 
 /// Info about a connected WS client.
 #[derive(Debug, Clone, Serialize)]

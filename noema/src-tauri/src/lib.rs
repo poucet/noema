@@ -178,6 +178,7 @@ pub fn run() {
             commands::voice::download_voice_model,
             commands::voice::toggle_voice,
             commands::voice::get_voice_status,
+            commands::voice::list_voice_providers,
             commands::voice::start_voice_session,
             commands::voice::process_audio_chunk,
             commands::voice::stop_voice_session,

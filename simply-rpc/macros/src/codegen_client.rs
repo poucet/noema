@@ -303,6 +303,18 @@ fn generate_client_body(
                 Ok(__stream)
             }
         }
+        ReturnKind::StreamBidi { input_type, output_type } => {
+            // Result<StreamHandle<T, U>> — open a bidi stream via RPC
+            // The RPC call sets up the server side. Then we register for
+            // incoming events (U) and get a way to send messages (T).
+            quote! {
+                #serialize
+                self.rpc_call(#method_str, #rpc_params).await?;
+                let __handle: ::simply_rpc::StreamHandle<#input_type, #output_type> =
+                    self.register_bidi_stream(#method_str).await?;
+                Ok(__handle)
+            }
+        }
     }
 }
 
@@ -313,6 +325,7 @@ fn collect_unique_stream_types(methods: &[&ParsedMethod]) -> Vec<syn::Type> {
         let st = match &m.return_kind {
             ReturnKind::StreamTuple { stream_type, .. } => stream_type,
             ReturnKind::StreamBare { stream_type } => stream_type,
+            ReturnKind::StreamBidi { .. } => continue, // bidi uses register_bidi_stream, not Stream type
             _ => continue,
         };
         let s = quote::quote! { #st }.to_string();

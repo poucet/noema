@@ -1,12 +1,12 @@
 //! Tests for REST dispatch: metadata, direct dispatch, client macro round-trip,
-//! RestDispatcher routing, and raw HTTP integration tests using reqwest.
+//! ServiceRouter routing, and raw HTTP integration tests using reqwest.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, RestDispatcher, RestService, RpcClient, RpcService};
+use simply_rpc::{HttpMethod, ServiceRouter, RestService, RpcClient, RpcService};
 
 // ---------------------------------------------------------------------------
 // Test types
@@ -145,10 +145,10 @@ fn make_svc(widgets: Vec<Widget>) -> WidgetApiService<InMemoryWidgets> {
     WidgetApiService(Arc::new(InMemoryWidgets::new(widgets)))
 }
 
-fn make_rd_from_widgets(widgets: Vec<Widget>) -> RestDispatcher {
+fn make_rd_from_widgets(widgets: Vec<Widget>) -> ServiceRouter {
     let impl_ = Arc::new(InMemoryWidgets::new(widgets));
     let svc = <dyn WidgetApi>::service(impl_);
-    RestDispatcher::new().register(svc)
+    ServiceRouter::new().register(svc)
 }
 
 // ===========================================================================
@@ -226,7 +226,7 @@ fn rest_meta_no_tool_flag() {
 }
 
 // ===========================================================================
-// PART 2: RestDispatcher tests (matchit routing)
+// PART 2: ServiceRouter tests (matchit routing)
 // ===========================================================================
 
 #[tokio::test]
@@ -299,7 +299,7 @@ async fn rest_dispatch_unknown_path_returns_none() {
 // ===========================================================================
 
 struct MockWsClient {
-    rd: RestDispatcher,
+    rd: ServiceRouter,
     svc: Arc<WidgetApiService<dyn WidgetApi>>,
 }
 
@@ -307,7 +307,7 @@ impl MockWsClient {
     fn new(widgets: Vec<Widget>) -> Self {
         let impl_ = Arc::new(InMemoryWidgets::new(widgets));
         let svc = <dyn WidgetApi>::service(impl_);
-        let rd = RestDispatcher::new().register(svc.clone());
+        let rd = ServiceRouter::new().register(svc.clone());
         Self { rd, svc }
     }
 }
@@ -402,7 +402,7 @@ async fn client_skip_method_errors() {
 // Zero simply-rpc code on the client side. Only reqwest + serde_json.
 // ===========================================================================
 
-/// Start a real HTTP server backed by `RestDispatcher` on an OS-assigned port.
+/// Start a real HTTP server backed by `ServiceRouter` on an OS-assigned port.
 /// Returns the base URL (e.g. "http://127.0.0.1:12345").
 async fn start_test_server(widgets: Vec<Widget>) -> String {
     use axum::extract::State;
@@ -412,10 +412,10 @@ async fn start_test_server(widgets: Vec<Widget>) -> String {
 
     let impl_ = Arc::new(InMemoryWidgets::new(widgets));
     let svc = <dyn WidgetApi>::service(impl_);
-    let dispatcher = Arc::new(RestDispatcher::new().register(svc));
+    let dispatcher = Arc::new(ServiceRouter::new().register(svc));
 
     async fn handler(
-        State(rd): State<Arc<RestDispatcher>>,
+        State(rd): State<Arc<ServiceRouter>>,
         req: axum::extract::Request,
     ) -> axum::response::Response {
         let method = req.method().clone();

@@ -14,15 +14,17 @@ pub mod meta;
 pub mod protocol;
 mod response;
 mod service;
+mod stream;
 pub mod ws_client;
 pub mod ws_server;
 
 pub use client::RpcClient;
 pub use context::DispatchResult;
+pub use stream::StreamHandle;
 pub use helpers::{base64_bytes, call_raw, call_unit, call_val, decode_base64, encode_base64};
 pub use meta::{check_compat, HttpMethod, MethodMeta, RouteKind, RouteMeta, ServiceMeta, ServiceMetaWire};
 pub use response::{BinaryResponse, BinaryUpload};
-pub use service::{Dispatcher, RestDispatcher, RestResult, RestService, RpcService};
+pub use service::{ServiceRouter, RestResult, RestService, RpcService, WsDispatchResult};
 
 /// Result type for RPC dispatch — `Ok(Value)` or error.
 pub type RpcResult = anyhow::Result<serde_json::Value>;

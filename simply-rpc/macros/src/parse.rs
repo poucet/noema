@@ -13,6 +13,8 @@ pub enum ReturnKind {
     StreamTuple { value_type: Type, stream_type: Type },
     /// `#[rpc(stream)]` `-> Result<S>` — push S, return true
     StreamBare { stream_type: Type },
+    /// `#[rpc(stream)]` `-> Result<StreamHandle<T, U>>` — bidirectional WS stream
+    StreamBidi { input_type: Type, output_type: Type },
 }
 
 /// An HTTP method (or WebSocket upgrade) for routing.
@@ -348,7 +350,15 @@ fn parse_return_type(output: &ReturnType, rpc_kind: &RpcKind) -> syn::Result<Ret
 
 /// For `#[rpc(stream)]` methods, classify the inner type of Result<...>.
 fn classify_stream_return(inner: &Type) -> syn::Result<ReturnKind> {
-    // Check for tuple (T, S) — stream returns alongside a value
+    // Check for StreamHandle<T, U> — bidirectional stream
+    if let Some((input_type, output_type)) = extract_stream_handle_types(inner) {
+        return Ok(ReturnKind::StreamBidi {
+            input_type,
+            output_type,
+        });
+    }
+
+    // Check for tuple (T, S)
     if let Type::Tuple(tuple) = inner {
         if tuple.elems.len() == 2 {
             let value_type = tuple.elems[0].clone();
@@ -363,6 +373,24 @@ fn classify_stream_return(inner: &Type) -> syn::Result<ReturnKind> {
     Ok(ReturnKind::StreamBare {
         stream_type: inner.clone(),
     })
+}
+
+/// Extract `(T, U)` from `StreamHandle<T, U>` or `simply_rpc::StreamHandle<T, U>`.
+fn extract_stream_handle_types(ty: &Type) -> Option<(Type, Type)> {
+    let Type::Path(path) = ty else { return None };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "StreamHandle" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    let mut types = args.args.iter().filter_map(|a| {
+        if let syn::GenericArgument::Type(t) = a { Some(t.clone()) } else { None }
+    });
+    let input = types.next()?;
+    let output = types.next()?;
+    Some((input, output))
 }
 
 /// Extract the inner `T` from `Result<T>` or `anyhow::Result<T>`.

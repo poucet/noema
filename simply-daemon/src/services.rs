@@ -149,71 +149,174 @@ where
 // VoiceService
 // ---------------------------------------------------------------------------
 
-pub struct VoiceService {
+use std::collections::HashMap;
+
+struct RegisteredProvider {
+    info: VoiceProviderInfo,
     stt: Option<Arc<dyn simply_voice::SttProvider>>,
+    realtime: Option<Arc<dyn simply_voice::RealtimeProvider>>,
+}
+
+pub struct VoiceService {
+    providers: HashMap<String, RegisteredProvider>,
 }
 
 impl VoiceService {
-    pub fn new(stt: Option<Arc<dyn simply_voice::SttProvider>>) -> Self {
-        Self { stt }
+    pub fn new() -> Self {
+        Self { providers: HashMap::new() }
+    }
+
+    pub fn register_stt(
+        mut self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        provider: Arc<dyn simply_voice::SttProvider>,
+    ) -> Self {
+        let id = id.into();
+        let entry = self.providers.entry(id.clone()).or_insert_with(|| RegisteredProvider {
+            info: VoiceProviderInfo { id, name: name.into(), capabilities: Vec::new() },
+            stt: None,
+            realtime: None,
+        });
+        entry.stt = Some(provider);
+        if !entry.info.capabilities.contains(&"stt".to_string()) {
+            entry.info.capabilities.push("stt".to_string());
+        }
+        self
+    }
+
+    pub fn register_realtime(
+        mut self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        provider: Arc<dyn simply_voice::RealtimeProvider>,
+    ) -> Self {
+        let id = id.into();
+        let entry = self.providers.entry(id.clone()).or_insert_with(|| RegisteredProvider {
+            info: VoiceProviderInfo { id, name: name.into(), capabilities: Vec::new() },
+            stt: None,
+            realtime: None,
+        });
+        entry.realtime = Some(provider);
+        if !entry.info.capabilities.contains(&"realtime".to_string()) {
+            entry.info.capabilities.push("realtime".to_string());
+        }
+        self
     }
 }
 
-#[async_trait]
-impl VoiceApi for VoiceService {
-    async fn voice_connect(&self, _session_id: &SessionId) -> anyhow::Result<VoiceHandle> {
-        let stt = self.stt.clone()
-            .ok_or_else(|| anyhow::anyhow!("no STT provider available"))?;
+/// Spawn the STT pipeline: VAD → SttProvider → VoiceEvents.
+fn spawn_stt_pipeline(
+    stt: Arc<dyn simply_voice::SttProvider>,
+    mut audio_rx: mpsc::Receiver<simply_voice::AudioChunk>,
+    event_tx: mpsc::Sender<simply_voice::VoiceEvent>,
+) {
+    tokio::spawn(async move {
+        use simply_voice::{VadEvent, VoiceActivityDetector, VoiceEvent, AudioChunk};
 
-        let (audio_tx, mut audio_rx) = mpsc::channel::<simply_voice::AudioChunk>(64);
-        let (event_tx, event_rx) = mpsc::channel::<simply_voice::VoiceEvent>(64);
+        let mut vad = VoiceActivityDetector::new();
 
-        tokio::spawn(async move {
-            use simply_voice::{VadEvent, VoiceActivityDetector, VoiceEvent, AudioChunk};
+        while let Some(chunk) = audio_rx.recv().await {
+            let samples: Vec<i16> = chunk.data.chunks_exact(2)
+                .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                .collect();
 
-            let mut vad = VoiceActivityDetector::new();
+            if let Some(vad_event) = vad.process(&samples) {
+                match vad_event {
+                    VadEvent::SpeechStart => {
+                        let _ = event_tx.send(VoiceEvent::Listening).await;
+                    }
+                    VadEvent::SpeechChunk(_) => {}
+                    VadEvent::SpeechEnd(audio_samples) => {
+                        let _ = event_tx.send(VoiceEvent::Transcribing).await;
 
-            while let Some(chunk) = audio_rx.recv().await {
-                // Convert PCM16 LE bytes to i16 samples for VAD
-                let samples: Vec<i16> = chunk.data.chunks_exact(2)
-                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
-                    .collect();
+                        let bytes: Vec<u8> = audio_samples.iter()
+                            .flat_map(|s| s.to_le_bytes())
+                            .collect();
+                        let audio = AudioChunk::new(bytes);
 
-                if let Some(vad_event) = vad.process(&samples) {
-                    match vad_event {
-                        VadEvent::SpeechStart => {
-                            let _ = event_tx.send(VoiceEvent::Listening).await;
-                        }
-                        VadEvent::SpeechChunk(_) => {
-                            // Intermediate — no action needed
-                        }
-                        VadEvent::SpeechEnd(audio_samples) => {
-                            let _ = event_tx.send(VoiceEvent::Transcribing).await;
-
-                            // Convert i16 samples back to PCM16 LE bytes
-                            let bytes: Vec<u8> = audio_samples.iter()
-                                .flat_map(|s| s.to_le_bytes())
-                                .collect();
-                            let audio = AudioChunk::new(bytes);
-
-                            match stt.transcribe(audio).await {
-                                Ok(t) if !t.text.trim().is_empty() => {
-                                    let _ = event_tx.send(
-                                        VoiceEvent::UserTranscript(t.text)
-                                    ).await;
-                                }
-                                Ok(_) => {} // empty transcription
-                                Err(e) => {
-                                    let _ = event_tx.send(
-                                        VoiceEvent::Error(format!("STT failed: {e}"))
-                                    ).await;
-                                }
+                        match stt.transcribe(audio).await {
+                            Ok(t) if !t.text.trim().is_empty() => {
+                                let _ = event_tx.send(VoiceEvent::UserTranscript(t.text)).await;
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                let _ = event_tx.send(VoiceEvent::Error(format!("STT failed: {e}"))).await;
                             }
                         }
                     }
                 }
             }
+        }
+    });
+}
+
+/// Spawn the realtime pipeline: audio → RealtimeProvider → VoiceEvents.
+fn spawn_realtime_pipeline(
+    realtime: Arc<dyn simply_voice::RealtimeProvider>,
+    mut audio_rx: mpsc::Receiver<simply_voice::AudioChunk>,
+    event_tx: mpsc::Sender<simply_voice::VoiceEvent>,
+) {
+    tokio::spawn(async move {
+        use simply_voice::{RealtimeConfig, RealtimeEvent, RealtimeInput, VoiceEvent};
+
+        let config = RealtimeConfig::default();
+        let (rt_tx, mut rt_rx) = match realtime.connect(config).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                let _ = event_tx.send(VoiceEvent::Error(format!("Realtime connect failed: {e}"))).await;
+                return;
+            }
+        };
+
+        // Forward audio to realtime provider
+        let rt_tx_clone = rt_tx.clone();
+        tokio::spawn(async move {
+            while let Some(chunk) = audio_rx.recv().await {
+                if rt_tx_clone.send(RealtimeInput::Audio(chunk)).await.is_err() {
+                    break;
+                }
+            }
+            // Input ended
+            drop(rt_tx_clone);
         });
+
+        // Forward realtime events to voice events
+        while let Some(event) = rt_rx.recv().await {
+            let voice_event = match event {
+                RealtimeEvent::Audio(chunk) => VoiceEvent::Audio(chunk),
+                RealtimeEvent::ModelTranscript(text) => VoiceEvent::ModelTranscript(text),
+                RealtimeEvent::UserTranscript(text) => VoiceEvent::UserTranscript(text),
+                RealtimeEvent::TurnEnd => VoiceEvent::TurnEnd,
+            };
+            if event_tx.send(voice_event).await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
+#[async_trait]
+impl VoiceApi for VoiceService {
+    async fn list_voice_providers(&self) -> anyhow::Result<Vec<VoiceProviderInfo>> {
+        Ok(self.providers.values().map(|p| p.info.clone()).collect())
+    }
+
+    async fn voice_connect(&self, _session_id: &SessionId, provider_id: &str) -> anyhow::Result<VoiceHandle> {
+        let provider = self.providers.get(provider_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
+
+        let (audio_tx, audio_rx) = mpsc::channel::<simply_voice::AudioChunk>(64);
+        let (event_tx, event_rx) = mpsc::channel::<simply_voice::VoiceEvent>(64);
+
+        // Prefer realtime if available, fall back to STT pipeline
+        if let Some(ref realtime) = provider.realtime {
+            spawn_realtime_pipeline(Arc::clone(realtime), audio_rx, event_tx);
+        } else if let Some(ref stt) = provider.stt {
+            spawn_stt_pipeline(Arc::clone(stt), audio_rx, event_tx);
+        } else {
+            anyhow::bail!("provider '{provider_id}' has no STT or realtime capability");
+        }
 
         Ok(VoiceHandle { audio_in: audio_tx, events: event_rx })
     }

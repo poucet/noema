@@ -7,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, RestDispatcher, RpcClient, RpcService, check_compat};
+use simply_rpc::{HttpMethod, ServiceRouter, RpcClient, RpcService, check_compat};
 
 // ---------------------------------------------------------------------------
 // Test trait — exercises all non-streaming patterns
@@ -103,10 +103,10 @@ impl ItemApi for InMemoryItems {
     }
 }
 
-fn make_rd(items: Vec<Item>) -> RestDispatcher {
+fn make_rd(items: Vec<Item>) -> ServiceRouter {
     let impl_ = Arc::new(InMemoryItems::new(items));
     let svc = <dyn ItemApi>::service(impl_);
-    RestDispatcher::new().register(svc)
+    ServiceRouter::new().register(svc)
 }
 
 // ---------------------------------------------------------------------------
@@ -197,13 +197,13 @@ async fn dispatch_bad_params_returns_error() {
 }
 
 // ---------------------------------------------------------------------------
-// RestDispatcher tests
+// ServiceRouter tests
 // ---------------------------------------------------------------------------
 
-fn make_rest_dispatcher(items: Vec<Item>) -> RestDispatcher {
+fn make_rest_dispatcher(items: Vec<Item>) -> ServiceRouter {
     let impl_ = Arc::new(InMemoryItems::new(items));
     let svc = <dyn ItemApi>::service(impl_);
-    RestDispatcher::new().register(svc)
+    ServiceRouter::new().register(svc)
 }
 
 #[tokio::test]
@@ -222,11 +222,11 @@ async fn rest_dispatcher_unknown_path_returns_none() {
 }
 
 // ---------------------------------------------------------------------------
-// Client macro tests (round-trip through RestDispatcher)
+// Client macro tests (round-trip through ServiceRouter)
 // ---------------------------------------------------------------------------
 
 struct MockClient {
-    rd: RestDispatcher,
+    rd: ServiceRouter,
 }
 
 impl MockClient {

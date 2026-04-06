@@ -160,6 +160,9 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
     // Generate rest_dispatch match arms
     let rest_dispatch_arms = generate_rest_dispatch_arms(parsed);
 
+    // Generate ws_dispatch match arms for stream methods
+    let ws_dispatch_arms = generate_ws_dispatch_arms(parsed);
+
     let schema_mod_name = format_ident!("__tool_schemas_{}", prefix);
 
     Ok(quote! {
@@ -201,6 +204,15 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
                 params: ::serde_json::Value,
             ) -> Option<::simply_rpc::RpcResult> {
                 #rest_dispatch_arms
+            }
+
+            async fn ws_dispatch_by_name(
+                &self,
+                method_name: &str,
+                params: ::serde_json::Value,
+                write_tx: ::tokio::sync::mpsc::Sender<String>,
+            ) -> Option<::simply_rpc::WsDispatchResult> {
+                #ws_dispatch_arms
             }
 
             fn meta(&self) -> &'static ::simply_rpc::ServiceMeta {
@@ -254,6 +266,9 @@ fn signature_hash(method: &ParsedMethod) -> u64 {
         ReturnKind::StreamBare { stream_type } => {
             format!("Result<{}>", quote! { #stream_type })
         }
+        ReturnKind::StreamBidi { input_type, output_type } => {
+            format!("Result<StreamHandle<{}, {}>>", quote! { #input_type }, quote! { #output_type })
+        }
     };
     ret_str.hash(&mut hasher);
     hasher.finish()
@@ -266,6 +281,10 @@ fn find_stream_type(methods: &[&ParsedMethod]) -> TokenStream {
             ReturnKind::StreamTuple { stream_type, .. }
             | ReturnKind::StreamBare { stream_type } => {
                 return quote! { #stream_type };
+            }
+            ReturnKind::StreamBidi { output_type, .. } => {
+                // Bidi streams produce Receiver<U> as the stream type
+                return quote! { ::tokio::sync::mpsc::Receiver<#output_type> };
             }
             _ => {}
         }
@@ -367,7 +386,7 @@ fn is_vec_u8(ty: &syn::Type) -> bool {
 
 /// Generate the body of `rest_dispatch_by_name` — a match on method name.
 ///
-/// The `RestDispatcher` (using matchit) handles path matching and param extraction.
+/// The `ServiceRouter` (using matchit) handles path matching and param extraction.
 /// By the time this is called, `params` is a flat JSON object with all parameters
 /// (path params as strings, body params as-is).
 fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
@@ -484,6 +503,223 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
     }
 }
 
+/// Generate `ws_dispatch_by_name` match arms for stream methods.
+///
+/// Each arm calls the trait method, spawns a forwarder for the output stream,
+/// creates an input sink, and returns `WsDispatchResult`.
+fn generate_ws_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
+    let arms: Vec<TokenStream> = parsed
+        .methods
+        .iter()
+        .filter(|m| m.rpc_kind == RpcKind::Stream)
+        .filter_map(|m| {
+            let method_name = &m.method_name;
+            let fn_name = &m.name;
+            let endpoint = m.rest_endpoint.as_ref()?;
+            if endpoint.http_method != HttpMethod::Stream {
+                return None;
+            }
+
+            let has_path_params = !endpoint.path_params.is_empty();
+            let all_params = &m.params;
+
+            // Generate param bindings (same as REST dispatch)
+            let mut param_bindings = Vec::new();
+            let mut call_args = Vec::new();
+
+            if all_params.is_empty() {
+                // nothing
+            } else if all_params.len() == 1 && !has_path_params {
+                let p = &all_params[0];
+                let name = &p.name;
+                let owned_type = &p.owned_type;
+                param_bindings.push(quote! {
+                    let #name: #owned_type = match ::serde_json::from_value(params.clone()) {
+                        Ok(v) => v,
+                        Err(e) => return Some(::simply_rpc::WsDispatchResult {
+                            result: Err(::anyhow::anyhow!("deserialize error: {}", e)),
+                            input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
+                        }),
+                    };
+                });
+                if p.is_ref || p.is_str_ref {
+                    call_args.push(quote! { &#name });
+                } else {
+                    call_args.push(quote! { #name });
+                }
+            } else {
+                for p in all_params {
+                    let name = &p.name;
+                    let name_str = name.to_string();
+                    let owned_type = &p.owned_type;
+                    param_bindings.push(quote! {
+                        let #name: #owned_type = match params.get(#name_str) {
+                            Some(v) => match ::serde_json::from_value(v.clone()) {
+                                Ok(v) => v,
+                                Err(e) => return Some(::simply_rpc::WsDispatchResult {
+                                    result: Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e)),
+                                    input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
+                                }),
+                            },
+                            None => return Some(::simply_rpc::WsDispatchResult {
+                                result: Err(::anyhow::anyhow!("missing field: {}", #name_str)),
+                                input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
+                            }),
+                        };
+                    });
+                    if p.is_ref || p.is_str_ref {
+                        call_args.push(quote! { &#name });
+                    } else {
+                        call_args.push(quote! { #name });
+                    }
+                }
+            }
+
+            let call = quote! { self.0.#fn_name(#(#call_args),*).await };
+            let method_name_event = format!("{method_name}.event");
+
+            let body = match &m.return_kind {
+                ReturnKind::StreamBidi { input_type, .. } => {
+                    // StreamHandle<T, U> — split into sender + receiver
+                    quote! {
+                        match #call {
+                            Ok(__handle) => {
+                                let (__input_tx, mut __output_rx) = __handle.into_parts();
+
+                                // Spawn output forwarder: Receiver<U> → write_tx as JSON
+                                let __write = write_tx.clone();
+                                let __evt_method = #method_name_event.to_string();
+                                ::tokio::spawn(async move {
+                                    while let Some(event) = __output_rx.recv().await {
+                                        let notif = ::serde_json::json!({
+                                            "method": __evt_method,
+                                            "params": ::serde_json::to_value(&event).unwrap_or_default(),
+                                        });
+                                        if __write.send(notif.to_string()).await.is_err() { break; }
+                                    }
+                                });
+
+                                // Create input sink: JSON Value → deserialize as T → input_tx
+                                let (__json_tx, mut __json_rx) = ::tokio::sync::mpsc::channel::<::serde_json::Value>(64);
+                                ::tokio::spawn(async move {
+                                    while let Some(value) = __json_rx.recv().await {
+                                        match ::serde_json::from_value::<#input_type>(value) {
+                                            Ok(msg) => { if __input_tx.send(msg).await.is_err() { break; } }
+                                            Err(e) => { ::tracing::warn!("stream input deserialize error: {}", e); }
+                                        }
+                                    }
+                                });
+
+                                Some(::simply_rpc::WsDispatchResult {
+                                    result: Ok(::serde_json::Value::Bool(true)),
+                                    input_sink: __json_tx,
+                                })
+                            }
+                            Err(e) => Some(::simply_rpc::WsDispatchResult {
+                                result: Err(e),
+                                input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
+                            }),
+                        }
+                    }
+                }
+                ReturnKind::StreamTuple { .. } => {
+                    // (Value, broadcast::Receiver<T>) — forward receiver as events
+                    quote! {
+                        match #call {
+                            Ok((__value, mut __stream)) => {
+                                let __write = write_tx.clone();
+                                let __evt_method = #method_name_event.to_string();
+                                ::tokio::spawn(async move {
+                                    loop {
+                                        match __stream.recv().await {
+                                            Ok(event) => {
+                                                let notif = ::serde_json::json!({
+                                                    "method": __evt_method,
+                                                    "params": ::serde_json::to_value(&event).unwrap_or_default(),
+                                                });
+                                                if __write.send(notif.to_string()).await.is_err() { break; }
+                                            }
+                                            Err(::tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                                ::tracing::warn!(skipped = n, "stream forwarder lagged");
+                                            }
+                                            Err(::tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                        }
+                                    }
+                                });
+                                let (__sink_tx, _) = ::tokio::sync::mpsc::channel(64);
+                                Some(::simply_rpc::WsDispatchResult {
+                                    result: ::simply_rpc::call_val(Ok(__value)),
+                                    input_sink: __sink_tx,
+                                })
+                            }
+                            Err(e) => Some(::simply_rpc::WsDispatchResult {
+                                result: Err(e),
+                                input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
+                            }),
+                        }
+                    }
+                }
+                ReturnKind::StreamBare { .. } => {
+                    // broadcast::Receiver<T> — forward as events
+                    quote! {
+                        match #call {
+                            Ok(mut __stream) => {
+                                let __write = write_tx.clone();
+                                let __evt_method = #method_name_event.to_string();
+                                ::tokio::spawn(async move {
+                                    loop {
+                                        match __stream.recv().await {
+                                            Ok(event) => {
+                                                let notif = ::serde_json::json!({
+                                                    "method": __evt_method,
+                                                    "params": ::serde_json::to_value(&event).unwrap_or_default(),
+                                                });
+                                                if __write.send(notif.to_string()).await.is_err() { break; }
+                                            }
+                                            Err(::tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                                ::tracing::warn!(skipped = n, "stream forwarder lagged");
+                                            }
+                                            Err(::tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                        }
+                                    }
+                                });
+                                let (__sink_tx, _) = ::tokio::sync::mpsc::channel(64);
+                                Some(::simply_rpc::WsDispatchResult {
+                                    result: Ok(::serde_json::Value::Bool(true)),
+                                    input_sink: __sink_tx,
+                                })
+                            }
+                            Err(e) => Some(::simply_rpc::WsDispatchResult {
+                                result: Err(e),
+                                input_sink: { let (tx, _) = ::tokio::sync::mpsc::channel(1); tx },
+                            }),
+                        }
+                    }
+                }
+                _ => return None,
+            };
+
+            Some(quote! {
+                #method_name => {
+                    #(#param_bindings)*
+                    return #body;
+                }
+            })
+        })
+        .collect();
+
+    if arms.is_empty() {
+        quote! { let _ = (method_name, params, write_tx); None }
+    } else {
+        quote! {
+            match method_name {
+                #(#arms)*
+                _ => None,
+            }
+        }
+    }
+}
+
 /// Generate the body that calls the trait method and wraps the result.
 fn generate_dispatch_body(method: &ParsedMethod, call_args: &[TokenStream]) -> TokenStream {
     let fn_name = &method.name;
@@ -533,6 +769,43 @@ fn generate_dispatch_body(method: &ParsedMethod, call_args: &[TokenStream]) -> T
                         ::simply_rpc::DispatchResult::with_stream(
                             Ok(::serde_json::Value::Bool(true)),
                             __stream,
+                        )
+                    }
+                    Err(e) => ::simply_rpc::DispatchResult::value(Err(e)),
+                })
+            }
+        }
+        ReturnKind::StreamBidi { input_type, output_type } => {
+            // Result<StreamHandle<T, U>> — create channels, return bidi stream
+            // The service returns StreamHandle. We split it: the Receiver<U> goes
+            // as the stream (server→client), and we create a json→T deserializer
+            // channel for client→server that the WS handler feeds into.
+            quote! {
+                Some(match #call {
+                    Ok(__handle) => {
+                        let (__client_tx, __client_rx) = __handle.into_parts();
+                        // Create a JSON input channel. The WS handler sends raw
+                        // serde_json::Value here; we deserialize and forward.
+                        let (__json_tx, mut __json_rx) = ::tokio::sync::mpsc::channel::<::serde_json::Value>(64);
+
+                        // Spawn deserializer: JSON Value → T → client_tx
+                        ::tokio::spawn(async move {
+                            while let Some(value) = __json_rx.recv().await {
+                                match ::serde_json::from_value::<#input_type>(value) {
+                                    Ok(msg) => {
+                                        if __client_tx.send(msg).await.is_err() { break; }
+                                    }
+                                    Err(e) => {
+                                        ::tracing::warn!("bidi stream deserialize error: {}", e);
+                                    }
+                                }
+                            }
+                        });
+
+                        ::simply_rpc::DispatchResult::with_bidi_stream(
+                            Ok(::serde_json::Value::Bool(true)),
+                            __client_rx,
+                            __json_tx,
                         )
                     }
                     Err(e) => ::simply_rpc::DispatchResult::value(Err(e)),

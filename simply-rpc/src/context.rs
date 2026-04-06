@@ -1,7 +1,4 @@
 /// Result of dispatching an RPC method.
-///
-/// Carries the RPC result alongside any streams produced by the method.
-/// Each service defines its own stream type via `RpcService::Stream`.
 pub struct DispatchResult<S = ()> {
     pub result: crate::RpcResult,
     pub streams: Vec<S>,

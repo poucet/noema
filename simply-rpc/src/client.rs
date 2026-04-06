@@ -32,4 +32,25 @@ pub trait RpcClient: Send + Sync {
         path: &str,
         body: Value,
     ) -> anyhow::Result<Value>;
+
+    /// Register a bidirectional stream for a given method.
+    ///
+    /// The RPC call has already been made (setting up the server side).
+    /// This method establishes the client-side channel bridging: incoming
+    /// WS frames are deserialized as `U` and sent to the returned handle's
+    /// receiver, while messages sent through the handle's sender are
+    /// serialized and sent as WS frames.
+    ///
+    /// Default implementation returns an error — override in clients that
+    /// support bidirectional streaming.
+    async fn register_bidi_stream<T, U>(
+        &self,
+        _method: &str,
+    ) -> anyhow::Result<crate::StreamHandle<T, U>>
+    where
+        T: serde::Serialize + Send + 'static,
+        U: serde::de::DeserializeOwned + Send + 'static,
+    {
+        anyhow::bail!("bidirectional streams not supported by this client")
+    }
 }

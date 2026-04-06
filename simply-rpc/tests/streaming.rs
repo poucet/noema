@@ -11,7 +11,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, RestDispatcher, RpcClient, RpcService};
+use simply_rpc::{HttpMethod, ServiceRouter, RpcClient, RpcService};
 use tokio::sync::broadcast;
 
 // ---------------------------------------------------------------------------
@@ -272,16 +272,16 @@ fn stream_meta_doc_comments() {
 // PART 5: REST dispatch works for non-stream methods on the same trait
 // ===========================================================================
 
-fn make_channel_rd(impl_: Arc<InMemoryChannels>) -> RestDispatcher {
+fn make_channel_rd(impl_: Arc<InMemoryChannels>) -> ServiceRouter {
     let svc = <dyn ChannelApi>::service(impl_);
-    RestDispatcher::new().register(svc)
+    ServiceRouter::new().register(svc)
 }
 
 #[tokio::test]
 async fn rest_dispatch_list_on_streaming_trait() {
     let rd = make_channel_rd(Arc::new(InMemoryChannels::new()));
 
-    // REST methods work through RestDispatcher
+    // REST methods work through ServiceRouter
     let result = rd.dispatch(HttpMethod::Get, "/chan", Value::Null).await.map(|rr| rr.result);
     let channels: Vec<ChannelInfo> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert!(channels.is_empty());
@@ -315,7 +315,7 @@ async fn rest_dispatch_stream_path_returns_none() {
 // ===========================================================================
 
 struct MockStreamClient {
-    rd: RestDispatcher,
+    rd: ServiceRouter,
     svc: Arc<ChannelApiService<dyn ChannelApi>>,
     impl_: Arc<InMemoryChannels>,
 }
@@ -324,7 +324,7 @@ impl MockStreamClient {
     fn new() -> Self {
         let impl_ = Arc::new(InMemoryChannels::new());
         let svc = <dyn ChannelApi>::service(impl_.clone());
-        let rd = RestDispatcher::new().register(svc.clone());
+        let rd = ServiceRouter::new().register(svc.clone());
         Self { rd, svc, impl_ }
     }
 }
@@ -430,10 +430,10 @@ async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
 
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = <dyn ChannelApi>::service(impl_.clone());
-    let dispatcher = Arc::new(RestDispatcher::new().register(svc));
+    let dispatcher = Arc::new(ServiceRouter::new().register(svc));
 
     async fn handler(
-        State(rd): State<Arc<RestDispatcher>>,
+        State(rd): State<Arc<ServiceRouter>>,
         req: axum::extract::Request,
     ) -> axum::response::Response {
         let method = req.method().clone();

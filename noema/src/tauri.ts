@@ -286,8 +286,18 @@ export function onOauthError(
 }
 
 // Browser voice commands (WebAudio-based)
-export async function startVoiceSession(): Promise<void> {
-  return invoke<void>("start_voice_session");
+export interface VoiceProviderInfo {
+  id: string;
+  name: string;
+  capabilities: string[];
+}
+
+export async function listVoiceProviders(): Promise<VoiceProviderInfo[]> {
+  return invoke<VoiceProviderInfo[]>("list_voice_providers");
+}
+
+export async function startVoiceSession(providerId: string): Promise<void> {
+  return invoke<void>("start_voice_session", { providerId });
 }
 
 export async function processAudioChunk(samples: number[]): Promise<void> {

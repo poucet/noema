@@ -87,25 +87,42 @@ where
 
         let model = Arc::new(ModelService::new(default_model_id));
         let asset = Arc::new(AssetService::new(Arc::clone(&coordinator), Arc::clone(&stores)));
-        let stt: Option<Arc<dyn simply_voice::SttProvider>> = config::PathManager::whisper_model_path()
-            .and_then(|path| {
-                if path.exists() {
-                    match simply_voice::WhisperProvider::new(&path) {
-                        Ok(p) => {
-                            tracing::info!("whisper STT loaded from {}", path.display());
-                            Some(Arc::new(p) as Arc<dyn simply_voice::SttProvider>)
-                        }
-                        Err(e) => {
-                            tracing::warn!("failed to load whisper model: {e}");
-                            None
-                        }
+        let mut voice_service = VoiceService::new();
+
+        // Register Whisper (local STT)
+        if let Some(path) = config::PathManager::whisper_model_path() {
+            if path.exists() {
+                match simply_voice::WhisperProvider::new(&path) {
+                    Ok(p) => {
+                        tracing::info!("whisper STT loaded from {}", path.display());
+                        voice_service = voice_service.register_stt(
+                            "whisper", "Whisper (local)", Arc::new(p),
+                        );
                     }
-                } else {
-                    tracing::info!("whisper model not found, voice STT unavailable");
-                    None
+                    Err(e) => tracing::warn!("failed to load whisper model: {e}"),
                 }
-            });
-        let voice = Arc::new(VoiceService::new(stt));
+            }
+        }
+
+        // Register Voxtral (Mistral API — STT + TTS)
+        if let Some(key) = settings.get_api_key("mistral") {
+            let voxtral = Arc::new(simply_voice::VoxtralProvider::new(key));
+            voice_service = voice_service.register_stt(
+                "voxtral", "Voxtral (Mistral)", voxtral,
+            );
+            tracing::info!("voxtral STT registered");
+        }
+
+        // Register Gemini Realtime
+        if let Some(key) = settings.get_api_key("google") {
+            let gemini = Arc::new(simply_voice::GeminiRealtimeProvider::new(key));
+            voice_service = voice_service.register_realtime(
+                "gemini", "Gemini Realtime", gemini,
+            );
+            tracing::info!("gemini realtime registered");
+        }
+
+        let voice = Arc::new(voice_service);
         let core = Arc::new(CoreService::embedded());
 
         let tools = Arc::new(CompositeToolService::new(
@@ -137,7 +154,7 @@ where
         Ok(daemon)
     }
 
-    // -- Service accessors for main.rs / RestDispatcher registration ----------
+    // -- Service accessors for main.rs / ServiceRouter registration ----------
 
     pub fn mcp_service(&self) -> Arc<dyn McpApi> { self.tools.clone() }
     pub fn oauth_service(&self) -> Arc<dyn OAuthApi> { self.mcp.clone() }

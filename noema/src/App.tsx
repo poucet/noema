@@ -794,6 +794,9 @@ function App() {
               voiceAvailable={voice.isAvailable}
               voiceStatus={voice.status}
               voiceBufferedCount={voice.bufferedCount}
+              voiceProviders={voice.providers}
+              selectedVoiceProvider={voice.selectedProvider}
+              onSelectVoiceProvider={voice.setSelectedProvider}
               onToggleVoice={voice.toggle}
               toolsEnabled={toolsEnabled}
               onToggleTools={handleToggleTools}

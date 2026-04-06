@@ -8,7 +8,7 @@ use simply_daemon::api::*;
 use simply_daemon::embedded::EmbeddedDaemon;
 use simply_daemon::storage::SqliteStores;
 use simply_daemon::net;
-use simply_rpc::{RestDispatcher, RpcService};
+use simply_rpc::{ServiceRouter, RpcService};
 use simply_daemon::api::Daemon;
 use tokio::sync::mpsc;
 
@@ -46,26 +46,24 @@ async fn main() -> anyhow::Result<()> {
     let (kill_tx, mut kill_rx) = mpsc::channel(1);
     let core_svc = Arc::new(simply_daemon::services::CoreService::new(kill_tx));
 
-    // Register REST services from the daemon's inner components
+    // Register all services
     let session_svc: Arc<dyn SessionApi> = daemon.clone();
     let conversation_svc: Arc<dyn ConversationApi> = daemon.clone();
 
-    let ws_dispatch = simply_daemon::ws_dispatch::build(Arc::clone(&session_svc));
-    let tracker = net::server::ConnectionTracker::new();
-
-    let rest_dispatcher = RestDispatcher::new()
-        .register(<dyn SessionApi>::service(session_svc.clone()))
+    let rest_dispatcher = Arc::new(ServiceRouter::new()
+        .register(<dyn SessionApi>::service(session_svc))
         .register(<dyn ConversationApi>::service(conversation_svc))
         .register(<dyn AssetApi>::service(daemon.asset_service()))
         .register(<dyn McpApi>::service(daemon.mcp_service()))
         .register(<dyn OAuthApi>::service(daemon.oauth_service()))
         .register(<dyn ModelApi>::service(daemon.model_service()))
         .register(<dyn VoiceApi>::service(daemon.voice_service()))
-        .register(<dyn CoreApi>::service(core_svc));
+        .register(<dyn CoreApi>::service(core_svc)));
+
+    let tracker = net::server::ConnectionTracker::new();
 
     let server = net::rest::start(net::rest::ServerConfig {
         rest_dispatcher,
-        ws_dispatch: Some(ws_dispatch),
         port,
         tracker,
     }).await?;

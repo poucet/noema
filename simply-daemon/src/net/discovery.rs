@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use simply_rpc::{RestDispatcher, RpcService};
+use simply_rpc::{ServiceRouter, RpcService};
 
 use crate::api::*;
 use crate::embedded::EmbeddedDaemon;
@@ -119,12 +119,8 @@ pub async fn connect_or_host(
     let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
     let core_svc = Arc::new(CoreService::new(kill_tx));
 
-    // WS dispatch — session streaming
     let session_svc: Arc<dyn SessionApi> = daemon.clone();
-    let ws_dispatch = crate::ws_dispatch::build(session_svc.clone());
-
-    // REST routes — all daemon APIs
-    let rest_dispatcher = RestDispatcher::new()
+    let rest_dispatcher = Arc::new(ServiceRouter::new()
         .register(<dyn SessionApi>::service(session_svc))
         .register(<dyn ConversationApi>::service(daemon.clone() as Arc<dyn ConversationApi>))
         .register(<dyn AssetApi>::service(daemon.asset_service()))
@@ -132,12 +128,11 @@ pub async fn connect_or_host(
         .register(<dyn OAuthApi>::service(daemon.oauth_service()))
         .register(<dyn ModelApi>::service(daemon.model_service()))
         .register(<dyn VoiceApi>::service(daemon.voice_service()))
-        .register(<dyn CoreApi>::service(core_svc));
+        .register(<dyn CoreApi>::service(core_svc)));
 
     let tracker = server::ConnectionTracker::new();
     let server = rest::start(rest::ServerConfig {
         rest_dispatcher,
-        ws_dispatch: Some(ws_dispatch),
         port,
         tracker,
     }).await?;

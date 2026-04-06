@@ -13,6 +13,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const [status, setStatus] = useState<VoiceStatus>("disabled");
   const [bufferedCount, setBufferedCount] = useState(0);
   const [isAvailable, setIsAvailable] = useState(false);
+  const [providers, setProviders] = useState<tauri.VoiceProviderInfo[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -32,12 +34,22 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     onErrorRef.current = options.onError;
   }, [options.onError]);
 
-  // Check if voice is available (Whisper model exists on backend)
-  // Note: mediaDevices availability is checked at runtime when recording starts
+  // Load available providers and check availability
   useEffect(() => {
     tauri.isVoiceAvailable()
       .then(setIsAvailable)
       .catch(() => setIsAvailable(false));
+
+    tauri.listVoiceProviders()
+      .then((list) => {
+        setProviders(list);
+        // Auto-select first provider if none selected
+        if (list.length > 0) {
+          setSelectedProvider((prev) => prev ?? list[0].id);
+          setIsAvailable(true);
+        }
+      })
+      .catch(() => setProviders([]));
   }, []);
 
   // Listen for transcription events from backend - only register once
@@ -88,7 +100,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   }, []); // Empty deps - only register once
 
   const startRecording = useCallback(async () => {
-    voiceLog.info("Starting recording");
+    if (!selectedProvider) {
+      onErrorRef.current?.("No voice provider selected");
+      return;
+    }
+
+    voiceLog.info("Starting recording", { provider: selectedProvider });
     // Clear dedup ref for new recording session
     lastTranscriptionRef.current = null;
     try {
@@ -148,7 +165,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       gainNode.connect(audioContext.destination);
 
       // Notify backend that recording started
-      await tauri.startVoiceSession();
+      await tauri.startVoiceSession(selectedProvider);
       voiceLog.info("Recording started successfully");
       setStatus("listening");
     } catch (err) {
@@ -157,7 +174,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       onErrorRef.current?.(message);
       setStatus("disabled");
     }
-  }, []);
+  }, [selectedProvider]);
 
   const stopRecording = useCallback(async () => {
     voiceLog.info("Stopping recording");
@@ -200,6 +217,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     status,
     bufferedCount,
     isAvailable,
+    providers,
+    selectedProvider,
+    setSelectedProvider,
     toggle,
     startRecording,
     stopRecording,
