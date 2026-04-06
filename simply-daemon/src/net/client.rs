@@ -51,26 +51,44 @@ impl RpcConnection for DaemonRpcConnection {
         body: Value,
     ) -> anyhow::Result<Value> {
         let url = format!("{}{}", self.base_url, path);
+        let max_retries = 2;
 
-        let resp = match http_method {
-            simply_rpc::HttpMethod::Get => self.http.get(&url).send().await?,
-            simply_rpc::HttpMethod::Post => self.http.post(&url).json(&body).send().await?,
-            simply_rpc::HttpMethod::Put => self.http.put(&url).json(&body).send().await?,
-            simply_rpc::HttpMethod::Delete => self.http.delete(&url).send().await?,
-        };
+        for attempt in 0..=max_retries {
+            let resp = match http_method {
+                simply_rpc::HttpMethod::Get => self.http.get(&url).send().await?,
+                simply_rpc::HttpMethod::Post => self.http.post(&url).json(&body).send().await?,
+                simply_rpc::HttpMethod::Put => self.http.put(&url).json(&body).send().await?,
+                simply_rpc::HttpMethod::Delete => self.http.delete(&url).send().await?,
+            };
 
-        let status = resp.status();
-        if status.is_success() {
-            let text = resp.text().await?;
-            if text.is_empty() {
-                Ok(Value::Null)
-            } else {
-                Ok(serde_json::from_str(&text)?)
+            let status = resp.status();
+            if status.is_success() {
+                let text = resp.text().await?;
+                if text.is_empty() {
+                    return Ok(Value::Null);
+                } else {
+                    return Ok(serde_json::from_str(&text)?);
+                }
             }
-        } else {
+
             let msg = resp.text().await.unwrap_or_else(|_| status.to_string());
-            Err(anyhow::anyhow!("REST error {}: {}", status, msg))
+
+            // Retry on 500+ server errors
+            if status.is_server_error() && attempt < max_retries {
+                tracing::warn!(
+                    attempt = attempt + 1,
+                    status = %status,
+                    path,
+                    "REST server error, retrying"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(500 * (attempt as u64 + 1))).await;
+                continue;
+            }
+
+            return Err(anyhow::anyhow!("REST error {}: {}", status, msg));
         }
+
+        unreachable!()
     }
 
     async fn register_stream(
