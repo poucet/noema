@@ -70,7 +70,7 @@ BASE=http://127.0.0.1:9800
 
 ## 6. MCP Instructions (Channel Map)
 
-- [ ] After Discord `ready` event, MCP server instructions contain guild/channel map
+- [x] After Discord `ready` event, MCP server instructions contain guild/channel map
 - [ ] Channel names, IDs, and types (text/voice/forum) are listed
 - [ ] Channels grouped by category
 - [ ] Create a new channel in Discord — instructions refresh
@@ -78,7 +78,7 @@ BASE=http://127.0.0.1:9800
 
 ## 7. Known Bugs to Fix
 
-- [ ] LLM sends Discord snowflake IDs as floats (`1.145e+18`) losing precision — tool calls fail. Need to coerce integer args or use string IDs in tool schemas.
+- [x] LLM sends Discord snowflake IDs as floats (`1.145e+18`) losing precision — tool calls fail. Need to coerce integer args or use string IDs in tool schemas.
 - [ ] LLM tried to use `get_channel_history` to answer "what was the first thing I said" instead of using the conversation context. System prompt should clarify when to use tools vs conversation history.
 
 ## 8. Cross-Client Tool Calls
