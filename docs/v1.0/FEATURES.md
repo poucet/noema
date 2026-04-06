@@ -79,7 +79,7 @@
 | RAG pipeline | P0 | Content | ⬜ Query -> embed -> search -> inject context -> LLM |
 | Event bus | P1 | Events | ⬜ Pub/sub, typed payloads, timer sources |
 | Intent engine | P1 | Events | ⬜ Action AST, LLM-compiled intents |
-| RTC service | P1 | RTC | ⬜ WebRTC audio, Google Meet integration |
+| Web extension | P2 | Web | ⏸️ Chrome extension daemon client, Meet caption capture |
 | Multi-user identity | P0 | Auth | ⬜ Per-user OAuth, Discord user -> Google account linking |
 | Permission model | P0 | Auth | ⬜ Role-based MCP tool access, generalizes beyond Discord |
 | Admin UI | P1 | Auth | ⬜ Web UI for all REST APIs, login for remote hosting |

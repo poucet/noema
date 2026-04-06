@@ -85,32 +85,42 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 ---
 
-## 3. RTC (Voice over WebRTC)
+## 3. Web Extension & RTC ⏸️
 
-Initial focus: Google Meet. Validates the architecture — any audio source using the common format plugs into the daemon voice pipeline.
+**Status:** Future — deprioritized in favor of Content, Events, and Multi-user.
 
-### Stage 1 — RTC Service Skeleton
+A Chrome extension (`simply-web`) as a new daemon client, like Noema and Lumina. Connects to the daemon via WS+REST, provides browser-context capabilities.
 
-- ⬜ 1.1 New crate: `simply-rtc/`
-- ⬜ 1.2 Register with daemon via `POST /register` with MCP endpoint
-- ⬜ 1.3 MCP tools: `join_rtc(url)`, `leave_rtc(session_id)`, `list_sessions()`
-- ⬜ 1.4 Event sources: `rtc.user_joined`, `rtc.user_left`, `rtc.session_started`
+**Why a Chrome extension (not a headless bot):**
+- Google Meet has no production API for bots joining calls (Media API is developer preview only, not GA)
+- The entire meeting bot industry uses headless browser automation (Puppeteer + Docker + virtual audio) — extremely fragile, high maintenance
+- A Chrome extension avoids all of that: runs in the user's own browser, uses `chrome.tabCapture` or DOM scraping, no infrastructure
+- Platform-agnostic: works with Meet, Zoom web, Teams web, any browser-based call
 
-### Stage 2 — Google Meet Integration
+**Approach for meeting transcription:**
+- Scrape Google Meet's live captions from the DOM (speaker-diarized, Google does the STT) rather than capturing mixed audio and doing our own STT
+- Mixed-audio STT from `tabCapture` is a hard problem; caption scraping sidesteps it entirely
 
-- ⬜ 2.1 Google Meet join flow — OAuth + meeting link -> join as participant
-- ⬜ 2.2 Audio capture from Meet session -> common format
-- ⬜ 2.3 Stream captured audio to daemon voice API (STT)
-- ⬜ 2.4 Receive TTS audio back from daemon, play into Meet session
-- ⬜ 2.5 Session lifecycle: join, leave, reconnect on disconnect, handle meeting end
+### Stage 1 — Extension Shell
 
-### Stage 3 — Transcription & Participation
+- ⬜ 1.1 Chrome extension (Manifest V3) connecting to daemon via WS+REST
+- ⬜ 1.2 Sidebar UI: chat with daemon agent
+- ⬜ 1.3 MCP tools: page context (URL, selected text, page content)
+- ⬜ 1.4 Content capture: send selected text/images to daemon for storage
 
-- ⬜ 3.1 Multi-speaker handling: distinguish participants by audio stream
-- ⬜ 3.2 Transcription mode: STT only, no TTS response (passive listening)
-- ⬜ 3.3 Participation mode: full STT -> agent -> TTS loop (active voice)
-- ⬜ 3.4 Push `rtc.transcript` events into the event bus
-- ⬜ 3.5 Handle interruptions and turn-taking in multi-party calls
+### Stage 2 — Meet Caption Capture
+
+- ⬜ 2.1 Detect Google Meet tab
+- ⬜ 2.2 Scrape live captions from Meet DOM (speaker name + text)
+- ⬜ 2.3 Stream caption events to daemon
+- ⬜ 2.4 Store transcripts as documents in UCM
+- ⬜ 2.5 Push `meet.transcript` events into the event bus
+
+### Stage 3 — Audio Streaming (future)
+
+- ⬜ 3.1 `chrome.tabCapture` audio capture -> common format -> daemon voice API
+- ⬜ 3.2 TTS playback into tab (Web Audio API)
+- ⬜ 3.3 Or: Google Meet Media API integration when it goes GA (per-participant audio, no extension needed)
 
 ---
 
@@ -167,16 +177,16 @@ Content Stage 2 (Embeddings) ──► Content Stage 3 (RAG)
 Events Stage 2 (Service Registry) ──► Events Stage 3 + 4 (parallel)
 Events Stage 3 + 4 ──► Events Stage 5 (Conditions + Workflow)
 Multi-user Stage 1 (Identity) ──► Multi-user Stage 2 (OAuth)
-Multi-user Stage 2 (OAuth) ──► RTC Stage 2 (Google Meet needs user's Google tokens)
 Multi-user Stage 2 ──► Multi-user Stage 3 (Permissions)
 Multi-user Stage 3 ──► Multi-user Stage 4 (Admin UI enforces permissions)
+Web Extension ──► blocked on nothing, but deprioritized
 ```
 
 Recommended start order:
 1. **Content Stage 1** (DocumentApi) — unblocks Events and RAG
-2. **Multi-user Stage 1** (Identity) — unblocks OAuth which unblocks RTC/Google Meet
+2. **Multi-user Stage 1** (Identity) — unblocks OAuth
 3. **Events Stage 1** (Event bus) — can start once Content Stage 1 lands
 4. **Content Stage 2-3** (Embeddings + RAG) — independent of Events/Auth
 5. **Multi-user Stage 2-3** (OAuth + Permissions) — independent of Content/Events
-6. **RTC** — starts after Multi-user Stage 2 (needs per-user Google tokens)
-7. **Admin UI** — last, once the APIs it surfaces are built
+6. **Admin UI** — last, once the APIs it surfaces are built
+7. **Web Extension & RTC** — when the active workstreams are done, or Meet Media API goes GA

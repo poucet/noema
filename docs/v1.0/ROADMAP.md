@@ -57,8 +57,8 @@ Document CRUD with frontmatter conventions, embedding providers, semantic search
 ### 2. Events & Intents
 Reactive event system — timers, platform events (Discord, desktop), LLM-compiled intents with action ASTs. Scheduled prompts, automated workflows.
 
-### 3. RTC (Voice over WebRTC)
-External action service for WebRTC sessions. Initial focus: join Google Meet, stream audio through daemon voice pipeline. Validates the "any audio source" architecture.
+### 3. Web Extension & RTC ⏸️
+Chrome extension (`simply-web`) as a daemon client — chat, MCP tools, content capture from any webpage. Meeting transcription via Google Meet caption scraping. Audio streaming and full RTC participation deferred until Google Meet Media API goes GA. Deprioritized for now.
 
 ### 4. Multi-user & OAuth
 Per-user identity with OAuth. Different Discord users link different Google accounts — affects their MCP tool access. Role-based permission model for MCP tools (starts with Discord roles, generalizes). Admin web UI with login for remote hosting.
