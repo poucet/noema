@@ -84,7 +84,7 @@ where
         let model = Arc::new(ModelService::new(default_model_id));
         let asset = Arc::new(AssetService::new(Arc::clone(&coordinator), Arc::clone(&stores)));
         let voice = Arc::new(VoiceService);
-        let daemon_info = Arc::new(DaemonInfoService);
+        let daemon_info = Arc::new(DaemonInfoService::embedded());
 
         let daemon = Arc::new(Self {
             coordinator,

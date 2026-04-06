@@ -144,12 +144,16 @@ impl VoiceApi for VoiceService {
 // ---------------------------------------------------------------------------
 
 pub struct DaemonInfoService {
-    kill_tx: tokio::sync::mpsc::Sender<()>,
+    kill_tx: Option<tokio::sync::mpsc::Sender<()>>,
 }
 
 impl DaemonInfoService {
     pub fn new(kill_tx: tokio::sync::mpsc::Sender<()>) -> Self {
-        Self { kill_tx }
+        Self { kill_tx: Some(kill_tx) }
+    }
+
+    pub fn embedded() -> Self {
+        Self { kill_tx: None }
     }
 }
 
@@ -160,7 +164,9 @@ impl DaemonInfoApi for DaemonInfoService {
     }
 
     async fn kill(&self) -> anyhow::Result<()> {
-        let _ = self.kill_tx.send(()).await;
+        if let Some(tx) = &self.kill_tx {
+            let _ = tx.send(()).await;
+        }
         Ok(())
     }
 
