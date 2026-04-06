@@ -119,6 +119,7 @@ struct ParamInfo {
     description: String,
     ty: ParamType,
     required: bool,
+    autocomplete: bool,
 }
 
 enum ParamType {
@@ -257,12 +258,14 @@ fn parse_params(func: &ItemFn) -> syn::Result<Vec<ParamInfo>> {
             let (param_type, required) = resolve_type(&pat_type.ty)?;
             let desc =
                 get_describe_attr(&pat_type.attrs).unwrap_or_else(|| param_name.replace('_', " "));
+            let autocomplete = pat_type.attrs.iter().any(|a| a.path().is_ident("autocomplete"));
 
             params.push(ParamInfo {
                 name: param_name,
                 description: desc,
                 ty: param_type,
                 required,
+                autocomplete,
             });
         }
     }
@@ -277,10 +280,12 @@ fn gen_option_registrations(params: &[ParamInfo]) -> Vec<TokenStream2> {
             let desc = &p.description;
             let opt_type = p.ty.option_type_tokens();
             let required = p.required;
+            let autocomplete = p.autocomplete;
             quote! {
                 .add_sub_option(
                     serenity::builder::CreateCommandOption::new(#opt_type, #name, #desc)
                         .required(#required)
+                        .set_autocomplete(#autocomplete)
                 )
             }
         })
@@ -295,10 +300,12 @@ fn gen_top_level_option_registrations(params: &[ParamInfo]) -> Vec<TokenStream2>
             let desc = &p.description;
             let opt_type = p.ty.option_type_tokens();
             let required = p.required;
+            let autocomplete = p.autocomplete;
             quote! {
                 .add_option(
                     serenity::builder::CreateCommandOption::new(#opt_type, #name, #desc)
                         .required(#required)
+                        .set_autocomplete(#autocomplete)
                 )
             }
         })
@@ -339,7 +346,7 @@ fn gen_call_args(params: &[ParamInfo]) -> Vec<TokenStream2> {
 fn strip_describe_attrs(func: &mut ItemFn) {
     for arg in func.sig.inputs.iter_mut() {
         if let FnArg::Typed(pat_type) = arg {
-            pat_type.attrs.retain(|a| !a.path().is_ident("describe"));
+            pat_type.attrs.retain(|a| !a.path().is_ident("describe") && !a.path().is_ident("autocomplete"));
         }
     }
 }
@@ -414,6 +421,7 @@ struct SubCommandInfo {
     sub_name: String,
     description: String,
     params: Vec<ParamInfo>,
+    has_autocomplete_params: bool,
 }
 
 fn generate_command_group(attrs: CommandAttrs, module: ItemMod) -> syn::Result<TokenStream2> {
@@ -430,10 +438,15 @@ fn generate_command_group(attrs: CommandAttrs, module: ItemMod) -> syn::Result<T
         .map(|(_, items)| items.as_slice())
         .unwrap_or(&[]);
 
-    // Find all #[sub_command] functions
+    // Find all #[sub_command] functions and an optional autocomplete function
     let mut sub_commands: Vec<SubCommandInfo> = Vec::new();
+    let mut has_autocomplete_fn = false;
     for item in items {
         if let syn::Item::Fn(func) = item {
+            if func.sig.ident == "autocomplete" {
+                has_autocomplete_fn = true;
+                continue;
+            }
             let sub_attr = func
                 .attrs
                 .iter()
@@ -441,6 +454,7 @@ fn generate_command_group(attrs: CommandAttrs, module: ItemMod) -> syn::Result<T
             if let Some(attr) = sub_attr {
                 let sub_attrs: CommandAttrs = attr.parse_args()?;
                 let params = parse_params(func)?;
+                let has_autocomplete_params = params.iter().any(|p| p.autocomplete);
                 let sub_name = sub_attrs
                     .name
                     .unwrap_or_else(|| func.sig.ident.to_string().replace('_', "-"));
@@ -449,6 +463,7 @@ fn generate_command_group(attrs: CommandAttrs, module: ItemMod) -> syn::Result<T
                     sub_name,
                     description: sub_attrs.description,
                     params,
+                    has_autocomplete_params,
                 });
             }
         }
@@ -513,6 +528,20 @@ fn generate_command_group(attrs: CommandAttrs, module: ItemMod) -> syn::Result<T
         })
         .collect();
 
+    let autocomplete_impl = if has_autocomplete_fn {
+        quote! {
+            async fn autocomplete(
+                &self,
+                lx: &crate::commands::LuminaContext,
+                cmd: &serenity::all::CommandInteraction,
+            ) -> anyhow::Result<()> {
+                #mod_name::autocomplete(lx, cmd).await
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     Ok(quote! {
         #clean_module
 
@@ -548,6 +577,8 @@ fn generate_command_group(attrs: CommandAttrs, module: ItemMod) -> syn::Result<T
                     other => Err(anyhow::anyhow!("unknown subcommand `{other}`")),
                 }
             }
+
+            #autocomplete_impl
         }
     })
 }

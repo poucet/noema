@@ -53,7 +53,10 @@ impl VoiceEventHandler for VoiceReceiver {
                     .flat_map(|s| s.to_le_bytes())
                     .collect();
                 let chunk = AudioChunk::new(pcm16);
-                let _ = self.stt_input.send(VoiceInput::Audio(chunk)).await;
+                // Use try_send to never block the songbird event loop
+                if self.stt_input.try_send(VoiceInput::Audio(chunk)).is_err() {
+                    tracing::trace!("STT channel full, dropping audio chunk");
+                }
             }
         }
         None

@@ -62,6 +62,36 @@ impl LuminaContext {
     }
 }
 
+impl LuminaContext {
+    /// Reply to a command interaction with a visible message.
+    pub async fn reply(&self, cmd: &CommandInteraction, msg: &str) -> anyhow::Result<()> {
+        use serenity::all::{CreateInteractionResponse, CreateInteractionResponseMessage};
+        cmd.create_response(&self.http, CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new().content(msg),
+        )).await?;
+        Ok(())
+    }
+
+    /// Reply with an ephemeral message (only visible to the command user).
+    pub async fn reply_ephemeral(&self, cmd: &CommandInteraction, msg: &str) -> anyhow::Result<()> {
+        use serenity::all::{CreateInteractionResponse, CreateInteractionResponseMessage};
+        cmd.create_response(&self.http, CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new().content(msg).ephemeral(true),
+        )).await?;
+        Ok(())
+    }
+
+    /// Acknowledge the interaction (defer) so Discord doesn't timeout.
+    /// Follow up with `cmd.edit_response()` to send the actual response.
+    pub async fn defer(&self, cmd: &CommandInteraction) -> anyhow::Result<()> {
+        use serenity::all::CreateInteractionResponse;
+        cmd.create_response(&self.http, CreateInteractionResponse::Defer(
+            serenity::all::CreateInteractionResponseMessage::new(),
+        )).await?;
+        Ok(())
+    }
+}
+
 impl std::ops::Deref for LuminaContext {
     type Target = Context;
     fn deref(&self) -> &Self::Target {

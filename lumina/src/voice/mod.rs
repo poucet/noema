@@ -169,11 +169,15 @@ impl VoiceManager {
 
     /// Synthesize text and return audio ready for songbird (interleaved stereo f32 48kHz).
     pub async fn synthesize_for_discord(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        tracing::info!(text_len = text.len(), "TTS: starting synthesis");
+
         // Use configured TTS provider or first available
         let tts_provider_id = match self.tts_provider_id().await {
             Some(id) => id,
             None => {
+                tracing::debug!("TTS: no configured provider, fetching list");
                 let providers = self.daemon.voice().list_voice_providers().await?;
+                tracing::debug!(count = providers.len(), "TTS: got providers");
                 providers.iter()
                     .find(|p| p.capabilities.contains(&"tts".to_string()))
                     .map(|p| p.id.clone())
@@ -185,13 +189,18 @@ impl VoiceManager {
         let voice_id = match self.tts_voice_id().await {
             Some(id) => id,
             None => {
+                tracing::debug!(provider = %tts_provider_id, "TTS: no configured voice, fetching list");
                 match self.daemon.voice().list_voices(&tts_provider_id).await {
-                    Ok(voices) if !voices.is_empty() => voices[0].id.clone(),
+                    Ok(voices) if !voices.is_empty() => {
+                        tracing::debug!(count = voices.len(), "TTS: got voices");
+                        voices[0].id.clone()
+                    }
                     _ => String::new(),
                 }
             }
         };
 
+        tracing::info!(provider = %tts_provider_id, voice = %voice_id, "TTS: calling synthesize");
         let audio = self.daemon.voice().synthesize(text, &tts_provider_id, &voice_id).await?;
         let mono = audio.to_f32_samples();
 
