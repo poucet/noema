@@ -323,7 +323,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       voiceLog.error("TTS failed", { err });
       ttsInFlightRef.current = false;
     }
-  }, [selectedProvider, providers]);
+  }, [ttsProvider, ttsVoice]);
 
   return {
     status,
