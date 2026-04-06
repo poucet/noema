@@ -241,13 +241,15 @@ pub async fn speak(
     let chunk = daemon.voice().synthesize(&text, &provider_id, voice).await
         .map_err(|e| format!("TTS failed: {e}"))?;
 
-    let sample_rate = chunk.sample_rate;
-    tracing::info!(audio_bytes = chunk.data.len(), sample_rate, "TTS: playing");
+    let sample_rate = chunk.format.sample_rate;
+    tracing::info!(
+        audio_bytes = chunk.data.len(),
+        sample_rate,
+        encoding = ?chunk.format.encoding,
+        "TTS: playing"
+    );
 
-    // Convert PCM16 LE to f32
-    let samples: Vec<f32> = chunk.data.chunks_exact(2)
-        .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
-        .collect();
+    let samples = chunk.to_f32_samples();
 
     // Play on a blocking thread (CPAL blocks until playback completes)
     tokio::task::spawn_blocking(move || {
@@ -281,13 +283,13 @@ pub async fn synthesize_speech(
             format!("TTS failed: {e}")
         })?;
 
-    tracing::info!(audio_bytes = chunk.data.len(), sample_rate = chunk.sample_rate, "TTS: got audio");
+    tracing::info!(audio_bytes = chunk.data.len(), sample_rate = chunk.format.sample_rate, "TTS: got audio");
 
     // Debug: write raw audio to a file so we can verify it
     if let Ok(mut f) = std::fs::File::create("/tmp/tts_debug.raw") {
         use std::io::Write;
         let _ = f.write_all(&chunk.data);
-        tracing::info!("TTS: debug audio written to /tmp/tts_debug.raw (play with: ffplay -f s16le -ar {} -ac 1 /tmp/tts_debug.raw)", chunk.sample_rate);
+        tracing::info!("TTS: debug audio written to /tmp/tts_debug.raw (play with: ffplay -f s16le -ar {} -ac 1 /tmp/tts_debug.raw)", chunk.format.sample_rate);
     }
 
     // Convert PCM16 LE to f32 samples for Web Audio API
@@ -297,7 +299,7 @@ pub async fn synthesize_speech(
 
     Ok(SynthesizeResult {
         samples,
-        sample_rate: chunk.sample_rate,
+        sample_rate: chunk.format.sample_rate,
     })
 }
 

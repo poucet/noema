@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use simply_rpc::StreamHandle;
-use simply_voice::{AudioChunk, VoiceEvent, VoiceInput};
+use simply_voice::{Audio, VoiceEvent, VoiceInput};
 
 /// Info about an available voice provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ pub trait VoiceApi: Send + Sync {
 
     /// Synthesize text to speech. Returns audio data.
     #[rpc(post = "/voice/tts", no_tool)]
-    async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<AudioChunk>;
+    async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<Audio>;
 
     /// List available TTS voices for a provider.
     #[rpc(get = "/voice/tts/voices/{provider_id}", no_tool)]

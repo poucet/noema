@@ -349,7 +349,7 @@ impl VoiceApi for VoiceService {
         Ok(simply_rpc::StreamHandle::new(input_tx, event_rx))
     }
 
-    async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::AudioChunk> {
+    async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::Audio> {
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
         let tts = provider.tts.as_ref()
