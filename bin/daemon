@@ -57,11 +57,10 @@ daemon_stop() {
     rm -f "$PIDFILE"
   fi
 
-  # Fallback: use the REST /kill endpoint
+  # Fallback: use the REST /daemon/kill endpoint
   if daemon_is_running; then
-    local rest_port=$((DAEMON_PORT + 1))
-    echo "Sending /kill to daemon on port $rest_port..."
-    curl -sf "http://127.0.0.1:$rest_port/kill" >/dev/null 2>&1 || true
+    echo "Sending /daemon/kill to daemon on port $DAEMON_PORT..."
+    curl -sf -X POST "http://127.0.0.1:$DAEMON_PORT/daemon/kill" >/dev/null 2>&1 || true
     sleep 1
     if ! daemon_is_running; then
       echo "Daemon stopped"
