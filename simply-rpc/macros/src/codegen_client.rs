@@ -88,7 +88,7 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
                     #serialize
                     self.0.rpc_call(#method_str, #rpc_params).await?;
                     let __path = #path_expr;
-                    let (__raw_tx, mut __raw_rx) = self.0.register_bidi_stream_raw(#method_str, &__path).await?;
+                    let (__raw_tx, mut __raw_rx) = self.0.register_stream(#method_str, &__path).await?;
 
                     // Wrap raw channels with typed serialization
                     let (__typed_tx, mut __typed_rx) = ::tokio::sync::mpsc::channel::<#input_type>(64);
@@ -306,49 +306,29 @@ fn generate_client_body(
                     .unwrap_or_default()
             }
         }
-        ReturnKind::StreamTuple { value_type, .. } => {
-            // Result<(T, S)> — RPC returns T, then register stream
+        ReturnKind::StreamTuple { value_type, stream_type } => {
+            // Result<(T, Stream)> — RPC returns T, then register stream for events
             quote! {
                 #serialize
                 let __r = self.0.rpc_call(#method_str, #rpc_params).await?;
                 let __value: #value_type = ::serde_json::from_value(__r)?;
-                let __stream = self.0.register_stream(__value.id.as_str()).await;
-                // Deserialize raw JSON events into the stream type
-                let (tx, rx) = ::tokio::sync::mpsc::channel(256);
-                ::tokio::spawn(async move {
-                    while let Some(value) = __stream.recv().await {
-                        // Stream events are already typed by the demux
-                        let _ = tx.send(value).await;
-                    }
-                });
-                Ok((__value, rx))
+                let (_, mut __raw_rx) = self.0.register_stream(#method_str).await?;
+                Ok((__value, __raw_rx))
             }
         }
-        ReturnKind::StreamBare { .. } => {
-            let id_expr = if let Some(first) = method.params.first() {
-                let name = &first.name;
-                if first.is_str_ref {
-                    quote! { #name }
-                } else {
-                    quote! { #name.as_str() }
-                }
-            } else {
-                quote! { "" }
-            };
-
+        ReturnKind::StreamBare { stream_type } => {
             quote! {
                 #serialize
                 self.0.rpc_call(#method_str, #rpc_params).await?;
-                let __stream = self.0.register_stream(#id_expr).await;
-                Ok(__stream)
+                let (_, __raw_rx) = self.0.register_stream(#method_str).await?;
+                Ok(__raw_rx)
             }
         }
         ReturnKind::StreamBidi { input_type, output_type } => {
-            // Fallback for StreamBidi without endpoint (shouldn't happen normally)
             quote! {
                 #serialize
                 self.0.rpc_call(#method_str, #rpc_params).await?;
-                let (__raw_tx, mut __raw_rx) = self.0.register_bidi_stream_raw(#method_str, "").await?;
+                let (__raw_tx, mut __raw_rx) = self.0.register_stream(#method_str).await?;
                 let (__typed_tx, mut __typed_rx) = ::tokio::sync::mpsc::channel::<#input_type>(64);
                 let (output_tx, output_rx) = ::tokio::sync::mpsc::channel::<#output_type>(64);
                 ::tokio::spawn(async move {

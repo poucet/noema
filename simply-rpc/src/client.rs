@@ -27,20 +27,17 @@ pub trait RpcConnection: Send + Sync {
         body: Value,
     ) -> anyhow::Result<Value>;
 
-    /// Register a stream for the given ID. Returns raw JSON events.
-    async fn register_stream(&self, id: &str) -> mpsc::Receiver<Value>;
-
-    /// Unregister a stream.
-    async fn unregister_stream(&self, id: &str);
-
-    /// Register a bidirectional stream (raw JSON channels).
+    /// Register a bidirectional stream.
+    ///
+    /// `method` is the RPC method name (e.g. "voice.voice_connect").
     ///
     /// Returns `(input_sink, output_stream)`:
-    /// - Send `Value` to `input_sink` → serialized and sent as `{method}.input` notifications
-    /// - Receive `Value` from `output_stream` ← deserialized from `{method}.event` notifications
-    async fn register_bidi_stream_raw(
+    /// - Send `Value` to `input_sink` → sent as `{method}.input` notifications
+    /// - Receive `Value` from `output_stream` ← from `{method}.event` notifications
+    ///
+    /// For unidirectional streams, the caller simply ignores the input_sink.
+    async fn register_stream(
         &self,
         method: &str,
-        path: &str,
     ) -> anyhow::Result<(mpsc::Sender<Value>, mpsc::Receiver<Value>)>;
 }

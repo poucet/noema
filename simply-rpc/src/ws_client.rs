@@ -1,16 +1,16 @@
-//! WebSocket RPC client — generic transport with auto-reconnect.
+//! WebSocket RPC client with auto-reconnect.
 //!
-//! Provides `WsConnection<E>` which implements `RpcClient` for any event type `E`.
-//! Automatically reconnects with exponential backoff when the connection drops.
+//! `WsConnection` handles the WS transport: request/response, notifications,
+//! and bidirectional streams. All notifications are routed by method name
+//! to registered sinks.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{broadcast, mpsc, oneshot, watch, Mutex};
+use tokio::sync::{mpsc, oneshot, watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -24,53 +24,40 @@ pub enum ConnectionState {
     Reconnecting,
 }
 
-/// Backoff configuration.
 const INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const BACKOFF_MULTIPLIER: u32 = 2;
 
-/// Callback that demuxes WS notifications into stream events.
-/// Given (method, params), returns `Some((stream_id, event))` if this is a stream event.
-pub type NotificationDemux<E> =
-    Arc<dyn Fn(&str, serde_json::Value) -> Option<(String, E)> + Send + Sync>;
-
-/// Active connection handles.
 struct LiveConnection {
     write_tx: mpsc::Sender<String>,
     _reader: JoinHandle<()>,
     _writer: JoinHandle<()>,
 }
 
-/// Generic WebSocket RPC client. Parameterized over the stream event type.
-pub struct WsConnection<E: Clone + Send + 'static> {
+/// WebSocket RPC client. Handles request/response and notification routing.
+pub struct WsConnection {
     live: Arc<Mutex<Option<LiveConnection>>>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
-    stream_senders: Arc<Mutex<HashMap<String, broadcast::Sender<E>>>>,
-    /// Raw JSON notification sinks for bidi streams, keyed by notification method name.
-    raw_sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
+    /// Notification sinks keyed by method name.
+    sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
     next_id: AtomicU64,
     state_rx: watch::Receiver<ConnectionState>,
     _reconnect_task: JoinHandle<()>,
 }
 
-impl<E: Clone + Send + 'static> WsConnection<E> {
+impl WsConnection {
     /// Connect to a server. Reconnects automatically on disconnect.
-    ///
-    /// `demux` converts WS notifications to `(stream_id, event)` for stream dispatch.
-    pub async fn connect(addr: &str, demux: NotificationDemux<E>) -> anyhow::Result<Self> {
+    pub async fn connect(addr: &str) -> anyhow::Result<Self> {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let stream_senders: Arc<Mutex<HashMap<String, broadcast::Sender<E>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let raw_sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>> =
+        let sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let live: Arc<Mutex<Option<LiveConnection>>> = Arc::new(Mutex::new(None));
 
         let (state_tx, state_rx) = watch::channel(ConnectionState::Connected);
         let initial = establish_connection(
-            addr, Arc::clone(&pending), Arc::clone(&stream_senders),
-            Arc::clone(&raw_sinks),
-            Arc::clone(&live), state_tx.clone(), Arc::clone(&demux),
+            addr, Arc::clone(&pending), Arc::clone(&sinks),
+            Arc::clone(&live), state_tx.clone(),
         ).await?;
         *live.lock().await = Some(initial);
 
@@ -78,8 +65,7 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
             let addr = addr.to_string();
             let live = Arc::clone(&live);
             let pending = Arc::clone(&pending);
-            let stream_senders = Arc::clone(&stream_senders);
-            let raw_sinks = Arc::clone(&raw_sinks);
+            let sinks = Arc::clone(&sinks);
             let state_tx = state_tx.clone();
             let mut state_rx = state_rx.clone();
 
@@ -102,9 +88,8 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
                         tokio::time::sleep(backoff).await;
 
                         match establish_connection(
-                            &addr, Arc::clone(&pending), Arc::clone(&stream_senders),
-                            Arc::clone(&raw_sinks),
-                            Arc::clone(&live), state_tx.clone(), Arc::clone(&demux),
+                            &addr, Arc::clone(&pending), Arc::clone(&sinks),
+                            Arc::clone(&live), state_tx.clone(),
                         ).await {
                             Ok(conn) => {
                                 *live.lock().await = Some(conn);
@@ -125,69 +110,87 @@ impl<E: Clone + Send + 'static> WsConnection<E> {
         Ok(Self {
             live,
             pending,
-            stream_senders,
-            raw_sinks,
+            sinks,
             next_id: AtomicU64::new(1),
             state_rx,
             _reconnect_task: reconnect_task,
         })
     }
 
-    /// Current connection state.
     pub fn connection_state(&self) -> ConnectionState {
         *self.state_rx.borrow()
     }
 
-    /// Watch connection state changes.
     pub fn watch_state(&self) -> watch::Receiver<ConnectionState> {
         self.state_rx.clone()
     }
 
-    /// Get a clone of the write channel (for sending messages from spawned tasks).
+    /// Get a clone of the write channel for sending raw WS messages.
     pub async fn write_tx(&self) -> Option<mpsc::Sender<String>> {
         self.live.lock().await.as_ref().map(|c| c.write_tx.clone())
     }
 
-    /// Send a fire-and-forget notification (no id, no response expected).
-    pub async fn send_notification(&self, method: &str, params: serde_json::Value) -> anyhow::Result<()> {
-        let notif = WsNotification {
+    /// Send an RPC request and wait for the response.
+    pub async fn rpc_call(&self, method: &str, params: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(id, tx);
+
+        let request = WsRequest {
+            id,
             method: method.to_string(),
             params,
         };
+
+        tracing::debug!(id, method, "WS client request");
+
         let write_tx = {
             let live = self.live.lock().await;
             match live.as_ref() {
                 Some(conn) => conn.write_tx.clone(),
-                None => return Err(anyhow::anyhow!("disconnected")),
+                None => {
+                    self.pending.lock().await.remove(&id);
+                    return Err(anyhow::anyhow!("disconnected, reconnecting"));
+                }
             }
         };
+
         write_tx
-            .send(serde_json::to_string(&notif)?)
+            .send(serde_json::to_string(&request)?)
             .await
-            .map_err(|_| anyhow::anyhow!("connection closed"))
+            .map_err(|_| anyhow::anyhow!("connection closed"))?;
+
+        let response = rx.await.map_err(|_| anyhow::anyhow!("connection closed"))?;
+
+        let is_err = response.error.is_some();
+        tracing::debug!(id, method, error = is_err, "WS client response");
+
+        match response.error {
+            Some(e) => Err(anyhow::anyhow!(e.message)),
+            None => Ok(response.result.unwrap_or(serde_json::Value::Null)),
+        }
     }
 
-    /// Register a raw JSON sink for notifications matching a specific method.
-    pub async fn register_raw_sink(&self, method: &str) -> mpsc::Receiver<serde_json::Value> {
+    /// Register a notification sink for a specific method name.
+    /// Returns a receiver for incoming notifications matching that method.
+    pub async fn register_sink(&self, method: &str) -> mpsc::Receiver<serde_json::Value> {
         let (tx, rx) = mpsc::channel(64);
-        self.raw_sinks.lock().await.insert(method.to_string(), tx);
+        self.sinks.lock().await.insert(method.to_string(), tx);
         rx
     }
 
-    /// Unregister a raw sink.
-    pub async fn unregister_raw_sink(&self, method: &str) {
-        self.raw_sinks.lock().await.remove(method);
+    /// Unregister a notification sink.
+    pub async fn unregister_sink(&self, method: &str) {
+        self.sinks.lock().await.remove(method);
     }
 }
 
-async fn establish_connection<E: Clone + Send + 'static>(
+async fn establish_connection(
     addr: &str,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
-    stream_senders: Arc<Mutex<HashMap<String, broadcast::Sender<E>>>>,
-    raw_sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
+    sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
     live: Arc<Mutex<Option<LiveConnection>>>,
     state_tx: watch::Sender<ConnectionState>,
-    demux: NotificationDemux<E>,
 ) -> anyhow::Result<LiveConnection> {
     let url = format!("ws://{}/ws", addr);
     let (ws_stream, _) = tokio_tungstenite::connect_async(&url).await?;
@@ -231,28 +234,21 @@ async fn establish_connection<E: Clone + Send + 'static>(
                 }
             } else if incoming.is_notification() {
                 let method = incoming.method.as_deref().unwrap();
-                // Try typed demux first (session events etc.)
-                if let Some((stream_id, event)) = demux(method, incoming.params.clone()) {
-                    let senders = stream_senders.lock().await;
-                    if let Some(tx) = senders.get(&stream_id) {
-                        let _ = tx.send(event);
-                    }
-                } else {
-                    // Try raw sinks (bidi stream events)
-                    let sinks = raw_sinks.lock().await;
-                    if let Some(tx) = sinks.get(method) {
-                        let _ = tx.send(incoming.params).await;
-                    }
+                let sinks = sinks.lock().await;
+                if let Some(tx) = sinks.get(method) {
+                    let _ = tx.send(incoming.params).await;
                 }
             }
         }
 
-        // Connection lost
+        // Connection lost — clean up
         *live.lock().await = None;
         let mut pending = pending.lock().await;
         for (_, tx) in pending.drain() {
             let _ = tx.send(WsResponse::err(0, "connection lost"));
         }
+        // Close all sinks so spawned tasks exit
+        sinks.lock().await.clear();
         let _ = state_tx.send(ConnectionState::Disconnected);
     });
 
@@ -261,77 +257,4 @@ async fn establish_connection<E: Clone + Send + 'static>(
         _reader: reader,
         _writer: writer,
     })
-}
-
-#[async_trait]
-impl<E: Clone + Send + Sync + 'static> crate::RpcClient for WsConnection<E> {
-    type Stream = broadcast::Receiver<E>;
-
-    async fn rpc_call(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> anyhow::Result<serde_json::Value> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
-
-        let request = WsRequest {
-            id,
-            method: method.to_string(),
-            params,
-        };
-
-        tracing::debug!(id, method, "WS client request");
-
-        let write_tx = {
-            let live = self.live.lock().await;
-            match live.as_ref() {
-                Some(conn) => conn.write_tx.clone(),
-                None => {
-                    self.pending.lock().await.remove(&id);
-                    return Err(anyhow::anyhow!("disconnected, reconnecting"));
-                }
-            }
-        };
-
-        write_tx
-            .send(serde_json::to_string(&request)?)
-            .await
-            .map_err(|_| anyhow::anyhow!("connection closed"))?;
-
-        let response = rx.await.map_err(|_| anyhow::anyhow!("connection closed"))?;
-
-        let is_err = response.error.is_some();
-        tracing::debug!(id, method, error = is_err, "WS client response");
-
-        match response.error {
-            Some(e) => Err(anyhow::anyhow!(e.message)),
-            None => Ok(response.result.unwrap_or(serde_json::Value::Null)),
-        }
-    }
-
-    async fn register_stream(&self, id: &str) -> Self::Stream {
-        let mut senders = self.stream_senders.lock().await;
-        if let Some(tx) = senders.get(id) {
-            return tx.subscribe();
-        }
-        let (tx, rx) = broadcast::channel(256);
-        senders.insert(id.to_string(), tx);
-        rx
-    }
-
-    async fn unregister_stream(&self, id: &str) {
-        self.stream_senders.lock().await.remove(id);
-    }
-
-    async fn rest_call(
-        &self,
-        http_method: crate::HttpMethod,
-        path: &str,
-        body: serde_json::Value,
-    ) -> anyhow::Result<serde_json::Value> {
-        let method = format!("REST.{:?} {}", http_method, path);
-        self.rpc_call(&method, body).await
-    }
 }
