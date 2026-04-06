@@ -109,10 +109,19 @@ mod voice {
 
         let voice_mgr = get_voice_manager(lx).await?;
         let stereo = voice_mgr.synthesize_for_discord(&text).await?;
+
+        tracing::info!(
+            stereo_samples = stereo.len(),
+            duration_secs = stereo.len() as f32 / 48_000.0 / 2.0,
+            "playing TTS in voice channel"
+        );
+
         let bytes: Vec<u8> = stereo.iter().flat_map(|s| s.to_le_bytes()).collect();
         let input = songbird::input::RawAdapter::new(std::io::Cursor::new(bytes), 48_000, 2);
         let mut handler = handler_lock.lock().await;
-        handler.play_input(input.into());
+
+        let track = handler.play_input(input.into());
+        tracing::info!(track_uuid = %track.uuid(), "track queued in songbird");
 
         Ok(())
     }
@@ -192,7 +201,9 @@ mod voice {
 
     #[sub_command(description = "Show current voice settings")]
     pub async fn status(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
+        tracing::info!("voice status: getting voice manager");
         let voice_mgr = get_voice_manager(lx).await?;
+        tracing::info!("voice status: got voice manager");
         let stt = voice_mgr.stt_provider_id().await.unwrap_or_else(|| "(auto)".to_string());
         let tts = voice_mgr.tts_provider_id().await.unwrap_or_else(|| "(none)".to_string());
         let voice = voice_mgr.tts_voice_id().await.unwrap_or_else(|| "(auto)".to_string());
@@ -251,16 +262,22 @@ mod voice {
 // --- Helpers (outside the module, used by subcommands via super::) ---
 
 async fn get_voice_manager(lx: &LuminaContext) -> anyhow::Result<Arc<crate::voice::VoiceManager>> {
+    tracing::debug!("get_voice_manager: acquiring data read lock");
     let data = lx.ctx.data.read().await;
-    data.get::<VoiceManagerKey>()
+    tracing::debug!("get_voice_manager: got data lock");
+    let mgr = data.get::<VoiceManagerKey>()
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("VoiceManager not initialized"))
+        .ok_or_else(|| anyhow::anyhow!("VoiceManager not initialized"));
+    drop(data);
+    tracing::debug!("get_voice_manager: released data lock");
+    mgr
 }
 
 async fn join_user_channel(
     lx: &LuminaContext,
     cmd: &CommandInteraction,
 ) -> Result<(serenity::model::id::GuildId, serenity::model::id::ChannelId), String> {
+    tracing::debug!("join_user_channel: start");
     let guild_id = cmd.guild_id.ok_or("Not in a guild")?;
     let voice_channel = {
         let guild = lx.cache.guild(guild_id).ok_or("Guild not found")?;
@@ -268,7 +285,9 @@ async fn join_user_channel(
             .and_then(|vs| vs.channel_id)
             .ok_or("You're not in a voice channel")?
     };
+    tracing::debug!("join_user_channel: getting songbird");
     let manager = songbird::get(&lx.ctx).await.ok_or("Songbird not initialized")?;
+    tracing::debug!("join_user_channel: calling join");
     manager.join(guild_id, voice_channel).await
         .map_err(|e| format!("Failed to join voice: {e}"))?;
     tracing::info!(guild_id = %guild_id, voice_channel = %voice_channel, "joined voice channel");

@@ -318,7 +318,7 @@ async fn rest_handler(
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    tracing::debug!(method = %method, path = %path, "request");
+    tracing::info!(method = %method, path = %path, "REST request");
 
     let http_method = match method {
         Method::GET => HttpMethod::Get,

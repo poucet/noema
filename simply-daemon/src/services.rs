@@ -350,11 +350,14 @@ impl VoiceApi for VoiceService {
     }
 
     async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::Audio> {
+        tracing::info!(provider_id, voice, text_len = text.len(), "synthesize called");
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
         let tts = provider.tts.as_ref()
             .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' has no TTS capability"))?;
-        tts.synthesize(text, voice).await
+        let result = tts.synthesize(text, voice).await;
+        tracing::info!(ok = result.is_ok(), "synthesize done");
+        result
     }
 
     async fn list_voices(&self, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>> {
