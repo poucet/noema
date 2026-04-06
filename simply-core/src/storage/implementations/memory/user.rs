@@ -13,6 +13,8 @@ use crate::storage::types::{Keyed, User};
 #[derive(Debug, Default)]
 pub struct MemoryUserStore {
     users: Mutex<HashMap<String, StoredUser>>,
+    tokens: Mutex<HashMap<String, UserId>>,
+    discord_mappings: Mutex<HashMap<String, UserId>>,
     default_user_id: Mutex<Option<UserId>>,
 }
 
@@ -64,9 +66,38 @@ impl UserStore for MemoryUserStore {
         Ok(stored)
     }
 
+    async fn get_user_by_id(&self, id: &UserId) -> Result<Option<StoredUser>> {
+        let users = self.users.lock().unwrap();
+        Ok(users.get(id.as_str()).cloned())
+    }
+
     async fn list_users(&self) -> Result<Vec<StoredUser>> {
         let users = self.users.lock().unwrap();
         Ok(users.values().cloned().collect())
+    }
+
+    async fn create_user_token(&self, user_id: &UserId) -> Result<String> {
+        let token = uuid::Uuid::new_v4().to_string();
+        self.tokens.lock().unwrap().insert(token.clone(), user_id.clone());
+        Ok(token)
+    }
+
+    async fn resolve_token(&self, token: &str) -> Result<Option<UserId>> {
+        Ok(self.tokens.lock().unwrap().get(token).cloned())
+    }
+
+    async fn revoke_user_tokens(&self, user_id: &UserId) -> Result<()> {
+        self.tokens.lock().unwrap().retain(|_, v| v != user_id);
+        Ok(())
+    }
+
+    async fn map_discord_user(&self, discord_user_id: &str, user_id: &UserId) -> Result<()> {
+        self.discord_mappings.lock().unwrap().insert(discord_user_id.to_string(), user_id.clone());
+        Ok(())
+    }
+
+    async fn resolve_discord_user(&self, discord_user_id: &str) -> Result<Option<UserId>> {
+        Ok(self.discord_mappings.lock().unwrap().get(discord_user_id).cloned())
     }
 }
 

@@ -130,21 +130,21 @@ A Chrome extension (`simply-web`) as a new daemon client, like Noema and Lumina.
 
 ### Stage 1 — Connection Auth & User Identity
 
-- 🔄 1.1 Auto-generate `daemon_secret` on first run, store in `settings.toml`
-- 🔄 1.2 Auth middleware: validate `Authorization: Bearer {daemon_secret}` on all routes except `/auth/*`
-- ⬜ 1.3 `X-User-Id` header support — daemon resolves to UCM user, scopes operations
-- ⬜ 1.4 Noema sends admin user_id on all requests
-- ⬜ 1.5 Lumina sends Discord-mapped user_id (or omits for anonymous)
-- ⬜ 1.6 User tiers: admin (full access), authenticated (own data), anonymous (public only)
-- ⬜ 1.7 Document ownership — documents scoped to creating user, `is_public` flag for shared docs
+- ✅ 1.1 Auto-generate `daemon_secret` on first run, store in `settings.toml`
+- ✅ 1.2 Auth middleware: validate `Authorization: Bearer {daemon_secret}` on all routes except `/auth/*`
+- ✅ 1.3 `X-User-Id` header support — daemon resolves to UCM user, scopes operations
+- ✅ 1.4 Noema sends admin user_id on all requests
+- ✅ 1.5 Lumina sends Discord-mapped user_id (or omits for anonymous)
+- ✅ 1.6 User tiers: admin (full access), authenticated (own data), anonymous (public only)
+- ✅ 1.7 Document ownership — documents scoped to creating user, ownership checks on mutate
 
 ### Stage 2 — Single-Port OAuth & Admin Page
 
-- ⬜ 2.1 Merge OAuth callback server into main port (`/auth/callback` route)
-- ⬜ 2.2 Admin page Google OAuth login (`/auth/login` → Google → verify `admin_email`)
-- ⬜ 2.3 User self-service auth page (`/auth/login` → Google → create/link UCM user)
-- ⬜ 2.4 Discord user mapping table: `discord_user_id → ucm_user_id`
-- ⬜ 2.5 Lumina `/auth` command — generates link to daemon auth page, maps Discord user after OAuth
+- ✅ 2.1 Merge OAuth callback server into main port (`/auth/callback` route)
+- ✅ 2.2 Admin page Google OAuth login (`/auth/login` → Google → verify `admin_email`)
+- ✅ 2.3 User self-service auth page (`/auth/login` → Google → create/link UCM user)
+- ✅ 2.4 Discord user mapping table: `discord_user_id → ucm_user_id`
+- ✅ 2.5 Lumina `/auth` command — generates link to daemon auth page, maps Discord user after OAuth
 
 ### Stage 3 — Per-User MCP OAuth
 

@@ -29,8 +29,8 @@ pub struct RemoteDaemon {
 }
 
 impl RemoteDaemon {
-    pub async fn connect_as(addr: &str, name: &str, daemon_secret: &str) -> anyhow::Result<Arc<Self>> {
-        let conn = Arc::new(DaemonRpcConnection::connect(addr, name, daemon_secret).await?);
+    pub async fn connect_as(addr: &str, name: &str, daemon_secret: &str, user_id: Option<&str>) -> anyhow::Result<Arc<Self>> {
+        let conn = Arc::new(DaemonRpcConnection::connect(addr, name, daemon_secret, user_id).await?);
         let rpc: Arc<dyn RpcConnection> = conn.clone();
 
         Ok(Arc::new(Self {

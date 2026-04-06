@@ -18,8 +18,12 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use simply_core::storage::ids::UserId;
+use simply_core::storage::traits::UserStore;
 use simply_rpc::{HttpMethod, ServiceRouter};
 
+use crate::auth::RequestUser;
+use crate::net::auth_routes::{self, AuthState};
 use crate::net::server::ConnectionTracker;
 use crate::net::protocol::*;
 
@@ -29,6 +33,10 @@ pub struct ServerConfig {
     pub port: u16,
     pub tracker: ConnectionTracker,
     pub daemon_secret: String,
+    pub user_store: Arc<dyn UserStore>,
+    pub admin_email: Option<String>,
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<String>,
 }
 
 /// Shared state for axum handlers.
@@ -37,21 +45,37 @@ struct AppState {
     rest_dispatcher: Arc<ServiceRouter>,
     tracker: ConnectionTracker,
     daemon_secret: Arc<str>,
+    user_store: Arc<dyn UserStore>,
 }
 
 /// Starts the unified server (REST + WS + admin).
 pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
+    let auth_state = AuthState {
+        user_store: Arc::clone(&config.user_store),
+        google_client_id: config.google_client_id,
+        google_client_secret: config.google_client_secret,
+        admin_email: config.admin_email,
+        daemon_port: config.port,
+    };
+
     let state = AppState {
         rest_dispatcher: config.rest_dispatcher,
         tracker: config.tracker,
         daemon_secret: Arc::from(config.daemon_secret.as_str()),
+        user_store: config.user_store,
     };
+
+    let auth_routes = Router::new()
+        .route("/auth/login", get(auth_routes::auth_login))
+        .route("/auth/callback", get(auth_routes::auth_callback))
+        .with_state(auth_state);
 
     let app = Router::new()
         .route("/", get(admin_page))
         .route("/admin", get(admin_page))
         .route("/admin/api/connections", get(admin_connections))
         .route("/ws", get(ws_upgrade_handler))
+        .merge(auth_routes)
         .fallback(rest_or_stream_handler)
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
@@ -89,28 +113,49 @@ impl ServerHandle {
 
 async fn auth_middleware(
     State(state): State<AppState>,
-    req: axum::extract::Request,
+    mut req: axum::extract::Request,
     next: Next,
 ) -> Response {
     let path = req.uri().path();
 
     // Public routes: admin page, auth flows
     if path == "/" || path == "/admin" || path.starts_with("/auth/") {
+        req.extensions_mut().insert(RequestUser::Anonymous);
         return next.run(req).await;
     }
 
-    // All other routes require Bearer token
-    let authorized = req.headers()
+    // Extract Bearer token
+    let token = req.headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|token| token == state.daemon_secret.as_ref());
+        .map(|s| s.to_string());
 
-    if !authorized {
-        return (StatusCode::UNAUTHORIZED, "invalid or missing daemon secret").into_response();
+    let Some(token) = token else {
+        return (StatusCode::UNAUTHORIZED, "missing authorization").into_response();
+    };
+
+    // Check if it's the daemon_secret (trusted service client)
+    if token == state.daemon_secret.as_ref() {
+        // Trusted client — read X-User-Id if present
+        let user_id = req.headers()
+            .get("X-User-Id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| UserId::from_string(s.to_string()));
+        req.extensions_mut().insert(RequestUser::Service(user_id));
+        return next.run(req).await;
     }
 
-    next.run(req).await
+    // Try resolving as a per-user token
+    match state.user_store.resolve_token(&token).await {
+        Ok(Some(user_id)) => {
+            req.extensions_mut().insert(RequestUser::User(user_id));
+            next.run(req).await
+        }
+        _ => {
+            (StatusCode::UNAUTHORIZED, "invalid token").into_response()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +398,13 @@ async fn rest_handler(
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    tracing::info!(method = %method, path = %path, "REST request");
+    // Extract resolved user from auth middleware (before consuming the request body)
+    let request_user = req.extensions()
+        .get::<RequestUser>()
+        .cloned()
+        .unwrap_or(RequestUser::Anonymous);
+
+    tracing::info!(method = %method, path = %path, user = ?request_user, "REST request");
 
     let http_method = match method {
         Method::GET => HttpMethod::Get,
@@ -384,6 +435,22 @@ async fn rest_handler(
         serde_json::Value::Null
     } else {
         serde_json::from_slice(&raw_bytes).unwrap_or(serde_json::Value::Null)
+    };
+
+    // Inject resolved user_id into params so RPC handlers can access it
+    let body = if let Some(uid) = request_user.user_id() {
+        match body {
+            serde_json::Value::Object(mut map) => {
+                map.insert("__user_id".to_string(), serde_json::Value::String(uid.as_str().to_string()));
+                serde_json::Value::Object(map)
+            }
+            serde_json::Value::Null => {
+                serde_json::json!({ "__user_id": uid.as_str() })
+            }
+            other => other,
+        }
+    } else {
+        body
     };
 
     let rest_result = match state.rest_dispatcher.dispatch(http_method, &path, body).await {

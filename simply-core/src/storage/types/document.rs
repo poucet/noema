@@ -56,6 +56,7 @@ pub struct Document {
     pub title: String,
     pub source: DocumentSource,
     pub source_id: Option<String>,
+    pub is_public: bool,
 }
 
 impl Document {
@@ -66,6 +67,7 @@ impl Document {
             title: title.into(),
             source,
             source_id: None,
+            is_public: false,
         }
     }
 

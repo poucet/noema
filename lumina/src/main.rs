@@ -71,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
     let _daemon_handle = net::connect_or_host(
         settings.daemon_port,
         "lumina",
+        None,
     ).await?;
     tracing::info!(host = _daemon_handle.is_host(), "daemon ready");
 

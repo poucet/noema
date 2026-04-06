@@ -37,6 +37,11 @@ pub struct SqliteStores {
 }
 
 impl SqliteStores {
+    /// Get the underlying SQLite store (implements all storage traits).
+    pub fn sqlite(&self) -> Arc<SqliteStore> {
+        self.sqlite.clone()
+    }
+
     /// Open storage using paths from config::PathManager.
     pub fn open() -> anyhow::Result<Self> {
         let db_path = config::PathManager::db_path()

@@ -30,10 +30,9 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     let mut settings = config::Settings::load();
     let port = settings.daemon_port;
     let daemon_secret = settings.ensure_daemon_secret().to_string();
-
     let daemon_port = port.unwrap_or(config::DEFAULT_DAEMON_PORT);
 
-    let handle = net::connect_or_host(port, "noema")
+    let handle = net::connect_or_host(port, "noema", None)
         .await
         .map_err(|e| format!("Failed to initialize daemon: {}", e))?;
 

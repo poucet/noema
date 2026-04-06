@@ -18,19 +18,27 @@ pub struct DaemonRpcConnection {
 }
 
 impl DaemonRpcConnection {
-    pub async fn connect(addr: &str, name: &str, daemon_secret: &str) -> anyhow::Result<Self> {
-        let headers = vec![
+    pub async fn connect(addr: &str, name: &str, daemon_secret: &str, user_id: Option<&str>) -> anyhow::Result<Self> {
+        let mut ws_headers = vec![
             ("Authorization".to_string(), format!("Bearer {daemon_secret}")),
         ];
-        let conn = WsConnection::connect_with_headers(addr, headers).await?;
+        if let Some(uid) = user_id {
+            ws_headers.push(("X-User-Id".to_string(), uid.to_string()));
+        }
+        let conn = WsConnection::connect_with_headers(addr, ws_headers).await?;
         let _ = conn.rpc_call("client.identify", serde_json::json!({ "name": name })).await;
 
         let mut headers = reqwest::header::HeaderMap::new();
-        let auth_value = format!("Bearer {daemon_secret}");
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_str(&auth_value)?,
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {daemon_secret}"))?,
         );
+        if let Some(uid) = user_id {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("x-user-id"),
+                reqwest::header::HeaderValue::from_str(uid)?,
+            );
+        }
 
         Ok(Self {
             conn,

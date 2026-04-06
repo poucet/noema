@@ -1,5 +1,6 @@
 //! Networking layer — HTTP/REST server, WebSocket server, client transport, and daemon discovery.
 
+pub mod auth_routes;
 pub mod protocol;
 pub mod server;
 pub mod rest;

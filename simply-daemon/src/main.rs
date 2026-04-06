@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Open storage and create daemon
     let stores = Arc::new(SqliteStores::open()?);
-    let daemon = EmbeddedDaemon::new(stores).await?;
+    let daemon = EmbeddedDaemon::new(Arc::clone(&stores)).await?;
 
     // Kill channel — shared with CoreService so /daemon/kill actually works
     let (kill_tx, mut kill_rx) = mpsc::channel(1);
@@ -69,6 +69,10 @@ async fn main() -> anyhow::Result<()> {
         port,
         tracker,
         daemon_secret,
+        user_store: stores.sqlite(),
+        admin_email: settings.admin_email.clone(),
+        google_client_id: settings.google_client_id.clone(),
+        google_client_secret: settings.google_client_secret.clone(),
     }).await?;
 
     let actual_port = server.port();

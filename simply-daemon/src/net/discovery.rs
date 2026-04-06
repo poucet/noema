@@ -83,6 +83,7 @@ impl DaemonHandle {
 pub async fn connect_or_host(
     port: Option<u16>,
     client_name: &str,
+    user_id: Option<&str>,
 ) -> anyhow::Result<DaemonHandle> {
     let port = port.unwrap_or(DEFAULT_DAEMON_PORT);
     let addr = format!("127.0.0.1:{}", port);
@@ -93,7 +94,7 @@ pub async fn connect_or_host(
     // Try to connect with a short timeout
     let connect_result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        RemoteDaemon::connect_as(&addr, client_name, &daemon_secret),
+        RemoteDaemon::connect_as(&addr, client_name, &daemon_secret, user_id),
     )
     .await;
 
@@ -116,6 +117,7 @@ pub async fn connect_or_host(
 
     config::load_env_file();
     let stores = Arc::new(SqliteStores::open()?);
+    let user_store = stores.sqlite();
     let daemon = EmbeddedDaemon::new(stores).await?;
 
     // Kill channel
@@ -140,6 +142,10 @@ pub async fn connect_or_host(
         port,
         tracker,
         daemon_secret,
+        user_store,
+        admin_email: settings.admin_email.clone(),
+        google_client_id: settings.google_client_id.clone(),
+        google_client_secret: settings.google_client_secret.clone(),
     }).await?;
 
     Ok(DaemonHandle::Host {

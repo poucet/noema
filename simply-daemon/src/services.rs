@@ -158,6 +158,29 @@ impl<S: StorageTypes> DocumentService<S> {
     pub fn new(stores: Arc<dyn Stores<S>>, user_id: simply_core::storage::ids::UserId) -> Self {
         Self { stores, user_id }
     }
+
+    /// Verify the current user can access a tab's parent document.
+    async fn verify_tab_access(&self, tab_id: &simply_core::storage::ids::TabId, require_owner: bool) -> anyhow::Result<()> {
+        use simply_core::storage::traits::DocumentStore;
+        let tab = self.stores.document().get_document_tab(tab_id).await?
+            .ok_or_else(|| anyhow::anyhow!("tab not found: {tab_id}"))?;
+        self.verify_document_access(&tab.document_id, require_owner).await
+    }
+
+    /// Verify the current user owns this document or it's public.
+    /// `require_owner` = true rejects public docs too (for mutations).
+    async fn verify_document_access(&self, document_id: &simply_core::storage::ids::DocumentId, require_owner: bool) -> anyhow::Result<()> {
+        use simply_core::storage::traits::DocumentStore;
+        let doc = self.stores.document().get_document(document_id).await?
+            .ok_or_else(|| anyhow::anyhow!("document not found: {document_id}"))?;
+        if doc.user_id == self.user_id {
+            return Ok(());
+        }
+        if !require_owner && doc.is_public {
+            return Ok(());
+        }
+        anyhow::bail!("access denied: document belongs to another user");
+    }
 }
 
 #[async_trait]
@@ -205,6 +228,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         use simply_core::storage::traits::DocumentStore;
 
         let id = DocumentId::from_string(document_id);
+        self.verify_document_access(&id, false).await?;
         let doc = self.stores.document().get_document(&id).await?
             .ok_or_else(|| anyhow::anyhow!("document not found: {document_id}"))?;
 
@@ -274,13 +298,17 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
     async fn rename_document(&self, document_id: &str, title: &str) -> anyhow::Result<()> {
         use simply_core::storage::ids::DocumentId;
         use simply_core::storage::traits::DocumentStore;
-        self.stores.document().update_document_title(&DocumentId::from_string(document_id), title).await
+        let id = DocumentId::from_string(document_id);
+        self.verify_document_access(&id, true).await?;
+        self.stores.document().update_document_title(&id, title).await
     }
 
     async fn delete_document(&self, document_id: &str) -> anyhow::Result<()> {
         use simply_core::storage::ids::DocumentId;
         use simply_core::storage::traits::DocumentStore;
-        self.stores.document().delete_document(&DocumentId::from_string(document_id)).await?;
+        let id = DocumentId::from_string(document_id);
+        self.verify_document_access(&id, true).await?;
+        self.stores.document().delete_document(&id).await?;
         Ok(())
     }
 
@@ -289,6 +317,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         use simply_core::storage::traits::DocumentStore;
 
         let doc_id = DocumentId::from_string(document_id);
+        self.verify_document_access(&doc_id, true).await?;
         let parent = request.parent_tab_id.as_deref().map(TabId::from_string);
 
         let tab_id = self.stores.document().create_document_tab(
@@ -321,7 +350,9 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         use simply_core::storage::ids::TabId;
         use simply_core::storage::traits::DocumentStore;
 
-        let tab = self.stores.document().get_document_tab(&TabId::from_string(tab_id)).await?
+        let tid = TabId::from_string(tab_id);
+        self.verify_tab_access(&tid, false).await?;
+        let tab = self.stores.document().get_document_tab(&tid).await?
             .ok_or_else(|| anyhow::anyhow!("tab not found: {tab_id}"))?;
 
         Ok(TabInfo {
@@ -339,17 +370,17 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
     async fn update_tab(&self, tab_id: &str, request: UpdateTabRequest) -> anyhow::Result<()> {
         use simply_core::storage::ids::TabId;
         use simply_core::storage::traits::DocumentStore;
-        self.stores.document().update_document_tab_content(
-            &TabId::from_string(tab_id),
-            &request.content,
-            &[],
-        ).await
+        let tid = TabId::from_string(tab_id);
+        self.verify_tab_access(&tid, true).await?;
+        self.stores.document().update_document_tab_content(&tid, &request.content, &[]).await
     }
 
     async fn delete_tab(&self, tab_id: &str) -> anyhow::Result<()> {
         use simply_core::storage::ids::TabId;
         use simply_core::storage::traits::DocumentStore;
-        self.stores.document().delete_document_tab(&TabId::from_string(tab_id)).await?;
+        let tid = TabId::from_string(tab_id);
+        self.verify_tab_access(&tid, true).await?;
+        self.stores.document().delete_document_tab(&tid).await?;
         Ok(())
     }
 }
