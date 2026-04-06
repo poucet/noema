@@ -246,6 +246,13 @@ pub async fn synthesize_speech(
 
     tracing::info!(audio_bytes = chunk.data.len(), sample_rate = chunk.sample_rate, "TTS: got audio");
 
+    // Debug: write raw audio to a file so we can verify it
+    if let Ok(mut f) = std::fs::File::create("/tmp/tts_debug.raw") {
+        use std::io::Write;
+        let _ = f.write_all(&chunk.data);
+        tracing::info!("TTS: debug audio written to /tmp/tts_debug.raw (play with: ffplay -f s16le -ar {} -ac 1 /tmp/tts_debug.raw)", chunk.sample_rate);
+    }
+
     // Convert PCM16 LE to f32 samples for Web Audio API
     let samples: Vec<f32> = chunk.data.chunks_exact(2)
         .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)

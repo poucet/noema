@@ -253,8 +253,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   }, [status, startRecording, stopRecording]);
 
   /// Speak text aloud via TTS. Finds a provider with TTS capability.
+  const ttsInFlightRef = useRef(false);
   const speakText = useCallback(async (text: string) => {
     if (!text.trim()) return;
+
+    // Prevent concurrent TTS calls
+    if (ttsInFlightRef.current) {
+      voiceLog.debug("TTS: already in flight, skipping");
+      return;
+    }
+    ttsInFlightRef.current = true;
 
     // Find a provider with TTS capability (prefer selected, fall back to any)
     const provider = providers.find(
@@ -263,12 +271,20 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
 
     if (!provider) {
       voiceLog.debug("TTS: no provider with TTS capability");
+      ttsInFlightRef.current = false;
       return;
     }
 
     try {
       voiceLog.info("TTS: synthesizing", { provider: provider.id, length: text.length });
       const result = await tauri.synthesizeSpeech(text, provider.id);
+      voiceLog.info("TTS: got samples", { count: result.samples.length, sampleRate: result.sampleRate });
+
+      if (result.samples.length === 0) {
+        voiceLog.warn("TTS: empty audio returned");
+        ttsInFlightRef.current = false;
+        return;
+      }
 
       const float32 = new Float32Array(result.samples);
       const ctx = new AudioContext({ sampleRate: result.sampleRate });
@@ -277,11 +293,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
+      source.onended = () => {
+        ctx.close();
+        ttsInFlightRef.current = false;
+        voiceLog.info("TTS: playback finished");
+      };
       source.start();
-      source.onended = () => ctx.close();
-      voiceLog.info("TTS: playing audio");
+      voiceLog.info("TTS: playback started", { durationSec: float32.length / result.sampleRate });
     } catch (err) {
       voiceLog.error("TTS failed", { err });
+      ttsInFlightRef.current = false;
     }
   }, [selectedProvider, providers]);
 

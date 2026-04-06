@@ -21,26 +21,22 @@ pub struct VoiceProviderInfo {
 #[async_trait]
 pub trait VoiceApi: Send + Sync {
     /// List available voice providers.
-    #[rpc(get = "/voice/provider")]
+    #[rpc(get = "/voice/provider", no_tool)]
     async fn list_voice_providers(&self) -> anyhow::Result<Vec<VoiceProviderInfo>>;
 
     /// Connect a bidirectional voice stream.
-    ///
-    /// Client sends VoiceInput (audio chunks), server sends VoiceEvent
-    /// (listening, transcribing, transcripts, errors).
-    #[rpc(stream = "/voice/stream/{provider_id}")]
+    #[rpc(stream = "/voice/stream/{provider_id}", no_tool)]
     async fn voice_connect(&self, provider_id: &str) -> anyhow::Result<StreamHandle<VoiceInput, VoiceEvent>>;
 
     /// Synthesize text to speech. Returns audio data.
-    /// `voice` is a provider-specific voice ID (from list_voices). Pass empty for default.
-    #[rpc(post = "/voice/tts")]
+    #[rpc(post = "/voice/tts", no_tool)]
     async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<AudioChunk>;
 
     /// List available TTS voices for a provider.
-    #[rpc(get = "/voice/tts/voices/{provider_id}")]
+    #[rpc(get = "/voice/tts/voices/{provider_id}", no_tool)]
     async fn list_voices(&self, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>>;
 
     /// Disconnect a voice stream.
-    #[rpc(delete = "/voice/{session_id}")]
+    #[rpc(delete = "/voice/{session_id}", no_tool)]
     async fn voice_disconnect(&self, session_id: &str) -> anyhow::Result<()>;
 }
