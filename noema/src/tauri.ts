@@ -297,7 +297,7 @@ export async function listVoiceProviders(): Promise<VoiceProviderInfo[]> {
 }
 
 export async function startVoiceSession(providerId: string): Promise<void> {
-  return invoke<void>("start_voice_session", { providerId });
+  return invoke<void>("start_voice_session", { provider_id: providerId });
 }
 
 export async function processAudioChunk(samples: number[]): Promise<void> {
