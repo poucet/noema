@@ -105,7 +105,8 @@ where
         }
 
         // Register Voxtral (Mistral API — STT + TTS)
-        if let Some(key) = settings.get_api_key("mistral") {
+        if let Some(key) = settings.get_api_key("mistral")
+            .or_else(|| std::env::var("MISTRAL_API_KEY").ok()) {
             let voxtral = Arc::new(simply_voice::VoxtralProvider::new(key));
             voice_service = voice_service
                 .register_stt("voxtral", "Voxtral (Mistral)", voxtral.clone())
@@ -114,7 +115,8 @@ where
         }
 
         // Register Gemini Realtime
-        if let Some(key) = settings.get_api_key("google") {
+        if let Some(key) = settings.get_api_key("google")
+            .or_else(|| std::env::var("GOOGLE_API_KEY").ok()) {
             let gemini = Arc::new(simply_voice::GeminiRealtimeProvider::new(key));
             voice_service = voice_service.register_realtime(
                 "gemini", "Gemini Realtime", gemini,
