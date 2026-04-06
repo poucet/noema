@@ -1,6 +1,6 @@
 # Action System — Unified Capability & Composition
 
-**Status:** Draft — partially implemented
+**Status:** Proposal — tasks in [v1.0 TASKS.md](../../v1.0/TASKS.md#2-events--intents)
 **Version:** 1.1
 **Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
 **Related:** [AGENTIC.md](AGENTIC.md), [CORE_SERVICE.md](CORE_SERVICE.md)

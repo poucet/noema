@@ -9,50 +9,43 @@
 
 ## Problem
 
-Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) are converging on the same needs — LLM orchestration, MCP tools, voice pipeline, storage — but implemented independently in different languages. This creates:
+Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) were converging on the same needs — LLM orchestration, MCP tools, voice pipeline, storage — but implemented independently in different languages.
 
-1. **Duplicated core logic** — both projects implement LLM provider abstraction, MCP integration, agent orchestration, and voice processing separately.
-2. **Python voice limitations** — Python's Discord ecosystem lags on DAVE (Discord Audio Visual Encryption) protocol support, blocking reliable STT/TTS in voice channels.
-3. **Platform lock-in** — Lumina's features are locked to Discord/Python. Noema's are locked to desktop/Tauri. Neither can easily extend to new platforms.
-4. **Storage contention** — if both share data, two separate processes writing to the same SQLite is fragile.
-5. **Maintenance burden** — maintaining two codebases with overlapping concerns in two languages.
+## Solution
 
-## Goals
+Unified Rust workspace: `simply-daemon` hub with `simply-core` internal library. Lumina is a Discord crate (serenity + songbird), Noema is a Tauri desktop client. Both connect to the daemon.
 
-- **Unify Noema and Lumina** into a single Rust workspace where they share a common core and differ only in presentation layer.
-- **Shared daemon** (`simply-daemon`) that owns LLM, MCP, voice, agent orchestration, and storage — runs as a long-lived process. `simply-core` is its internal library.
-- **Lumina as a crate** in the Noema workspace — a Discord bot (serenity + songbird) that connects to the core service.
-- **Voice provider abstraction** in the core (starting with Voxtral/Mistral) — usable by both Noema (desktop mic via CPAL) and Lumina (Discord via songbird).
-- **Architecture supports future platforms** (Telegram, WhatsApp, WebRTC/meet) without building them in v1.
+Three interfaces: WebSocket + JSON for rich clients, REST for triggers/management, MCP outbound for action services.
 
 ## Non-goals (v1)
 
-- Telegram, WhatsApp, or other messaging platform integrations.
-- `simply-chris.ai/meet` WebRTC product (architecture supports it, doesn't build it).
-- Unified command macro (single annotation for both Discord + MCP) — use serenity's native `#[command]` and separate MCP tool definitions.
-- Google services integration migration.
-- Full feature parity with Python Lumina — v1 focuses on Discord text commands + voice with DAVE.
+- Telegram, WhatsApp, or other messaging platform integrations
+- Full feature parity with Python Lumina
 
 ---
 
-## Resolved Questions
+## What's Built
 
-1. **Core service protocol** — Three interfaces: WebSocket + JSON for rich clients (Noema, Lumina), REST for trigger services, MCP outbound for action services. See [CORE_SERVICE.md](../designs/CORE_SERVICE.md).
-2. **Storage model** — Lumina features map onto UCM primitives. No separate databases. See [ARCHITECTURE.md](../designs/ARCHITECTURE.md#features-on-ucm--content-as-convention).
-3. **Command system** — Separate: serenity `#[command]` for Discord, separate MCP tool definitions. No unified macro.
-4. **Config unification** — Shared `config/` crate with `Settings::load()` + `.env` fallback.
-5. **UCM schema extensions** — Existing UCM primitives cover it. Content conventions (todo, note, etc.) are just frontmatter on documents.
-6. **Core service lifecycle** — `simply-daemon` runs as standalone binary. Noema uses `EmbeddedDaemon` (in-process). Lumina uses `RemoteDaemon` (WS+REST).
-7. **Repo name** — keeping `noema` as the GitHub repo for now.
+- **Workspace restructured** — `simply-core`, `simply-daemon`, `simply-rpc`, `simply-voice`, `noema`, `lumina`, `config`
+- **Daemon hub** — 8 API traits, axum REST + WS server, service extraction
+- **RPC framework** — `#[rpc_service]` proc macro, REST dispatch, binary transfer, `ServiceRouter`
+- **Typed content** — `IntoContent`/`FromContent` traits, `rest_dispatch_as_content` macro
+- **Discord bot** — serenity-based, chat (channel management, streaming, model selection), 15 MCP tools via rmcp, `/tool call` + `/tool list`
+- **Voice pipeline** — `simply-voice` crate with STT/TTS providers (Voxtral, Whisper, ElevenLabs, Gemini), VAD, daemon integration
+- **Desktop voice** — mic capture via CPAL, daemon STT/TTS, provider/voice selection UI
+- **Discord voice** — songbird with DAVE encryption, `/voice` commands (transcribe, listen, say, leave, list, status, provider, set-voice), config persistence, TTS fallback, transcript routing
 
-## Open Questions
+## What's Next
 
-1. **Songbird DAVE status** — need to verify songbird's current DAVE protocol support. If incomplete, may need to contribute upstream or work around.
+See [ROADMAP.md](ROADMAP.md) and [TASKS.md](TASKS.md) for the next phase:
+1. **Content & RAG** — document CRUD, embedding providers, semantic search
+2. **Events** — event bus, intents, scheduled actions
+3. **RTC** — WebRTC voice service, Google Meet integration
+4. **Multi-user & OAuth** — per-user identity, Google account linking, permission model, admin UI
 
 ---
 
 ## Related
 
-- Supersedes: Praxis CRUD side-car design (Python-era, no longer applicable)
 - Architecture: [designs/ARCHITECTURE.md](../designs/ARCHITECTURE.md)
 - Post-v1 Roadmap: [FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md)

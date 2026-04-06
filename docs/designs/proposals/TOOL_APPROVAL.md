@@ -1,6 +1,6 @@
 # Design: Tool Call Approval Flow
 
-**Status:** Open
+**Status:** Accepted — tasks in [v1.0 TASKS.md](../../v1.0/TASKS.md#stage-3--permission-model) (Multi-user Stage 3)
 **Affects:** SessionApi, Lumina chat, MCP tool execution
 
 ---

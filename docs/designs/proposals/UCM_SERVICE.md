@@ -1,6 +1,6 @@
 # Design: UCM Storage Architecture
 
-**Status:** Decided — UCM stays in daemon
+**Status:** Decided — UCM stays in daemon. Tasks in [v1.0 TASKS.md](../../v1.0/TASKS.md#1-content--rag)
 **Affects:** Content phase, daemon architecture
 
 ---

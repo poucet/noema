@@ -3,63 +3,95 @@
 **Design:** [GOAL.md](GOAL.md)
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 
-Features grouped by where they land in the Rust workspace. Ported from Python Lumina (`~/projects/simply/lumina`) unless noted otherwise.
+---
+
+## Built
+
+### simply-core (shared services)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Agent orchestration | ✅ | ToolAgent, SessionManager, spawn_agent |
+| LLM providers | ✅ | Claude, OpenAI, Gemini, Ollama |
+| MCP server/client | ✅ | McpRegistry, ephemeral registration, rmcp |
+
+### simply-rpc (RPC framework)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `#[rpc_service]` proc macro | ✅ | REST path annotations, stream annotations |
+| `ServiceRouter` | ✅ | Replaced RestDispatcher, matchit URL routing |
+| `RpcConnection` trait | ✅ | Unified client connection abstraction |
+| Binary transfer | ✅ | `BinaryResponse` + `BinaryUpload` |
+| Typed content dispatch | ✅ | `IntoContent`/`FromContent`, `rest_dispatch_as_content` |
+
+### simply-voice (voice pipeline)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| STT providers | ✅ | Voxtral, Whisper |
+| TTS providers | ✅ | Voxtral, ElevenLabs |
+| Realtime provider | ✅ | Gemini |
+| VAD | ✅ | Voice activity detection module |
+| Daemon integration | ✅ | STT stream via bidi WS, TTS endpoint, provider registration |
+
+### simply-daemon (hub)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| 8 API traits | ✅ | Session, Conversation, Asset, Mcp, OAuth, Model, Voice, DaemonInfo |
+| Axum REST + WS server | ✅ | Single port, REST + WS |
+| Service extraction | ✅ | McpService, ModelService, AssetService, VoiceService, DaemonInfoService |
+| `EmbeddedDaemon` | ✅ | In-process for Noema |
+| `RemoteDaemon` → `RemoteXxxApi` | ✅ | WS + HTTP client structs |
+| 500 error retry | ✅ | Protocol-level retry |
+| Plaintext API keys | ✅ | In settings.toml |
+
+### lumina (Discord bot)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Discord gateway | ✅ | serenity-based, connects via RemoteDaemon |
+| Chat commands | ✅ | Channel management, streaming, model selection, pause/resume |
+| MCP service | ✅ | 15 Discord tools, ephemeral registration |
+| `/tool call` + `/tool list` | ✅ | Modal form from schema, paginated embed |
+| MCP instructions | ✅ | Dynamic channel map, refreshes on Discord events |
+| `.sync` command | ✅ | Owner command sync |
+| Voice I/O | ✅ | Songbird + DAVE encryption |
+| Voice commands | ✅ | transcribe, listen, say, leave, list, status, provider, set-voice |
+| Voice config | ✅ | Config persistence, TTS fallback, random voice, transcript routing |
+
+### noema (Tauri desktop)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Desktop voice | ✅ | CPAL mic capture, daemon STT/TTS |
+| Voice UI | ✅ | Provider/voice dropdown, decoupled STT/TTS selection |
 
 ---
 
-## → simply-core (shared services, available to all platforms)
+## Next Phase
 
-### Core infrastructure (dedicated services)
-
-| Feature | Python Source | Priority | Phase | Notes |
-|---------|-------------|----------|-------|-------|
-| **Agent orchestration** | `agent/nous_agent.py`, `agent/task_manager.py` | P0 | Foundation | ✅ ToolAgent, SessionManager, spawn_agent |
-| **LLM providers** | nous library | P0 | Foundation | ✅ `simply-core/llm` — Claude, OpenAI, Gemini, Ollama |
-| **MCP server/client** | `mcp_protocol/server/`, `mcp_protocol/handlers/` | P0 | Foundation | ✅ McpRegistry, ephemeral registration, rmcp |
-| **Voice pipeline** | `services/discord/cogs/voice_cog.py` (VAD, STT, TTS) | P0 | Voice | In progress — simply-voice crate |
-| **Document CRUD** | multiple databases | P0 | Content | Not started — DocumentApi, frontmatter queries |
-| **Identity** | `services/identity/` | P1 | Content | Not started — cross-platform user identity |
-| **Event & Intent system** | `services/scheduler/` | P1 | Events | Not started — event bus + intent engine |
-| **Search / RAG** | `services/rag/` | P2 | post-v1 | Embeddings over all UCM content, unified search |
-| **Brain / Analytics** | `services/brain/` | P2 | post-v1 | Aggregation queries over turn data |
-
-### Content conventions (no dedicated service — just UCM documents with frontmatter)
-
-| Feature | Python Source | Priority | Phase | Notes |
-|---------|-------------|----------|-------|-------|
-| **TODOs** | `services/database/todo_database.py` | P1 | Content | `type: todo` documents, queried via generic document service |
-| **Notes** | `services/database/note_database.py` | P1 | Content | `type: note` documents |
-| **Context / Memory** | `services/context/` | P2 | Content | `type: context` documents |
-| **Access control** | `services/access_control/` | P1 | Lumina | Punted — not needed for current workflow |
-| **MCP server config** | `services/mcp/` | P2 | Content | `type: mcp_server` documents |
+| Feature | Priority | Area | Notes |
+|---------|----------|------|-------|
+| Document CRUD | P0 | Content | ⬜ DocumentApi, frontmatter queries, named documents |
+| Embedding providers | P0 | Content | ⬜ Vector storage, embedding API trait |
+| RAG pipeline | P0 | Content | ⬜ Query -> embed -> search -> inject context -> LLM |
+| Event bus | P1 | Events | ⬜ Pub/sub, typed payloads, timer sources |
+| Intent engine | P1 | Events | ⬜ Action AST, LLM-compiled intents |
+| RTC service | P1 | RTC | ⬜ WebRTC audio, Google Meet integration |
+| Multi-user identity | P0 | Auth | ⬜ Per-user OAuth, Discord user -> Google account linking |
+| Permission model | P0 | Auth | ⬜ Role-based MCP tool access, generalizes beyond Discord |
+| Admin UI | P1 | Auth | ⬜ Web UI for all REST APIs, login for remote hosting |
 
 ---
 
-## → lumina crate (Discord-specific presentation)
-
-| Feature | Python Source | Priority | Phase | Notes |
-|---------|-------------|----------|-------|-------|
-| **Discord gateway + bot** | `__main__.py`, discord.py bot | P0 | Lumina | ✅ serenity-based, connects via RemoteDaemon |
-| **Chat commands** | `cogs/chat_cog.py` | P0 | Lumina | ✅ Channel management, streaming, model selection |
-| **MCP Discord tools** | `handlers/discord_handler.py` | P0 | Lumina | ✅ 15 tools via rmcp #[tool], ephemeral registration |
-| **Tool invocation UI** | — | P0 | Lumina | ✅ `/tool call` (modal) + `/tool list` (paginated) |
-| **Voice I/O** | `cogs/voice_cog.py` | P0 | Voice | Not started — songbird + DAVE |
-| **Admin commands** | `cogs/admin_cog.py` | P1 | — | Punted |
-| **Server management** | `cogs/server_cog.py` | P2 | — | Punted |
-| **Command sync** | `cogs/sync_cog.py` | P2 | Lumina | ✅ `.sync` owner command |
-| **Message export** | `cogs/util_cog.py` | P3 | — | Deferred |
-
----
-
-## → Deferred (not in v1, architecture supports later)
+## Deferred (post-v1)
 
 | Feature | Reason |
 |---------|--------|
-| **Google Auth/Drive/Calendar/Docs** | Complex OAuth flows, low priority for v1 |
-| **Brave/Google Search** | Easy to add as MCP tool later |
-| **Telegram/WhatsApp** | New presentation layer crates |
-| **WebRTC / /meet** | New presentation layer crate (2.5 is experimental only) |
-| **Filesystem handler** | Simple to add, low priority |
-| **Note → Google Doc export** | Depends on Google integration |
-| **Search / RAG** | Post-v1 (see [FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md)) |
-| **Brain / Analytics** | Post-v1 |
+| Telegram/WhatsApp | New presentation layer crates |
+| Image generation | MCP tool server, low priority |
+| PDF extraction / video transcription | Multimodal pipeline features |
+| Wiki cross-linking | Depends on content phase |
+| Hierarchical tags | Depends on content phase |

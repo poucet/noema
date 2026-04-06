@@ -1,6 +1,6 @@
 # Agentic System — Event & Intent Engine
 
-**Status:** Draft — Events phase not started
+**Status:** Proposal — tasks in [v1.0 TASKS.md](../../v1.0/TASKS.md#2-events--intents)
 **Version:** 1.1
 **Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
 

@@ -3,85 +3,83 @@
 **Design:** [GOAL.md](GOAL.md)
 **Architecture:** [designs/ARCHITECTURE.md](../designs/ARCHITECTURE.md)
 **Post-v1:** [FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md)
-**Manual tests:** [TODO.md](TODO.md)
+**Tasks:** [TASKS.md](TASKS.md)
 
 ---
 
-## Overview
-
-v1.0 is organized into phases. Foundation restructured the workspace and built the daemon hub. Lumina ported the Discord bot with MCP tool infrastructure. Voice, Content, and Events run as independent workstreams after Lumina's core is functional.
-
-Each phase has its own detailed roadmap in `phases/`.
-
-```
-Foundation (complete)
-  Crate rename → daemon → REST-first → service extraction → typed content dispatch
-
-Lumina (Stage 3 complete, paused)
-  Crate → Chat → MCP Service → /tool command
-  (Admin punted, Schedule deferred to Events)
-
-Voice (in progress)                Content (not started)         Events (not started)
-  simply-voice crate                 Document CRUD                Event bus
-  Daemon voice pipeline              Frontmatter queries          Intents
-  Desktop voice (Noema)              Content conventions          Scheduled prompts
-  Discord voice (Lumina)
-```
-
----
-
-## Phases
-
-| Phase | Status | Priority | Complexity | Depends On | Roadmap |
-|-------|--------|----------|------------|------------|---------|
-| **Foundation** | Complete | P0 | L | — | [phases/foundation/](phases/foundation/ROADMAP.md) |
-| **Lumina** | Paused (Stage 3) | P0 | L | Foundation | [phases/lumina/](phases/lumina/ROADMAP.md) |
-| **Voice** | In Progress | P0 | L | Foundation | [phases/voice/](phases/voice/ROADMAP.md) |
-| **Content** | Not Started | P0 | M | Foundation | [phases/content/](phases/content/ROADMAP.md) |
-| **Events** | Not Started | P1 | XL | Foundation, soft on Content | [phases/events/](phases/events/ROADMAP.md) |
-| **RTC** | Not Started | P1 | L | Voice Stage 2 | [phases/rtc/](phases/rtc/ROADMAP.md) |
-
----
-
-## What's been delivered
+## Completed
 
 ### Foundation
+Workspace restructure, daemon hub, REST-first transport, service extraction, typed content dispatch.
+
 - `simply-daemon` hub with 8 API traits, axum REST + WS server
-- `simply-rpc` framework: `#[rpc_service]` proc macro, REST dispatch, binary transfer
-- `IntoContent`/`FromContent` traits + `rest_dispatch_as_content` for typed MCP content
-- Service extraction: McpService, ModelService, AssetService, etc.
+- `simply-rpc` framework: `#[rpc_service]` proc macro, `ServiceRouter`, binary transfer
+- `IntoContent`/`FromContent` traits, `rest_dispatch_as_content` macro
+- Service extraction: McpService, ModelService, AssetService, VoiceService, DaemonInfoService
+- `RpcConnection` trait, `RemoteXxxApi` client structs
 
-### Lumina (through Stage 3)
-- Discord bot connects to daemon via `RemoteDaemon`
-- LLM chat: channel management, streaming responses, model selection
-- MCP service: 15 Discord tools via rmcp `#[tool]` macros, ephemeral registration
-- `/tool call` (modal form from schema) + `/tool list` (paginated embed)
-- Dynamic channel map in MCP instructions (refreshes on Discord events)
-- Daemon API: `list_all_tools`, `call_tool_direct` using rmcp types natively
+### Lumina (Discord Bot)
+Discord bot with LLM chat, MCP tool infrastructure, and full voice support.
 
-### Lumina deferred
-- Admin/access control — punted (not needed for current workflow)
-- Schedule — deferred to Events phase (intents/triggers architecture)
-- Verification (3.5) — pending manual test, see [TODO.md](TODO.md)
+- serenity-based bot connecting via RemoteDaemon
+- LLM chat: channel management, streaming, model selection, pause/resume
+- MCP service: 15 Discord tools via rmcp, ephemeral registration
+- `/tool call` (modal) + `/tool list` (paginated embed)
+- Dynamic channel map in MCP instructions
+- Voice: songbird + DAVE, transcribe/listen/say/leave/list/status, provider selection, config persistence, TTS fallback, transcript routing
+
+### Voice
+Voice pipeline for desktop and Discord.
+
+- `simply-voice` crate: STT (Voxtral, Whisper), TTS (Voxtral, ElevenLabs), Realtime (Gemini), VAD
+- Daemon integration: STT bidi WS stream, TTS endpoint, provider registration
+- Desktop: CPAL mic capture, auto-TTS, provider/voice dropdown UI
+- Discord: all voice commands, DAVE encryption
+
+### Known Deferred Items
+- Realtime mode (Gemini audio-in/audio-out through daemon)
+- Hot-swap STT provider mid-stream
+- Multi-user voice (multiple speakers in one channel)
+- ElevenLabs voice autocomplete
+- Persist desktop voice settings
+- Handle voice interruptions
+- Lumina Stage 3.5 verification (Noema using Discord tools through daemon)
+
+---
+
+## Next Phase
+
+Four parallel workstreams. See [TASKS.md](TASKS.md) for detailed tasks.
+
+### 1. Content & RAG
+Document CRUD with frontmatter conventions, embedding providers, semantic search over all UCM content. Foundation for everything that needs searchable knowledge.
+
+### 2. Events & Intents
+Reactive event system — timers, platform events (Discord, desktop), LLM-compiled intents with action ASTs. Scheduled prompts, automated workflows.
+
+### 3. RTC (Voice over WebRTC)
+External action service for WebRTC sessions. Initial focus: join Google Meet, stream audio through daemon voice pipeline. Validates the "any audio source" architecture.
+
+### 4. Multi-user & OAuth
+Per-user identity with OAuth. Different Discord users link different Google accounts — affects their MCP tool access. Role-based permission model for MCP tools (starts with Discord roles, generalizes). Admin web UI with login for remote hosting.
 
 ---
 
 ## Parallelization
 
 ```
-Timeline ──────────────────────────────────────────────────────────────────────►
+Completed ─────────────────────────────────────────────────
 
-Foundation  ████████████████████████████████████  (complete)
+Foundation  ████████████████████  (done)
+Lumina      ████████████████████  (done — stages 1-3, 6)
+Voice       ████████████████████  (done — stages 1-4)
 
-Lumina      ·················████████████████████  (Stage 1-3 complete, paused)
+Next ──────────────────────────────────────────────────────
 
-Voice                                       ████████████████████████  (in progress)
-
-Content                                     ██████████████████
-
-Events                                      ██████████████████████████████████
-
-RTC                                                  ██████████████████
+Content & RAG     ██████████████████████████
+Events & Intents  ██████████████████████████████████████
+RTC               ████████████████████  (after Content stage 1)
+Multi-user/OAuth  ██████████████████████████████████████
 ```
 
-Voice, Content, and Events can advance independently. RTC starts after Voice Stage 2 (daemon voice API).
+Content & RAG, Events, and Multi-user can start independently. RTC depends on the daemon's MCP service registration (Content stage 1) for its `join_rtc` / `leave_rtc` tools.
