@@ -12,6 +12,7 @@
 #[macro_use] mod session;
 #[macro_use] mod conversation;
 #[macro_use] mod asset;
+#[macro_use] mod document;
 #[macro_use] mod mcp;
 #[macro_use] mod oauth;
 #[macro_use] mod model;
@@ -22,6 +23,7 @@ pub mod types;
 pub use session::*;
 pub use conversation::*;
 pub use asset::*;
+pub use document::*;
 pub use mcp::*;
 pub use oauth::*;
 pub use model::*;
@@ -39,6 +41,7 @@ pub use simply_rpc::{BinaryResponse, BinaryUpload};
 pub trait Daemon: Send + Sync {
     fn session(&self) -> &dyn SessionApi;
     fn conversation(&self) -> &dyn ConversationApi;
+    fn document(&self) -> &dyn DocumentApi;
     fn mcp(&self) -> &dyn McpApi;
     fn oauth(&self) -> &dyn OAuthApi;
     fn model(&self) -> &dyn ModelApi;
