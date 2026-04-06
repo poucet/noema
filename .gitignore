@@ -12,3 +12,5 @@ node_modules/
 lumina.log
 logs/
 tests/results/
+.venv/
+etc/mlx-voice/.venv/
