@@ -70,9 +70,6 @@ async fn main() -> anyhow::Result<()> {
         tracker,
         daemon_secret,
         user_store: stores.sqlite(),
-        admin_email: settings.admin_email.clone(),
-        google_client_id: settings.google_client_id.clone(),
-        google_client_secret: settings.google_client_secret.clone(),
     }).await?;
 
     let actual_port = server.port();

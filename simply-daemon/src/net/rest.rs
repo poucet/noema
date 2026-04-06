@@ -23,6 +23,7 @@ use simply_core::storage::traits::UserStore;
 use simply_rpc::{HttpMethod, ServiceRouter};
 
 use crate::auth::RequestUser;
+use crate::net::admin_api::{self, AdminState};
 use crate::net::auth_routes::{self, AuthState};
 use crate::net::server::ConnectionTracker;
 use crate::net::protocol::*;
@@ -34,9 +35,6 @@ pub struct ServerConfig {
     pub tracker: ConnectionTracker,
     pub daemon_secret: String,
     pub user_store: Arc<dyn UserStore>,
-    pub admin_email: Option<String>,
-    pub google_client_id: Option<String>,
-    pub google_client_secret: Option<String>,
 }
 
 /// Shared state for axum handlers.
@@ -52,10 +50,11 @@ struct AppState {
 pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     let auth_state = AuthState {
         user_store: Arc::clone(&config.user_store),
-        google_client_id: config.google_client_id,
-        google_client_secret: config.google_client_secret,
-        admin_email: config.admin_email,
         daemon_port: config.port,
+    };
+
+    let admin_state = AdminState {
+        user_store: Arc::clone(&config.user_store),
     };
 
     let state = AppState {
@@ -68,7 +67,18 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     let auth_routes = Router::new()
         .route("/auth/login", get(auth_routes::auth_login))
         .route("/auth/callback", get(auth_routes::auth_callback))
+        .route("/auth/status", get(auth_routes::auth_status))
         .with_state(auth_state);
+
+    let admin_routes = Router::new()
+        .route("/admin/api/setup-status", get(admin_api::get_setup_status))
+        .route("/admin/api/settings", get(admin_api::get_settings).put(admin_api::update_settings))
+        .route("/admin/api/api-key", axum::routing::post(admin_api::set_api_key))
+        .route("/admin/api/api-key/{provider}", axum::routing::delete(admin_api::remove_api_key))
+        .route("/admin/api/users", get(admin_api::list_users).post(admin_api::create_user))
+        .route("/admin/api/tokens", axum::routing::post(admin_api::create_token))
+        .route("/admin/api/tokens/revoke", axum::routing::post(admin_api::revoke_tokens))
+        .with_state(admin_state);
 
     let app = Router::new()
         .route("/", get(admin_page))
@@ -76,6 +86,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/admin/api/connections", get(admin_connections))
         .route("/ws", get(ws_upgrade_handler))
         .merge(auth_routes)
+        .merge(admin_routes)
         .fallback(rest_or_stream_handler)
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
@@ -118,18 +129,43 @@ async fn auth_middleware(
 ) -> Response {
     let path = req.uri().path();
 
-    // Public routes: admin page, auth flows
-    if path == "/" || path == "/admin" || path.starts_with("/auth/") {
+    // Public routes: admin page, admin API, auth flows
+    if path == "/" || path == "/admin" || path.starts_with("/admin/api/") || path.starts_with("/auth/") {
+        // Check for session cookie (from Google OAuth sign-in)
+        let cookie_user = req.headers()
+            .get(axum::http::header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|cookies| {
+                cookies.split(';')
+                    .find_map(|c| c.trim().strip_prefix("simply_token="))
+            })
+            .map(|s| s.to_string());
+
+        if let Some(token) = cookie_user {
+            if let Ok(Some(user_id)) = state.user_store.resolve_token(&token).await {
+                req.extensions_mut().insert(RequestUser::User(user_id));
+                return next.run(req).await;
+            }
+        }
+
         req.extensions_mut().insert(RequestUser::Anonymous);
         return next.run(req).await;
     }
 
-    // Extract Bearer token
-    let token = req.headers()
+    // Extract Bearer token or session cookie
+    let bearer = req.headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string());
+
+    let cookie_token = req.headers()
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|cookies| cookies.split(';').find_map(|c| c.trim().strip_prefix("simply_token=")))
+        .map(|s| s.to_string());
+
+    let token = bearer.or(cookie_token);
 
     let Some(token) = token else {
         return (StatusCode::UNAUTHORIZED, "missing authorization").into_response();

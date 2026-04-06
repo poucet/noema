@@ -3,113 +3,379 @@
 <head>
 <title>simply-daemon</title>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #1a1a2e; color: #e0e0e0; }
-  h1 { font-size: 1.4em; color: #fff; }
-  h2 { font-size: 1.1em; color: #ccc; margin-top: 30px; }
-  table { width: 100%; border-collapse: collapse; margin: 10px 0 20px; }
-  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; font-size: 0.9em; }
-  th { color: #888; font-weight: 500; font-size: 0.8em; text-transform: uppercase; }
-  .count { color: #888; font-weight: normal; font-size: 0.9em; }
-  .empty { text-align: center; color: #555; font-style: italic; }
-  .actions { margin: 30px 0; }
-  button { background: #c0392b; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.85em; }
-  button:hover { background: #e74c3c; }
-  button:disabled { background: #555; cursor: not-allowed; }
-  #status { margin-top: 10px; font-size: 0.85em; color: #888; }
-  .section { margin-bottom: 10px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
+  .container { max-width: 720px; margin: 0 auto; padding: 40px 20px; }
+  h1 { font-size: 1.6em; color: #fff; margin-bottom: 8px; }
+  h2 { font-size: 1.2em; color: #ccc; margin: 28px 0 12px; }
+  h3 { font-size: 1em; color: #aaa; margin: 20px 0 8px; }
+  p { color: #999; font-size: 0.9em; line-height: 1.5; margin-bottom: 12px; }
+  a { color: #14b8a6; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Cards */
+  .card { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 8px; padding: 20px; margin-bottom: 12px; }
+  .card.success { border-color: #14b8a6; }
+
+  /* Buttons */
+  .btn { display: inline-block; padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.9em; font-weight: 500; }
+  .btn-primary { background: #14b8a6; color: #fff; }
+  .btn-primary:hover { background: #0d9488; }
+  .btn-danger { background: #c0392b; color: #fff; }
+  .btn-danger:hover { background: #e74c3c; }
+  .btn-outline { background: transparent; border: 1px solid #444; color: #ccc; }
+  .btn-outline:hover { border-color: #14b8a6; color: #14b8a6; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-google { background: #fff; color: #333; font-weight: 500; display: inline-flex; align-items: center; gap: 10px; padding: 12px 24px; font-size: 1em; border-radius: 8px; }
+  .btn-google:hover { background: #f0f0f0; }
+
+  /* Forms */
+  input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; background: #12121f; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; font-size: 0.9em; font-family: monospace; }
+  input:focus { outline: none; border-color: #14b8a6; }
+  label { display: block; font-size: 0.85em; color: #888; margin-bottom: 4px; }
+  .form-row { margin-bottom: 12px; }
+  .form-actions { margin-top: 16px; display: flex; gap: 8px; }
+
+  /* Status */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; font-weight: 500; }
+  .badge-ok { background: #14b8a622; color: #14b8a6; }
+  .badge-missing { background: #ef444422; color: #ef4444; }
+  .badge-info { background: #3b82f622; color: #3b82f6; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #222; font-size: 0.85em; }
+  th { color: #666; font-weight: 500; text-transform: uppercase; font-size: 0.75em; }
+  .empty { text-align: center; color: #444; font-style: italic; padding: 20px; }
+
+  /* Sections */
+  .section { display: none; }
+  .section.active { display: block; }
+  .step-indicator { display: flex; gap: 8px; margin-bottom: 24px; }
+  .step { padding: 4px 12px; border-radius: 12px; font-size: 0.8em; background: #1a1a2e; color: #666; }
+  .step.active { background: #14b8a6; color: #fff; }
+  .step.done { background: #14b8a622; color: #14b8a6; }
+
+  /* Provider cards */
+  .provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 600px) { .provider-grid { grid-template-columns: 1fr; } }
+  .provider-card { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 8px; padding: 16px; }
+  .provider-card.configured { border-color: #14b8a6; }
+  .provider-name { font-weight: 600; font-size: 0.95em; margin-bottom: 4px; }
+  .provider-link { font-size: 0.8em; }
+  .provider-input { margin-top: 8px; display: flex; gap: 6px; }
+  .provider-input input { flex: 1; }
+  .provider-input .btn { padding: 8px 12px; font-size: 0.8em; }
 </style>
 </head>
 <body>
-<h1>simply-daemon</h1>
+<div class="container">
+  <h1>simply-daemon</h1>
 
-<h2>Connections <span class="count" id="conn-count"></span></h2>
-<table>
-  <thead><tr><th>ID</th><th>Client</th><th>Address</th><th>Connected</th></tr></thead>
-  <tbody id="connections"></tbody>
-</table>
+  <!-- ================================================================== -->
+  <!-- SETUP WIZARD                                                       -->
+  <!-- ================================================================== -->
+  <div id="setup" class="section">
+    <p>Let's get you set up. This takes about a minute.</p>
 
-<h2>Sessions <span class="count" id="session-count"></span></h2>
-<table>
-  <thead><tr><th>ID</th><th>Model</th><th>Persistence</th><th>Created</th></tr></thead>
-  <tbody id="sessions"></tbody>
-</table>
+    <div class="step-indicator">
+      <span class="step" id="step-1-ind">1. Sign In</span>
+      <span class="step" id="step-2-ind">2. API Keys</span>
+      <span class="step" id="step-3-ind">3. Done</span>
+    </div>
 
-<h2>Models</h2>
-<div id="models" class="section"></div>
+    <!-- Step 1: Google Sign-In -->
+    <div id="setup-step-1" class="card">
+      <h2>Sign in with Google</h2>
+      <p>The first person to sign in becomes the admin.</p>
+      <div id="google-signin-area" style="margin-top:16px">
+        <a href="/auth/login" class="btn btn-google">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Sign in with Google
+        </a>
+      </div>
+      <div id="google-oauth-setup" style="display:none; margin-top:16px">
+        <p>Google OAuth is not configured yet. You need to set up Google Cloud credentials:</p>
+        <ol style="color:#999; font-size:0.85em; line-height:1.8; padding-left:20px; margin:12px 0">
+          <li><a href="https://console.cloud.google.com/projectcreate" target="_blank">Create a Google Cloud project</a></li>
+          <li><a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank">Configure OAuth consent screen</a> (External, app name: "Simply")</li>
+          <li><a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank">Create OAuth credentials</a> (Web application)</li>
+          <li>Add redirect URI: <code id="redirect-uri" style="color:#14b8a6"></code></li>
+          <li>Copy the Client ID and Client Secret below:</li>
+        </ol>
+        <div class="form-row">
+          <label>Google Client ID</label>
+          <input type="text" id="google-client-id" placeholder="xxx.apps.googleusercontent.com">
+        </div>
+        <div class="form-row">
+          <label>Google Client Secret</label>
+          <input type="password" id="google-client-secret" placeholder="GOCSPX-xxx">
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" onclick="saveGoogleOAuth()">Save & Sign In</button>
+        </div>
+      </div>
+    </div>
 
-<div class="actions">
-  <button onclick="killDaemon()" id="killBtn">Kill Daemon</button>
-  <div id="status"></div>
+    <!-- Step 2: API Keys -->
+    <div id="setup-step-2" class="card" style="display:none">
+      <h2>Add API Keys</h2>
+      <p>Add keys for the LLM providers you want to use. You can always add more later.</p>
+      <div class="provider-grid" id="provider-grid"></div>
+      <div class="form-actions" style="margin-top:16px">
+        <button class="btn btn-primary" onclick="showStep(3)">Continue</button>
+        <button class="btn btn-outline" onclick="showStep(3)">Skip for now</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Done -->
+    <div id="setup-step-3" class="card" style="display:none">
+      <h2 style="color:#14b8a6">Setup Complete!</h2>
+      <p id="setup-summary"></p>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="location.reload()">Go to Dashboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- DASHBOARD                                                          -->
+  <!-- ================================================================== -->
+  <div id="dashboard" class="section">
+    <p id="admin-greeting"></p>
+
+    <h2>Connections <span class="badge badge-info" id="conn-count">0</span></h2>
+    <table>
+      <thead><tr><th>ID</th><th>Client</th><th>Address</th><th>Connected</th></tr></thead>
+      <tbody id="connections"><tr><td colspan="4" class="empty">No connections</td></tr></tbody>
+    </table>
+
+    <h2>Sessions <span class="badge badge-info" id="session-count">0</span></h2>
+    <table>
+      <thead><tr><th>ID</th><th>Model</th><th>Persistence</th><th>Created</th></tr></thead>
+      <tbody id="sessions"><tr><td colspan="4" class="empty">No active sessions</td></tr></tbody>
+    </table>
+
+    <h2>API Keys</h2>
+    <div class="provider-grid" id="dash-provider-grid"></div>
+
+    <h2>Users</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Email</th></tr></thead>
+      <tbody id="users"><tr><td colspan="2" class="empty">No users</td></tr></tbody>
+    </table>
+
+    <h2>Settings</h2>
+    <div class="card">
+      <div class="form-row"><label>Admin Email</label><div id="dash-admin-email" style="color:#14b8a6">—</div></div>
+      <div class="form-row"><label>Default Model</label><div id="dash-model">—</div></div>
+    </div>
+
+    <div style="margin-top:30px">
+      <button class="btn btn-danger" onclick="killDaemon()">Shut Down Daemon</button>
+      <span id="kill-status" style="margin-left:10px; color:#888; font-size:0.85em"></span>
+    </div>
+  </div>
 </div>
 
 <script>
-const REST = ''; // Same origin
+const PROVIDERS = [
+  { id: 'anthropic', name: 'Anthropic', url: 'https://console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' },
+  { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys', placeholder: 'sk-...' },
+  { id: 'google', name: 'Google (Gemini)', url: 'https://aistudio.google.com/apikey', placeholder: 'AIza...' },
+  { id: 'mistral', name: 'Mistral', url: 'https://console.mistral.ai/api-keys', placeholder: '' },
+];
+
+let setupStatus = null;
+
+async function init() {
+  try {
+    const res = await fetch('/admin/api/setup-status');
+    setupStatus = await res.json();
+  } catch (e) {
+    document.querySelector('.container').innerHTML = '<h1>simply-daemon</h1><p>Could not reach daemon API.</p>';
+    return;
+  }
+
+  if (setupStatus.is_configured) {
+    showDashboard();
+  } else {
+    showSetup();
+  }
+}
+
+// ===================== SETUP =====================
+
+async function showSetup() {
+  document.getElementById('setup').classList.add('active');
+  document.getElementById('redirect-uri').textContent = location.origin + '/auth/callback';
+
+  // Check if Google OAuth is available
+  const authRes = await fetch('/auth/status');
+  const authStatus = await authRes.json();
+
+  if (authStatus.google_oauth_available) {
+    document.getElementById('google-signin-area').style.display = 'block';
+    document.getElementById('google-oauth-setup').style.display = 'none';
+  } else {
+    document.getElementById('google-signin-area').style.display = 'none';
+    document.getElementById('google-oauth-setup').style.display = 'block';
+  }
+
+  showStep(1);
+}
+
+function showStep(n) {
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById(`setup-step-${i}`);
+    const ind = document.getElementById(`step-${i}-ind`);
+    el.style.display = i === n ? 'block' : 'none';
+    ind.className = i < n ? 'step done' : i === n ? 'step active' : 'step';
+  }
+  if (n === 2) renderProviderGrid('provider-grid', true);
+  if (n === 3) renderSetupSummary();
+}
+
+async function saveGoogleOAuth() {
+  const clientId = document.getElementById('google-client-id').value.trim();
+  const clientSecret = document.getElementById('google-client-secret').value.trim();
+  if (!clientId || !clientSecret) { alert('Both fields are required'); return; }
+
+  await fetch('/admin/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ google_client_id: clientId, google_client_secret: clientSecret }),
+  });
+
+  // Now redirect to Google sign-in
+  location.href = '/auth/login';
+}
+
+async function renderSetupSummary() {
+  const res = await fetch('/admin/api/setup-status');
+  const status = await res.json();
+  const keys = status.api_keys.length > 0 ? status.api_keys.join(', ') : 'none yet';
+  document.getElementById('setup-summary').innerHTML =
+    `Admin: <strong>${status.admin_email || '—'}</strong><br>` +
+    `API keys: <strong>${keys}</strong><br>` +
+    `You can configure more from the dashboard anytime.`;
+}
+
+// ===================== PROVIDERS =====================
+
+function renderProviderGrid(containerId, isSetup) {
+  const container = document.getElementById(containerId);
+  const configured = setupStatus?.api_keys || [];
+  container.innerHTML = PROVIDERS.map(p => {
+    const isCfg = configured.includes(p.id);
+    return `<div class="provider-card ${isCfg ? 'configured' : ''}">
+      <div class="provider-name">${p.name} ${isCfg ? '<span class="badge badge-ok">configured</span>' : ''}</div>
+      <div class="provider-link"><a href="${p.url}" target="_blank">Get API key &rarr;</a></div>
+      <div class="provider-input">
+        <input type="password" id="key-${p.id}" placeholder="${p.placeholder}" value="">
+        <button class="btn btn-outline" onclick="saveApiKey('${p.id}')">Save</button>
+        ${isCfg ? `<button class="btn btn-outline" onclick="removeApiKey('${p.id}')" style="color:#ef4444;border-color:#ef4444">Remove</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function saveApiKey(provider) {
+  const input = document.getElementById(`key-${provider}`);
+  const key = input.value.trim();
+  if (!key) return;
+  await fetch('/admin/api/api-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, api_key: key }),
+  });
+  input.value = '';
+  // Refresh status
+  const res = await fetch('/admin/api/setup-status');
+  setupStatus = await res.json();
+  // Re-render whichever grid is visible
+  if (document.getElementById('provider-grid').children.length > 0) renderProviderGrid('provider-grid', true);
+  if (document.getElementById('dash-provider-grid').children.length > 0) renderProviderGrid('dash-provider-grid', false);
+}
+
+async function removeApiKey(provider) {
+  await fetch(`/admin/api/api-key/${provider}`, { method: 'DELETE' });
+  const res = await fetch('/admin/api/setup-status');
+  setupStatus = await res.json();
+  renderProviderGrid('provider-grid', true);
+  renderProviderGrid('dash-provider-grid', false);
+}
+
+// ===================== DASHBOARD =====================
+
+async function showDashboard() {
+  document.getElementById('dashboard').classList.add('active');
+  document.getElementById('admin-greeting').innerHTML =
+    `Signed in as <strong>${setupStatus.admin_email}</strong>`;
+  renderProviderGrid('dash-provider-grid', false);
+  loadConnections();
+  loadSessions();
+  loadUsers();
+  loadSettings();
+  setInterval(loadConnections, 5000);
+  setInterval(loadSessions, 5000);
+}
 
 async function loadConnections() {
   try {
     const res = await fetch('/admin/api/connections');
     const conns = await res.json();
-    document.getElementById('conn-count').textContent = `(${conns.length})`;
+    document.getElementById('conn-count').textContent = conns.length;
     const tbody = document.getElementById('connections');
-    if (conns.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">No connections</td></tr>';
-    } else {
-      tbody.innerHTML = conns.map(c =>
-        `<tr><td>${c.id}</td><td>${c.name || '<span style="color:#555">—</span>'}</td><td>${c.addr}</td><td>${c.connected_at}</td></tr>`
-      ).join('');
-    }
-  } catch (e) {
-    document.getElementById('conn-count').textContent = '(error)';
-  }
+    tbody.innerHTML = conns.length === 0
+      ? '<tr><td colspan="4" class="empty">No connections</td></tr>'
+      : conns.map(c => `<tr><td>${c.id}</td><td>${c.name||'—'}</td><td>${c.addr}</td><td>${c.connected_at}</td></tr>`).join('');
+  } catch (e) {}
 }
 
 async function loadSessions() {
   try {
-    const res = await fetch(REST + '/session');
+    const res = await fetch('/session');
+    if (!res.ok) return;
     const sessions = await res.json();
-    document.getElementById('session-count').textContent = `(${sessions.length})`;
+    document.getElementById('session-count').textContent = sessions.length;
     const tbody = document.getElementById('sessions');
-    if (sessions.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">No active sessions</td></tr>';
-    } else {
-      tbody.innerHTML = sessions.map(s =>
-        `<tr><td>${s.id}</td><td>${s.model_id}</td><td>${s.persistence}</td><td>${s.created_at}</td></tr>`
-      ).join('');
-    }
-  } catch (e) {
-    document.getElementById('session-count').textContent = '(error)';
-  }
+    tbody.innerHTML = sessions.length === 0
+      ? '<tr><td colspan="4" class="empty">No active sessions</td></tr>'
+      : sessions.map(s => `<tr><td>${s.id}</td><td>${s.model_id}</td><td>${s.persistence}</td><td>${s.created_at}</td></tr>`).join('');
+  } catch (e) {}
 }
 
-async function loadModels() {
+async function loadUsers() {
   try {
-    const res = await fetch(REST + '/model/default');
-    const defaultModel = await res.json();
-    document.getElementById('models').textContent = `Default: ${defaultModel}`;
-  } catch (e) {
-    document.getElementById('models').textContent = 'Could not load models';
-  }
+    const res = await fetch('/admin/api/users');
+    const users = await res.json();
+    const tbody = document.getElementById('users');
+    tbody.innerHTML = users.length === 0
+      ? '<tr><td colspan="2" class="empty">No users</td></tr>'
+      : users.map(u => `<tr><td style="font-family:monospace;font-size:0.8em">${u.id}</td><td>${u.email}</td></tr>`).join('');
+  } catch (e) {}
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/admin/api/settings');
+    const s = await res.json();
+    document.getElementById('dash-admin-email').textContent = s.admin_email || '—';
+    document.getElementById('dash-model').textContent = s.default_model || '(auto)';
+  } catch (e) {}
 }
 
 async function killDaemon() {
   if (!confirm('Shut down the daemon?')) return;
-  const btn = document.getElementById('killBtn');
-  btn.disabled = true;
-  btn.textContent = 'Shutting down...';
-  try {
-    await fetch(REST + '/daemon/kill', { method: 'POST' });
-    document.getElementById('status').textContent = 'Shutdown signal sent.';
-  } catch (e) {
-    document.getElementById('status').textContent = 'Sent (daemon may be down).';
-  }
+  try { await fetch('/daemon/kill', { method: 'POST' }); } catch (e) {}
+  document.getElementById('kill-status').textContent = 'Shutdown signal sent.';
 }
 
-loadConnections();
-loadSessions();
-loadModels();
-setInterval(loadConnections, 5000);
-setInterval(loadSessions, 5000);
+// Boot
+init();
 </script>
 </body>
 </html>

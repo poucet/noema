@@ -143,9 +143,6 @@ pub async fn connect_or_host(
         tracker,
         daemon_secret,
         user_store,
-        admin_email: settings.admin_email.clone(),
-        google_client_id: settings.google_client_id.clone(),
-        google_client_secret: settings.google_client_secret.clone(),
     }).await?;
 
     Ok(DaemonHandle::Host {
