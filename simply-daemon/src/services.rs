@@ -157,14 +157,14 @@ impl VoiceApi for VoiceService {
 }
 
 // ---------------------------------------------------------------------------
-// DaemonInfoService
+// CoreService
 // ---------------------------------------------------------------------------
 
-pub struct DaemonInfoService {
+pub struct CoreService {
     kill_tx: Option<tokio::sync::mpsc::Sender<()>>,
 }
 
-impl DaemonInfoService {
+impl CoreService {
     pub fn new(kill_tx: tokio::sync::mpsc::Sender<()>) -> Self {
         Self { kill_tx: Some(kill_tx) }
     }
@@ -175,7 +175,7 @@ impl DaemonInfoService {
 }
 
 #[async_trait]
-impl DaemonInfoApi for DaemonInfoService {
+impl CoreApi for CoreService {
     async fn health(&self) -> anyhow::Result<DaemonHealth> {
         Ok(DaemonHealth { status: "ok".to_string() })
     }

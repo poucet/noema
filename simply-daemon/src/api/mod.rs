@@ -16,7 +16,7 @@
 #[macro_use] mod oauth;
 #[macro_use] mod model;
 #[macro_use] mod voice;
-#[macro_use] mod daemon_info;
+#[macro_use] mod core;
 pub mod types;
 
 pub use session::*;
@@ -26,11 +26,25 @@ pub use mcp::*;
 pub use oauth::*;
 pub use model::*;
 pub use voice::*;
-pub use daemon_info::*;
+pub use self::core::*;
 pub use types::*;
 pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
-/// Convenience super-trait combining all daemon APIs.
-pub trait DaemonApi: SessionApi + ConversationApi + AssetApi + McpApi + OAuthApi + ModelApi + VoiceApi {}
-
-impl<T: SessionApi + ConversationApi + AssetApi + McpApi + OAuthApi + ModelApi + VoiceApi> DaemonApi for T {}
+/// Trait providing access to all daemon API services.
+///
+/// Implemented by `EmbeddedDaemon` (returns inner services directly)
+/// and `RemoteDaemon` (returns `self` for each, since it implements all traits via RPC).
+///
+/// Consumers call `daemon.model().list_models()`, `daemon.session().create_session()`, etc.
+pub trait Daemon: Send + Sync {
+    fn session(&self) -> &dyn SessionApi;
+    fn conversation(&self) -> &dyn ConversationApi;
+    fn mcp(&self) -> &dyn McpApi;
+    fn oauth(&self) -> &dyn OAuthApi;
+    fn model(&self) -> &dyn ModelApi;
+    fn asset(&self) -> &dyn AssetApi;
+    fn voice(&self) -> &dyn VoiceApi;
+    fn core(&self) -> &dyn CoreApi;
+    /// Composite tool service — includes daemon REST tools + MCP tools.
+    fn tools(&self) -> &dyn simply_core::ToolService;
+}

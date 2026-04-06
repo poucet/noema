@@ -19,9 +19,12 @@ use simply_core::{
     McpToolRegistry, Persistence, SessionEvent, SessionEventSender, SessionManager, ToolService,
 };
 
+use simply_rpc::RpcService;
+
 use crate::api::*;
 use crate::mcp::{McpService, McpServiceConfig};
 use crate::services::*;
+use crate::tools::{CompositeToolService, DaemonToolService};
 
 // ---------------------------------------------------------------------------
 // Session bookkeeping
@@ -49,7 +52,8 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     model: Arc<ModelService>,
     asset: Arc<AssetService<S>>,
     voice: Arc<VoiceService>,
-    daemon_info: Arc<DaemonInfoService>,
+    core: Arc<CoreService>,
+    tools: Arc<CompositeToolService>,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -84,7 +88,18 @@ where
         let model = Arc::new(ModelService::new(default_model_id));
         let asset = Arc::new(AssetService::new(Arc::clone(&coordinator), Arc::clone(&stores)));
         let voice = Arc::new(VoiceService);
-        let daemon_info = Arc::new(DaemonInfoService::embedded());
+        let core = Arc::new(CoreService::embedded());
+
+        let tools = Arc::new({
+            let daemon_tools = DaemonToolService::new()
+                .register(<dyn AssetApi>::service(asset.clone()))
+                .register(<dyn ModelApi>::service(model.clone()))
+                .register(<dyn CoreApi>::service(core.clone()));
+            let mcp_tools = McpToolRegistry::new(Arc::clone(mcp.registry()));
+            CompositeToolService::new()
+                .add(daemon_tools)
+                .add(mcp_tools)
+        });
 
         let daemon = Arc::new(Self {
             coordinator,
@@ -95,7 +110,8 @@ where
             model,
             asset,
             voice,
-            daemon_info,
+            core,
+            tools,
         });
 
         Self::spawn_session_reaper(Arc::clone(&daemon));
@@ -109,7 +125,12 @@ where
     pub fn model_service(&self) -> Arc<ModelService> { Arc::clone(&self.model) }
     pub fn asset_service(&self) -> Arc<AssetService<S>> { Arc::clone(&self.asset) }
     pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
-    pub fn daemon_info_service(&self) -> Arc<DaemonInfoService> { Arc::clone(&self.daemon_info) }
+    pub fn core_service(&self) -> Arc<CoreService> { Arc::clone(&self.core) }
+
+    /// The composite tool service (daemon REST tools + MCP tools).
+    pub fn tool_service(&self) -> &CompositeToolService {
+        &self.tools
+    }
 
     pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
     pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
@@ -278,8 +299,7 @@ where
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
         let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
-        let tools: Arc<dyn ToolService> =
-            Arc::new(McpToolRegistry::new(Arc::clone(self.mcp.registry())));
+        let tools: Arc<dyn ToolService> = self.tools.clone();
         let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
         let evt_tx = Self::spawn_event_forwarder(&session_id, &broadcast_tx);
 
@@ -417,72 +437,19 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Delegated traits — forward to inner services for DaemonApi compat
+// Daemon trait — service bag with direct delegation
 // ---------------------------------------------------------------------------
 
-#[async_trait]
-impl<S: StorageTypes> McpApi for EmbeddedDaemon<S>
+impl<S: StorageTypes> Daemon for EmbeddedDaemon<S>
 where S::Document: DocumentResolver,
 {
-    async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> { self.mcp.list_mcp_servers().await }
-    async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> { self.mcp.add_mcp_server(request).await }
-    async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.remove_mcp_server(server_id).await }
-    async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> { self.mcp.connect_mcp_server(server_id).await }
-    async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.disconnect_mcp_server(server_id).await }
-    async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpTool>> { self.mcp.get_mcp_server_tools(server_id).await }
-    async fn test_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> { self.mcp.test_mcp_server(server_id).await }
-    async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> { self.mcp.update_mcp_server_settings(server_id, request).await }
-    async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.stop_mcp_retry(server_id).await }
-    async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.start_mcp_retry(server_id).await }
-    async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize> { self.mcp.register_ephemeral_mcp(request).await }
-    async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.unregister_ephemeral_mcp(server_id).await }
-    async fn list_all_tools(&self) -> anyhow::Result<Vec<McpTool>> { self.mcp.list_all_tools().await }
-    async fn call_tool_direct(&self, request: CallToolRequestParam) -> anyhow::Result<CallToolResult> { self.mcp.call_tool_direct(request).await }
-}
-
-#[async_trait]
-impl<S: StorageTypes> OAuthApi for EmbeddedDaemon<S>
-where S::Document: DocumentResolver,
-{
-    async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> { self.mcp.start_oauth(server_id).await }
-    async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()> { self.mcp.complete_oauth(server_id, code, state).await }
-    async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()> { self.mcp.complete_oauth_with_code(server_id, code).await }
-    async fn resolve_oauth_state(&self, state: &str) -> Option<String> { self.mcp.resolve_oauth_state(state).await }
-}
-
-#[async_trait]
-impl<S: StorageTypes> ModelApi for EmbeddedDaemon<S>
-where S::Document: DocumentResolver,
-{
-    async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>> { self.model.list_models().await }
-    async fn list_providers(&self) -> Vec<llm::ProviderInfo> { self.model.list_providers().await }
-    async fn default_model_id(&self) -> String { self.model.default_model_id().await }
-    async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> { self.model.set_default_model(model_id).await }
-}
-
-#[async_trait]
-impl<S: StorageTypes> AssetApi for EmbeddedDaemon<S>
-where S::Document: DocumentResolver,
-{
-    async fn store_asset(&self, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetInfo> { self.asset.store_asset(upload).await }
-    async fn list_assets(&self) -> anyhow::Result<Vec<AssetId>> { self.asset.list_assets().await }
-    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<AssetInfo> { self.asset.get_asset(id).await }
-    async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> { self.asset.get_blob(hash).await }
-}
-
-#[async_trait]
-impl<S: StorageTypes> VoiceApi for EmbeddedDaemon<S>
-where S::Document: DocumentResolver,
-{
-    async fn voice_connect(&self, session_id: &SessionId) -> anyhow::Result<VoiceHandle> { self.voice.voice_connect(session_id).await }
-    async fn voice_disconnect(&self, session_id: &SessionId) -> anyhow::Result<()> { self.voice.voice_disconnect(session_id).await }
-}
-
-#[async_trait]
-impl<S: StorageTypes> DaemonInfoApi for EmbeddedDaemon<S>
-where S::Document: DocumentResolver,
-{
-    async fn health(&self) -> anyhow::Result<DaemonHealth> { self.daemon_info.health().await }
-    async fn kill(&self) -> anyhow::Result<()> { self.daemon_info.kill().await }
-    async fn version(&self) -> anyhow::Result<String> { self.daemon_info.version().await }
+    fn session(&self) -> &dyn SessionApi { self }
+    fn conversation(&self) -> &dyn ConversationApi { self }
+    fn mcp(&self) -> &dyn McpApi { &*self.mcp }
+    fn oauth(&self) -> &dyn OAuthApi { &*self.mcp }
+    fn model(&self) -> &dyn ModelApi { &*self.model }
+    fn asset(&self) -> &dyn AssetApi { &*self.asset }
+    fn voice(&self) -> &dyn VoiceApi { &*self.voice }
+    fn core(&self) -> &dyn CoreApi { &*self.core }
+    fn tools(&self) -> &dyn ToolService { &*self.tools }
 }
