@@ -70,14 +70,18 @@ async fn main() -> anyhow::Result<()> {
         .register(<dyn VoiceApi>::service(voice_svc))
         .register(<dyn DaemonInfoApi>::service(daemon_info_svc));
 
-    let _server = net::rest::start(net::rest::ServerConfig {
+    let server = net::rest::start(net::rest::ServerConfig {
         rest_dispatcher,
         ws_dispatch: Some(ws_dispatch),
         port,
         tracker,
     }).await?;
 
-    tracing::info!(port, "daemon ready");
+    let actual_port = server.port();
+    tracing::info!(port = actual_port, "daemon ready");
+
+    // Print port to stdout so callers (e.g. test harnesses) can discover it
+    println!("{actual_port}");
 
     // Wait for shutdown signal (Ctrl+C, SIGTERM, or /kill REST endpoint)
     tokio::select! {

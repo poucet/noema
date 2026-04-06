@@ -56,7 +56,8 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
 
     let addr = format!("127.0.0.1:{}", config.port);
     let listener = TcpListener::bind(&addr).await?;
-    tracing::info!(port = config.port, "server listening");
+    let actual_port = listener.local_addr()?.port();
+    tracing::info!(port = actual_port, "server listening");
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -67,7 +68,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
             .ok();
     });
 
-    Ok(ServerHandle { _task: handle, _shutdown: shutdown_tx, port: config.port })
+    Ok(ServerHandle { _task: handle, _shutdown: shutdown_tx, port: actual_port })
 }
 
 pub struct ServerHandle {
