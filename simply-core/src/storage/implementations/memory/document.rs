@@ -52,6 +52,7 @@ impl DocumentStore for MemoryDocumentStore {
             title: title.to_string(),
             source,
             source_id: source_id.map(|s| s.to_string()),
+            is_public: false,
         };
 
         let stored = stored_editable(id.clone(), doc, now, now);
