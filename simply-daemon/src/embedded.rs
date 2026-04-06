@@ -107,10 +107,10 @@ where
         // Register Voxtral (Mistral API — STT + TTS)
         if let Some(key) = settings.get_api_key("mistral") {
             let voxtral = Arc::new(simply_voice::VoxtralProvider::new(key));
-            voice_service = voice_service.register_stt(
-                "voxtral", "Voxtral (Mistral)", voxtral,
-            );
-            tracing::info!("voxtral STT registered");
+            voice_service = voice_service
+                .register_stt("voxtral", "Voxtral (Mistral)", voxtral.clone())
+                .register_tts("voxtral", "Voxtral (Mistral)", voxtral);
+            tracing::info!("voxtral STT + TTS registered");
         }
 
         // Register Gemini Realtime

@@ -154,6 +154,7 @@ use std::collections::HashMap;
 struct RegisteredProvider {
     info: VoiceProviderInfo,
     stt: Option<Arc<dyn simply_voice::SttProvider>>,
+    tts: Option<Arc<dyn simply_voice::TtsProvider>>,
     realtime: Option<Arc<dyn simply_voice::RealtimeProvider>>,
 }
 
@@ -175,12 +176,29 @@ impl VoiceService {
         let id = id.into();
         let entry = self.providers.entry(id.clone()).or_insert_with(|| RegisteredProvider {
             info: VoiceProviderInfo { id, name: name.into(), capabilities: Vec::new() },
-            stt: None,
-            realtime: None,
+            stt: None, tts: None, realtime: None,
         });
         entry.stt = Some(provider);
         if !entry.info.capabilities.contains(&"stt".to_string()) {
             entry.info.capabilities.push("stt".to_string());
+        }
+        self
+    }
+
+    pub fn register_tts(
+        mut self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        provider: Arc<dyn simply_voice::TtsProvider>,
+    ) -> Self {
+        let id = id.into();
+        let entry = self.providers.entry(id.clone()).or_insert_with(|| RegisteredProvider {
+            info: VoiceProviderInfo { id, name: name.into(), capabilities: Vec::new() },
+            stt: None, tts: None, realtime: None,
+        });
+        entry.tts = Some(provider);
+        if !entry.info.capabilities.contains(&"tts".to_string()) {
+            entry.info.capabilities.push("tts".to_string());
         }
         self
     }
@@ -194,8 +212,7 @@ impl VoiceService {
         let id = id.into();
         let entry = self.providers.entry(id.clone()).or_insert_with(|| RegisteredProvider {
             info: VoiceProviderInfo { id, name: name.into(), capabilities: Vec::new() },
-            stt: None,
-            realtime: None,
+            stt: None, tts: None, realtime: None,
         });
         entry.realtime = Some(provider);
         if !entry.info.capabilities.contains(&"realtime".to_string()) {
@@ -324,6 +341,22 @@ impl VoiceApi for VoiceService {
         }
 
         Ok(simply_rpc::StreamHandle::new(input_tx, event_rx))
+    }
+
+    async fn synthesize(&self, text: &str, provider_id: &str) -> anyhow::Result<simply_voice::AudioChunk> {
+        let provider = self.providers.get(provider_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
+        let tts = provider.tts.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' has no TTS capability"))?;
+        tts.synthesize(text).await
+    }
+
+    async fn list_voices(&self, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>> {
+        let provider = self.providers.get(provider_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
+        let tts = provider.tts.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' has no TTS capability"))?;
+        tts.voices().await
     }
 
     async fn voice_disconnect(&self, _session_id: &str) -> anyhow::Result<()> {

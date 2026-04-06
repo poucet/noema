@@ -33,11 +33,11 @@
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 2.1 | ⬜ | Pipeline mode: audio stream → VAD → STT → agent → TTS → audio back | P0 | L |
+| 2.1 | ✅ | STT stream: audio → VAD → STT → UserTranscript back to client | P0 | L |
 | 2.2 | ⬜ | Realtime mode: audio stream → VAD → RealtimeProvider (bidirectional) | P0 | L |
-| 2.3 | ⬜ | WS binary frame multiplexing for audio transport | P0 | M |
-| 2.4 | ⬜ | Pure STT mode: client sends audio, gets text back (no LLM) | P1 | S |
-| 2.5 | ⬜ | Pure TTS mode: client sends text, gets audio back | P1 | S |
+| 2.3 | ✅ | Bidi WS streams via StreamHandle (macro-generated) | P0 | M |
+| 2.4 | ✅ | TTS endpoint: POST /voice/tts → synthesize text → AudioChunk | P0 | S |
+| 2.5 | ⬜ | Voice provider selection UI + list endpoint | P1 | S |
 
 ---
 
@@ -45,9 +45,10 @@
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 3.1 | ⬜ | Wire Noema: mic → daemon voice → transcript into chat conversation | P0 | M |
+| 3.1 | ✅ | Wire Noema: mic → daemon voice → transcript into chat conversation | P0 | M |
 | 3.2 | ⬜ | Audio session management in Noema UI | P0 | S |
-| 3.3 | ⬜ | Handle interruptions: user speaks while TTS is playing | P1 | S |
+| 3.3 | ⬜ | Voice conversation mode: auto-TTS assistant responses + play through speakers | P0 | M |
+| 3.4 | ⬜ | Handle interruptions: user speaks while TTS is playing | P1 | S |
 
 ---
 
@@ -56,6 +57,9 @@
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
 | 4.1 | ⬜ | Add songbird to Lumina crate | P0 | M |
-| 4.2 | ⬜ | `/voice join`, `/voice leave`, `/voice converse` commands | P0 | M |
-| 4.3 | ⬜ | Multi-user voice: distinguish speakers, turn-taking | P1 | M |
-| 4.4 | ⬜ | DAVE encryption support | P1 | L |
+| 4.2 | ⬜ | `/voice transcribe` — join voice channel, transcribe all speech to text channel | P0 | M |
+| 4.3 | ⬜ | `/voice listen` — join voice channel, STT → session → TTS response (full voice conversation) | P0 | L |
+| 4.4 | ⬜ | `/voice say <text>` — speak text in the voice channel via TTS | P0 | S |
+| 4.5 | ⬜ | `/voice leave` — leave voice channel | P0 | S |
+| 4.6 | ⬜ | Multi-user voice: distinguish speakers, turn-taking | P1 | M |
+| 4.7 | ⬜ | DAVE encryption support | P1 | L |
