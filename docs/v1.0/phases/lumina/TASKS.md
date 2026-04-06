@@ -121,53 +121,26 @@
 
 ---
 
-## Stage 9 — MCP Server Management
-
-**Goal:** Port MCP server discovery and management commands.
-
-| # | | Task | Priority | Size |
-|---|---|------|----------|------|
-| 9.1 | ⬜ | Port MCPServerCog: `/mcp list`, `info`, `toggle`, `delete` | P1 | M |
-| 9.2 | ⬜ | `/mcp tools` — list available tools | P1 | S |
-| 9.3 | ⬜ | `/mcp call`, `/mcp call_raw` — invoke tools | P1 | M |
-| 9.4 | ⬜ | `/mcp add` — interactive server registration | P2 | M |
-
----
-
-## Stage 10 — Context (Memory Garden)
+## Stage 9 — Context (Memory Garden)
 
 **Goal:** Port context/mental state management system.
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 10.1 | ⬜ | Port ContextCog: `/context save`, `reload`, `list`, `show`, `delete` | P2 | M |
-| 10.2 | ⬜ | `on_message` listener for context switch detection | P2 | S |
+| 9.1 | ⬜ | Port ContextCog: `/context save`, `reload`, `list`, `show`, `delete` | P2 | M |
+| 9.2 | ⬜ | `on_message` listener for context switch detection | P2 | S |
 
 ---
 
-## Stage 11 — Google Integrations
+## Stage 10 — Google Integrations (Sidecar MCP Server)
 
-**Goal:** Port Google service integrations (conditional on auth).
-
-| # | | Task | Priority | Size |
-|---|---|------|----------|------|
-| 11.1 | ⬜ | Port AuthCog / GoogleAuthCog: `/authenticate`, `/authenticate_google` | P2 | M |
-| 11.2 | ⬜ | Port DriveCog: `/drive list`, `show`, `read` | P2 | M |
-| 11.3 | ⬜ | Port CalendarCog: `/calendar list` | P2 | S |
-
----
-
-## Stage 12 — Server Management & Utilities
-
-**Goal:** Port remaining server and utility commands.
+**Goal:** Separate sidecar MCP server exposing Google service integrations, with authentication handled through MCP.
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 12.1 | ⬜ | Port ServerCog: `/welcome` (set_channel, toggle, set_template, test) | P2 | M |
-| 12.2 | ⬜ | `/serverinfo` — server information display | P2 | S |
-| 12.3 | ⬜ | `on_member_join` listener for welcome messages | P2 | S |
-| 12.4 | ⬜ | Port UtilityCog: `/export_messages` | P2 | S |
-| 12.5 | ⬜ | Rich Discord embeds and interactive components | P2 | M |
+| 10.1 | ⬜ | Scaffold sidecar MCP server crate with Google OAuth via MCP auth | P2 | M |
+| 10.2 | ⬜ | Drive tools: `drive_list`, `drive_show`, `drive_read` | P2 | M |
+| 10.3 | ⬜ | Calendar tools: `calendar_list` | P2 | S |
 
 ---
 
