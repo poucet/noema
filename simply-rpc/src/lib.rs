@@ -18,7 +18,7 @@ mod stream;
 pub mod ws_client;
 pub mod ws_server;
 
-pub use client::RpcClient;
+pub use client::RpcConnection;
 pub use context::DispatchResult;
 pub use stream::StreamHandle;
 pub use helpers::{base64_bytes, call_raw, call_unit, call_val, decode_base64, encode_base64};

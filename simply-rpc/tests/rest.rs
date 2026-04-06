@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, ServiceRouter, RestService, RpcClient, RpcService};
+use simply_rpc::{HttpMethod, ServiceRouter, RestService, RpcConnection, RpcService};
 
 // ---------------------------------------------------------------------------
 // Test types
@@ -313,7 +313,7 @@ impl MockWsClient {
 }
 
 #[async_trait]
-impl RpcClient for MockWsClient {
+impl RpcConnection for MockWsClient {
     type Stream = tokio::sync::broadcast::Receiver<String>;
 
     async fn rpc_call(&self, method: &str, params: Value) -> anyhow::Result<Value> {

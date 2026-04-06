@@ -7,7 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, ServiceRouter, RpcClient, RpcService, check_compat};
+use simply_rpc::{HttpMethod, ServiceRouter, RpcConnection, RpcService, check_compat};
+use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------
 // Test trait — exercises all non-streaming patterns
@@ -236,15 +237,10 @@ impl MockClient {
 }
 
 #[async_trait]
-impl RpcClient for MockClient {
-    type Stream = ();
-
+impl RpcConnection for MockClient {
     async fn rpc_call(&self, method: &str, _params: Value) -> anyhow::Result<Value> {
         Err(anyhow::anyhow!("rpc_call should not be used for REST methods: {method}"))
     }
-
-    async fn register_stream(&self, _id: &str) -> Self::Stream {}
-    async fn unregister_stream(&self, _id: &str) {}
 
     async fn rest_call(
         &self,
@@ -257,13 +253,28 @@ impl RpcClient for MockClient {
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
     }
+
+    async fn register_stream(&self, _id: &str) -> mpsc::Receiver<Value> {
+        let (_, rx) = mpsc::channel(1);
+        rx
+    }
+
+    async fn unregister_stream(&self, _id: &str) {}
+
+    async fn register_bidi_stream_raw(
+        &self, _method: &str, _path: &str,
+    ) -> anyhow::Result<(mpsc::Sender<Value>, mpsc::Receiver<Value>)> {
+        anyhow::bail!("not supported")
+    }
 }
 
-impl_remote_item_api!(MockClient);
+fn make_remote(items: Vec<Item>) -> RemoteItemApi {
+    RemoteItemApi::new(Arc::new(MockClient::new(items)))
+}
 
 #[tokio::test]
 async fn client_list_items() {
-    let client = MockClient::new(vec![
+    let client = make_remote(vec![
         Item { id: "a".into(), name: "A".into() },
     ]);
     let items = client.list_items().await.unwrap();
@@ -273,7 +284,7 @@ async fn client_list_items() {
 
 #[tokio::test]
 async fn client_get_item() {
-    let client = MockClient::new(vec![
+    let client = make_remote(vec![
         Item { id: "x".into(), name: "X".into() },
     ]);
     let item = client.get_item("x").await.unwrap();
@@ -282,7 +293,7 @@ async fn client_get_item() {
 
 #[tokio::test]
 async fn client_add_item() {
-    let client = MockClient::new(vec![]);
+    let client = make_remote(vec![]);
     client.add_item(Item { id: "new".into(), name: "New".into() }).await.unwrap();
     let items = client.list_items().await.unwrap();
     assert_eq!(items.len(), 1);
@@ -290,7 +301,7 @@ async fn client_add_item() {
 
 #[tokio::test]
 async fn client_rename_item() {
-    let client = MockClient::new(vec![
+    let client = make_remote(vec![
         Item { id: "1".into(), name: "Old".into() },
     ]);
     client.rename_item("1", "New").await.unwrap();
@@ -300,7 +311,7 @@ async fn client_rename_item() {
 
 #[tokio::test]
 async fn client_raw_return() {
-    let client = MockClient::new(vec![
+    let client = make_remote(vec![
         Item { id: "1".into(), name: "A".into() },
     ]);
     let count = client.count_items().await;

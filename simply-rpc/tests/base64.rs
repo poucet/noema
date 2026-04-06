@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use simply_rpc::{BinaryResponse, BinaryUpload, HttpMethod, ServiceRouter, RpcClient, RpcService};
+use simply_rpc::{BinaryResponse, BinaryUpload, HttpMethod, ServiceRouter, RpcConnection, RpcService};
 
 // ---------------------------------------------------------------------------
 // Test trait with binary methods
@@ -119,8 +119,8 @@ impl MockBlobClient {
 }
 
 #[async_trait]
-impl RpcClient for MockBlobClient {
-    type Stream = ();
+impl RpcConnection for MockBlobClient {
+    
 
     async fn rpc_call(&self, method: &str, _params: Value) -> anyhow::Result<Value> {
         Err(anyhow::anyhow!("rpc_call should not be used for REST methods: {method}"))

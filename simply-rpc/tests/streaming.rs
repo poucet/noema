@@ -11,7 +11,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, ServiceRouter, RpcClient, RpcService};
+use simply_rpc::{HttpMethod, ServiceRouter, RpcConnection, RpcService};
 use tokio::sync::broadcast;
 
 // ---------------------------------------------------------------------------
@@ -330,7 +330,7 @@ impl MockStreamClient {
 }
 
 #[async_trait]
-impl RpcClient for MockStreamClient {
+impl RpcConnection for MockStreamClient {
     type Stream = broadcast::Receiver<ChannelEvent>;
 
     async fn rpc_call(&self, method: &str, params: Value) -> anyhow::Result<Value> {

@@ -3,10 +3,11 @@ use quote::{format_ident, quote};
 
 use crate::parse::{HttpMethod, ParsedMethod, ParsedTrait, RestEndpoint, ReturnKind, RpcKind};
 
-/// Generate the `impl_remote_xxx!` declarative macro.
+/// Generate a `RemoteXxxApi` struct that implements the trait via `RpcConnection`.
 pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
-    let macro_name = parsed.client_macro_name();
     let trait_name = &parsed.trait_name;
+    let remote_name = parsed.remote_name();
+    let vis = &parsed.vis;
 
     let method_impls: Vec<TokenStream> = parsed
         .methods
@@ -14,33 +15,28 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         .map(|m| generate_client_method(m))
         .collect::<syn::Result<Vec<_>>>()?;
 
-    // Collect stream types for where bounds on the client
-    let stream_methods: Vec<_> = parsed
-        .methods
-        .iter()
-        .filter(|m| m.rpc_kind == RpcKind::Stream)
-        .collect();
-
-    // No where bounds needed — the RpcClient::Stream type must match
-    // the stream types in the trait. The compiler enforces this via the
-    // explicit type annotations in the generated method bodies.
-    let _ = stream_methods;
-
     Ok(quote! {
-        /// Implement the trait for any type implementing `RpcClient`.
-        macro_rules! #macro_name {
-            ($T:ty) => {
-                #[::async_trait::async_trait]
-                impl #trait_name for $T
-                {
-                    #(#method_impls)*
-                }
-            };
+        /// Auto-generated remote client for this API trait.
+        ///
+        /// Holds an `Arc<dyn RpcConnection>` and implements the trait by
+        /// delegating to REST/WS calls over the connection.
+        #vis struct #remote_name(::std::sync::Arc<dyn ::simply_rpc::RpcConnection>);
+
+        impl #remote_name {
+            /// Create a new remote client from an RPC connection.
+            pub fn new(conn: ::std::sync::Arc<dyn ::simply_rpc::RpcConnection>) -> Self {
+                Self(conn)
+            }
+        }
+
+        #[::async_trait::async_trait]
+        impl #trait_name for #remote_name {
+            #(#method_impls)*
         }
     })
 }
 
-/// Generate a single method implementation for the client.
+/// Generate a single method implementation for the remote client.
 fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
     let sig = &method.sig;
     let fn_name = &sig.ident;
@@ -55,24 +51,22 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
         });
     }
 
-    // REST-annotated methods (not stream) → generate rest_call with path interpolation
+    // REST-annotated methods → generate rest_call with path interpolation
     if let Some(endpoint) = &method.rest_endpoint {
         if endpoint.http_method != HttpMethod::Stream {
             let body = generate_rest_client_body(method, endpoint);
             return Ok(quote! {
                 async fn #fn_name(#inputs) #output {
-                    use ::simply_rpc::RpcClient;
                     #body
                 }
             });
         }
 
-        // StreamBidi with a path → generate bidi WS connection via rpc_call + register_bidi_stream
+        // StreamBidi with a path → generate bidi WS connection
         if let ReturnKind::StreamBidi { input_type, output_type } = &method.return_kind {
             let method_str = &method.method_name;
             let path_template = &endpoint.path_template;
 
-            // Build path with interpolation
             let path_expr = if endpoint.path_params.is_empty() {
                 quote! { #path_template.to_string() }
             } else {
@@ -91,36 +85,52 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
 
             return Ok(quote! {
                 async fn #fn_name(#inputs) #output {
-                    use ::simply_rpc::RpcClient;
                     #serialize
-                    // Call via RPC to set up the server side, then register the bidi stream
-                    self.rpc_call(#method_str, #rpc_params).await?;
+                    self.0.rpc_call(#method_str, #rpc_params).await?;
                     let __path = #path_expr;
-                    let __handle: ::simply_rpc::StreamHandle<#input_type, #output_type> =
-                        self.register_bidi_stream(#method_str, &__path).await?;
-                    Ok(__handle)
+                    let (__raw_tx, mut __raw_rx) = self.0.register_bidi_stream_raw(#method_str, &__path).await?;
+
+                    // Wrap raw channels with typed serialization
+                    let (__typed_tx, mut __typed_rx) = ::tokio::sync::mpsc::channel::<#input_type>(64);
+                    let (output_tx, output_rx) = ::tokio::sync::mpsc::channel::<#output_type>(64);
+
+                    // T → serialize → raw_tx
+                    ::tokio::spawn(async move {
+                        while let Some(msg) = __typed_rx.recv().await {
+                            let value = ::serde_json::to_value(&msg).unwrap_or_default();
+                            if __raw_tx.send(value).await.is_err() { break; }
+                        }
+                    });
+
+                    // raw_rx → deserialize → U
+                    ::tokio::spawn(async move {
+                        while let Some(value) = __raw_rx.recv().await {
+                            match ::serde_json::from_value::<#output_type>(value) {
+                                Ok(event) => { if output_tx.send(event).await.is_err() { break; } }
+                                Err(e) => { ::tracing::warn!("bidi stream deserialize error: {}", e); }
+                            }
+                        }
+                    });
+
+                    Ok(::simply_rpc::StreamHandle::new(__typed_tx, output_rx))
                 }
             });
         }
     }
 
-    // Stream or unannotated methods → WS rpc_call (existing behavior)
+    // Stream or unannotated methods → WS rpc_call
     let method_str = &method.method_name;
     let (serialize, rpc_params) = generate_serialize(method);
     let body = generate_client_body(method, method_str, &serialize, &rpc_params);
 
     Ok(quote! {
         async fn #fn_name(#inputs) #output {
-            use ::simply_rpc::RpcClient;
             #body
         }
     })
 }
 
 /// Generate the body for a REST-annotated client method.
-///
-/// Builds the path from the template (interpolating params), collects remaining
-/// params into a JSON body, then calls `self.rest_call(method, path, body)`.
 fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> TokenStream {
     let http_method = match endpoint.http_method {
         HttpMethod::Get => quote! { ::simply_rpc::HttpMethod::Get },
@@ -130,12 +140,10 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
         HttpMethod::Stream => unreachable!("stream methods handled separately"),
     };
 
-    // Build path string with interpolation
     let path_template = &endpoint.path_template;
     let path_expr = if endpoint.path_params.is_empty() {
         quote! { #path_template.to_string() }
     } else {
-        // Replace {param} with the actual param value
         let mut format_str = path_template.clone();
         let mut format_args = Vec::new();
         for param_name in &endpoint.path_params {
@@ -147,7 +155,6 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
         quote! { format!(#format_str, #(#format_args),*) }
     };
 
-    // Body params: everything not in the path
     let body_params: Vec<_> = method.params.iter().filter(|p| {
         !endpoint.path_params.contains(&p.name.to_string())
     }).collect();
@@ -155,7 +162,6 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
     let body_expr = if body_params.is_empty() {
         quote! { ::serde_json::Value::Null }
     } else if body_params.len() == 1 && endpoint.path_params.is_empty() {
-        // Single param, no path params → whole body is the value
         let p = &body_params[0];
         let name = &p.name;
         quote! { ::serde_json::to_value(#name)? }
@@ -188,17 +194,17 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
     match &method.return_kind {
         ReturnKind::ResultUnit => quote! {
             let __path = #path_expr;
-            self.rest_call(#http_method, &__path, #body_expr).await?;
+            self.0.rest_call(#http_method, &__path, #body_expr).await?;
             Ok(())
         },
         ReturnKind::ResultValue { .. } => quote! {
             let __path = #path_expr;
-            let __r = self.rest_call(#http_method, &__path, #body_expr).await?;
+            let __r = self.0.rest_call(#http_method, &__path, #body_expr).await?;
             Ok(::serde_json::from_value(__r)?)
         },
         ReturnKind::RawValue { .. } => quote! {
             let __path = #path_expr;
-            self.rest_call(#http_method, &__path, #body_expr)
+            self.0.rest_call(#http_method, &__path, #body_expr)
                 .await
                 .and_then(|r| ::serde_json::from_value(r).map_err(Into::into))
                 .unwrap_or_default()
@@ -221,7 +227,6 @@ fn generate_serialize(method: &ParsedMethod) -> (TokenStream, TokenStream) {
         return (quote! {}, quote! { ::serde_json::to_value(#name)? });
     }
 
-    // Multi-param: generate a Params struct with owned types for serialization.
     let struct_name = format_ident!("__RpcClientParams_{}", method.name);
     let fields: Vec<TokenStream> = params
         .iter()
@@ -262,13 +267,7 @@ fn generate_serialize(method: &ParsedMethod) -> (TokenStream, TokenStream) {
     (serialize, params_expr)
 }
 
-/// Check if a type is `Vec<u8>`.
-fn is_vec_u8(ty: &syn::Type) -> bool {
-    let s = quote! { #ty }.to_string().replace(' ', "");
-    s == "Vec<u8>"
-}
-
-/// Generate the body of a client method.
+/// Generate the body of a client method (WS RPC path).
 fn generate_client_body(
     method: &ParsedMethod,
     method_str: &str,
@@ -279,48 +278,53 @@ fn generate_client_body(
         ReturnKind::ResultUnit => {
             quote! {
                 #serialize
-                self.rpc_call(#method_str, #rpc_params).await?;
+                self.0.rpc_call(#method_str, #rpc_params).await?;
                 Ok(())
             }
         }
         ReturnKind::ResultValue { .. } => {
             quote! {
                 #serialize
-                let __r = self.rpc_call(#method_str, #rpc_params).await?;
+                let __r = self.0.rpc_call(#method_str, #rpc_params).await?;
                 Ok(::serde_json::from_value(__r)?)
             }
         }
         ReturnKind::RawValue { .. } => {
-            // RawValue methods don't return Result, so we can't use ? — wrap everything in a closure
             let params_for_raw = if method.params.is_empty() {
                 quote! { ::serde_json::Value::Null }
             } else if method.params.len() == 1 {
                 let name = &method.params[0].name;
                 quote! { ::serde_json::to_value(#name).unwrap_or_default() }
             } else {
-                // Multi-param: reuse the serialize struct but with unwrap
                 quote! { #rpc_params.unwrap_or_default() }
             };
             quote! {
                 #serialize
-                self.rpc_call(#method_str, #params_for_raw)
+                self.0.rpc_call(#method_str, #params_for_raw)
                     .await
                     .and_then(|r| ::serde_json::from_value(r).map_err(Into::into))
                     .unwrap_or_default()
             }
         }
-        ReturnKind::StreamTuple { value_type, stream_type } => {
+        ReturnKind::StreamTuple { value_type, .. } => {
             // Result<(T, S)> — RPC returns T, then register stream
             quote! {
                 #serialize
-                let __r = self.rpc_call(#method_str, #rpc_params).await?;
+                let __r = self.0.rpc_call(#method_str, #rpc_params).await?;
                 let __value: #value_type = ::serde_json::from_value(__r)?;
-                let __stream: #stream_type = self.register_stream(__value.id.as_str()).await;
-                Ok((__value, __stream))
+                let __stream = self.0.register_stream(__value.id.as_str()).await;
+                // Deserialize raw JSON events into the stream type
+                let (tx, rx) = ::tokio::sync::mpsc::channel(256);
+                ::tokio::spawn(async move {
+                    while let Some(value) = __stream.recv().await {
+                        // Stream events are already typed by the demux
+                        let _ = tx.send(value).await;
+                    }
+                });
+                Ok((__value, rx))
             }
         }
-        ReturnKind::StreamBare { stream_type } => {
-            // Result<S> — RPC returns true, register stream using first param
+        ReturnKind::StreamBare { .. } => {
             let id_expr = if let Some(first) = method.params.first() {
                 let name = &first.name;
                 if first.is_str_ref {
@@ -334,38 +338,35 @@ fn generate_client_body(
 
             quote! {
                 #serialize
-                self.rpc_call(#method_str, #rpc_params).await?;
-                let __stream: #stream_type = self.register_stream(#id_expr).await;
+                self.0.rpc_call(#method_str, #rpc_params).await?;
+                let __stream = self.0.register_stream(#id_expr).await;
                 Ok(__stream)
             }
         }
         ReturnKind::StreamBidi { input_type, output_type } => {
-            // StreamBidi without a stream endpoint — use method name as path fallback
+            // Fallback for StreamBidi without endpoint (shouldn't happen normally)
             quote! {
                 #serialize
-                self.rpc_call(#method_str, #rpc_params).await?;
-                let __handle: ::simply_rpc::StreamHandle<#input_type, #output_type> =
-                    self.register_bidi_stream(#method_str, "").await?;
-                Ok(__handle)
+                self.0.rpc_call(#method_str, #rpc_params).await?;
+                let (__raw_tx, mut __raw_rx) = self.0.register_bidi_stream_raw(#method_str, "").await?;
+                let (__typed_tx, mut __typed_rx) = ::tokio::sync::mpsc::channel::<#input_type>(64);
+                let (output_tx, output_rx) = ::tokio::sync::mpsc::channel::<#output_type>(64);
+                ::tokio::spawn(async move {
+                    while let Some(msg) = __typed_rx.recv().await {
+                        let value = ::serde_json::to_value(&msg).unwrap_or_default();
+                        if __raw_tx.send(value).await.is_err() { break; }
+                    }
+                });
+                ::tokio::spawn(async move {
+                    while let Some(value) = __raw_rx.recv().await {
+                        match ::serde_json::from_value::<#output_type>(value) {
+                            Ok(event) => { if output_tx.send(event).await.is_err() { break; } }
+                            Err(e) => { ::tracing::warn!("bidi stream deserialize error: {}", e); }
+                        }
+                    }
+                });
+                Ok(::simply_rpc::StreamHandle::new(__typed_tx, output_rx))
             }
         }
     }
-}
-
-/// Collect unique stream types from stream methods.
-fn collect_unique_stream_types(methods: &[&ParsedMethod]) -> Vec<syn::Type> {
-    let mut types = Vec::new();
-    for m in methods {
-        let st = match &m.return_kind {
-            ReturnKind::StreamTuple { stream_type, .. } => stream_type,
-            ReturnKind::StreamBare { stream_type } => stream_type,
-            ReturnKind::StreamBidi { .. } => continue, // bidi uses register_bidi_stream, not Stream type
-            _ => continue,
-        };
-        let s = quote::quote! { #st }.to_string();
-        if !types.iter().any(|t| quote::quote! { #t }.to_string() == s) {
-            types.push(st.clone());
-        }
-    }
-    types
 }

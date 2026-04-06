@@ -1,31 +1,25 @@
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio::sync::mpsc;
 
-/// Trait for types that can make RPC calls over a network.
+/// Trait-object-safe RPC connection.
 ///
-/// Implement this on your remote client (e.g. `RemoteDaemon`), then use
-/// the generated `impl_remote_xxx!` macros to get trait impls for free.
+/// The core transport interface. Implementations handle the network protocol
+/// (WS, HTTP, in-process). Generated `RemoteXxxApi` structs use this to
+/// communicate with the server.
+///
+/// All methods work with raw `serde_json::Value` — the generated code
+/// handles typed serialization/deserialization.
 #[async_trait]
-pub trait RpcClient: Send + Sync {
-    /// The stream type returned by `#[rpc(stream)]` methods.
-    /// Use `()` if no stream methods are needed.
-    type Stream: Send + 'static;
-
-    /// Send an RPC request and wait for the response.
+pub trait RpcConnection: Send + Sync {
+    /// Send an RPC request and wait for the JSON response.
     async fn rpc_call(
         &self,
         method: &str,
         params: Value,
     ) -> anyhow::Result<Value>;
 
-    /// Register a stream for the given ID.
-    /// Called by generated client code for `#[rpc(stream)]` methods.
-    async fn register_stream(&self, id: &str) -> Self::Stream;
-
-    /// Unregister a stream. Called on cleanup (e.g. close_session).
-    async fn unregister_stream(&self, id: &str);
-
-    /// Make a REST HTTP call. Generated client code calls this for REST-annotated methods.
+    /// Make a REST HTTP call.
     async fn rest_call(
         &self,
         http_method: crate::HttpMethod,
@@ -33,27 +27,20 @@ pub trait RpcClient: Send + Sync {
         body: Value,
     ) -> anyhow::Result<Value>;
 
-    /// Register a bidirectional stream.
+    /// Register a stream for the given ID. Returns raw JSON events.
+    async fn register_stream(&self, id: &str) -> mpsc::Receiver<Value>;
+
+    /// Unregister a stream.
+    async fn unregister_stream(&self, id: &str);
+
+    /// Register a bidirectional stream (raw JSON channels).
     ///
-    /// The RPC call has already been made (setting up the server side).
-    /// `method` is the RPC method name (e.g. "voice.voice_connect").
-    /// `path` is the stream path (e.g. "/voice/stream/whisper").
-    ///
-    /// The client sends `T` as JSON notifications on the shared WS
-    /// (method: "{method}.input"), and receives `U` events
-    /// (method: "{method}.event").
-    ///
-    /// Default implementation returns an error — override in clients that
-    /// support bidirectional streaming.
-    async fn register_bidi_stream<T, U>(
+    /// Returns `(input_sink, output_stream)`:
+    /// - Send `Value` to `input_sink` → serialized and sent as `{method}.input` notifications
+    /// - Receive `Value` from `output_stream` ← deserialized from `{method}.event` notifications
+    async fn register_bidi_stream_raw(
         &self,
-        _method: &str,
-        _path: &str,
-    ) -> anyhow::Result<crate::StreamHandle<T, U>>
-    where
-        T: serde::Serialize + Send + 'static,
-        U: serde::de::DeserializeOwned + Send + 'static,
-    {
-        anyhow::bail!("bidirectional streams not supported by this client")
-    }
+        method: &str,
+        path: &str,
+    ) -> anyhow::Result<(mpsc::Sender<Value>, mpsc::Receiver<Value>)>;
 }

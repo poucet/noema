@@ -138,10 +138,17 @@ impl ParsedTrait {
         )
     }
 
-    /// Client macro name: e.g. `impl_remote_session_api`
+    /// Client macro name: e.g. `impl_remote_session_api` (kept for backward compat)
     pub fn client_macro_name(&self) -> Ident {
         let snake = to_snake_case(&self.trait_name.to_string());
         Ident::new(&format!("impl_remote_{snake}"), self.trait_name.span())
+    }
+
+    /// Remote client struct name: e.g. `RemoteSessionApi`
+    pub fn remote_name(&self) -> Ident {
+        // Strip "Api" suffix if present, then prefix with "Remote"
+        let name = self.trait_name.to_string();
+        Ident::new(&format!("Remote{name}"), self.trait_name.span())
     }
 
     /// Metadata constant name: e.g. `SESSION_API_META`
