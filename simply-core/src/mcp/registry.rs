@@ -641,11 +641,15 @@ impl McpToolRegistry {
         self.get_server_for_tool(name).await.is_some()
     }
 
-    /// Get the server ID that provides a tool
+    /// Get the server ID that provides a tool. Handles prefixed names (e.g. "server.tool_name").
     pub async fn get_server_for_tool(&self, name: &str) -> Option<String> {
+        let (target_server, tool_name) = name.split_once('.').unwrap_or(("", name));
         let registry = self.mcp_registry.lock().await;
         for (server_id, server) in registry.connected_servers() {
-            if server.tools.iter().any(|t| t.name == name) {
+            if !target_server.is_empty() && server_id != target_server {
+                continue;
+            }
+            if server.tools.iter().any(|t| t.name.as_ref() == tool_name) {
                 return Some(server_id.to_string());
             }
         }
@@ -663,9 +667,11 @@ impl crate::agent::ToolService for McpToolRegistry {
     async fn get_definitions(&self) -> Vec<ToolDefinition> {
         let registry = self.mcp_registry.lock().await;
         let mut definitions = Vec::new();
-        for (_server_id, server) in registry.connected_servers() {
+        for (server_id, server) in registry.connected_servers() {
             for tool in &server.tools {
-                definitions.push(mcp_tool_to_definition(tool));
+                let mut def = mcp_tool_to_definition(tool);
+                def.name = format!("{server_id}.{}", def.name);
+                definitions.push(def);
             }
         }
         definitions
@@ -678,15 +684,19 @@ impl crate::agent::ToolService for McpToolRegistry {
     ) -> Result<Vec<ToolResultContent>> {
         traffic_log::log_mcp_request(name, &args);
 
-        // Get the tool caller and coerced arguments under the lock, then release it
-        // before making the actual call. This prevents deadlock when tools spawn
-        // subconversations that need to use the same registry.
+        // Strip server prefix (e.g. "lumina-discord.list_channels" -> server_id="lumina-discord", tool_name="list_channels")
+        let (target_server, tool_name) = name.split_once('.')
+            .unwrap_or(("", name));
+
         let (tool_caller, arguments) = {
             let registry = self.mcp_registry.lock().await;
 
             let mut found = None;
-            for (_server_id, server) in registry.connected_servers() {
-                if let Some(tool) = server.tools.iter().find(|t| t.name == name) {
+            for (server_id, server) in registry.connected_servers() {
+                if !target_server.is_empty() && server_id != target_server {
+                    continue;
+                }
+                if let Some(tool) = server.tools.iter().find(|t| t.name.as_ref() == tool_name) {
                     let schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
                     let coerced_args = coerce_args_to_schema(&args, &schema);
                     let arguments = coerced_args.as_object().cloned();
@@ -706,7 +716,7 @@ impl crate::agent::ToolService for McpToolRegistry {
             }
         };
 
-        match tool_caller.call_tool(name.to_string(), arguments).await {
+        match tool_caller.call_tool(tool_name.to_string(), arguments).await {
             Ok(result) => {
                 let content: Vec<ToolResultContent> = result
                     .content
