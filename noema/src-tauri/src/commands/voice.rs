@@ -195,7 +195,14 @@ pub async fn toggle_voice(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
         stop_voice_session(app, state).await?;
         Ok(false)
     } else {
-        start_voice_session(app, state).await?;
+        // Use first available provider as default
+        let daemon = state.get_daemon()?;
+        let providers = daemon.voice().list_voice_providers().await
+            .map_err(|e| format!("{e}"))?;
+        let provider_id = providers.first()
+            .map(|p| p.id.clone())
+            .ok_or("No voice providers available")?;
+        start_voice_session(app, state, provider_id).await?;
         Ok(true)
     }
 }
