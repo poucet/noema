@@ -14,6 +14,8 @@ use commands::CommandRegistry;
 use serenity::model::id::{ChannelId, GuildId};
 use serenity::prelude::*;
 use songbird::SerenityInit;
+use songbird::Config as SongbirdConfig;
+use songbird::driver::{DecodeMode, DecodeConfig, Channels, SampleRate};
 use simply_daemon::api::{Daemon, McpApi, RegisterEphemeralRequest};
 use simply_daemon::net;
 
@@ -103,9 +105,13 @@ async fn main() -> anyhow::Result<()> {
             guild_ids: lumina_cfg.discord.guild_ids.iter().map(|&id| GuildId::new(id)).collect(),
             status_channel_id: lumina_cfg.discord.status_channel_id.map(ChannelId::new),
         })
-        .register_songbird()
+        .register_songbird_from_config(
+            SongbirdConfig::default().decode_mode(DecodeMode::Decode(
+                DecodeConfig::new(Channels::Mono, SampleRate::Hz16000)
+            ))
+        )
         .type_map_insert::<DaemonKey>(daemon.clone())
-        .type_map_insert::<voice::VoiceManagerKey>(Arc::new(voice::VoiceManager::new(daemon)))
+        .type_map_insert::<voice::VoiceManagerKey>(Arc::new(voice::VoiceManager::new(daemon, lumina_cfg.voice.clone())))
         .type_map_insert::<ConfigKey>(lumina_cfg)
         .type_map_insert::<CommandRegistry>(registry)
         .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new()))

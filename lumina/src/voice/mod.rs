@@ -1,18 +1,21 @@
 //! Voice module — manages Discord voice connections, audio pipelines,
 //! and integration with the daemon's STT/TTS services.
 //!
-//! The voice module owns long-lived connections:
-//! - Songbird voice channel connections (audio receive/send)
-//! - Daemon STT streams (audio → transcription)
-//! - TTS synthesis (text → audio → voice channel)
-//!
-//! Commands in `commands/voice.rs` are thin wrappers that call into this module.
+//! Flow:
+//!   Songbird VoiceTick (i16 stereo 48kHz)
+//!   → downsample to mono 16kHz PCM16
+//!   → daemon STT stream (VoiceInput::Audio)
+//!   → receive VoiceEvent::UserTranscript
+//!   → post to text channel (transcribe) or send to session + TTS (listen)
+
+mod receiver;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serenity::model::id::{ChannelId, GuildId};
-use simply_daemon::api::Daemon;
+use simply_daemon::api::{Daemon, VoiceApi};
+use songbird::Call;
 use tokio::sync::Mutex;
 
 /// Active voice session for a guild.
@@ -23,6 +26,8 @@ pub struct VoiceSession {
     pub voice_channel: ChannelId,
     /// Session mode.
     pub mode: VoiceMode,
+    /// Daemon conversation session (for listen mode — persistent across utterances).
+    pub daemon_session: Option<simply_daemon::DaemonSession>,
 }
 
 /// What the voice session is doing.
@@ -38,28 +43,103 @@ pub enum VoiceMode {
 pub struct VoiceManager {
     sessions: Mutex<HashMap<GuildId, VoiceSession>>,
     daemon: Arc<dyn Daemon>,
+    config: Mutex<config::VoiceConfig>,
 }
 
 impl VoiceManager {
-    pub fn new(daemon: Arc<dyn Daemon>) -> Self {
+    pub fn new(daemon: Arc<dyn Daemon>, voice_config: config::VoiceConfig) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             daemon,
+            config: Mutex::new(voice_config),
         }
     }
 
-    /// Start a voice session in the given guild.
+    pub fn daemon(&self) -> &Arc<dyn Daemon> {
+        &self.daemon
+    }
+
+    pub async fn stt_provider_id(&self) -> Option<String> {
+        self.config.lock().await.stt_provider.clone()
+    }
+
+    pub async fn tts_provider_id(&self) -> Option<String> {
+        self.config.lock().await.tts_provider.clone()
+    }
+
+    pub async fn tts_voice_id(&self) -> Option<String> {
+        self.config.lock().await.tts_voice.clone()
+    }
+
+    pub async fn set_stt_provider(&self, id: String) {
+        self.config.lock().await.stt_provider = Some(id);
+    }
+
+    pub async fn set_tts_provider(&self, id: String) {
+        self.config.lock().await.tts_provider = Some(id);
+    }
+
+    pub async fn set_tts_voice(&self, id: String) {
+        self.config.lock().await.tts_voice = Some(id);
+    }
+
+    pub async fn save_config(&self, lumina_cfg: &mut config::LuminaConfig) -> Result<(), String> {
+        lumina_cfg.voice = self.config.lock().await.clone();
+        lumina_cfg.save()
+    }
+
+    /// Start a voice session and register the audio receive handler on the songbird Call.
     pub async fn start_session(
         &self,
         guild_id: GuildId,
         voice_channel: ChannelId,
         text_channel: ChannelId,
         mode: VoiceMode,
-    ) {
+        daemon_session: Option<simply_daemon::DaemonSession>,
+        call: Arc<Mutex<Call>>,
+        http: Arc<serenity::http::Http>,
+    ) -> anyhow::Result<()> {
+        // Connect to daemon STT — use configured provider or first available
+        let stt_provider_id = match self.stt_provider_id().await {
+            Some(id) => id,
+            None => {
+                let providers = self.daemon.voice().list_voice_providers().await?;
+                providers.iter()
+                    .find(|p| p.capabilities.contains(&"stt".to_string()))
+                    .map(|p| p.id.clone())
+                    .ok_or_else(|| anyhow::anyhow!("No STT provider available"))?
+            }
+        };
+
+        let stt_handle = self.daemon.voice().voice_connect(&stt_provider_id).await?;
+        let (stt_input, stt_events) = stt_handle.into_parts();
+
+        // Register songbird receive handler — pipes audio to daemon STT
+        {
+            let mut handler = call.lock().await;
+            handler.add_global_event(
+                songbird::CoreEvent::VoiceTick.into(),
+                receiver::VoiceReceiver::new(stt_input),
+            );
+        }
+
+        // Spawn event handler — processes STT results
+        let voice_mgr = self.daemon.clone();
+        receiver::spawn_event_handler(
+            guild_id,
+            text_channel,
+            mode,
+            stt_events,
+            http,
+            voice_mgr,
+            call.clone(),
+        );
+
         let session = VoiceSession {
             text_channel,
             voice_channel,
             mode,
+            daemon_session,
         };
         self.sessions.lock().await.insert(guild_id, session);
         tracing::info!(
@@ -67,8 +147,10 @@ impl VoiceManager {
             voice_channel = %voice_channel,
             text_channel = %text_channel,
             mode = ?mode,
+            stt_provider = %stt_provider_id,
             "voice session started"
         );
+        Ok(())
     }
 
     /// Stop and remove the voice session for a guild.
@@ -80,25 +162,62 @@ impl VoiceManager {
         session
     }
 
-    /// Get the active session for a guild.
-    pub async fn get_session(&self, guild_id: &GuildId) -> Option<VoiceMode> {
+    /// Get the active mode for a guild.
+    pub async fn get_mode(&self, guild_id: &GuildId) -> Option<VoiceMode> {
         self.sessions.lock().await.get(guild_id).map(|s| s.mode)
     }
 
-    /// Synthesize text and return audio ready for songbird (stereo f32 48kHz).
+    /// Synthesize text and return audio ready for songbird (interleaved stereo f32 48kHz).
     pub async fn synthesize_for_discord(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        use simply_daemon::api::VoiceApi;
+        // Use configured TTS provider or first available
+        let tts_provider_id = match self.tts_provider_id().await {
+            Some(id) => id,
+            None => {
+                let providers = self.daemon.voice().list_voice_providers().await?;
+                providers.iter()
+                    .find(|p| p.capabilities.contains(&"tts".to_string()))
+                    .map(|p| p.id.clone())
+                    .ok_or_else(|| anyhow::anyhow!("No TTS provider available. Use /voice provider to set one."))?
+            }
+        };
 
-        let providers = self.daemon.voice().list_voice_providers().await?;
-        let tts_provider = providers.iter()
-            .find(|p| p.capabilities.contains(&"tts".to_string()))
-            .ok_or_else(|| anyhow::anyhow!("No TTS provider available"))?;
+        // Use configured voice or first available
+        let voice_id = match self.tts_voice_id().await {
+            Some(id) => id,
+            None => {
+                match self.daemon.voice().list_voices(&tts_provider_id).await {
+                    Ok(voices) if !voices.is_empty() => voices[0].id.clone(),
+                    _ => String::new(),
+                }
+            }
+        };
 
-        let audio = self.daemon.voice().synthesize(text, &tts_provider.id, "").await?;
+        let audio = self.daemon.voice().synthesize(text, &tts_provider_id, &voice_id).await?;
         let mono = audio.to_f32_samples();
 
-        // Resample to stereo 48kHz for Discord
+        tracing::info!(
+            samples = mono.len(),
+            source_rate = audio.format.sample_rate,
+            tts_provider = %tts_provider_id,
+            voice = %voice_id,
+            "TTS synthesized for Discord"
+        );
+
         Ok(resample_mono_to_stereo_48k(&mono, audio.format.sample_rate))
+    }
+
+    /// Play TTS audio in the voice channel.
+    pub async fn play_tts(&self, call: &Arc<Mutex<Call>>, text: &str) -> anyhow::Result<()> {
+        let stereo = self.synthesize_for_discord(text).await?;
+        let bytes: Vec<u8> = stereo.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let input = songbird::input::RawAdapter::new(
+            std::io::Cursor::new(bytes),
+            48_000,
+            2,
+        );
+        let mut handler = call.lock().await;
+        handler.play_input(input.into());
+        Ok(())
     }
 }
 

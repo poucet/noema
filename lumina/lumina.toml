@@ -5,9 +5,20 @@
 
 [discord]
 bot_token = ""
-owner_id =
+owner_id = 0
 guild_ids = []
-status_channel_id =
-ai_chats_category_id =
+# status_channel_id = 0
+# ai_chats_category_id = 0
 history_limit = 1000
-model_id = ""
+# model_id = ""
+
+[voice]
+# STT provider ID — use /voice provider to list available options
+# stt_provider = "whisper"
+# stt_provider = "voxtral"
+
+# TTS provider ID
+# tts_provider = "voxtral"
+
+# TTS voice ID — use /voice voice to list available voices
+# tts_voice = ""

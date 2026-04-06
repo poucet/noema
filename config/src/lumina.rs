@@ -8,6 +8,18 @@ use std::fs;
 pub struct LuminaConfig {
     #[serde(default)]
     pub discord: DiscordConfig,
+    #[serde(default)]
+    pub voice: VoiceConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VoiceConfig {
+    /// STT provider ID (e.g. "whisper", "voxtral")
+    pub stt_provider: Option<String>,
+    /// TTS provider ID (e.g. "voxtral")
+    pub tts_provider: Option<String>,
+    /// TTS voice ID
+    pub tts_voice: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -46,6 +58,17 @@ impl LuminaConfig {
         }
 
         cfg
+    }
+
+    /// Save config back to lumina.toml.
+    pub fn save(&self) -> Result<(), String> {
+        let path = PathManager::lumina_config_path()
+            .ok_or("Could not determine config path")?;
+        let toml = toml::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize config: {e}"))?;
+        fs::write(&path, toml)
+            .map_err(|e| format!("Failed to write config: {e}"))?;
+        Ok(())
     }
 
     pub fn bot_token(&self) -> Option<&str> {
