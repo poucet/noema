@@ -105,7 +105,8 @@ pub async fn auth_login(
         "discord_id": query.discord_id,
         "redirect": query.redirect,
     });
-    let state_encoded = urlencoding::encode(&oauth_state.to_string());
+    let state_string = oauth_state.to_string();
+    let state_encoded = urlencoding::encode(&state_string);
 
     let auth_url = format!(
         "https://accounts.google.com/o/oauth2/v2/auth?\
