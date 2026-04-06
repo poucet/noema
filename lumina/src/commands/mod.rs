@@ -8,6 +8,7 @@ pub mod chat;
 mod model;
 mod ping;
 pub mod tool;
+pub mod voice;
 
 use std::collections::HashMap;
 use std::sync::Arc;

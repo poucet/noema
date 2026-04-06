@@ -6,12 +6,14 @@ mod chat;
 mod commands;
 pub mod mcp;
 pub mod paginator;
+pub mod voice;
 
 use std::sync::Arc;
 
 use commands::CommandRegistry;
 use serenity::model::id::{ChannelId, GuildId};
 use serenity::prelude::*;
+use songbird::SerenityInit;
 use simply_daemon::api::{Daemon, McpApi, RegisterEphemeralRequest};
 use simply_daemon::net;
 
@@ -93,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
 
     let intents = GatewayIntents::GUILDS
         | GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::GUILD_VOICE_STATES
         | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = Client::builder(token, intents)
@@ -100,7 +103,9 @@ async fn main() -> anyhow::Result<()> {
             guild_ids: lumina_cfg.discord.guild_ids.iter().map(|&id| GuildId::new(id)).collect(),
             status_channel_id: lumina_cfg.discord.status_channel_id.map(ChannelId::new),
         })
-        .type_map_insert::<DaemonKey>(daemon)
+        .register_songbird()
+        .type_map_insert::<DaemonKey>(daemon.clone())
+        .type_map_insert::<voice::VoiceManagerKey>(Arc::new(voice::VoiceManager::new(daemon)))
         .type_map_insert::<ConfigKey>(lumina_cfg)
         .type_map_insert::<CommandRegistry>(registry)
         .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new()))

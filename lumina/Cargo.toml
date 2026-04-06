@@ -17,6 +17,10 @@ simply-rpc = { workspace = true }
 
 # Discord
 serenity = { workspace = true }
+songbird = { workspace = true }
+
+# Voice
+simply-voice = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["full"] }
