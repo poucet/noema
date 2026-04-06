@@ -126,46 +126,49 @@ A Chrome extension (`simply-web`) as a new daemon client, like Noema and Lumina.
 
 ## 4. Multi-user & OAuth
 
-### Stage 1 — User Identity
+**Design:** [AUTH_AND_IDENTITY.md](../designs/AUTH_AND_IDENTITY.md)
 
-- ⬜ 1.1 `User` model in daemon — unique identity with linked platform accounts
-- ⬜ 1.2 `UserApi` trait on daemon — CRUD for users, account linking
-- ⬜ 1.3 Discord user -> daemon user mapping — Lumina resolves Discord user ID to daemon user on each request
-- ⬜ 1.4 Session-level user context — sessions know which user they belong to
+### Stage 1 — Connection Auth & User Identity
 
-### Stage 2 — OAuth & Account Linking
+- ⬜ 1.1 Auto-generate `daemon_secret` on first run, store in `settings.toml`
+- ⬜ 1.2 Auth middleware: validate `Authorization: Bearer {daemon_secret}` on all routes except `/auth/*`
+- ⬜ 1.3 `X-User-Id` header support — daemon resolves to UCM user, scopes operations
+- ⬜ 1.4 Noema sends admin user_id on all requests
+- ⬜ 1.5 Lumina sends Discord-mapped user_id (or omits for anonymous)
+- ⬜ 1.6 User tiers: admin (full access), authenticated (own data), anonymous (public only)
+- ⬜ 1.7 Document ownership — documents scoped to creating user, `is_public` flag for shared docs
 
-- ⬜ 2.1 OAuth2 flow in daemon — authorization code grant, token storage, refresh
-- ⬜ 2.2 Google account linking — user authenticates via OAuth, daemon stores tokens per user
-- ⬜ 2.3 Per-user MCP credentials — when an MCP tool needs Google API access, daemon injects the requesting user's tokens
-- ⬜ 2.4 Lumina OAuth trigger — Discord command (e.g. `/account link google`) opens browser OAuth flow, links result to Discord user's daemon identity
-- ⬜ 2.5 Token management — refresh, revoke, re-auth prompt when tokens expire
+### Stage 2 — Single-Port OAuth & Admin Page
 
-### Stage 3 — Permission Model
+- ⬜ 2.1 Merge OAuth callback server into main port (`/auth/callback` route)
+- ⬜ 2.2 Admin page Google OAuth login (`/auth/login` → Google → verify `admin_email`)
+- ⬜ 2.3 User self-service auth page (`/auth/login` → Google → create/link UCM user)
+- ⬜ 2.4 Discord user mapping table: `discord_user_id → ucm_user_id`
+- ⬜ 2.5 Lumina `/auth` command — generates link to daemon auth page, maps Discord user after OAuth
 
-- ⬜ 3.1 `Permission` model — define which MCP tools require which permission level
-- ⬜ 3.2 Role-based access — users have roles, roles grant permissions (e.g. `admin` can use `delete_document`, `member` cannot)
-- ⬜ 3.3 Discord role sync — map Discord server roles to daemon permission roles
-- ⬜ 3.4 Generalized role source — role mapping is pluggable so non-Discord platforms can provide roles too
-- ⬜ 3.5 Tool call approval flow — tools can require user confirmation before execution (see [TOOL_APPROVAL.md](../designs/proposals/TOOL_APPROVAL.md))
-  - `ToolCallPending` event, `confirm_tool_call` API
-  - Session-level `ToolApproval` policy: `AutoApprove`, `RequireAll`, `AllowList`
-  - Lumina: approval embed with approve/reject buttons
-  - Noema: modal confirmation in chat UI
-  - Timeout auto-reject (5 min default)
-- ⬜ 3.6 Permission checks at tool dispatch — daemon enforces before execution, not clients
+### Stage 3 — Per-User MCP OAuth
 
-### Stage 4 — Admin UI
+- ⬜ 3.1 Per-user per-MCP-server token storage: `(user_id, server_id) → tokens`
+- ⬜ 3.2 MCP OAuth initiation: `/auth/mcp/{server_id}?user_id={user_id}` → provider OAuth → store tokens
+- ⬜ 3.3 Token injection: daemon adds user's token to MCP requests as `Authorization` header
+- ⬜ 3.4 `auth_required` error response when user has no token for a service
+- ⬜ 3.5 Automatic token refresh using stored refresh tokens
+- ⬜ 3.6 Token revocation (admin or self-service)
 
-- ⬜ 4.1 Auth on daemon REST API — login endpoint, session tokens, middleware
-- ⬜ 4.2 Admin web UI shell — SPA served from daemon's REST port (e.g. `/admin`)
-- ⬜ 4.3 User management page — list users, view linked accounts, assign roles
-- ⬜ 4.4 MCP tool browser — list all registered tools, view schemas, set permission requirements
-- ⬜ 4.5 Service registry page — view connected clients and MCP services, health status
-- ⬜ 4.6 Conversation browser — view active sessions, conversation history
-- ⬜ 4.7 Model + provider config — view/edit LLM providers, voice providers, embedding providers
-- ⬜ 4.8 Settings page — daemon config editing (API keys, voice settings, etc.)
-- ⬜ 4.9 Intent dashboard — view/create/edit intents, see execution history (depends on Events)
+### Stage 4 — Discord Role-Based Access Control
+
+- ⬜ 4.1 `[mcp_access]` config in `lumina.toml` — map Discord roles to MCP server access
+- ⬜ 4.2 Lumina checks user's Discord roles before MCP tool calls
+- ⬜ 4.3 Graceful denial: "You need the `developers` role to use GitHub tools"
+- ⬜ 4.4 Tool call approval flow (see [TOOL_APPROVAL.md](../designs/proposals/TOOL_APPROVAL.md))
+
+### Stage 5 — Admin UI
+
+- ⬜ 5.1 Admin page protected by Google OAuth (`admin_email` in config)
+- ⬜ 5.2 User management: list users, view linked accounts, revoke access
+- ⬜ 5.3 MCP service management: connect/disconnect, view tools, per-service OAuth status
+- ⬜ 5.4 Connection browser: view connected clients, active sessions
+- ⬜ 5.5 Settings page: API keys, voice providers, model config
 
 ---
 
@@ -176,9 +179,10 @@ Content Stage 1 (DocumentApi) ──► Events Stage 1 (intent documents in UCM)
 Content Stage 2 (Embeddings) ──► Content Stage 3 (RAG)
 Events Stage 2 (Service Registry) ──► Events Stage 3 + 4 (parallel)
 Events Stage 3 + 4 ──► Events Stage 5 (Conditions + Workflow)
-Multi-user Stage 1 (Identity) ──► Multi-user Stage 2 (OAuth)
-Multi-user Stage 2 ──► Multi-user Stage 3 (Permissions)
-Multi-user Stage 3 ──► Multi-user Stage 4 (Admin UI enforces permissions)
+Multi-user Stage 1 (Connection Auth) ──► Multi-user Stage 2 (OAuth)
+Multi-user Stage 2 (OAuth) ──► Multi-user Stage 3 (Per-User MCP OAuth)
+Multi-user Stage 3 ──► Multi-user Stage 4 (Role-Based Access)
+Multi-user Stage 4 ──► Multi-user Stage 5 (Admin UI)
 Web Extension ──► blocked on nothing, but deprioritized
 ```
 

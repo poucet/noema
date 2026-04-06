@@ -1,6 +1,6 @@
 # Auth & Multi-User Identity
 
-**Status:** refined
+**Status:** planned
 **Priority:** P0
 **Depends on:** Foundation (complete)
 
