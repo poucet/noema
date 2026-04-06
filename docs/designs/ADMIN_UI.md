@@ -71,9 +71,10 @@ Three tiers — each user hits the simplest one that works for them:
 
 **Tier 2 — Guided web wizard (cloud / self-hosted):**
 When no creds are available and not localhost, the setup wizard shows an interactive Google Cloud walkthrough:
-1. "Create a Google Cloud project" — direct link to `console.cloud.google.com/projectcreate` with suggested name pre-filled
-2. "Enable OAuth consent screen" — direct link to consent screen page, tells you exactly what to enter (app name: "Simply", email: yours, scopes: email+profile)
-3. "Create OAuth credentials" — direct link to credentials page, tells you: type = Web application, redirect URI = `https://your-domain/auth/callback` (pre-filled from current URL)
+1. "Create a Google Cloud project" — direct link to `console.cloud.google.com/projectcreate`
+2. "Configure OAuth branding" — link to `console.cloud.google.com/auth/branding`, set app name to "Simply"
+3. "Set audience" — link to `console.cloud.google.com/auth/audience`, choose "External"
+4. "Create OAuth 2.0 Client ID" — link to `console.cloud.google.com/apis/credentials/oauthclient`, type: Web application, redirect URI pre-filled from current URL
 4. Paste fields for client ID + secret
 5. "Test Connection" button — tries a test OAuth redirect to verify creds work
 6. On success: saves to settings, proceeds to sign-in

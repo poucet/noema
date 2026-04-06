@@ -27,12 +27,25 @@ daemon_is_running() {
   nc -z 127.0.0.1 "$DAEMON_PORT" 2>/dev/null
 }
 
+build_admin() {
+  if [ -f "$REPO_ROOT/admin/package.json" ]; then
+    if [ ! -d "$REPO_ROOT/admin/node_modules" ]; then
+      log "Installing admin dependencies..."
+      (cd "$REPO_ROOT/admin" && npm install --silent)
+    fi
+    log "Building admin UI..."
+    (cd "$REPO_ROOT/admin" && npm run build --silent)
+  fi
+}
+
 daemon_start_bg() {
   if daemon_is_running; then
     log "Already running on port $DAEMON_PORT"
+    log "Admin: http://127.0.0.1:$DAEMON_PORT"
     return 0
   fi
 
+  build_admin
   detect_voice_server
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
@@ -44,6 +57,7 @@ daemon_start_bg() {
   for i in $(seq 1 30); do
     if daemon_is_running; then
       log "Ready (pid $pid)"
+      log "Admin: http://127.0.0.1:$DAEMON_PORT"
       return 0
     fi
     sleep 0.5
@@ -103,10 +117,12 @@ case "${1:-status}" in
       log "Already running on port $DAEMON_PORT"
       exit 1
     fi
+    build_admin
     detect_voice_server
     mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
     : > "$DAEMON_LOG_FILE"
     log "Starting in foreground... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
+    log "Admin: http://127.0.0.1:$DAEMON_PORT"
     cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
     ;;
   stop|kill)

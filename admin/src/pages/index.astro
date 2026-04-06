@@ -32,11 +32,12 @@ import Base from '../layouts/Base.astro';
       <div id="google-setup" class="hidden mt-2">
         <p>Google OAuth is not yet configured. Follow these steps:</p>
         <ol style="color:#999; font-size:0.84em; line-height:2; padding-left:20px; margin:10px 0">
-          <li><a href="https://console.cloud.google.com/projectcreate" target="_blank">Create a Google Cloud project</a></li>
-          <li><a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank">Configure OAuth consent screen</a> &mdash; External, app name: "Simply"</li>
-          <li><a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank">Create OAuth 2.0 credentials</a> &mdash; Type: Web application</li>
-          <li>Add authorized redirect URI: <code id="redirect-uri"></code></li>
-          <li>Paste the credentials below:</li>
+          <li><a href="https://console.cloud.google.com/projectcreate" target="_blank">Create a Google Cloud project</a> (or select an existing one)</li>
+          <li><a href="https://console.cloud.google.com/auth/branding" target="_blank">Configure OAuth branding</a> &mdash; set app name to "Simply", add your email as support contact</li>
+          <li><a href="https://console.cloud.google.com/auth/audience" target="_blank">Set audience</a> &mdash; choose "External" user type</li>
+          <li><a href="https://console.cloud.google.com/apis/credentials/oauthclient" target="_blank">Create OAuth 2.0 Client ID</a> &mdash; Application type: "Web application"</li>
+          <li>Under "Authorized redirect URIs", add: <code id="redirect-uri"></code></li>
+          <li>Copy the Client ID and Client Secret, paste below:</li>
         </ol>
         <div class="form-row">
           <label>Client ID</label>
