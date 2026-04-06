@@ -2,19 +2,17 @@
 //!
 //! - If a daemon is already running on the well-known port, connect to it.
 //! - Otherwise, start an embedded daemon and become the host.
-//!
-//! The caller provides builders for the WS dispatch and REST dispatcher —
-//! discovery doesn't know which services exist.
 
 use std::sync::Arc;
 
-use simply_rpc::Dispatcher;
-
 use tokio::sync::watch;
 
-use crate::api::DaemonApi;
+use simply_rpc::{RestDispatcher, RpcService};
+
+use crate::api::*;
 use crate::embedded::EmbeddedDaemon;
 use crate::remote::RemoteDaemon;
+use crate::services::CoreService;
 use crate::storage::SqliteStores;
 
 use simply_rpc::ws_client::ConnectionState;
@@ -26,20 +24,19 @@ use config::DEFAULT_DAEMON_PORT;
 pub enum DaemonHandle {
     /// This process is hosting the daemon. Dropping shuts down servers.
     Host {
-        daemon: Arc<dyn DaemonApi>,
+        daemon: Arc<dyn Daemon>,
         _server: rest::ServerHandle,
-        /// Fires when `/kill` is called on the REST API.
-        kill_rx: Option<tokio::sync::mpsc::Receiver<()>>,
+        kill_rx: tokio::sync::mpsc::Receiver<()>,
     },
     /// Connected to a remote daemon. Reconnects automatically on disconnect.
     Remote {
-        daemon: Arc<dyn DaemonApi>,
+        daemon: Arc<dyn Daemon>,
         remote: Arc<RemoteDaemon>,
     },
 }
 
 impl DaemonHandle {
-    pub fn daemon(&self) -> Arc<dyn DaemonApi> {
+    pub fn daemon(&self) -> Arc<dyn Daemon> {
         match self {
             DaemonHandle::Host { daemon, .. } => Arc::clone(daemon),
             DaemonHandle::Remote { daemon, .. } => Arc::clone(daemon),
@@ -48,6 +45,15 @@ impl DaemonHandle {
 
     pub fn is_host(&self) -> bool {
         matches!(self, DaemonHandle::Host { .. })
+    }
+
+    /// Wait for a kill signal. Only fires for hosted daemons (via `/daemon/kill`).
+    /// For remote daemons, this future never resolves.
+    pub async fn wait_for_kill(&mut self) {
+        match self {
+            DaemonHandle::Host { kill_rx, .. } => { kill_rx.recv().await; }
+            DaemonHandle::Remote { .. } => std::future::pending().await,
+        }
     }
 
     /// Current connection state. Host is always connected.
@@ -70,18 +76,13 @@ impl DaemonHandle {
     }
 }
 
-/// Builders that the caller provides to wire up services.
-pub struct ServiceBuilders {
-    pub ws_dispatch: Box<dyn FnOnce(Arc<dyn DaemonApi>) -> server::DispatchFn + Send>,
-    pub rest_dispatcher: Box<dyn FnOnce(Arc<dyn DaemonApi>) -> Dispatcher + Send>,
-    /// Client name shown in admin dashboard (e.g. "noema", "lumina").
-    pub client_name: String,
-}
-
 /// Try to connect to an existing daemon. If none is running, start one.
+///
+/// When hosting, starts a full server with REST + WS (session streaming)
+/// and a kill channel for `/daemon/kill`.
 pub async fn connect_or_host(
     port: Option<u16>,
-    builders: ServiceBuilders,
+    client_name: &str,
 ) -> anyhow::Result<DaemonHandle> {
     let port = port.unwrap_or(DEFAULT_DAEMON_PORT);
     let addr = format!("127.0.0.1:{}", port);
@@ -89,14 +90,14 @@ pub async fn connect_or_host(
     // Try to connect with a short timeout
     let connect_result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        RemoteDaemon::connect_as(&addr, &builders.client_name),
+        RemoteDaemon::connect_as(&addr, client_name),
     )
     .await;
 
     match connect_result {
         Ok(Ok(remote)) => {
             tracing::info!(port, "Connected to existing daemon");
-            let daemon = Arc::clone(&remote) as Arc<dyn DaemonApi>;
+            let daemon = Arc::clone(&remote) as Arc<dyn Daemon>;
             return Ok(DaemonHandle::Remote { daemon, remote });
         }
         Ok(Err(e)) => {
@@ -107,19 +108,35 @@ pub async fn connect_or_host(
         }
     }
 
-    // No daemon running — start one
+    // No daemon running — start one with full REST + WS server
     tracing::info!(port, "Starting embedded daemon");
 
     config::load_env_file();
     let stores = Arc::new(SqliteStores::open()?);
     let daemon = EmbeddedDaemon::new(stores).await?;
-    let daemon: Arc<dyn DaemonApi> = daemon;
 
-    let ws_dispatch = (builders.ws_dispatch)(Arc::clone(&daemon));
+    // Kill channel
+    let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
+    let core_svc = Arc::new(CoreService::new(kill_tx));
+
+    // WS dispatch — session streaming
+    let session_svc: Arc<dyn SessionApi> = daemon.clone();
+    let ws_dispatch = crate::ws_dispatch::build(session_svc.clone());
+
+    // REST routes — all daemon APIs
+    let rest_dispatcher = RestDispatcher::new()
+        .register(<dyn SessionApi>::service(session_svc))
+        .register(<dyn ConversationApi>::service(daemon.clone() as Arc<dyn ConversationApi>))
+        .register(<dyn AssetApi>::service(daemon.asset_service()))
+        .register(<dyn McpApi>::service(daemon.mcp_service()))
+        .register(<dyn OAuthApi>::service(daemon.mcp_service()))
+        .register(<dyn ModelApi>::service(daemon.model_service()))
+        .register(<dyn VoiceApi>::service(daemon.voice_service()))
+        .register(<dyn CoreApi>::service(core_svc));
+
     let tracker = server::ConnectionTracker::new();
-
     let server = rest::start(rest::ServerConfig {
-        rest_dispatcher: simply_rpc::RestDispatcher::new(),
+        rest_dispatcher,
         ws_dispatch: Some(ws_dispatch),
         port,
         tracker,
@@ -128,6 +145,6 @@ pub async fn connect_or_host(
     Ok(DaemonHandle::Host {
         daemon,
         _server: server,
-        kill_rx: None,
+        kill_rx,
     })
 }

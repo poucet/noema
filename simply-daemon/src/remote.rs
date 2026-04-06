@@ -37,10 +37,6 @@ impl RemoteDaemon {
         }))
     }
 
-    pub fn into_daemon(self: Arc<Self>) -> Arc<dyn DaemonApi> {
-        self
-    }
-
     pub fn connection_state(&self) -> ConnectionState {
         self.conn.connection_state()
     }
@@ -103,3 +99,52 @@ impl_remote_mcp_api!(RemoteDaemon);
 impl_remote_o_auth_api!(RemoteDaemon);
 impl_remote_model_api!(RemoteDaemon);
 impl_remote_voice_api!(RemoteDaemon);
+impl_remote_core_api!(RemoteDaemon);
+
+impl Daemon for RemoteDaemon {
+    fn session(&self) -> &dyn SessionApi { self }
+    fn conversation(&self) -> &dyn ConversationApi { self }
+    fn mcp(&self) -> &dyn McpApi { self }
+    fn oauth(&self) -> &dyn OAuthApi { self }
+    fn model(&self) -> &dyn ModelApi { self }
+    fn asset(&self) -> &dyn AssetApi { self }
+    fn voice(&self) -> &dyn VoiceApi { self }
+    fn core(&self) -> &dyn CoreApi { self }
+    fn tools(&self) -> &dyn simply_core::ToolService { self }
+}
+
+/// Remote tool service — delegates to the daemon's `/mcp/tools` endpoints.
+#[async_trait]
+impl simply_core::ToolService for RemoteDaemon {
+    async fn get_definitions(&self) -> Vec<llm::ToolDefinition> {
+        McpApi::list_all_tools(self).await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| llm::ToolDefinition {
+                name: t.name.to_string(),
+                description: t.description.map(|d| d.to_string()),
+                input_schema: serde_json::from_value(
+                    serde_json::to_value(&*t.input_schema).unwrap_or_default()
+                ).unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
+        let result = McpApi::call_tool_direct(
+            self,
+            CallToolRequestParam::new(name.to_string())
+                .with_arguments(arguments.as_object().cloned().unwrap_or_default()),
+        ).await?;
+        Ok(result.content.into_iter().filter_map(|c| {
+            match c.raw {
+                rmcp::model::RawContent::Text(t) => Some(llm::ToolResultContent::text(t.text)),
+                _ => None,
+            }
+        }).collect())
+    }
+}
