@@ -149,14 +149,73 @@ where
 // VoiceService
 // ---------------------------------------------------------------------------
 
-pub struct VoiceService;
+pub struct VoiceService {
+    stt: Option<Arc<dyn simply_voice::SttProvider>>,
+}
+
+impl VoiceService {
+    pub fn new(stt: Option<Arc<dyn simply_voice::SttProvider>>) -> Self {
+        Self { stt }
+    }
+}
 
 #[async_trait]
 impl VoiceApi for VoiceService {
     async fn voice_connect(&self, _session_id: &SessionId) -> anyhow::Result<VoiceHandle> {
-        let (audio_tx, _) = mpsc::channel(32);
-        let (_, voice_rx) = mpsc::channel(32);
-        Ok(VoiceHandle { audio_in: audio_tx, events: voice_rx })
+        let stt = self.stt.clone()
+            .ok_or_else(|| anyhow::anyhow!("no STT provider available"))?;
+
+        let (audio_tx, mut audio_rx) = mpsc::channel::<simply_voice::AudioChunk>(64);
+        let (event_tx, event_rx) = mpsc::channel::<simply_voice::VoiceEvent>(64);
+
+        tokio::spawn(async move {
+            use simply_voice::{VadEvent, VoiceActivityDetector, VoiceEvent, AudioChunk};
+
+            let mut vad = VoiceActivityDetector::new();
+
+            while let Some(chunk) = audio_rx.recv().await {
+                // Convert PCM16 LE bytes to i16 samples for VAD
+                let samples: Vec<i16> = chunk.data.chunks_exact(2)
+                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
+                    .collect();
+
+                if let Some(vad_event) = vad.process(&samples) {
+                    match vad_event {
+                        VadEvent::SpeechStart => {
+                            let _ = event_tx.send(VoiceEvent::Listening).await;
+                        }
+                        VadEvent::SpeechChunk(_) => {
+                            // Intermediate — no action needed
+                        }
+                        VadEvent::SpeechEnd(audio_samples) => {
+                            let _ = event_tx.send(VoiceEvent::Transcribing).await;
+
+                            // Convert i16 samples back to PCM16 LE bytes
+                            let bytes: Vec<u8> = audio_samples.iter()
+                                .flat_map(|s| s.to_le_bytes())
+                                .collect();
+                            let audio = AudioChunk::new(bytes);
+
+                            match stt.transcribe(audio).await {
+                                Ok(t) if !t.text.trim().is_empty() => {
+                                    let _ = event_tx.send(
+                                        VoiceEvent::UserTranscript(t.text)
+                                    ).await;
+                                }
+                                Ok(_) => {} // empty transcription
+                                Err(e) => {
+                                    let _ = event_tx.send(
+                                        VoiceEvent::Error(format!("STT failed: {e}"))
+                                    ).await;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(VoiceHandle { audio_in: audio_tx, events: event_rx })
     }
 
     async fn voice_disconnect(&self, _session_id: &SessionId) -> anyhow::Result<()> {

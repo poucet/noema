@@ -37,6 +37,7 @@ regex = "1"
 # Local workspace dependencies
 config = { workspace = true }
 simply-audio = { workspace = true, features = ["browser"] }
+simply-voice = { workspace = true }
 noema-ext = { workspace = true }
 simply-daemon = { workspace = true }
 simply-rpc = { workspace = true }

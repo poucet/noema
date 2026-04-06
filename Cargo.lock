@@ -3364,6 +3364,7 @@ dependencies = [
  "simply-audio",
  "simply-daemon",
  "simply-rpc",
+ "simply-voice",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",

@@ -1,14 +1,13 @@
 //! Application state management
 
-use simply_audio::BrowserAudioController;
-use simply_audio::VoiceCoordinator;
 use simply_daemon::api::Daemon;
 use simply_daemon::types::ConversationId;
 use simply_daemon::net::DaemonHandle;
+use simply_voice::AudioChunk;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::{mpsc, Mutex, OnceCell};
 
 pub struct AppState {
     /// Guards against concurrent init_app calls (React StrictMode)
@@ -19,11 +18,12 @@ pub struct AppState {
     pub _daemon_handle: OnceCell<DaemonHandle>,
     /// REST base URL for the daemon (e.g. "http://127.0.0.1:9800")
     pub rest_base_url: OnceCell<String>,
-    pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
+    /// Sender to push audio chunks to the daemon's voice pipeline.
+    /// Some = voice session active, None = inactive.
+    pub voice_audio_tx: Mutex<Option<mpsc::Sender<AudioChunk>>>,
     pub voice_conversation: Mutex<Option<ConversationId>>,
     pub processing: Mutex<HashMap<ConversationId, bool>>,
     pub forwarders: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
-    pub browser_audio_controller: Mutex<Option<BrowserAudioController>>,
 }
 
 impl AppState {
@@ -33,11 +33,10 @@ impl AppState {
             daemon: OnceCell::new(),
             _daemon_handle: OnceCell::new(),
             rest_base_url: OnceCell::new(),
-            voice_coordinator: Mutex::new(None),
+            voice_audio_tx: Mutex::new(None),
             voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),
             forwarders: Mutex::new(HashMap::new()),
-            browser_audio_controller: Mutex::new(None),
         }
     }
 

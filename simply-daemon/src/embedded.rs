@@ -87,7 +87,25 @@ where
 
         let model = Arc::new(ModelService::new(default_model_id));
         let asset = Arc::new(AssetService::new(Arc::clone(&coordinator), Arc::clone(&stores)));
-        let voice = Arc::new(VoiceService);
+        let stt: Option<Arc<dyn simply_voice::SttProvider>> = config::PathManager::whisper_model_path()
+            .and_then(|path| {
+                if path.exists() {
+                    match simply_voice::WhisperProvider::new(&path) {
+                        Ok(p) => {
+                            tracing::info!("whisper STT loaded from {}", path.display());
+                            Some(Arc::new(p) as Arc<dyn simply_voice::SttProvider>)
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to load whisper model: {e}");
+                            None
+                        }
+                    }
+                } else {
+                    tracing::info!("whisper model not found, voice STT unavailable");
+                    None
+                }
+            });
+        let voice = Arc::new(VoiceService::new(stt));
         let core = Arc::new(CoreService::embedded());
 
         let tools = Arc::new(CompositeToolService::new(
