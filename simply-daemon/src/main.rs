@@ -35,8 +35,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("simply-daemon starting");
 
     config::load_env_file();
-    let settings = config::Settings::load();
+    let mut settings = config::Settings::load();
     let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
+    let daemon_secret = settings.ensure_daemon_secret().to_string();
 
     // Open storage and create daemon
     let stores = Arc::new(SqliteStores::open()?);
@@ -67,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         rest_dispatcher,
         port,
         tracker,
+        daemon_secret,
     }).await?;
 
     let actual_port = server.port();

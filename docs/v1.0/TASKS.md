@@ -130,8 +130,8 @@ A Chrome extension (`simply-web`) as a new daemon client, like Noema and Lumina.
 
 ### Stage 1 — Connection Auth & User Identity
 
-- ⬜ 1.1 Auto-generate `daemon_secret` on first run, store in `settings.toml`
-- ⬜ 1.2 Auth middleware: validate `Authorization: Bearer {daemon_secret}` on all routes except `/auth/*`
+- 🔄 1.1 Auto-generate `daemon_secret` on first run, store in `settings.toml`
+- 🔄 1.2 Auth middleware: validate `Authorization: Bearer {daemon_secret}` on all routes except `/auth/*`
 - ⬜ 1.3 `X-User-Id` header support — daemon resolves to UCM user, scopes operations
 - ⬜ 1.4 Noema sends admin user_id on all requests
 - ⬜ 1.5 Lumina sends Discord-mapped user_id (or omits for anonymous)

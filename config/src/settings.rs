@@ -1,6 +1,8 @@
 //! Application settings management
 
 use crate::{crypto, PathManager};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -22,6 +24,8 @@ pub struct Settings {
     pub oauth_callback_port: Option<u16>,
     /// Port for the daemon server (default: 9800)
     pub daemon_port: Option<u16>,
+    /// Shared secret for client authentication (auto-generated on first run)
+    pub daemon_secret: Option<String>,
 }
 
 /// Default port for the daemon server.
@@ -105,5 +109,19 @@ impl Settings {
     /// Check if a model is favorited.
     pub fn is_favorite_model(&self, model_id: &str) -> bool {
         self.favorite_models.iter().any(|m| m == model_id)
+    }
+
+    /// Returns the daemon secret, generating and persisting one if it doesn't exist.
+    pub fn ensure_daemon_secret(&mut self) -> &str {
+        if self.daemon_secret.is_none() {
+            let mut bytes = [0u8; 32];
+            rand::rng().fill(&mut bytes);
+            let secret = URL_SAFE_NO_PAD.encode(bytes);
+            self.daemon_secret = Some(secret);
+            if let Err(e) = self.save() {
+                eprintln!("failed to save daemon_secret: {e}");
+            }
+        }
+        self.daemon_secret.as_deref().unwrap()
     }
 }

@@ -1,5 +1,5 @@
 project: simply
 version: v1.0
-phase: voice
+phase: multi-user
 stage: 1
 status: in-progress

@@ -56,7 +56,18 @@ async fn handle_asset_request(
     let url = format!("{base_url}/blob/{blob_hash}");
     tracing::debug!(url = %url, "asset proxy request");
 
-    match reqwest::get(&url).await {
+    let http = match app_state.http_client.get() {
+        Some(c) => c,
+        None => {
+            return Response::builder()
+                .status(503)
+                .header("Content-Type", "text/plain")
+                .body("HTTP client not initialized".as_bytes().to_vec())
+                .unwrap();
+        }
+    };
+
+    match http.get(&url).send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
             tracing::debug!(status, url = %url, "asset proxy response");

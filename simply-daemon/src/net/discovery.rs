@@ -87,10 +87,13 @@ pub async fn connect_or_host(
     let port = port.unwrap_or(DEFAULT_DAEMON_PORT);
     let addr = format!("127.0.0.1:{}", port);
 
+    let mut settings = config::Settings::load();
+    let daemon_secret = settings.ensure_daemon_secret().to_string();
+
     // Try to connect with a short timeout
     let connect_result = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        RemoteDaemon::connect_as(&addr, client_name),
+        RemoteDaemon::connect_as(&addr, client_name, &daemon_secret),
     )
     .await;
 
@@ -136,6 +139,7 @@ pub async fn connect_or_host(
         rest_dispatcher,
         port,
         tracker,
+        daemon_secret,
     }).await?;
 
     Ok(DaemonHandle::Host {

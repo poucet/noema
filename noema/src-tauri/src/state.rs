@@ -18,6 +18,8 @@ pub struct AppState {
     pub _daemon_handle: OnceCell<DaemonHandle>,
     /// REST base URL for the daemon (e.g. "http://127.0.0.1:9800")
     pub rest_base_url: OnceCell<String>,
+    /// HTTP client with auth headers for daemon REST calls
+    pub http_client: OnceCell<reqwest::Client>,
     /// Sender to push voice input to the daemon's voice pipeline.
     /// Some = voice session active, None = inactive.
     pub voice_audio_tx: Mutex<Option<mpsc::Sender<VoiceInput>>>,
@@ -33,6 +35,7 @@ impl AppState {
             daemon: OnceCell::new(),
             _daemon_handle: OnceCell::new(),
             rest_base_url: OnceCell::new(),
+            http_client: OnceCell::new(),
             voice_audio_tx: Mutex::new(None),
             voice_conversation: Mutex::new(None),
             processing: Mutex::new(HashMap::new()),

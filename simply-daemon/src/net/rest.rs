@@ -9,7 +9,8 @@ use axum::body::Body;
 use axum::extract::{FromRequest, State};
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::ConnectInfo;
-use axum::http::{Method, StatusCode};
+use axum::http::{Method, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
@@ -27,6 +28,7 @@ pub struct ServerConfig {
     pub rest_dispatcher: Arc<ServiceRouter>,
     pub port: u16,
     pub tracker: ConnectionTracker,
+    pub daemon_secret: String,
 }
 
 /// Shared state for axum handlers.
@@ -34,6 +36,7 @@ pub struct ServerConfig {
 struct AppState {
     rest_dispatcher: Arc<ServiceRouter>,
     tracker: ConnectionTracker,
+    daemon_secret: Arc<str>,
 }
 
 /// Starts the unified server (REST + WS + admin).
@@ -41,6 +44,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     let state = AppState {
         rest_dispatcher: config.rest_dispatcher,
         tracker: config.tracker,
+        daemon_secret: Arc::from(config.daemon_secret.as_str()),
     };
 
     let app = Router::new()
@@ -49,6 +53,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/admin/api/connections", get(admin_connections))
         .route("/ws", get(ws_upgrade_handler))
         .fallback(rest_or_stream_handler)
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
 
     let addr = format!("127.0.0.1:{}", config.port);
@@ -76,6 +81,36 @@ pub struct ServerHandle {
 
 impl ServerHandle {
     pub fn port(&self) -> u16 { self.port }
+}
+
+// ---------------------------------------------------------------------------
+// Auth middleware
+// ---------------------------------------------------------------------------
+
+async fn auth_middleware(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let path = req.uri().path();
+
+    // Public routes: admin page, auth flows
+    if path == "/" || path == "/admin" || path.starts_with("/auth/") {
+        return next.run(req).await;
+    }
+
+    // All other routes require Bearer token
+    let authorized = req.headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .is_some_and(|token| token == state.daemon_secret.as_ref());
+
+    if !authorized {
+        return (StatusCode::UNAUTHORIZED, "invalid or missing daemon secret").into_response();
+    }
+
+    next.run(req).await
 }
 
 // ---------------------------------------------------------------------------

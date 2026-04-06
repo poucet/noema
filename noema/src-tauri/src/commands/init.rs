@@ -27,8 +27,9 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     log_message("Starting app initialization");
 
     config::load_env_file();
-    let settings = config::Settings::load();
+    let mut settings = config::Settings::load();
     let port = settings.daemon_port;
+    let daemon_secret = settings.ensure_daemon_secret().to_string();
 
     let daemon_port = port.unwrap_or(config::DEFAULT_DAEMON_PORT);
 
@@ -43,6 +44,17 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     // When remote, this points to wherever the daemon is running.
     let rest_base_url: String = format!("http://127.0.0.1:{daemon_port}");
     let _ = state.rest_base_url.set(rest_base_url);
+
+    // Build an authenticated HTTP client for REST proxying (e.g. asset protocol)
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {daemon_secret}")) {
+        headers.insert(reqwest::header::AUTHORIZATION, v);
+    }
+    let http_client = reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let _ = state.http_client.set(http_client);
 
     let model_name = daemon.model().default_model_id().await;
     let _ = state.daemon.set(daemon);

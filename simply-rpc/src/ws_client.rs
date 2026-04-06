@@ -12,6 +12,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch, Mutex};
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::protocol::*;
@@ -48,6 +49,11 @@ pub struct WsConnection {
 impl WsConnection {
     /// Connect to a server. Reconnects automatically on disconnect.
     pub async fn connect(addr: &str) -> anyhow::Result<Self> {
+        Self::connect_with_headers(addr, Vec::new()).await
+    }
+
+    /// Connect with custom headers on the WS upgrade request.
+    pub async fn connect_with_headers(addr: &str, headers: Vec<(String, String)>) -> anyhow::Result<Self> {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>> =
@@ -56,13 +62,14 @@ impl WsConnection {
 
         let (state_tx, state_rx) = watch::channel(ConnectionState::Connected);
         let initial = establish_connection(
-            addr, Arc::clone(&pending), Arc::clone(&sinks),
+            addr, &headers, Arc::clone(&pending), Arc::clone(&sinks),
             Arc::clone(&live), state_tx.clone(),
         ).await?;
         *live.lock().await = Some(initial);
 
         let reconnect_task = {
             let addr = addr.to_string();
+            let headers = headers.clone();
             let live = Arc::clone(&live);
             let pending = Arc::clone(&pending);
             let sinks = Arc::clone(&sinks);
@@ -88,7 +95,7 @@ impl WsConnection {
                         tokio::time::sleep(backoff).await;
 
                         match establish_connection(
-                            &addr, Arc::clone(&pending), Arc::clone(&sinks),
+                            &addr, &headers, Arc::clone(&pending), Arc::clone(&sinks),
                             Arc::clone(&live), state_tx.clone(),
                         ).await {
                             Ok(conn) => {
@@ -187,13 +194,21 @@ impl WsConnection {
 
 async fn establish_connection(
     addr: &str,
+    headers: &[(String, String)],
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
     sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
     live: Arc<Mutex<Option<LiveConnection>>>,
     state_tx: watch::Sender<ConnectionState>,
 ) -> anyhow::Result<LiveConnection> {
     let url = format!("ws://{}/ws", addr);
-    let (ws_stream, _) = tokio_tungstenite::connect_async(&url).await?;
+    let mut request = url.into_client_request()?;
+    for (key, value) in headers {
+        request.headers_mut().insert(
+            key.parse::<tokio_tungstenite::tungstenite::http::HeaderName>()?,
+            value.parse()?,
+        );
+    }
+    let (ws_stream, _) = tokio_tungstenite::connect_async(request).await?;
     let (ws_sink, ws_source) = ws_stream.split();
 
     let (write_tx, mut write_rx) = mpsc::channel::<String>(256);

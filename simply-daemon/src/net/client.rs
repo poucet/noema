@@ -18,14 +18,24 @@ pub struct DaemonRpcConnection {
 }
 
 impl DaemonRpcConnection {
-    pub async fn connect(addr: &str, name: &str) -> anyhow::Result<Self> {
-        let conn = WsConnection::connect(addr).await?;
+    pub async fn connect(addr: &str, name: &str, daemon_secret: &str) -> anyhow::Result<Self> {
+        let headers = vec![
+            ("Authorization".to_string(), format!("Bearer {daemon_secret}")),
+        ];
+        let conn = WsConnection::connect_with_headers(addr, headers).await?;
         let _ = conn.rpc_call("client.identify", serde_json::json!({ "name": name })).await;
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        let auth_value = format!("Bearer {daemon_secret}");
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&auth_value)?,
+        );
 
         Ok(Self {
             conn,
             base_url: format!("http://{addr}"),
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder().default_headers(headers).build()?,
         })
     }
 
