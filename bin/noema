@@ -9,20 +9,8 @@ export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_daemon::ws=debug,simply_c
 
 case "${1:-dev}" in
   dev)
-    export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
-    export DAEMON_LOG_FILE="$REPO_ROOT/daemon.log"
-    : > "$NOEMA_LOG_FILE"
-    : > "$DAEMON_LOG_FILE"
-    cd "$REPO_ROOT/noema" && npm run tauri dev
-    ;;
-  split)
-    # Start daemon in background, then Noema connecting to it
-    "$SCRIPT_DIR/daemon" start
-
-    cleanup() { "$SCRIPT_DIR/daemon" stop; }
-    trap cleanup EXIT INT TERM
-
-    export NOEMA_LOG_FILE="$REPO_ROOT/noema.log"
+    export NOEMA_LOG_FILE="$REPO_ROOT/logs/noema.log"
+    mkdir -p "$REPO_ROOT/logs"
     : > "$NOEMA_LOG_FILE"
     cd "$REPO_ROOT/noema" && npm run tauri dev
     ;;
@@ -44,7 +32,6 @@ case "${1:-dev}" in
   *)
     echo "Usage: noema [dev|split|build|install|nuke]"
     echo "  dev      Run Noema with embedded daemon (default)"
-    echo "  split    Run daemon + Noema separately (daemon in background)"
     echo "  build    Build release binaries"
     echo "  install  Build and open macOS installer"
     echo "  nuke     Delete all local data"

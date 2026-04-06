@@ -8,7 +8,7 @@ PIDFILE="$REPO_ROOT/.daemon.pid"
 DAEMON_PORT="${DAEMON_PORT:-9800}"
 
 export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_core=debug}"
-export DAEMON_LOG_FILE="${DAEMON_LOG_FILE:-$REPO_ROOT/daemon.log}"
+export DAEMON_LOG_FILE="${DAEMON_LOG_FILE:-$REPO_ROOT/logs/daemon.log}"
 
 daemon_is_running() {
   nc -z 127.0.0.1 "$DAEMON_PORT" 2>/dev/null
@@ -20,6 +20,7 @@ daemon_start_bg() {
     return 0
   fi
 
+  mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
   echo "Starting daemon... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
   cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
@@ -81,6 +82,7 @@ case "${1:-status}" in
       echo "Daemon already running on port $DAEMON_PORT"
       exit 1
     fi
+    mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
     : > "$DAEMON_LOG_FILE"
     echo "Starting daemon in foreground... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
     cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
