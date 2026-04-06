@@ -2,31 +2,31 @@
 
 Verification tests that should pass before moving to the next major milestone. Run these against a live daemon + Discord bot.
 
-Daemon default ports: WS 9800, REST 9801.
+Daemon default port: 9800 (REST + WebSocket on single port).
 
 ---
 
 ## 1. Daemon REST APIs
 
 ```bash
-BASE=http://127.0.0.1:9801
+BASE=http://127.0.0.1:9800
 ```
 
 ### Health & Info
-- [ ] `curl $BASE/daemon` — returns `{"status":"ok"}`
-- [ ] `curl $BASE/daemon/version` — returns version string
-- [ ] `curl $BASE/model` — lists available models
-- [ ] `curl $BASE/model/provider` — lists providers
-- [ ] `curl $BASE/model/default` — returns default model ID
+- [x] `curl $BASE/daemon` — returns `{"status":"ok"}`
+- [x] `curl $BASE/daemon/version` — returns version string
+- [x] `curl $BASE/model` — lists available models
+- [x] `curl $BASE/model/provider` — lists providers
+- [x] `curl $BASE/model/default` — returns default model ID
 
 ### Conversations
-- [ ] `curl $BASE/conversation` — lists conversations (may be empty)
-- [ ] `curl -X POST $BASE/conversation -d '{"name":"test"}'` — creates conversation, returns ID
-- [ ] `curl $BASE/conversation/{id}/messages` — returns messages
+- [x] `curl $BASE/conversation` — lists conversations (may be empty)
+- [x] `curl -X POST $BASE/conversation -H 'Content-Type: application/json' -d '"test"'` — creates conversation, returns ID
+- [x] `curl $BASE/conversation/{id}/messages` — returns messages
 
 ### MCP Servers
-- [ ] `curl $BASE/mcp` — lists configured MCP servers
-- [ ] `curl $BASE/mcp/tools` — lists all tools across all servers
+- [x] `curl $BASE/mcp` — lists configured MCP servers
+- [x] `curl $BASE/mcp/tools` — lists all tools across all servers
 
 ### Binary Assets
 - [ ] Upload: `curl -X POST $BASE/asset -H 'Content-Type: image/png' --data-binary @test.png` — returns asset ID
@@ -35,11 +35,11 @@ BASE=http://127.0.0.1:9801
 
 ## 2. Lumina LLM Chat
 
-- [ ] Start daemon (`simply-daemon`) and Lumina (`lumina`)
-- [ ] Lumina connects to Discord and posts status message
-- [ ] Create a chat channel via `/chat new`
-- [ ] Send a message in the AI chat channel — Lumina responds via LLM
-- [ ] Response streams back with debounced edits (not all at once)
+- [x] Start daemon (`simply-daemon`) and Lumina (`lumina`)
+- [x] Lumina connects to Discord and posts status message
+- [x] Create a chat channel via `/chat new`
+- [x] Send a message in the AI chat channel — Lumina responds via LLM
+- [x] Response streams back with debounced edits (not all at once)
 - [ ] `/chat model <model_id>` changes the model for the channel
 - [ ] `/chat pause` stops responses, `/chat resume` restarts them
 - [ ] Channel history is loaded as conversation context (check LLM sees prior messages)
