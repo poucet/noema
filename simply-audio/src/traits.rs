@@ -11,6 +11,6 @@ pub trait AudioStreamer: Send + Sync {
 
 /// Trait for audio playback
 pub trait AudioPlayer: Send + Sync {
-    /// Play audio samples (16kHz mono f32)
-    fn play(&self, samples: &[f32]) -> Result<()>;
+    /// Play audio samples at the given sample rate (mono f32).
+    fn play(&self, samples: &[f32], sample_rate: u32) -> Result<()>;
 }

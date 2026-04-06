@@ -308,13 +308,8 @@ export async function stopVoiceSession(): Promise<string | null> {
   return invoke<string | null>("stop_voice_session");
 }
 
-export interface SynthesizeResult {
-  samples: number[];
-  sampleRate: number;
-}
-
-export async function synthesizeSpeech(text: string, providerId: string, voice?: string): Promise<SynthesizeResult> {
-  return invoke<SynthesizeResult>("synthesize_speech", { text, providerId, voice });
+export async function speak(text: string, providerId: string, voice?: string): Promise<void> {
+  return invoke<void>("speak", { text, providerId, voice });
 }
 
 export async function listTtsVoices(providerId: string): Promise<{ id: string; name: string }[]> {

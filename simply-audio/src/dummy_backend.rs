@@ -19,7 +19,7 @@ impl DummyAudioPlayer {
         Err(anyhow!("Audio playback is not available in this build (missing 'backend-cpal' feature)"))
     }
     
-    pub fn play(&self, _samples: &[f32]) -> Result<()> {
+    pub fn play(&self, _samples: &[f32], _sample_rate: u32) -> Result<()> {
         Err(anyhow!("Audio playback is not available"))
     }
 }

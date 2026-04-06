@@ -18,7 +18,6 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const [ttsProvider, setTtsProvider] = useState<string | null>(null);
   const [ttsVoice, setTtsVoice] = useState<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const playbackContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -166,11 +165,6 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
 
-      // Create playback context for TTS (must be created during user gesture)
-      if (!playbackContextRef.current || playbackContextRef.current.state === "closed") {
-        playbackContextRef.current = new AudioContext({ sampleRate: 24000 });
-        voiceLog.debug("TTS playback context created");
-      }
 
       // Load AudioWorklet processor module
       voiceLog.debug("Loading AudioWorklet processor");
@@ -285,42 +279,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     }
 
     try {
-      voiceLog.info("TTS: synthesizing", { provider: ttsProvider, voice: ttsVoice, length: text.length });
-      const result = await tauri.synthesizeSpeech(text, ttsProvider, ttsVoice ?? undefined);
-      voiceLog.info("TTS: got samples", { count: result.samples.length, sampleRate: result.sampleRate });
-
-      if (result.samples.length === 0) {
-        voiceLog.warn("TTS: empty audio returned");
-        ttsInFlightRef.current = false;
-        return;
-      }
-
-      const ctx = playbackContextRef.current;
-      if (!ctx || ctx.state === "closed") {
-        voiceLog.warn("TTS: no playback context (start recording first)");
-        ttsInFlightRef.current = false;
-        return;
-      }
-
-      // Resume context if suspended (autoplay policy)
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-      }
-
-      const float32 = new Float32Array(result.samples);
-      const buffer = ctx.createBuffer(1, float32.length, result.sampleRate);
-      buffer.getChannelData(0).set(float32);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(ctx.destination);
-      source.onended = () => {
-        ttsInFlightRef.current = false;
-        voiceLog.info("TTS: playback finished");
-      };
-      source.start();
-      voiceLog.info("TTS: playback started", { durationSec: float32.length / result.sampleRate, ctxState: ctx.state });
+      voiceLog.info("TTS: speaking", { provider: ttsProvider, voice: ttsVoice, length: text.length });
+      await tauri.speak(text, ttsProvider, ttsVoice ?? undefined);
+      voiceLog.info("TTS: done");
     } catch (err) {
       voiceLog.error("TTS failed", { err });
+    } finally {
       ttsInFlightRef.current = false;
     }
   }, [ttsProvider, ttsVoice]);

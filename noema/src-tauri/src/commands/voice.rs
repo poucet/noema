@@ -226,6 +226,43 @@ pub async fn get_voice_status(state: State<'_, Arc<AppState>>) -> Result<String,
     Ok(if has_session { "enabled" } else { "disabled" }.to_string())
 }
 
+/// Synthesize and play text-to-speech via native audio output.
+#[tauri::command]
+pub async fn speak(
+    state: State<'_, Arc<AppState>>,
+    text: String,
+    provider_id: String,
+    voice: Option<String>,
+) -> Result<(), String> {
+    let voice = voice.as_deref().unwrap_or("");
+    tracing::info!(provider_id = %provider_id, voice = %voice, text_len = text.len(), "TTS: speak");
+
+    let daemon = state.get_daemon()?;
+    let chunk = daemon.voice().synthesize(&text, &provider_id, voice).await
+        .map_err(|e| format!("TTS failed: {e}"))?;
+
+    let sample_rate = chunk.sample_rate;
+    tracing::info!(audio_bytes = chunk.data.len(), sample_rate, "TTS: playing");
+
+    // Convert PCM16 LE to f32
+    let samples: Vec<f32> = chunk.data.chunks_exact(2)
+        .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+        .collect();
+
+    // Play on a blocking thread (CPAL blocks until playback completes)
+    tokio::task::spawn_blocking(move || {
+        use simply_audio::AudioPlayer;
+        let player = simply_audio::AudioPlayback::new()
+            .map_err(|e| format!("Failed to create audio player: {e}"))?;
+        player.play(&samples, sample_rate)
+            .map_err(|e| format!("Playback failed: {e}"))?;
+        tracing::info!("TTS: playback complete");
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("Playback task failed: {e}"))?
+}
+
 /// Synthesize text to speech. Returns f32 samples ready for Web Audio API playback.
 #[tauri::command]
 pub async fn synthesize_speech(

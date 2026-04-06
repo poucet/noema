@@ -36,7 +36,7 @@ tracing-appender = "0.2"
 regex = "1"
 # Local workspace dependencies
 config = { workspace = true }
-simply-audio = { workspace = true, features = ["browser"] }
+simply-audio = { workspace = true, features = ["browser", "backend-cpal"] }
 simply-voice = { workspace = true }
 noema-ext = { workspace = true }
 simply-daemon = { workspace = true }

@@ -118,17 +118,9 @@ impl CpalAudioPlayer {
             .default_output_device()
             .ok_or_else(|| anyhow::anyhow!("No output device available"))?;
 
-        let supported_configs: Vec<_> = output_device.supported_output_configs()?.collect();
-        let _supported_config = supported_configs
-            .iter()
-            .filter(|c| c.channels() <= 2)
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("No supported audio output config found"))?;
-
-        let sample_rate = SampleRate(16000);
         let config = StreamConfig {
             channels: 1,
-            sample_rate,
+            sample_rate: SampleRate(24000),
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -141,11 +133,16 @@ impl CpalAudioPlayer {
 }
 
 impl AudioPlayer for CpalAudioPlayer {
-    /// Play audio samples (expected to be 16kHz mono f32)
-    fn play(&self, samples: &[f32]) -> Result<()> {
+    fn play(&self, samples: &[f32], sample_rate: u32) -> Result<()> {
         if samples.is_empty() {
             return Ok(());
         }
+
+        let config = StreamConfig {
+            channels: 1,
+            sample_rate: SampleRate(sample_rate),
+            buffer_size: cpal::BufferSize::Default,
+        };
 
         let samples = Arc::new(samples.to_vec());
         let samples_clone = samples.clone();
@@ -153,7 +150,7 @@ impl AudioPlayer for CpalAudioPlayer {
         let sample_index_clone = sample_index.clone();
 
         let stream = self.output_device.build_output_stream(
-            &self.config,
+            &config,
             move |output: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut index = sample_index_clone.lock().unwrap();
                 for sample in output.iter_mut() {
@@ -171,7 +168,7 @@ impl AudioPlayer for CpalAudioPlayer {
 
         stream.play()?;
 
-        let duration_secs = samples.len() as f32 / self.config.sample_rate.0 as f32;
+        let duration_secs = samples.len() as f32 / sample_rate as f32;
         std::thread::sleep(std::time::Duration::from_secs_f32(duration_secs + 0.1));
 
         Ok(())
