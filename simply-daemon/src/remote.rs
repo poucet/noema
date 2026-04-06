@@ -20,6 +20,7 @@ pub struct RemoteDaemon {
     session: RemoteSessionApi,
     conversation: RemoteConversationApi,
     asset: RemoteAssetApi,
+    document: RemoteDocumentApi,
     mcp: RemoteMcpApi,
     oauth: RemoteOAuthApi,
     model: RemoteModelApi,
@@ -40,6 +41,7 @@ impl RemoteDaemon {
             session: RemoteSessionApi::new(rpc.clone()),
             conversation: RemoteConversationApi::new(rpc.clone()),
             asset: RemoteAssetApi::new(rpc.clone()),
+            document: RemoteDocumentApi::new(rpc.clone()),
             mcp: RemoteMcpApi::new(rpc.clone()),
             oauth: RemoteOAuthApi::new(rpc.clone()),
             model: RemoteModelApi::new(rpc.clone()),
@@ -61,6 +63,7 @@ impl RemoteDaemon {
 impl Daemon for RemoteDaemon {
     fn session(&self) -> &dyn SessionApi { &self.session }
     fn conversation(&self) -> &dyn ConversationApi { &self.conversation }
+    fn document(&self) -> &dyn DocumentApi { &self.document }
     fn mcp(&self) -> &dyn McpApi { &self.mcp }
     fn oauth(&self) -> &dyn OAuthApi { &self.oauth }
     fn model(&self) -> &dyn ModelApi { &self.model }

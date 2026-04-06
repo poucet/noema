@@ -146,6 +146,215 @@ where
 }
 
 // ---------------------------------------------------------------------------
+// DocumentService
+// ---------------------------------------------------------------------------
+
+pub struct DocumentService<S: StorageTypes> {
+    stores: Arc<dyn Stores<S>>,
+    user_id: simply_core::storage::ids::UserId,
+}
+
+impl<S: StorageTypes> DocumentService<S> {
+    pub fn new(stores: Arc<dyn Stores<S>>, user_id: simply_core::storage::ids::UserId) -> Self {
+        Self { stores, user_id }
+    }
+}
+
+#[async_trait]
+impl<S: StorageTypes> DocumentApi for DocumentService<S> {
+    async fn list_documents(&self) -> anyhow::Result<Vec<DocumentInfo>> {
+        use simply_core::storage::traits::DocumentStore;
+        let docs = self.stores.document().list_documents(&self.user_id).await?;
+        let mut result = Vec::new();
+        for doc in docs {
+            let tabs = self.stores.document().list_document_tabs(&doc.id).await?;
+            result.push(DocumentInfo {
+                id: doc.id.to_string(),
+                title: doc.title.clone(),
+                source: format!("{:?}", doc.source),
+                source_id: doc.source_id.clone(),
+                tab_count: tabs.len(),
+                created_at: doc.content.created_at,
+                updated_at: doc.content.updated_at,
+            });
+        }
+        Ok(result)
+    }
+
+    async fn search_documents(&self, query: &str) -> anyhow::Result<Vec<DocumentInfo>> {
+        use simply_core::storage::traits::DocumentStore;
+        let docs = self.stores.document().search_documents(&self.user_id, query, 50).await?;
+        let mut result = Vec::new();
+        for doc in docs {
+            let tabs = self.stores.document().list_document_tabs(&doc.id).await?;
+            result.push(DocumentInfo {
+                id: doc.id.to_string(),
+                title: doc.title.clone(),
+                source: format!("{:?}", doc.source),
+                source_id: doc.source_id.clone(),
+                tab_count: tabs.len(),
+                created_at: doc.content.created_at,
+                updated_at: doc.content.updated_at,
+            });
+        }
+        Ok(result)
+    }
+
+    async fn get_document(&self, document_id: &str) -> anyhow::Result<DocumentDetail> {
+        use simply_core::storage::ids::DocumentId;
+        use simply_core::storage::traits::DocumentStore;
+
+        let id = DocumentId::from_string(document_id);
+        let doc = self.stores.document().get_document(&id).await?
+            .ok_or_else(|| anyhow::anyhow!("document not found: {document_id}"))?;
+
+        let tabs = self.stores.document().list_document_tabs(&id).await?;
+        let tab_infos: Vec<TabInfo> = tabs.iter().map(|t| TabInfo {
+            id: t.id.to_string(),
+            title: t.title.clone(),
+            icon: t.icon.clone(),
+            parent_tab_id: t.parent_tab_id.as_ref().map(|id| id.to_string()),
+            tab_index: t.tab_index,
+            content_markdown: t.content_markdown.clone(),
+            created_at: t.content.created_at,
+            updated_at: t.content.updated_at,
+        }).collect();
+
+        Ok(DocumentDetail {
+            id: doc.id.to_string(),
+            title: doc.title.clone(),
+            source: format!("{:?}", doc.source),
+            source_id: doc.source_id.clone(),
+            tabs: tab_infos,
+            created_at: doc.content.created_at,
+            updated_at: doc.content.updated_at,
+        })
+    }
+
+    async fn create_document(&self, request: CreateDocumentRequest) -> anyhow::Result<DocumentInfo> {
+        use simply_core::storage::traits::DocumentStore;
+        use simply_core::storage::types::DocumentSource;
+
+        let doc_id = self.stores.document().create_document(
+            &self.user_id,
+            &request.title,
+            DocumentSource::UserCreated,
+            None,
+        ).await?;
+
+        // Create initial tab if content provided
+        if let Some(ref content) = request.content {
+            self.stores.document().create_document_tab(
+                &doc_id,
+                None, // no parent
+                0,    // first tab
+                &request.title,
+                None, // no icon
+                Some(content),
+                &[],  // no assets
+                None, // no source tab
+            ).await?;
+        }
+
+        let doc = self.stores.document().get_document(&doc_id).await?
+            .ok_or_else(|| anyhow::anyhow!("document not found after create"))?;
+        let tabs = self.stores.document().list_document_tabs(&doc_id).await?;
+
+        Ok(DocumentInfo {
+            id: doc.id.to_string(),
+            title: doc.title.clone(),
+            source: format!("{:?}", doc.source),
+            source_id: doc.source_id.clone(),
+            tab_count: tabs.len(),
+            created_at: doc.content.created_at,
+            updated_at: doc.content.updated_at,
+        })
+    }
+
+    async fn rename_document(&self, document_id: &str, title: &str) -> anyhow::Result<()> {
+        use simply_core::storage::ids::DocumentId;
+        use simply_core::storage::traits::DocumentStore;
+        self.stores.document().update_document_title(&DocumentId::from_string(document_id), title).await
+    }
+
+    async fn delete_document(&self, document_id: &str) -> anyhow::Result<()> {
+        use simply_core::storage::ids::DocumentId;
+        use simply_core::storage::traits::DocumentStore;
+        self.stores.document().delete_document(&DocumentId::from_string(document_id)).await?;
+        Ok(())
+    }
+
+    async fn create_tab(&self, document_id: &str, request: CreateTabRequest) -> anyhow::Result<TabInfo> {
+        use simply_core::storage::ids::{DocumentId, TabId};
+        use simply_core::storage::traits::DocumentStore;
+
+        let doc_id = DocumentId::from_string(document_id);
+        let parent = request.parent_tab_id.as_deref().map(TabId::from_string);
+
+        let tab_id = self.stores.document().create_document_tab(
+            &doc_id,
+            parent.as_ref(),
+            request.tab_index.unwrap_or(0),
+            &request.title,
+            None,
+            request.content.as_deref(),
+            &[],
+            None,
+        ).await?;
+
+        let tab = self.stores.document().get_document_tab(&tab_id).await?
+            .ok_or_else(|| anyhow::anyhow!("tab not found after create"))?;
+
+        Ok(TabInfo {
+            id: tab.id.to_string(),
+            title: tab.title.clone(),
+            icon: tab.icon.clone(),
+            parent_tab_id: tab.parent_tab_id.as_ref().map(|id| id.to_string()),
+            tab_index: tab.tab_index,
+            content_markdown: tab.content_markdown.clone(),
+            created_at: tab.content.created_at,
+            updated_at: tab.content.updated_at,
+        })
+    }
+
+    async fn get_tab(&self, tab_id: &str) -> anyhow::Result<TabInfo> {
+        use simply_core::storage::ids::TabId;
+        use simply_core::storage::traits::DocumentStore;
+
+        let tab = self.stores.document().get_document_tab(&TabId::from_string(tab_id)).await?
+            .ok_or_else(|| anyhow::anyhow!("tab not found: {tab_id}"))?;
+
+        Ok(TabInfo {
+            id: tab.id.to_string(),
+            title: tab.title.clone(),
+            icon: tab.icon.clone(),
+            parent_tab_id: tab.parent_tab_id.as_ref().map(|id| id.to_string()),
+            tab_index: tab.tab_index,
+            content_markdown: tab.content_markdown.clone(),
+            created_at: tab.content.created_at,
+            updated_at: tab.content.updated_at,
+        })
+    }
+
+    async fn update_tab(&self, tab_id: &str, request: UpdateTabRequest) -> anyhow::Result<()> {
+        use simply_core::storage::ids::TabId;
+        use simply_core::storage::traits::DocumentStore;
+        self.stores.document().update_document_tab_content(
+            &TabId::from_string(tab_id),
+            &request.content,
+            &[],
+        ).await
+    }
+
+    async fn delete_tab(&self, tab_id: &str) -> anyhow::Result<()> {
+        use simply_core::storage::ids::TabId;
+        use simply_core::storage::traits::DocumentStore;
+        self.stores.document().delete_document_tab(&TabId::from_string(tab_id)).await?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // VoiceService
 // ---------------------------------------------------------------------------
 
