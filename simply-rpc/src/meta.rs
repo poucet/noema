@@ -35,6 +35,9 @@ pub struct RouteMeta {
     pub binary_upload: bool,
     /// Add immutable caching headers (Cache-Control + ETag).
     pub immutable_cache: bool,
+    /// JSON Schema for tool parameters. Returns `None` for methods with no parameters.
+    /// Schema is computed once on first call and cached via internal `LazyLock`.
+    pub tool_schema: fn() -> Option<&'static schemars::Schema>,
 }
 
 impl RouteMeta {

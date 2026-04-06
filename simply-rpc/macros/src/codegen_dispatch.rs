@@ -84,7 +84,8 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         })
         .collect();
 
-    // Generate route metadata entries (REST + stream)
+    // Generate tool schema functions + route metadata entries
+    let mut schema_fns: Vec<TokenStream> = Vec::new();
     let route_metas: Vec<TokenStream> = parsed
         .methods
         .iter()
@@ -101,6 +102,45 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             let immutable_cache = m.immutable_cache;
             let binary_response = is_binary_response_type(&m.return_kind);
             let binary_upload = has_binary_upload_param(m);
+
+            // Generate tool_schema function
+            let tool_params: Vec<_> = m.params.iter()
+                .filter(|p| {
+                    let ty = &p.owned_type;
+                    let ty_str = quote! { #ty }.to_string().replace(' ', "");
+                    ty_str != "BinaryUpload" && !ty_str.ends_with("::BinaryUpload")
+                })
+                .collect();
+
+            let schema_fn_name = format_ident!("__tool_schema_{}", m.name);
+            let schema_mod = format_ident!("__tool_schemas_{}", prefix);
+            let tool_schema = if tool_params.is_empty() || no_tool {
+                schema_fns.push(quote! {
+                    pub fn #schema_fn_name() -> ::core::option::Option<&'static ::schemars::Schema> { None }
+                });
+                quote! { #schema_mod::#schema_fn_name }
+            } else {
+                let fields: Vec<TokenStream> = tool_params.iter().map(|p| {
+                    let name = &p.name;
+                    let ty = &p.owned_type;
+                    quote! { pub #name: #ty }
+                }).collect();
+
+                schema_fns.push(quote! {
+                    pub fn #schema_fn_name() -> ::core::option::Option<&'static ::schemars::Schema> {
+                        #[derive(::schemars::JsonSchema)]
+                        #[allow(non_camel_case_types)]
+                        struct Params {
+                            #(#fields),*
+                        }
+                        static SCHEMA: ::std::sync::LazyLock<::schemars::Schema> =
+                            ::std::sync::LazyLock::new(|| ::schemars::schema_for!(Params));
+                        Some(&SCHEMA)
+                    }
+                });
+                quote! { #schema_mod::#schema_fn_name }
+            };
+
             Some(quote! {
                 ::simply_rpc::RouteMeta {
                     kind: #kind,
@@ -111,6 +151,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
                     binary_response: #binary_response,
                     binary_upload: #binary_upload,
                     immutable_cache: #immutable_cache,
+                    tool_schema: #tool_schema,
                 }
             })
         })
@@ -119,7 +160,16 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
     // Generate rest_dispatch match arms
     let rest_dispatch_arms = generate_rest_dispatch_arms(parsed);
 
+    let schema_mod_name = format_ident!("__tool_schemas_{}", prefix);
+
     Ok(quote! {
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        mod #schema_mod_name {
+            use super::*;
+            #(#schema_fns)*
+        }
+
         /// Auto-generated RPC service wrapper (internal — use `TraitName::service()` instead).
         #[doc(hidden)]
         #vis struct #service_name<T: #trait_name + ?Sized>(::std::sync::Arc<T>);

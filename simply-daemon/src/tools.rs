@@ -59,7 +59,7 @@ impl ToolService for DaemonToolService {
                     Some(ToolDefinition {
                         name: rm.method_name.to_string(),
                         description: rm.description.map(|s| s.to_string()),
-                        input_schema: Default::default(),
+                        input_schema: (rm.tool_schema)().cloned().unwrap_or_default(),
                     })
                 })
             })
