@@ -74,7 +74,7 @@ where
 
         const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
         let default_model_id = settings
-            .default_model
+            .default_model.clone()
             .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
 
         let document_resolver: Arc<dyn DocumentResolver> = stores.document();

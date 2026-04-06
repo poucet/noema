@@ -60,6 +60,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         .methods
         .iter()
         .filter(|m| m.rpc_kind != RpcKind::Skip)
+        .filter(|m| !matches!(m.return_kind, ReturnKind::StreamBidi { .. }))
         .collect();
 
     let match_arms: Vec<TokenStream> = rpc_methods

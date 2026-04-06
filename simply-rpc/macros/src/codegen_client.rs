@@ -307,21 +307,38 @@ fn generate_client_body(
             }
         }
         ReturnKind::StreamTuple { value_type, stream_type } => {
-            // Result<(T, Stream)> — RPC returns T, then register stream for events
+            // Result<(T, Stream)> — RPC returns T, then register stream for events.
+            // Bridge: mpsc::Receiver<Value> → deserialize → broadcast::Sender<Event> → broadcast::Receiver
             quote! {
                 #serialize
                 let __r = self.0.rpc_call(#method_str, #rpc_params).await?;
                 let __value: #value_type = ::serde_json::from_value(__r)?;
                 let (_, mut __raw_rx) = self.0.register_stream(#method_str).await?;
-                Ok((__value, __raw_rx))
+                let (__broadcast_tx, __broadcast_rx) = ::tokio::sync::broadcast::channel(256);
+                ::tokio::spawn(async move {
+                    while let Some(value) = __raw_rx.recv().await {
+                        if let Ok(event) = ::serde_json::from_value(value) {
+                            let _ = __broadcast_tx.send(event);
+                        }
+                    }
+                });
+                Ok((__value, __broadcast_rx))
             }
         }
         ReturnKind::StreamBare { stream_type } => {
             quote! {
                 #serialize
                 self.0.rpc_call(#method_str, #rpc_params).await?;
-                let (_, __raw_rx) = self.0.register_stream(#method_str).await?;
-                Ok(__raw_rx)
+                let (_, mut __raw_rx) = self.0.register_stream(#method_str).await?;
+                let (__broadcast_tx, __broadcast_rx) = ::tokio::sync::broadcast::channel(256);
+                ::tokio::spawn(async move {
+                    while let Some(value) = __raw_rx.recv().await {
+                        if let Ok(event) = ::serde_json::from_value(value) {
+                            let _ = __broadcast_tx.send(event);
+                        }
+                    }
+                });
+                Ok(__broadcast_rx)
             }
         }
         ReturnKind::StreamBidi { input_type, output_type } => {

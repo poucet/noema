@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{FromRequest, State};
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::ConnectInfo;
 use axum::http::{Method, StatusCode};
@@ -216,17 +216,21 @@ async fn handle_ws_connection(
 
 async fn rest_or_stream_handler(
     State(state): State<AppState>,
-    ws: Option<axum::extract::WebSocketUpgrade>,
     req: axum::extract::Request,
 ) -> Response {
     let path = req.uri().path().to_string();
 
     // Check if this is a WS upgrade for a stream route
-    if let Some(ws) = ws {
-        if state.rest_dispatcher.has_stream_route(&path) {
-            let dispatcher = Arc::clone(&state.rest_dispatcher);
-            return ws.on_upgrade(move |socket| handle_stream_ws(dispatcher, path, socket));
-        }
+    if req.headers().get("upgrade").and_then(|v| v.to_str().ok()) == Some("websocket")
+        && state.rest_dispatcher.has_stream_route(&path)
+    {
+        // Re-extract the WebSocketUpgrade from the request
+        let ws = match axum::extract::WebSocketUpgrade::from_request(req, &state).await {
+            Ok(ws) => ws,
+            Err(e) => return e.into_response(),
+        };
+        let dispatcher = Arc::clone(&state.rest_dispatcher);
+        return ws.on_upgrade(move |socket| handle_stream_ws(dispatcher, path, socket));
     }
 
     rest_handler(state, req).await
