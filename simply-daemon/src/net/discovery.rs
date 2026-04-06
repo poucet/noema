@@ -129,7 +129,7 @@ pub async fn connect_or_host(
         .register(<dyn ConversationApi>::service(daemon.clone() as Arc<dyn ConversationApi>))
         .register(<dyn AssetApi>::service(daemon.asset_service()))
         .register(<dyn McpApi>::service(daemon.mcp_service()))
-        .register(<dyn OAuthApi>::service(daemon.mcp_service()))
+        .register(<dyn OAuthApi>::service(daemon.oauth_service()))
         .register(<dyn ModelApi>::service(daemon.model_service()))
         .register(<dyn VoiceApi>::service(daemon.voice_service()))
         .register(<dyn CoreApi>::service(core_svc));

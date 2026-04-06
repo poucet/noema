@@ -90,16 +90,14 @@ where
         let voice = Arc::new(VoiceService);
         let core = Arc::new(CoreService::embedded());
 
-        let tools = Arc::new({
-            let daemon_tools = DaemonToolService::new()
+        let tools = Arc::new(CompositeToolService::new(
+            DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
                 .register(<dyn ModelApi>::service(model.clone()))
-                .register(<dyn CoreApi>::service(core.clone()));
-            let mcp_tools = McpToolRegistry::new(Arc::clone(mcp.registry()));
-            CompositeToolService::new()
-                .add(daemon_tools)
-                .add(mcp_tools)
-        });
+                .register(<dyn CoreApi>::service(core.clone())),
+            McpToolRegistry::new(Arc::clone(mcp.registry())),
+            Arc::clone(&mcp),
+        ));
 
         let daemon = Arc::new(Self {
             coordinator,
@@ -121,16 +119,12 @@ where
 
     // -- Service accessors for main.rs / RestDispatcher registration ----------
 
-    pub fn mcp_service(&self) -> Arc<McpService> { Arc::clone(&self.mcp) }
+    pub fn mcp_service(&self) -> Arc<dyn McpApi> { self.tools.clone() }
+    pub fn oauth_service(&self) -> Arc<dyn OAuthApi> { self.mcp.clone() }
     pub fn model_service(&self) -> Arc<ModelService> { Arc::clone(&self.model) }
     pub fn asset_service(&self) -> Arc<AssetService<S>> { Arc::clone(&self.asset) }
     pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
     pub fn core_service(&self) -> Arc<CoreService> { Arc::clone(&self.core) }
-
-    /// The composite tool service (daemon REST tools + MCP tools).
-    pub fn tool_service(&self) -> &CompositeToolService {
-        &self.tools
-    }
 
     pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
     pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
@@ -445,7 +439,7 @@ where S::Document: DocumentResolver,
 {
     fn session(&self) -> &dyn SessionApi { self }
     fn conversation(&self) -> &dyn ConversationApi { self }
-    fn mcp(&self) -> &dyn McpApi { &*self.mcp }
+    fn mcp(&self) -> &dyn McpApi { &*self.tools }
     fn oauth(&self) -> &dyn OAuthApi { &*self.mcp }
     fn model(&self) -> &dyn ModelApi { &*self.model }
     fn asset(&self) -> &dyn AssetApi { &*self.asset }
