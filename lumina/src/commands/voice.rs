@@ -96,14 +96,19 @@ mod voice {
         let manager = songbird::get(&lx.ctx).await
             .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
 
-        // Auto-join if not connected
-        let handler_lock = match manager.get(guild_id) {
-            Some(h) => h,
-            None => {
-                join_user_channel(lx, cmd).await.map_err(|e| anyhow::anyhow!(e))?;
-                manager.get(guild_id).ok_or_else(|| anyhow::anyhow!("Failed to join"))?
+        // Auto-join if not connected to a channel
+        let needs_join = match manager.get(guild_id) {
+            Some(h) => {
+                let handler = h.lock().await;
+                handler.current_channel().is_none()
             }
+            None => true,
         };
+        if needs_join {
+            join_user_channel(lx, cmd).await.map_err(|e| anyhow::anyhow!(e))?;
+        }
+        let handler_lock = manager.get(guild_id)
+            .ok_or_else(|| anyhow::anyhow!("Failed to get voice handler"))?;
 
         lx.reply(cmd, &format!("Speaking: _{text}_")).await?;
 
