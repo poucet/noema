@@ -69,6 +69,24 @@ daemon_stop() {
     fi
   fi
 
+  # Last resort: kill whatever is listening on the port
+  if daemon_is_running; then
+    local port_pid
+    port_pid=$(lsof -ti "tcp:$DAEMON_PORT" 2>/dev/null | head -1)
+    if [ -n "$port_pid" ]; then
+      echo "Force killing process $port_pid on port $DAEMON_PORT..."
+      kill "$port_pid" 2>/dev/null
+      sleep 1
+      if ! daemon_is_running; then
+        echo "Daemon stopped"
+        return 0
+      fi
+      kill -9 "$port_pid" 2>/dev/null || true
+      echo "Daemon killed (SIGKILL)"
+      return 0
+    fi
+  fi
+
   echo "No daemon running"
 }
 
