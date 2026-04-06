@@ -57,17 +57,17 @@ impl Settings {
     }
 
     /// Get a decrypted API key for a provider.
-    /// Returns None if not set or decryption fails.
+    /// Get an API key for a provider (plaintext).
+    /// Falls back to trying decryption for backward compatibility with old encrypted keys.
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
-        self.api_keys
-            .get(provider)
-            .and_then(|encrypted| crypto::decrypt_string(encrypted).ok())
+        let value = self.api_keys.get(provider)?;
+        // Try decryption first (backward compat), fall back to plaintext
+        crypto::decrypt_string(value).ok().or_else(|| Some(value.clone()))
     }
 
-    /// Set an API key for a provider (encrypts before storing).
+    /// Set an API key for a provider (stored as plaintext).
     pub fn set_api_key(&mut self, provider: &str, api_key: &str) -> Result<(), String> {
-        let encrypted = crypto::encrypt_string(api_key)?;
-        self.api_keys.insert(provider.to_string(), encrypted);
+        self.api_keys.insert(provider.to_string(), api_key.to_string());
         Ok(())
     }
 
