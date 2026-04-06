@@ -5479,6 +5479,7 @@ dependencies = [
  "serde_json",
  "simply-core",
  "simply-rpc",
+ "simply-voice",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tower-service",
