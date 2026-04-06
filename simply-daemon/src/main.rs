@@ -49,13 +49,15 @@ async fn main() -> anyhow::Result<()> {
     let model_svc: Arc<dyn ModelApi> = daemon.model_service();
     let asset_svc: Arc<dyn AssetApi> = daemon.asset_service();
     let voice_svc: Arc<dyn VoiceApi> = daemon.voice_service();
-    let daemon_info_svc: Arc<dyn DaemonInfoApi> = daemon.daemon_info_service();
+
+    // Kill channel — shared with DaemonInfoService so /daemon/kill actually works
+    let (kill_tx, mut kill_rx) = mpsc::channel(1);
+    let daemon_info_svc: Arc<dyn DaemonInfoApi> = Arc::new(
+        simply_daemon::services::DaemonInfoService::new(kill_tx),
+    );
 
     let ws_dispatch = build_ws_dispatch(Arc::clone(&session_svc));
     let tracker = net::server::ConnectionTracker::new();
-
-    // Kill channel
-    let (kill_tx, mut kill_rx) = mpsc::channel(1);
 
     // Unified server (axum) — REST + admin + WebSocket on a single port
     let rest_dispatcher = RestDispatcher::new()
@@ -73,7 +75,6 @@ async fn main() -> anyhow::Result<()> {
         ws_dispatch: Some(ws_dispatch),
         port,
         tracker,
-        kill_tx: kill_tx.clone(),
     }).await?;
 
     tracing::info!(port, "daemon ready");

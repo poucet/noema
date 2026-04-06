@@ -28,7 +28,6 @@ pub struct ServerConfig {
     pub ws_dispatch: Option<DispatchFn>,
     pub port: u16,
     pub tracker: ConnectionTracker,
-    pub kill_tx: tokio::sync::mpsc::Sender<()>,
 }
 
 /// Shared state for axum handlers.
@@ -37,7 +36,6 @@ struct AppState {
     rest_dispatcher: Arc<RestDispatcher>,
     ws_dispatch: Option<DispatchFn>,
     tracker: ConnectionTracker,
-    kill_tx: tokio::sync::mpsc::Sender<()>,
 }
 
 /// Starts the unified server (REST + WS + admin).
@@ -46,7 +44,6 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         rest_dispatcher: Arc::new(config.rest_dispatcher),
         ws_dispatch: config.ws_dispatch,
         tracker: config.tracker,
-        kill_tx: config.kill_tx,
     };
 
     let app = Router::new()

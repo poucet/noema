@@ -117,20 +117,17 @@ pub async fn connect_or_host(
 
     let ws_dispatch = (builders.ws_dispatch)(Arc::clone(&daemon));
     let tracker = server::ConnectionTracker::new();
-    let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
 
-    let rest_dispatcher = (builders.rest_dispatcher)(Arc::clone(&daemon));
     let server = rest::start(rest::ServerConfig {
         rest_dispatcher: simply_rpc::RestDispatcher::new(),
         ws_dispatch: Some(ws_dispatch),
         port,
         tracker,
-        kill_tx,
     }).await?;
 
     Ok(DaemonHandle::Host {
         daemon,
         _server: server,
-        kill_rx: Some(kill_rx),
+        kill_rx: None,
     })
 }
