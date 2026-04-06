@@ -144,11 +144,11 @@ mod voice {
     pub async fn provider(
         lx: &LuminaContext,
         cmd: &CommandInteraction,
-        #[describe("stt or tts")] r#type: String,
+        #[describe("stt or tts")] kind: String,
         #[describe("Provider ID")] #[autocomplete] id: String,
     ) -> anyhow::Result<()> {
         let voice_mgr = get_voice_manager(lx).await?;
-        match r#type.as_str() {
+        match kind.as_str() {
             "stt" => {
                 voice_mgr.set_stt_provider(id.clone()).await;
                 lx.reply(cmd, &format!("STT provider set to **{id}**")).await
