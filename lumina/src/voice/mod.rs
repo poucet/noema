@@ -41,7 +41,7 @@ pub enum VoiceMode {
 
 /// Manages voice sessions across guilds.
 pub struct VoiceManager {
-    sessions: Mutex<HashMap<GuildId, VoiceSession>>,
+    pub(crate) sessions: Mutex<HashMap<GuildId, VoiceSession>>,
     daemon: Arc<dyn Daemon>,
     config: Mutex<config::VoiceConfig>,
 }
@@ -90,7 +90,7 @@ impl VoiceManager {
 
     /// Start a voice session and register the audio receive handler on the songbird Call.
     pub async fn start_session(
-        &self,
+        self: &Arc<Self>,
         guild_id: GuildId,
         voice_channel: ChannelId,
         text_channel: ChannelId,
@@ -124,14 +124,13 @@ impl VoiceManager {
         }
 
         // Spawn event handler — processes STT results
-        let voice_mgr = self.daemon.clone();
         receiver::spawn_event_handler(
             guild_id,
             text_channel,
             mode,
             stt_events,
             http,
-            voice_mgr,
+            Arc::clone(self),
             call.clone(),
         );
 
@@ -235,6 +234,33 @@ pub struct VoiceManagerKey;
 
 impl serenity::prelude::TypeMapKey for VoiceManagerKey {
     type Value = Arc<VoiceManager>;
+}
+
+/// Build a WAV file in memory from f32 interleaved samples.
+pub(crate) fn build_wav_f32(samples: &[f32], sample_rate: u32, channels: u16) -> Vec<u8> {
+    let bits_per_sample: u16 = 32;
+    let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
+    let block_align = channels * bits_per_sample / 8;
+    let data_len = (samples.len() * 4) as u32;
+
+    let mut buf = Vec::with_capacity(44 + data_len as usize);
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&(36 + data_len).to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes());
+    buf.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
+    buf.extend_from_slice(&channels.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&byte_rate.to_le_bytes());
+    buf.extend_from_slice(&block_align.to_le_bytes());
+    buf.extend_from_slice(&bits_per_sample.to_le_bytes());
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&data_len.to_le_bytes());
+    for &s in samples {
+        buf.extend_from_slice(&s.to_le_bytes());
+    }
+    buf
 }
 
 /// Resample mono audio to interleaved stereo 48kHz.

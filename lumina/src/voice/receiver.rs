@@ -70,7 +70,7 @@ pub fn spawn_event_handler(
     mode: VoiceMode,
     mut stt_events: mpsc::Receiver<VoiceEvent>,
     http: Arc<serenity::http::Http>,
-    daemon: Arc<dyn Daemon>,
+    voice_mgr: Arc<super::VoiceManager>,
     call: Arc<Mutex<songbird::Call>>,
 ) {
     tokio::spawn(async move {
@@ -86,11 +86,72 @@ pub fn spawn_event_handler(
                             let _ = text_channel.say(&http, format!("🗣️ {text}")).await;
                         }
                         VoiceMode::Listen => {
+                            // Post transcript to text channel
                             let _ = text_channel.say(&http, format!("🗣️ {text}")).await;
 
-                            // TODO: send to daemon session, get response, TTS it back
-                            // This needs access to the VoiceSession's daemon_session
-                            // which is held by VoiceManager. For now, just echo.
+                            // Send to daemon session → get LLM response → TTS → play
+                            let response = {
+                                let mut sessions = voice_mgr.sessions.lock().await;
+                                if let Some(session) = sessions.get_mut(&guild_id) {
+                                    if let Some(ref mut daemon_session) = session.daemon_session {
+                                        // Send user transcript to session
+                                        let send_result = daemon_session.send(simply_daemon::api::UserMessage {
+                                            content: vec![simply_daemon::api::InputContent::Text {
+                                                text: text.clone(),
+                                            }],
+                                        }).await;
+
+                                        if let Err(e) = send_result {
+                                            tracing::error!(error = %e, "failed to send to session");
+                                            None
+                                        } else {
+                                            // Collect the response
+                                            let mut response_text = String::new();
+                                            loop {
+                                                match daemon_session.recv().await {
+                                                    Ok(simply_daemon::api::DaemonEvent::TextDelta(delta)) => {
+                                                        response_text.push_str(&delta);
+                                                    }
+                                                    Ok(simply_daemon::api::DaemonEvent::TurnComplete) => break,
+                                                    Ok(simply_daemon::api::DaemonEvent::Error(e)) => {
+                                                        tracing::error!(error = %e, "session error");
+                                                        break;
+                                                    }
+                                                    Err(_) => break,
+                                                    _ => {} // skip tool calls etc
+                                                }
+                                            }
+                                            if response_text.trim().is_empty() { None } else { Some(response_text) }
+                                        }
+                                    } else { None }
+                                } else { None }
+                            };
+
+                            if let Some(response_text) = response {
+                                // Post response to text channel
+                                let _ = text_channel.say(&http, format!("💬 {response_text}")).await;
+
+                                // TTS → play in voice channel
+                                match voice_mgr.synthesize_for_discord(&response_text).await {
+                                    Ok(stereo) => {
+                                        let wav = super::build_wav_f32(&stereo, 48_000, 2);
+                                        let cursor = std::io::Cursor::new(wav);
+                                        let input = songbird::input::Input::Live(
+                                            songbird::input::LiveInput::Raw(
+                                                songbird::input::AudioStream { input: Box::new(cursor) },
+                                            ),
+                                            None,
+                                        );
+                                        let mut handler = call.lock().await;
+                                        handler.play_input(input);
+                                        tracing::info!("TTS response playing in voice channel");
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "TTS synthesis failed");
+                                        let _ = text_channel.say(&http, format!("TTS error: {e}")).await;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
