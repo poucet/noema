@@ -251,6 +251,7 @@ mod voice {
         let voice_mgr = get_voice_manager(lx).await?;
         let options = cmd.data.options();
         let subcommand = options.first().map(|o| o.name).unwrap_or("");
+        tracing::debug!(subcommand, "voice autocomplete");
 
         let choices: Vec<AutocompleteChoice> = match subcommand {
             "provider" => {
@@ -264,11 +265,17 @@ mod voice {
             }
             "set-voice" => {
                 let tts_id = voice_mgr.tts_provider_id().await.unwrap_or_default();
-                let voices = voice_mgr.daemon().voice().list_voices(&tts_id).await.unwrap_or_default();
-                voices.iter()
-                    .map(|v| AutocompleteChoice::new(&v.name, v.id.clone()))
-                    .take(25)
-                    .collect()
+                tracing::debug!(tts_provider = %tts_id, "fetching voices for autocomplete");
+                if tts_id.is_empty() {
+                    vec![AutocompleteChoice::new("Set a TTS provider first (/voice provider tts ...)", "")]
+                } else {
+                    let voices = voice_mgr.daemon().voice().list_voices(&tts_id).await.unwrap_or_default();
+                    tracing::debug!(count = voices.len(), "got voices for autocomplete");
+                    voices.iter()
+                        .map(|v| AutocompleteChoice::new(&v.name, v.id.clone()))
+                        .take(25)
+                        .collect()
+                }
             }
             _ => vec![],
         };
