@@ -5,13 +5,21 @@ use serde::{Deserialize, Serialize};
 use simply_rpc::{BinaryResponse, BinaryUpload};
 use super::types::{AssetId, BlobHash};
 
-/// Asset metadata returned by get_asset.
+/// Asset metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetInfo {
     pub id: AssetId,
     pub blob_hash: BlobHash,
     pub mime_type: String,
     pub size_bytes: i64,
+}
+
+/// Full asset: metadata + binary data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Asset {
+    pub info: AssetInfo,
+    #[serde(flatten)]
+    pub data: BinaryResponse,
 }
 
 #[simply_rpc::rpc_service("asset")]
@@ -26,8 +34,12 @@ pub trait AssetApi: Send + Sync {
     async fn list_assets(&self) -> anyhow::Result<Vec<AssetId>>;
 
     /// Get asset metadata by ID.
-    #[rpc(get = "/asset/{id}")]
-    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<AssetInfo>;
+    #[rpc(get = "/asset/{id}/info")]
+    async fn get_asset_info(&self, id: &AssetId) -> anyhow::Result<AssetInfo>;
+
+    /// Get an asset (metadata + binary data) by ID.
+    #[rpc(get = "/asset/{id}", binary_response)]
+    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<BinaryResponse>;
 
     /// Get blob data + mime type by content hash.
     #[rpc(get = "/blob/{hash}", immutable_cache)]

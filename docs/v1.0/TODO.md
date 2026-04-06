@@ -53,7 +53,7 @@ BASE=http://127.0.0.1:9800
 
 ## 4. /tool call — Text Tools
 
-- [ ] `/tool call list_channels` — modal opens with guild_id field
+- [x] `/tool call list_channels` — modal opens with guild_id field
 - [ ] Fill in guild_id, submit — returns channel list as embed
 - [ ] `/tool call send_message` — modal with channel_id + content fields
 - [ ] Submit — message appears in the target Discord channel

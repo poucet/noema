@@ -114,7 +114,7 @@ where
         self.stores.asset().list().await
     }
 
-    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<AssetInfo> {
+    async fn get_asset_info(&self, id: &AssetId) -> anyhow::Result<AssetInfo> {
         use simply_core::storage::traits::AssetStore;
         let stored = self.stores.asset().get(id).await?
             .ok_or_else(|| anyhow::anyhow!("asset not found: {id}"))?;
@@ -124,6 +124,14 @@ where
             mime_type: stored.mime_type.clone(),
             size_bytes: stored.size_bytes,
         })
+    }
+
+    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<simply_rpc::BinaryResponse> {
+        use simply_core::storage::traits::AssetStore;
+        let stored = self.stores.asset().get(id).await?
+            .ok_or_else(|| anyhow::anyhow!("asset not found: {id}"))?;
+        let data = self.coordinator.get_blob(&stored.blob_hash).await?;
+        Ok(simply_rpc::BinaryResponse { data, mime_type: stored.mime_type.clone() })
     }
 
     async fn get_blob(&self, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> {

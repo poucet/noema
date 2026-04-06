@@ -25,6 +25,10 @@ Non-blocking issues discovered during testing. Fix later.
 
 - Only lists MCP tools from Lumina (Discord) — daemon's built-in tools are missing from the tool list
 
+## Tool call UX
+
+- Tool params could support autocomplete from related tools (e.g. `get_asset` id field autocompletes from `list_assets` results). Needs a way to annotate param-to-tool relationships in tool schemas.
+
 ## API design
 
 - Consider putting all REST API services under a common root (e.g. `/api/` or `/rpc/`) to separate from admin/WS paths

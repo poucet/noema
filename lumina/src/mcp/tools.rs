@@ -439,11 +439,18 @@ impl LuminaMcpServer {
     }
 
     async fn do_list_channels(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {
+        use serenity::model::channel::ChannelType;
         let channels = p.guild_id.serenity().channels(self.http()).await?;
-        let list: Vec<serde_json::Value> = channels.values().map(|ch| json!({
-            "name": ch.name, "id": ch.id.get(), "kind": format!("{:?}", ch.kind),
-            "parent_id": ch.parent_id.map(|p| p.get()),
-        })).collect();
+        let list: Vec<serde_json::Value> = channels.values()
+            .filter(|ch| !matches!(ch.kind, ChannelType::Category))
+            .map(|ch| {
+                let category = ch.parent_id.and_then(|pid| channels.get(&pid).map(|c| c.name.clone()));
+                json!({
+                    "name": ch.name, "id": ch.id.get().to_string(),
+                    "kind": format!("{:?}", ch.kind),
+                    "category": category,
+                })
+            }).collect();
         Ok(json!({ "status": "success", "channels": list, "count": list.len() }))
     }
 

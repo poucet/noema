@@ -8,13 +8,33 @@ use serde::Deserialize;
 
 macro_rules! discord_id {
     ($name:ident, $desc:literal, $serenity_ty:path) => {
-        #[derive(Debug, Clone, Copy, Deserialize)]
-        #[serde(transparent)]
+        #[derive(Debug, Clone, Copy)]
         pub struct $name(pub u64);
 
         impl $name {
             pub fn serenity(self) -> $serenity_ty {
                 <$serenity_ty>::new(self.0)
+            }
+        }
+
+        /// Deserialize from string or integer — LLMs may send either.
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                use serde::de;
+                struct Visitor;
+                impl de::Visitor<'_> for Visitor {
+                    type Value = u64;
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        write!(f, "a string or integer Discord ID")
+                    }
+                    fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> { Ok(v) }
+                    fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> { Ok(v as u64) }
+                    fn visit_f64<E: de::Error>(self, v: f64) -> Result<u64, E> { Ok(v as u64) }
+                    fn visit_str<E: de::Error>(self, v: &str) -> Result<u64, E> {
+                        v.parse().map_err(de::Error::custom)
+                    }
+                }
+                Ok($name(deserializer.deserialize_any(Visitor)?))
             }
         }
 
@@ -25,8 +45,8 @@ macro_rules! discord_id {
 
             fn json_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
                 let mut map = serde_json::Map::new();
-                map.insert("type".into(), "integer".into());
-                map.insert("description".into(), $desc.into());
+                map.insert("type".into(), "string".into());
+                map.insert("description".into(), concat!($desc, " (as string)").into());
                 map.into()
             }
 

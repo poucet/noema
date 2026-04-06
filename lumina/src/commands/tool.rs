@@ -140,6 +140,16 @@ async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str)
             if let Some(desc) = &param.description {
                 input = input.placeholder(desc);
             }
+            // Pre-populate contextual Discord IDs
+            match param.name.as_str() {
+                "guild_id" => if let Some(gid) = cmd.guild_id {
+                    input = input.value(gid.get().to_string());
+                },
+                "channel_id" => {
+                    input = input.value(cmd.channel_id.get().to_string());
+                },
+                _ => {}
+            }
             input = input.required(param.required);
             components.push(CreateActionRow::InputText(input));
         }
@@ -389,16 +399,16 @@ fn format_array(items: &[serde_json::Value]) -> String {
 
     for (i, item) in items.iter().enumerate() {
         if let serde_json::Value::Object(obj) = item {
-            // Try to find a good label: name, id, title, or first string field
-            let label = obj.get("name").or(obj.get("id")).or(obj.get("title"))
-                .and_then(|v| match v {
-                    serde_json::Value::String(s) => Some(s.as_str()),
-                    serde_json::Value::Object(inner) => {
-                        // Handle nested id like { "model": "...", "provider": "..." }
-                        inner.values().find_map(|v| v.as_str())
-                    }
-                    _ => None,
-                });
+            // Try to find a good label: name, id, title
+            let label_key = ["name", "title", "id"].iter()
+                .find(|&&k| obj.contains_key(k))
+                .copied();
+
+            let label = label_key.and_then(|k| obj.get(k)).and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s.as_str()),
+                serde_json::Value::Object(inner) => inner.values().find_map(|v| v.as_str()),
+                _ => None,
+            });
 
             if let Some(label) = label {
                 lines.push(format!("{}. **{}**", i + 1, label));
@@ -406,8 +416,9 @@ fn format_array(items: &[serde_json::Value]) -> String {
                 lines.push(format!("{}.", i + 1));
             }
 
-            // Show key fields inline, skip nested objects
+            // Show key fields inline, skip the one used as label
             for (key, val) in obj {
+                if label_key == Some(key.as_str()) { continue; }
                 match val {
                     serde_json::Value::String(s) => {
                         lines.push(format!("   {key}: {s}"));
@@ -438,6 +449,8 @@ fn format_array(items: &[serde_json::Value]) -> String {
                     serde_json::Value::Null => {}
                 }
             }
+        } else if let Some(s) = item.as_str() {
+            lines.push(format!("{}. {s}", i + 1));
         } else {
             lines.push(format!("{}. {}", i + 1, item));
         }
@@ -463,7 +476,9 @@ fn format_object(obj: &serde_json::Map<String, serde_json::Value>, indent: usize
                 if simple.len() == arr.len() {
                     lines.push(format!("{prefix}**{key}:** {}", simple.join(", ")));
                 } else {
-                    lines.push(format!("{prefix}**{key}:** ({} items)", arr.len()));
+                    // Expand arrays of objects inline
+                    lines.push(format!("{prefix}**{key}:**"));
+                    lines.push(format_array(arr));
                 }
             }
             serde_json::Value::Object(inner) => {
@@ -497,20 +512,52 @@ async fn send_tool_result_from_service(
 
     match result {
         Ok(content) => {
-            let raw_text = content.iter()
-                .filter_map(|c| match c {
-                    simply_daemon::types::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            use simply_daemon::types::ToolResultContent;
+            use base64::Engine;
 
-            let formatted = format_tool_output(&raw_text);
-            let pages = crate::paginator::paginate_text(&formatted, 1800);
+            let mut text_parts = Vec::new();
+            let mut attachments: Vec<serenity::builder::CreateAttachment> = Vec::new();
 
-            crate::paginator::send_paginated_embeds_to_channel(
-                lx, channel_id, tool_name, &pages, Duration::from_secs(120),
-            ).await?;
+            for c in &content {
+                match c {
+                    ToolResultContent::Text { text } => text_parts.push(text.as_str()),
+                    ToolResultContent::Image { data, mime_type } => {
+                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
+                            let ext = mime_type.split('/').last().unwrap_or("png");
+                            attachments.push(serenity::builder::CreateAttachment::bytes(
+                                bytes, format!("asset.{ext}"),
+                            ));
+                        }
+                    }
+                    ToolResultContent::Audio { data, mime_type } => {
+                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
+                            let ext = mime_type.split('/').last().unwrap_or("wav");
+                            attachments.push(serenity::builder::CreateAttachment::bytes(
+                                bytes, format!("audio.{ext}"),
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if !attachments.is_empty() {
+                let mut msg = CreateMessage::new();
+                for a in attachments {
+                    msg = msg.add_file(a);
+                }
+                if !text_parts.is_empty() {
+                    msg = msg.content(text_parts.join("\n"));
+                }
+                channel_id.send_message(&lx.http, msg).await?;
+            } else {
+                let raw_text = text_parts.join("\n");
+                let formatted = format_tool_output(&raw_text);
+                let pages = crate::paginator::paginate_text(&formatted, 1800);
+
+                crate::paginator::send_paginated_embeds_to_channel(
+                    lx, channel_id, tool_name, &pages, Duration::from_secs(120),
+                ).await?;
+            }
         }
         Err(e) => {
             let embed = CreateEmbed::new()
