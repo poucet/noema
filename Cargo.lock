@@ -5531,6 +5531,7 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
+ "whisper-rs",
 ]
 
 [[package]]

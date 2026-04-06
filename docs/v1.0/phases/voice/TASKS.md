@@ -20,9 +20,9 @@
 |---|---|------|----------|------|
 | 1.1 | ✅ | Create `simply-voice/` crate with `SttProvider`, `TtsProvider`, `RealtimeProvider` traits | P0 | M |
 | 1.2 | ⬜ | Voxtral provider: implements `SttProvider` + `TtsProvider` | P0 | M |
-| 1.3 | ⬜ | Whisper provider: implements `SttProvider` | P1 | S |
+| 1.3 | ✅ | Whisper provider: implements `SttProvider` | P1 | S |
 | 1.4 | ⬜ | Gemini Realtime provider: implements `RealtimeProvider` | P0 | L |
-| 1.5 | ⬜ | VAD module: voice activity detection | P0 | M |
+| 1.5 | ✅ | VAD module: voice activity detection | P0 | M |
 | 1.6 | ⬜ | Audio format utilities: PCM conversion, sample rate | P0 | S |
 
 ---
