@@ -1,6 +1,6 @@
 # Auth & Multi-User Identity
 
-**Status:** draft
+**Status:** refined
 **Priority:** P0
 **Depends on:** Foundation (complete)
 
@@ -213,9 +213,42 @@ everyone = ["google-docs"]              # everyone gets Docs
 
 For Noema (desktop), all MCP services are available (single admin user). The role check is Lumina-specific.
 
+### Single Port Architecture
+
+Everything on one port. The existing separate OAuth callback server (port 9876) is merged into the main server.
+
+```
+:9800/                              → Admin page (Google OAuth protected)
+:9800/admin/api/*                   → Admin API endpoints
+:9800/auth/login                    → User Google OAuth login flow
+:9800/auth/mcp/{server_id}          → Per-user MCP service OAuth initiation
+:9800/auth/callback                 → OAuth callback handler (all flows)
+:9800/ws                            → WebSocket (sessions, bidi streams)
+:9800/document/*                    → Document API
+:9800/conversation/*                → Conversation API
+:9800/session/*                     → Session API
+:9800/voice/*                       → Voice API (REST + stream)
+:9800/model/*                       → Model API
+:9800/mcp/*                         → MCP API
+:9800/asset/*                       → Asset API
+:9800/daemon/*                      → Core API (health, kill, version)
+```
+
+**Auth rules:**
+- `/auth/*` routes — no daemon_secret required (handle their own auth)
+- `/admin` — requires valid Google OAuth session matching `admin_email`
+- All other routes — require `Authorization: Bearer {daemon_secret}`
+- `X-User-Id` header — optional on all routes, scopes operations to user
+
+**Benefits of single port:**
+- One URL to configure/share
+- One port to expose in cloud deployments
+- OAuth callbacks use the same origin (no CORS)
+- Simpler TLS — one cert, one domain
+
 ## Open Questions
 
-1. **HTTPS** — should the daemon serve HTTPS directly (self-signed cert) or rely on a reverse proxy? For OAuth callbacks, HTTPS is required by Google.
-2. **Token refresh** — how to handle expired Google tokens? Silent refresh with stored refresh token?
-3. **Rate limiting** — should anonymous users be rate-limited?
-4. **Revocation** — can the admin revoke a user's access?
+1. **HTTPS** — serve HTTPS directly (rustls, auto-generated self-signed cert) or rely on reverse proxy (nginx, Caddy)? Google OAuth requires HTTPS callbacks in production, but `localhost` is exempt.
+2. **Token refresh** — silent refresh using stored refresh tokens. Handled automatically by the daemon before expiry.
+3. **Rate limiting** — should anonymous users be rate-limited to prevent abuse?
+4. **Revocation** — admin can delete the user's token mapping, revoking their authenticated status.
