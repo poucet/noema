@@ -40,9 +40,9 @@ BASE=http://127.0.0.1:9800
 - [x] Create a chat channel via `/chat new`
 - [x] Send a message in the AI chat channel — Lumina responds via LLM
 - [x] Response streams back with debounced edits (not all at once)
-- [ ] `/chat model <model_id>` changes the model for the channel
-- [ ] `/chat pause` stops responses, `/chat resume` restarts them
-- [ ] Channel history is loaded as conversation context (check LLM sees prior messages)
+- [x] `/chat model <model_id>` changes the model for the channel
+- [x] `/chat pause` stops responses, `/chat resume` restarts them
+- [x] Channel history is loaded as conversation context (check LLM sees prior messages)
 
 ## 3. Lumina MCP Tools (via daemon)
 

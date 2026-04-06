@@ -83,39 +83,23 @@ impl super::SlashCommand for Chat {
     }
 
     async fn autocomplete(&self, lx: &LuminaContext, ac: &CommandInteraction) -> anyhow::Result<()> {
-        // Extract partial input from raw (unresolved) options — nested inside the subcommand.
-        use serenity::all::CommandDataOptionValue;
-
-        let sub = match ac.data.options.first() {
-            Some(o) if o.name == "model" => o,
-            _ => return Ok(()),
-        };
-
-        let partial = match &sub.value {
-            CommandDataOptionValue::SubCommand(sub_opts) => {
-                sub_opts.iter()
-                    .find(|o| o.name == "model_id")
-                    .and_then(|o| match &o.value {
-                        CommandDataOptionValue::String(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default()
-            }
-            _ => String::new(),
-        };
-
+        let partial = ac.data.autocomplete()
+            .map(|opt| opt.value.to_string())
+            .unwrap_or_default();
         let partial_lower = partial.to_lowercase();
 
-        // Fetch models from daemon and filter by partial match
+        tracing::debug!(partial = %partial, "model autocomplete");
+
         let models = lx.daemon.list_models().await.unwrap_or_default();
         let choices: Vec<AutocompleteChoice> = models
             .into_iter()
+            .filter(|m| m.definition.capabilities.contains(&simply_daemon::api::ModelCapability::Text))
             .filter(|m| {
+                if partial_lower.is_empty() { return true; }
                 let full_id = m.id.to_string().to_lowercase();
                 let name = m.definition.name().to_lowercase();
                 let display = m.definition.display_name.as_deref().unwrap_or("").to_lowercase();
-                partial_lower.is_empty()
-                    || full_id.contains(&partial_lower)
+                full_id.contains(&partial_lower)
                     || name.contains(&partial_lower)
                     || display.contains(&partial_lower)
             })
@@ -126,11 +110,12 @@ impl super::SlashCommand for Chat {
                     Some(name) => format!("{name}  ({full_id})"),
                     None => full_id.clone(),
                 };
-                // Discord truncates labels at 100 chars
                 let label = if label.len() > 100 { label[..100].to_string() } else { label };
                 AutocompleteChoice::new(label, full_id)
             })
             .collect();
+
+        tracing::debug!(partial = %partial, choices = choices.len(), "model autocomplete results");
 
         ac.create_response(
             &lx.http,
@@ -228,21 +213,21 @@ async fn cmd_new(
 }
 
 async fn cmd_pause(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
-    let mut paused = lx.state.paused_channels.write().await;
-    if !paused.insert(cmd.channel_id) {
+    if has_topic_tag(lx, cmd.channel_id, "paused") {
         return reply_ephemeral(lx, cmd, "Already paused.").await;
     }
+    reply_ephemeral(lx, cmd, "Paused. Use `/chat resume` to resume.").await?;
     set_topic_tag(lx, cmd.channel_id, "paused", "true").await;
-    reply_ephemeral(lx, cmd, "Paused. Use `/chat resume` to resume.").await
+    Ok(())
 }
 
 async fn cmd_resume(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
-    let mut paused = lx.state.paused_channels.write().await;
-    if !paused.remove(&cmd.channel_id) {
+    if !has_topic_tag(lx, cmd.channel_id, "paused") {
         return reply_ephemeral(lx, cmd, "Not paused.").await;
     }
+    reply_ephemeral(lx, cmd, "Resumed.").await?;
     remove_topic_tag(lx, cmd.channel_id, "paused").await;
-    reply_ephemeral(lx, cmd, "Resumed.").await
+    Ok(())
 }
 
 async fn cmd_model(
@@ -253,17 +238,24 @@ async fn cmd_model(
     let channel_id = cmd.channel_id;
     match model_id {
         Some(id) => {
-            lx.state
-                .channel_models
-                .write()
-                .await
-                .insert(channel_id, id.clone());
+            // Validate the model exists and supports text/chat
+            let models = lx.daemon.list_models().await.unwrap_or_default();
+            let model = models.iter().find(|m| m.id.to_string() == id);
+            match model {
+                None => {
+                    return reply_ephemeral(lx, cmd, &format!("Unknown model: `{id}`")).await;
+                }
+                Some(m) if !m.definition.capabilities.contains(&simply_daemon::api::ModelCapability::Text) => {
+                    return reply_ephemeral(lx, cmd, &format!("`{id}` does not support chat (capabilities: {:?})", m.definition.capabilities)).await;
+                }
+                _ => {}
+            }
+            reply_ephemeral(lx, cmd, &format!("Model for this channel set to `{id}`")).await?;
             set_topic_tag(lx, channel_id, "model", &id).await;
-            reply_ephemeral(lx, cmd, &format!("Model for this channel set to `{id}`")).await
+            Ok(())
         }
         None => {
-            let models = lx.state.channel_models.read().await;
-            let current = models.get(&channel_id);
+            let current = get_topic_tag(lx, channel_id, "model");
             let default = lx
                 .config
                 .discord
@@ -271,7 +263,7 @@ async fn cmd_model(
                 .as_deref()
                 .filter(|s| !s.is_empty());
             let display = current
-                .map(|s| s.as_str())
+                .as_deref()
                 .or(default)
                 .unwrap_or("(daemon default)");
             reply_ephemeral(lx, cmd, &format!("Current model: `{display}`")).await
@@ -287,9 +279,10 @@ async fn cmd_model(
 async fn set_topic_tag(lx: &LuminaContext, channel_id: ChannelId, key: &str, value: &str) {
     let current_topic = get_channel_topic(lx, channel_id).unwrap_or_default();
     let new_topic = update_tag_in_topic(&current_topic, key, Some(value));
-    let _ = channel_id
-        .edit(&lx.http, EditChannel::new().topic(&new_topic))
-        .await;
+    tracing::debug!(channel = %channel_id, current = %current_topic, new = %new_topic, "setting topic tag");
+    if let Err(e) = channel_id.edit(&lx.http, EditChannel::new().topic(&new_topic)).await {
+        tracing::error!(channel = %channel_id, error = %e, "failed to set channel topic");
+    }
 }
 
 /// Remove a `[key:...]` or `[key]` tag from the channel topic.
@@ -308,6 +301,27 @@ fn get_channel_topic(lx: &LuminaContext, channel_id: ChannelId) -> Option<String
             if let Some(ch) = guild.channels.get(&channel_id) {
                 return ch.topic.clone();
             }
+        }
+    }
+    None
+}
+
+/// Check if a tag exists in the channel topic.
+pub fn has_topic_tag(lx: &LuminaContext, channel_id: ChannelId, key: &str) -> bool {
+    get_topic_tag(lx, channel_id, key).is_some()
+}
+
+/// Get the value of a `[key:value]` tag from the channel topic, or empty string for bare `[key]`.
+pub fn get_topic_tag(lx: &LuminaContext, channel_id: ChannelId, key: &str) -> Option<String> {
+    let topic = get_channel_topic(lx, channel_id)?;
+    let prefix = format!("[{key}:");
+    let bare = format!("[{key}]");
+    for word in topic.split_whitespace() {
+        if word == bare {
+            return Some(String::new());
+        }
+        if word.starts_with(&prefix) && word.ends_with(']') {
+            return Some(word[prefix.len()..word.len() - 1].to_string());
         }
     }
     None

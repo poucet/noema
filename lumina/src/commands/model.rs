@@ -68,7 +68,7 @@ mod model {
         cmd: &CommandInteraction,
     ) -> anyhow::Result<()> {
         let channel_id = cmd.channel_id;
-        let channel_model = lx.state.channel_models.read().await.get(&channel_id).cloned();
+        let channel_model = crate::commands::chat::get_topic_tag(lx, channel_id, "model");
         let config_default = lx.config.discord.model_id.as_deref().filter(|s| !s.is_empty());
 
         let (source, model) = match (&channel_model, config_default) {

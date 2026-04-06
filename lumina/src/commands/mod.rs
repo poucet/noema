@@ -4,40 +4,29 @@
 //! Use `register_command!` for stateful commands that need custom constructors.
 //! No manual dispatch table — `inventory` collects them at link time.
 
-mod chat;
+pub mod chat;
 mod model;
 mod ping;
 pub mod tool;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serenity::all::CommandInteraction;
 use serenity::builder::CreateCommand;
-use serenity::model::id::ChannelId;
 use serenity::prelude::*;
 use simply_daemon::api::DaemonApi;
-use tokio::sync::RwLock;
 
 // ---------------------------------------------------------------------------
 // Shared state
 // ---------------------------------------------------------------------------
 
-/// Shared mutable state across all handlers.
-pub struct SharedState {
-    pub paused_channels: RwLock<HashSet<ChannelId>>,
-    /// Per-channel model override. Falls back to config default if not set.
-    pub channel_models: RwLock<HashMap<ChannelId, String>>,
-}
+/// Shared state across all handlers. Currently empty — all state lives in channel topic tags.
+pub struct SharedState;
 
 impl SharedState {
-    pub fn new() -> Self {
-        Self {
-            paused_channels: RwLock::new(HashSet::new()),
-            channel_models: RwLock::new(HashMap::new()),
-        }
-    }
+    pub fn new() -> Self { Self }
 }
 
 impl TypeMapKey for SharedState {
