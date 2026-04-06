@@ -100,12 +100,25 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   }, []); // Empty deps - only register once
 
   const startRecording = useCallback(async () => {
-    if (!selectedProvider) {
-      onErrorRef.current?.("No voice provider selected");
+    // Lazy-load providers if not yet loaded
+    let provider = selectedProvider;
+    if (!provider) {
+      try {
+        const list = await tauri.listVoiceProviders();
+        setProviders(list);
+        if (list.length > 0) {
+          provider = list[0].id;
+          setSelectedProvider(provider);
+          setIsAvailable(true);
+        }
+      } catch { /* ignore */ }
+    }
+    if (!provider) {
+      onErrorRef.current?.("No voice providers available");
       return;
     }
 
-    voiceLog.info("Starting recording", { provider: selectedProvider });
+    voiceLog.info("Starting recording", { provider });
     // Clear dedup ref for new recording session
     lastTranscriptionRef.current = null;
     try {
@@ -165,7 +178,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       gainNode.connect(audioContext.destination);
 
       // Notify backend that recording started
-      await tauri.startVoiceSession(selectedProvider);
+      await tauri.startVoiceSession(provider);
       voiceLog.info("Recording started successfully");
       setStatus("listening");
     } catch (err) {
@@ -174,7 +187,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       onErrorRef.current?.(message);
       setStatus("disabled");
     }
-  }, [selectedProvider]);
+  }, [selectedProvider, providers]);
 
   const stopRecording = useCallback(async () => {
     voiceLog.info("Stopping recording");
