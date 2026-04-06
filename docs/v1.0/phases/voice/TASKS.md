@@ -18,7 +18,7 @@
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 1.1 | 🔄 | Create `simply-voice/` crate with `SttProvider`, `TtsProvider`, `RealtimeProvider` traits | P0 | M |
+| 1.1 | ✅ | Create `simply-voice/` crate with `SttProvider`, `TtsProvider`, `RealtimeProvider` traits | P0 | M |
 | 1.2 | ⬜ | Voxtral provider: implements `SttProvider` + `TtsProvider` | P0 | M |
 | 1.3 | ⬜ | Whisper provider: implements `SttProvider` | P1 | S |
 | 1.4 | ⬜ | Gemini Realtime provider: implements `RealtimeProvider` | P0 | L |

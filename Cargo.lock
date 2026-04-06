@@ -5521,6 +5521,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "simply-voice"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "futures",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
