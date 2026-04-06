@@ -114,6 +114,81 @@ fn nav_buttons(page: usize, total: usize) -> Vec<CreateActionRow> {
     ])]
 }
 
+/// Send a paginated embed to a channel with prev/next buttons.
+pub async fn send_paginated_embeds_to_channel(
+    lx: &LuminaContext,
+    channel_id: serenity::model::id::ChannelId,
+    title: &str,
+    pages: &[String],
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    use serenity::builder::{CreateEmbed, CreateMessage, EditMessage};
+
+    if pages.is_empty() {
+        let embed = CreateEmbed::new().title(title).description("(empty)").color(0x2ECC71);
+        channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
+        return Ok(());
+    }
+
+    let mut page = 0usize;
+    let total = pages.len();
+
+    let make_embed = |p: usize| {
+        let mut e = CreateEmbed::new().description(&pages[p]).color(0x2ECC71);
+        if total > 1 {
+            e = e.title(format!("{title} ({}/{})", p + 1, total));
+        } else {
+            e = e.title(title);
+        }
+        e
+    };
+
+    let components = if total > 1 { nav_buttons(page, total) } else { vec![] };
+    let msg = channel_id.send_message(
+        &lx.http,
+        CreateMessage::new().embed(make_embed(page)).components(components),
+    ).await?;
+
+    if total <= 1 {
+        return Ok(());
+    }
+
+    let mut collector = msg
+        .await_component_interactions(&lx.ctx.shard)
+        .timeout(timeout)
+        .stream();
+
+    while let Some(interaction) = collector.next().await {
+        if let ComponentInteractionDataKind::Button = &interaction.data.kind {
+            match interaction.data.custom_id.as_str() {
+                "page_prev" => page = page.saturating_sub(1),
+                "page_next" => page = (page + 1).min(total - 1),
+                _ => continue,
+            }
+
+            interaction
+                .create_response(
+                    &lx.http,
+                    CreateInteractionResponse::UpdateMessage(
+                        CreateInteractionResponseMessage::new()
+                            .embed(make_embed(page))
+                            .components(nav_buttons(page, total)),
+                    ),
+                )
+                .await?;
+        }
+    }
+
+    // Remove buttons after timeout
+    msg.channel_id.edit_message(
+        &lx.http,
+        msg.id,
+        EditMessage::new().embed(make_embed(page)).components(vec![]),
+    ).await?;
+
+    Ok(())
+}
+
 /// Split text into pages that fit within Discord's 2000 char limit.
 /// Splits on newline boundaries.
 pub fn paginate_text(text: &str, max_chars: usize) -> Vec<String> {

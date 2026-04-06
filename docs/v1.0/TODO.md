@@ -48,8 +48,8 @@ BASE=http://127.0.0.1:9800
 
 - [x] Lumina registers as MCP service on connect (check daemon logs: "ephemeral MCP service registered")
 - [x] `/tool list` shows all tools from daemon + lumina-discord server
-- [ ] Tool descriptions and param counts are correct
-- [ ] Pagination works if tool list exceeds one page
+- [x] Tool descriptions and param counts are correct
+- [x]] Pagination works if tool list exceeds one page
 
 ## 4. /tool call — Text Tools
 

@@ -370,6 +370,111 @@ async fn send_tool_result(
     Ok(())
 }
 
+/// Format a JSON value into a human-readable Discord-friendly string.
+fn format_tool_output(text: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return text.to_string();
+    };
+
+    match &value {
+        serde_json::Value::Array(items) => format_array(items),
+        serde_json::Value::Object(obj) => format_object(obj, 0),
+        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| text.to_string()),
+    }
+}
+
+fn format_array(items: &[serde_json::Value]) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("**{} items:**", items.len()));
+
+    for (i, item) in items.iter().enumerate() {
+        if let serde_json::Value::Object(obj) = item {
+            // Try to find a good label: name, id, title, or first string field
+            let label = obj.get("name").or(obj.get("id")).or(obj.get("title"))
+                .and_then(|v| match v {
+                    serde_json::Value::String(s) => Some(s.as_str()),
+                    serde_json::Value::Object(inner) => {
+                        // Handle nested id like { "model": "...", "provider": "..." }
+                        inner.values().find_map(|v| v.as_str())
+                    }
+                    _ => None,
+                });
+
+            if let Some(label) = label {
+                lines.push(format!("{}. **{}**", i + 1, label));
+            } else {
+                lines.push(format!("{}.", i + 1));
+            }
+
+            // Show key fields inline, skip nested objects
+            for (key, val) in obj {
+                match val {
+                    serde_json::Value::String(s) => {
+                        lines.push(format!("   {key}: {s}"));
+                    }
+                    serde_json::Value::Bool(b) => {
+                        lines.push(format!("   {key}: {b}"));
+                    }
+                    serde_json::Value::Number(n) => {
+                        lines.push(format!("   {key}: {n}"));
+                    }
+                    serde_json::Value::Array(arr) => {
+                        let summary: Vec<String> = arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+                        if !summary.is_empty() {
+                            lines.push(format!("   {key}: {}", summary.join(", ")));
+                        }
+                    }
+                    serde_json::Value::Object(inner) => {
+                        // Flatten simple inner objects (like "id": {"provider": "x", "model": "y"})
+                        let flat: Vec<String> = inner.iter()
+                            .filter_map(|(k, v)| v.as_str().map(|s| format!("{k}: {s}")))
+                            .collect();
+                        if !flat.is_empty() {
+                            lines.push(format!("   {key}: {}", flat.join(", ")));
+                        }
+                    }
+                    serde_json::Value::Null => {}
+                }
+            }
+        } else {
+            lines.push(format!("{}. {}", i + 1, item));
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn format_object(obj: &serde_json::Map<String, serde_json::Value>, indent: usize) -> String {
+    let prefix = "  ".repeat(indent);
+    let mut lines = Vec::new();
+    for (key, val) in obj {
+        match val {
+            serde_json::Value::String(s) => lines.push(format!("{prefix}**{key}:** {s}")),
+            serde_json::Value::Bool(b) => lines.push(format!("{prefix}**{key}:** {b}")),
+            serde_json::Value::Number(n) => lines.push(format!("{prefix}**{key}:** {n}")),
+            serde_json::Value::Null => lines.push(format!("{prefix}**{key}:** —")),
+            serde_json::Value::Array(arr) if arr.is_empty() => lines.push(format!("{prefix}**{key}:** (empty)")),
+            serde_json::Value::Array(arr) => {
+                let simple: Vec<String> = arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                if simple.len() == arr.len() {
+                    lines.push(format!("{prefix}**{key}:** {}", simple.join(", ")));
+                } else {
+                    lines.push(format!("{prefix}**{key}:** ({} items)", arr.len()));
+                }
+            }
+            serde_json::Value::Object(inner) => {
+                lines.push(format!("{prefix}**{key}:**"));
+                lines.push(format_object(inner, indent + 1));
+            }
+        }
+    }
+    lines.join("\n")
+}
+
 /// Send a ToolService result (Vec<ToolResultContent>) as a Discord response.
 async fn send_tool_result_from_service(
     lx: &LuminaContext,
@@ -378,9 +483,21 @@ async fn send_tool_result_from_service(
     result: anyhow::Result<Vec<simply_daemon::types::ToolResultContent>>,
 ) -> anyhow::Result<()> {
     let target = target.into();
+
+    // Defer the response first (tool calls may take time)
+    let channel_id = match &target {
+        SendTarget::Channel(id) => *id,
+        SendTarget::Command(cmd) => {
+            cmd.create_response(&lx.http, CreateInteractionResponse::Defer(
+                CreateInteractionResponseMessage::new(),
+            )).await?;
+            cmd.channel_id
+        }
+    };
+
     match result {
         Ok(content) => {
-            let text = content.iter()
+            let raw_text = content.iter()
                 .filter_map(|c| match c {
                     simply_daemon::types::ToolResultContent::Text { text } => Some(text.as_str()),
                     _ => None,
@@ -388,44 +505,25 @@ async fn send_tool_result_from_service(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let body = if text.len() > 4000 { format!("{}...", &text[..4000]) } else { text };
-            let embed = CreateEmbed::new()
-                .title(format!("Tool: {tool_name}"))
-                .description(body)
-                .color(0x2ECC71);
+            let formatted = format_tool_output(&raw_text);
+            let pages = crate::paginator::paginate_text(&formatted, 1800);
 
-            match target {
-                SendTarget::Channel(channel_id) => {
-                    channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
-                }
-                SendTarget::Command(cmd) => {
-                    cmd.create_response(&lx.http, CreateInteractionResponse::Defer(
-                        CreateInteractionResponseMessage::new(),
-                    )).await?;
-                    cmd.channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
-                    cmd.delete_response(&lx.http).await.ok();
-                }
-            }
+            crate::paginator::send_paginated_embeds_to_channel(
+                lx, channel_id, tool_name, &pages, Duration::from_secs(120),
+            ).await?;
         }
         Err(e) => {
             let embed = CreateEmbed::new()
                 .title(format!("Tool: {tool_name} (error)"))
                 .description(format!("{e}"))
                 .color(0xE74C3C);
-
-            match target {
-                SendTarget::Channel(channel_id) => {
-                    channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
-                }
-                SendTarget::Command(cmd) => {
-                    cmd.create_response(&lx.http, CreateInteractionResponse::Defer(
-                        CreateInteractionResponseMessage::new(),
-                    )).await?;
-                    cmd.channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
-                    cmd.delete_response(&lx.http).await.ok();
-                }
-            }
+            channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
         }
+    }
+
+    // Clean up the deferred "thinking" message
+    if let SendTarget::Command(cmd) = target {
+        cmd.delete_response(&lx.http).await.ok();
     }
     Ok(())
 }
