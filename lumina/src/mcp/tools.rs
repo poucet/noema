@@ -64,15 +64,49 @@ fn build_embed(title: Option<&str>, desc: Option<&str>, color: Option<&str>) -> 
 }
 
 fn message_to_json(msg: &serenity::model::channel::Message) -> serde_json::Value {
-    json!({
-        "id": msg.id.get(), "channel_id": msg.channel_id.get(),
-        "author": { "id": msg.author.id.get(), "name": msg.author.name },
-        "content": msg.content, "timestamp": msg.timestamp.to_string(),
-        "reactions": msg.reactions.iter().map(|r| json!({
-            "emoji": r.reaction_type.to_string(), "count": r.count,
-        })).collect::<Vec<_>>(),
-        "attachments": msg.attachments.len(), "embeds": msg.embeds.len(),
-    })
+    let mut m = serde_json::Map::new();
+
+    m.insert("name".into(), format!("<@{}>", msg.author.id.get()).into());
+    // Discord timestamp format: <t:unix:R> for relative, <t:unix:f> for full
+    let unix = msg.timestamp.unix_timestamp();
+    m.insert("timestamp".into(), format!("<t:{unix}:R>").into());
+
+    // Only include content if non-empty
+    if !msg.content.is_empty() {
+        m.insert("content".into(), msg.content.clone().into());
+    }
+
+    // Summarize embeds
+    if !msg.embeds.is_empty() {
+        let embed_summaries: Vec<serde_json::Value> = msg.embeds.iter().map(|e| {
+            let mut parts = Vec::new();
+            if let Some(ref t) = e.title { parts.push(t.clone()); }
+            if let Some(ref d) = e.description {
+                let truncated = if d.len() > 100 { format!("{}...", &d[..97]) } else { d.clone() };
+                parts.push(truncated);
+            }
+            parts.join(": ").into()
+        }).collect();
+        m.insert("embeds".into(), embed_summaries.into());
+    }
+
+    // Summarize attachments
+    if !msg.attachments.is_empty() {
+        let att_names: Vec<serde_json::Value> = msg.attachments.iter()
+            .map(|a| a.filename.clone().into())
+            .collect();
+        m.insert("attachments".into(), att_names.into());
+    }
+
+    // Only include reactions if any
+    if !msg.reactions.is_empty() {
+        let reactions: Vec<serde_json::Value> = msg.reactions.iter()
+            .map(|r| format!("{} x{}", r.reaction_type, r.count).into())
+            .collect();
+        m.insert("reactions".into(), reactions.into());
+    }
+
+    m.into()
 }
 
 const NUMBER_EMOJIS: &[&str] = &["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
@@ -347,7 +381,7 @@ impl LuminaMcpServer {
             msg = msg.embed(embed);
         }
         let sent = ch.send_message(self.http(), msg).await?;
-        Ok(json!({ "status": "success", "message_id": sent.id.get(), "channel_id": sent.channel_id.get() }))
+        Ok(json!({ "status": "success", "message_id": sent.id.get().to_string(), "channel_id": sent.channel_id.get().to_string() }))
     }
 
     async fn do_reply_to_message(&self, p: ReplyToMessageParams) -> anyhow::Result<serde_json::Value> {
@@ -361,7 +395,7 @@ impl LuminaMcpServer {
             msg = msg.allowed_mentions(serenity::builder::CreateAllowedMentions::new().replied_user(false));
         }
         let sent = ch.send_message(self.http(), msg).await?;
-        Ok(json!({ "status": "success", "message_id": sent.id.get() }))
+        Ok(json!({ "status": "success", "message_id": sent.id.get().to_string() }))
     }
 
     async fn do_create_embed(&self, p: CreateEmbedParams) -> anyhow::Result<serde_json::Value> {
@@ -374,7 +408,7 @@ impl LuminaMcpServer {
             }
         }
         let sent = ch.send_message(self.http(), CreateMessage::new().embed(embed)).await?;
-        Ok(json!({ "status": "success", "message_id": sent.id.get() }))
+        Ok(json!({ "status": "success", "message_id": sent.id.get().to_string() }))
     }
 
     async fn do_create_poll(&self, p: CreatePollParams) -> anyhow::Result<serde_json::Value> {
@@ -391,7 +425,7 @@ impl LuminaMcpServer {
             let e = emoji_list.get(i).map(|s| s.as_str()).unwrap_or(NUMBER_EMOJIS.get(i).copied().unwrap_or("▪️"));
             sent.react(self.http(), serenity::model::channel::ReactionType::Unicode(e.to_string())).await?;
         }
-        Ok(json!({ "status": "success", "message_id": sent.id.get(), "options_count": p.options.len() }))
+        Ok(json!({ "status": "success", "message_id": sent.id.get().to_string(), "options_count": p.options.len() }))
     }
 
     async fn do_get_channel_history(&self, p: ChannelHistoryParams) -> anyhow::Result<serde_json::Value> {
@@ -411,7 +445,7 @@ impl LuminaMcpServer {
             all.extend(batch);
         }
         let messages: Vec<serde_json::Value> = all.iter().map(message_to_json).collect();
-        Ok(json!({ "status": "success", "messages": messages, "count": messages.len() }))
+        Ok(messages.into())
     }
 
     async fn do_search_messages(&self, p: SearchMessagesParams) -> anyhow::Result<serde_json::Value> {
@@ -435,7 +469,7 @@ impl LuminaMcpServer {
                 }
             }
         }
-        Ok(json!({ "status": "success", "messages": matches, "count": matches.len() }))
+        Ok(matches.into())
     }
 
     async fn do_list_channels(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {
@@ -451,23 +485,23 @@ impl LuminaMcpServer {
                     "category": category,
                 })
             }).collect();
-        Ok(json!({ "status": "success", "channels": list, "count": list.len() }))
+        Ok(list.into())
     }
 
     async fn do_list_guilds(&self) -> anyhow::Result<serde_json::Value> {
         let cache = self.cache().context("gateway cache not available yet")?;
         let guilds: Vec<serde_json::Value> = cache.guilds().iter().filter_map(|id| {
-            cache.guild(*id).map(|g| json!({ "name": g.name.clone(), "id": id.get() }))
+            cache.guild(*id).map(|g| json!({ "name": g.name.clone(), "id": id.get().to_string() }))
         }).collect();
-        Ok(json!({ "status": "success", "guilds": guilds, "count": guilds.len() }))
+        Ok(guilds.into())
     }
 
     async fn do_get_emoji_list(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {
         let emojis = p.guild_id.serenity().emojis(self.http()).await?;
         let list: Vec<serde_json::Value> = emojis.iter().map(|e| json!({
-            "name": e.name, "id": e.id.get(), "animated": e.animated, "available": e.available,
+            "name": e.name, "id": e.id.get().to_string(), "animated": e.animated, "available": e.available,
         })).collect();
-        Ok(json!({ "status": "success", "emojis": list, "count": list.len() }))
+        Ok(list.into())
     }
 
     async fn do_get_voice_states(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {
@@ -477,14 +511,14 @@ impl LuminaMcpServer {
         for (user_id, vs) in &guild.voice_states {
             if let Some(ch_id) = vs.channel_id {
                 voice_channels.entry(ch_id).or_default().push(json!({
-                    "user_id": user_id.get(), "self_mute": vs.self_mute, "self_deaf": vs.self_deaf,
+                    "user_id": user_id.get().to_string(), "self_mute": vs.self_mute, "self_deaf": vs.self_deaf,
                     "mute": vs.mute, "deaf": vs.deaf,
                 }));
             }
         }
         let states: Vec<serde_json::Value> = voice_channels.into_iter().map(|(ch_id, members)| {
             let ch_name = guild.channels.get(&ch_id).map(|c| c.name.clone()).unwrap_or_default();
-            json!({ "channel_name": ch_name, "channel_id": ch_id.get(), "members": members, "member_count": members.len() })
+            json!({ "channel_name": ch_name, "channel_id": ch_id.get().to_string(), "members": members, "member_count": members.len() })
         }).collect();
         let total: usize = states.iter().filter_map(|s| s["member_count"].as_u64()).sum::<u64>() as usize;
         Ok(json!({ "status": "success", "voice_states": states, "total_voice_users": total }))
@@ -558,7 +592,7 @@ impl LuminaMcpServer {
                 if total >= min_reactions {
                     trending.push(json!({
                         "content": if msg.content.len() > 200 { format!("{}...", &msg.content[..197]) } else { msg.content.clone() },
-                        "author": msg.author.name, "channel_id": msg.channel_id.get(),
+                        "author": msg.author.name, "channel_id": msg.channel_id.get().to_string(),
                         "reactions": total, "timestamp": msg.timestamp.to_string(),
                     }));
                 }
@@ -579,11 +613,11 @@ impl LuminaMcpServer {
     async fn do_get_active_threads(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {
         let threads_data = p.guild_id.serenity().get_active_threads(self.http()).await?;
         let threads: Vec<serde_json::Value> = threads_data.threads.iter().map(|t| json!({
-            "name": t.name, "id": t.id.get(), "parent_id": t.parent_id.map(|p| p.get()),
+            "name": t.name, "id": t.id.get().to_string(), "parent_id": t.parent_id.map(|p| p.get().to_string()),
             "member_count": t.member_count, "message_count": t.message_count,
-            "owner_id": t.owner_id.map(|o| o.get()),
+            "owner_id": t.owner_id.map(|o| o.get().to_string()),
         })).collect();
-        Ok(json!({ "status": "success", "threads": threads, "count": threads.len() }))
+        Ok(threads.into())
     }
 
     async fn do_get_user_activity(&self, p: UserActivityParams) -> anyhow::Result<serde_json::Value> {

@@ -411,7 +411,12 @@ fn format_array(items: &[serde_json::Value]) -> String {
             });
 
             if let Some(label) = label {
-                lines.push(format!("{}. **{}**", i + 1, label));
+                // Don't wrap in bold if label is a URL or has markdown
+                if label.starts_with("http") || label.contains('[') || label.contains('*') {
+                    lines.push(format!("{}. {}", i + 1, label));
+                } else {
+                    lines.push(format!("{}. **{}**", i + 1, label));
+                }
             } else {
                 lines.push(format!("{}.", i + 1));
             }

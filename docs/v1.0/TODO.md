@@ -54,13 +54,13 @@ BASE=http://127.0.0.1:9800
 ## 4. /tool call — Text Tools
 
 - [x] `/tool call list_channels` — modal opens with guild_id field
-- [ ] Fill in guild_id, submit — returns channel list as embed
-- [ ] `/tool call send_message` — modal with channel_id + content fields
-- [ ] Submit — message appears in the target Discord channel
-- [ ] `/tool call get_channel_history` — returns message history as embed
-- [ ] `/tool call search_messages` — finds messages matching query
-- [ ] `/tool call list_guilds` — returns guilds (no params, executes immediately)
-- [ ] Tools that error show red error embeds
+- [x] Fill in guild_id, submit — returns channel list as embed
+- [x] `/tool call send_message` — modal with channel_id + content fields
+- [x] Submit — message appears in the target Discord channel
+- [x] `/tool call get_channel_history` — returns message history as embed
+- [x] `/tool call search_messages` — finds messages matching query
+- [x] `/tool call list_guilds` — returns guilds (no params, executes immediately)
+- [x] Tools that error show red error embeds
 
 ## 5. /tool call — Multimodal Content
 
