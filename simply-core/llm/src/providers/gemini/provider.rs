@@ -39,9 +39,21 @@ impl GeminiProvider {
 #[async_trait]
 impl ModelProvider for GeminiProvider {
     async fn list_models(&self) -> anyhow::Result<Vec<crate::ModelDefinition>> {
-        let url = format!("{}/models", self.base_url);
-        let response: ListModelsResponse = self.client.get(&url).await?;
-        Ok(response.models.into_iter().map(|m| m.into()).collect())
+        let mut all = Vec::new();
+        let mut page_token: Option<String> = None;
+        loop {
+            let url = match &page_token {
+                Some(token) => format!("{}/models?pageSize=100&pageToken={token}", self.base_url),
+                None => format!("{}/models?pageSize=100", self.base_url),
+            };
+            let response: ListModelsResponse = self.client.get(&url).await?;
+            all.extend(response.models.into_iter().map(crate::ModelDefinition::from));
+            match response.next_page_token {
+                Some(token) if !token.is_empty() => page_token = Some(token),
+                _ => break,
+            }
+        }
+        Ok(all)
     }
 
     fn create_chat_model(&self, model_name: &str) -> Option<Arc<dyn ChatModel + Send + Sync>> {

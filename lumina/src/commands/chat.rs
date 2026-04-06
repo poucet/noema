@@ -83,24 +83,25 @@ impl super::SlashCommand for Chat {
     }
 
     async fn autocomplete(&self, lx: &LuminaContext, ac: &CommandInteraction) -> anyhow::Result<()> {
-        // Find the focused option — it's nested inside the subcommand
-        let opts = ac.data.options();
-        let sub = match opts.first() {
-            Some(o) => o,
-            None => return Ok(()),
+        // Extract partial input from raw (unresolved) options — nested inside the subcommand.
+        use serenity::all::CommandDataOptionValue;
+
+        let sub = match ac.data.options.first() {
+            Some(o) if o.name == "model" => o,
+            _ => return Ok(()),
         };
 
-        if sub.name != "model" {
-            return Ok(());
-        }
-
-        let partial = if let ResolvedValue::SubCommand(ref sub_opts) = sub.value {
-            sub_opts.iter().find_map(|o| match o {
-                ResolvedOption { name: "model_id", value: ResolvedValue::String(s), .. } => Some(s.to_string()),
-                _ => None,
-            }).unwrap_or_default()
-        } else {
-            String::new()
+        let partial = match &sub.value {
+            CommandDataOptionValue::SubCommand(sub_opts) => {
+                sub_opts.iter()
+                    .find(|o| o.name == "model_id")
+                    .and_then(|o| match &o.value {
+                        CommandDataOptionValue::String(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default()
+            }
+            _ => String::new(),
         };
 
         let partial_lower = partial.to_lowercase();
@@ -110,16 +111,24 @@ impl super::SlashCommand for Chat {
         let choices: Vec<AutocompleteChoice> = models
             .into_iter()
             .filter(|m| {
-                let id = m.id.to_string().to_lowercase();
+                let full_id = m.id.to_string().to_lowercase();
                 let name = m.definition.name().to_lowercase();
-                partial_lower.is_empty() || id.contains(&partial_lower) || name.contains(&partial_lower)
+                let display = m.definition.display_name.as_deref().unwrap_or("").to_lowercase();
+                partial_lower.is_empty()
+                    || full_id.contains(&partial_lower)
+                    || name.contains(&partial_lower)
+                    || display.contains(&partial_lower)
             })
             .take(25) // Discord max autocomplete choices
             .map(|m| {
-                let display = m.definition.display_name
-                    .as_deref()
-                    .unwrap_or(&m.id.model);
-                AutocompleteChoice::new(display.to_string(), m.id.to_string())
+                let full_id = m.id.to_string();
+                let label = match &m.definition.display_name {
+                    Some(name) => format!("{name}  ({full_id})"),
+                    None => full_id.clone(),
+                };
+                // Discord truncates labels at 100 chars
+                let label = if label.len() > 100 { label[..100].to_string() } else { label };
+                AutocompleteChoice::new(label, full_id)
             })
             .collect();
 
