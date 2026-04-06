@@ -83,6 +83,9 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     let app = Router::new()
         .route("/", get(admin_page))
         .route("/admin", get(admin_page))
+        .route("/_assets/{*path}", get(admin_page))
+        .route("/favicon.svg", get(admin_page))
+        .route("/favicon.ico", get(admin_page))
         .route("/admin/api/connections", get(admin_connections))
         .route("/ws", get(ws_upgrade_handler))
         .merge(auth_routes)
@@ -129,8 +132,11 @@ async fn auth_middleware(
 ) -> Response {
     let path = req.uri().path();
 
-    // Public routes: admin page, admin API, auth flows
-    if path == "/" || path == "/admin" || path.starts_with("/admin/api/") || path.starts_with("/auth/") {
+    // Public routes: admin page, admin API, auth flows, static assets
+    if path == "/" || path == "/admin" || path.starts_with("/admin/api/")
+        || path.starts_with("/auth/") || path.starts_with("/_assets/")
+        || path == "/favicon.svg" || path == "/favicon.ico"
+    {
         // Check for session cookie (from Google OAuth sign-in)
         let cookie_user = req.headers()
             .get(axum::http::header::COOKIE)
@@ -198,8 +204,59 @@ async fn auth_middleware(
 // Admin handlers
 // ---------------------------------------------------------------------------
 
-async fn admin_page() -> Html<&'static str> {
-    Html(include_str!("../admin/admin.html"))
+/// Serve admin frontend files from the admin/dist/ build output.
+/// Falls back to the embedded index.html if the build directory isn't found.
+async fn admin_page(req: axum::extract::Request) -> Response {
+    let path = req.uri().path();
+
+    // Resolve the admin dist directory (relative to the binary or workspace root)
+    let dist_dir = find_admin_dist();
+
+    if let Some(dist) = dist_dir {
+        // Map URL path to file
+        let file_path = if path == "/" || path == "/admin" {
+            dist.join("index.html")
+        } else {
+            dist.join(path.trim_start_matches('/'))
+        };
+
+        if file_path.exists() {
+            if let Ok(contents) = tokio::fs::read(&file_path).await {
+                let mime = match file_path.extension().and_then(|e| e.to_str()) {
+                    Some("html") => "text/html; charset=utf-8",
+                    Some("js") => "application/javascript",
+                    Some("css") => "text/css",
+                    Some("svg") => "image/svg+xml",
+                    Some("ico") => "image/x-icon",
+                    Some("json") => "application/json",
+                    _ => "application/octet-stream",
+                };
+                return Response::builder()
+                    .header("Content-Type", mime)
+                    .body(Body::from(contents))
+                    .unwrap();
+            }
+        }
+    }
+
+    // Fallback: embedded HTML (keeps working even without the build)
+    Html(include_str!("../admin/admin.html")).into_response()
+}
+
+fn find_admin_dist() -> Option<std::path::PathBuf> {
+    // Try relative to CWD (development: running from workspace root)
+    let cwd = std::path::PathBuf::from("admin/dist");
+    if cwd.is_dir() { return Some(cwd); }
+
+    // Try relative to the binary location
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let near_exe = parent.join("admin/dist");
+            if near_exe.is_dir() { return Some(near_exe); }
+        }
+    }
+
+    None
 }
 
 async fn admin_connections(State(state): State<AppState>) -> Json<Vec<crate::net::server::ConnectionInfo>> {
