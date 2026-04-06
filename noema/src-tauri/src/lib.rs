@@ -53,7 +53,7 @@ async fn handle_asset_request(
                 .unwrap();
         }
     };
-    let url = format!("{base_url}/asset/{blob_hash}");
+    let url = format!("{base_url}/blob/{blob_hash}");
     tracing::debug!(url = %url, "asset proxy request");
 
     match reqwest::get(&url).await {
@@ -104,7 +104,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // Custom protocol for serving assets from blob storage
-        // Assets are served at: noema-asset://localhost/{asset_id}
+        // Assets are served at: noema-asset://localhost/{blob_hash}
         // Browser can cache these using standard HTTP caching
         .register_asynchronous_uri_scheme_protocol("noema-asset", {
             let app_state = app_state.clone();
