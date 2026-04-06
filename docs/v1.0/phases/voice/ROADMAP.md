@@ -26,15 +26,26 @@ The voice streaming API is generic — any audio source can plug in. This means 
 
 **Complexity:** M
 
+**Three provider traits:**
+- `SttProvider` — audio in → text out (Whisper, Voxtral)
+- `TtsProvider` — text in → audio out (Voxtral)
+- `RealtimeProvider` — audio in → audio out with built-in LLM (Gemini Realtime API)
+
+The first two compose into a pipeline (STT → your LLM → TTS). The third is an all-in-one stream that bypasses the daemon's LLM layer.
+
 **Tasks:**
 - [ ] Create `simply-voice/` crate in workspace
-- [ ] Define provider traits: `SttProvider`, `TtsProvider`
-- [ ] Implement Voxtral provider (STT + TTS via Mistral realtime API)
+- [ ] Define `SttProvider` trait: stream audio in, get transcription text out
+- [ ] Define `TtsProvider` trait: stream text in, get audio out
+- [ ] Define `RealtimeProvider` trait: bidirectional audio stream with built-in LLM
+- [ ] Voxtral provider: implements `SttProvider` + `TtsProvider`
+- [ ] Whisper provider: implements `SttProvider`
+- [ ] Gemini Realtime provider: implements `RealtimeProvider`
 - [ ] VAD (voice activity detection) module
 - [ ] Audio format utilities: PCM conversion, sample rate handling, common format spec
 - [ ] Provider configuration: API keys, model selection, voice selection
 
-**Verify:** Unit tests pass for provider traits + Voxtral integration tests.
+**Verify:** Unit tests pass for provider traits + integration tests for each provider.
 
 ---
 
@@ -47,7 +58,8 @@ The voice streaming API is generic — any audio source can plug in. This means 
 **Tasks:**
 - [ ] Integrate `simply-voice` into simply-daemon
 - [ ] Voice streaming API: clients send audio chunks, daemon returns transcriptions + TTS audio
-- [ ] Full pipeline in daemon: VAD → STT → agent → TTS
+- [ ] Pipeline mode: VAD → STT → agent → TTS (uses SttProvider + TtsProvider)
+- [ ] Realtime mode: VAD → RealtimeProvider (bidirectional audio, LLM built-in)
 - [ ] Define common audio format for client↔daemon streaming (PCM sample rate, encoding)
 - [ ] Ensure the voice API is generic enough for any audio source (not coupled to CPAL or songbird)
 - [ ] `list_voices` API

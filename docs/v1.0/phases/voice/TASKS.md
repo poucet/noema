@@ -9,26 +9,32 @@
 
 ## Stage 1 — Voice Library
 
-**Goal:** Standalone `simply-voice` crate with provider traits and at least one implementation.
+**Goal:** Standalone `simply-voice` crate with three provider traits and implementations.
+
+**Three provider traits:**
+- `SttProvider` — audio in → text out (Whisper, Voxtral)
+- `TtsProvider` — text in → audio out (Voxtral)
+- `RealtimeProvider` — audio in → audio out with built-in LLM (Gemini Realtime)
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 1.1 | ⬜ | Create `simply-voice/` crate with STT/TTS provider traits | P0 | M |
-| 1.2 | ⬜ | Voxtral (Mistral) provider implementation | P0 | M |
-| 1.3 | ⬜ | Whisper provider (extract from current simply-audio) | P1 | S |
-| 1.4 | ⬜ | VAD module: voice activity detection | P0 | M |
-| 1.5 | ⬜ | Audio format utilities: PCM conversion, sample rate | P0 | S |
+| 1.1 | 🔄 | Create `simply-voice/` crate with `SttProvider`, `TtsProvider`, `RealtimeProvider` traits | P0 | M |
+| 1.2 | ⬜ | Voxtral provider: implements `SttProvider` + `TtsProvider` | P0 | M |
+| 1.3 | ⬜ | Whisper provider: implements `SttProvider` | P1 | S |
+| 1.4 | ⬜ | Gemini Realtime provider: implements `RealtimeProvider` | P0 | L |
+| 1.5 | ⬜ | VAD module: voice activity detection | P0 | M |
+| 1.6 | ⬜ | Audio format utilities: PCM conversion, sample rate | P0 | S |
 
 ---
 
 ## Stage 2 — Voice in Daemon
 
-**Goal:** Voice pipeline runs in simply-daemon. Clients stream audio, daemon handles STT/TTS.
+**Goal:** Voice pipeline runs in simply-daemon. Two modes: pipeline (STT → LLM → TTS) and realtime (bidirectional via RealtimeProvider).
 
 | # | | Task | Priority | Size |
 |---|---|------|----------|------|
-| 2.1 | ⬜ | VoiceApi implementation: audio stream → VAD → STT → text events | P0 | L |
-| 2.2 | ⬜ | TTS pipeline: text → audio stream back to client | P0 | M |
+| 2.1 | ⬜ | Pipeline mode: audio stream → VAD → STT → agent → TTS → audio back | P0 | L |
+| 2.2 | ⬜ | Realtime mode: audio stream → VAD → RealtimeProvider (bidirectional) | P0 | L |
 | 2.3 | ⬜ | WS binary frame multiplexing for audio transport | P0 | M |
 | 2.4 | ⬜ | Pure STT mode: client sends audio, gets text back (no LLM) | P1 | S |
 | 2.5 | ⬜ | Pure TTS mode: client sends text, gets audio back | P1 | S |
