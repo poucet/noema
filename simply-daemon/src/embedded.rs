@@ -104,14 +104,20 @@ where
             }
         }
 
-        // Register Voxtral (Mistral API — STT + TTS)
-        if let Some(key) = settings.get_api_key("mistral")
+        // Register Voxtral — local MLX server or Mistral API
+        if let Ok(base_url) = std::env::var("VOXTRAL_BASE_URL") {
+            let voxtral = Arc::new(simply_voice::VoxtralProvider::local(&base_url));
+            voice_service = voice_service
+                .register_stt("voxtral", "Voxtral (local)", voxtral.clone())
+                .register_tts("voxtral", "Voxtral (local)", voxtral);
+            tracing::info!(base_url = %base_url, "voxtral local STT + TTS registered");
+        } else if let Some(key) = settings.get_api_key("mistral")
             .or_else(|| std::env::var("MISTRAL_API_KEY").ok()) {
             let voxtral = Arc::new(simply_voice::VoxtralProvider::new(key));
             voice_service = voice_service
                 .register_stt("voxtral", "Voxtral (Mistral)", voxtral.clone())
                 .register_tts("voxtral", "Voxtral (Mistral)", voxtral);
-            tracing::info!("voxtral STT + TTS registered");
+            tracing::info!("voxtral STT + TTS registered (Mistral API)");
         }
 
         // Register Gemini Realtime

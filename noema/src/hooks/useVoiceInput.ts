@@ -16,6 +16,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const [providers, setProviders] = useState<tauri.VoiceProviderInfo[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const playbackContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -162,6 +163,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
 
+      // Create playback context for TTS (must be created during user gesture)
+      if (!playbackContextRef.current || playbackContextRef.current.state === "closed") {
+        playbackContextRef.current = new AudioContext({ sampleRate: 24000 });
+        voiceLog.debug("TTS playback context created");
+      }
+
       // Load AudioWorklet processor module
       voiceLog.debug("Loading AudioWorklet processor");
       await audioContext.audioWorklet.addModule("/audio-processor.js");
@@ -286,20 +293,30 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         return;
       }
 
+      const ctx = playbackContextRef.current;
+      if (!ctx || ctx.state === "closed") {
+        voiceLog.warn("TTS: no playback context (start recording first)");
+        ttsInFlightRef.current = false;
+        return;
+      }
+
+      // Resume context if suspended (autoplay policy)
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
       const float32 = new Float32Array(result.samples);
-      const ctx = new AudioContext({ sampleRate: result.sampleRate });
       const buffer = ctx.createBuffer(1, float32.length, result.sampleRate);
       buffer.getChannelData(0).set(float32);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
       source.onended = () => {
-        ctx.close();
         ttsInFlightRef.current = false;
         voiceLog.info("TTS: playback finished");
       };
       source.start();
-      voiceLog.info("TTS: playback started", { durationSec: float32.length / result.sampleRate });
+      voiceLog.info("TTS: playback started", { durationSec: float32.length / result.sampleRate, ctxState: ctx.state });
     } catch (err) {
       voiceLog.error("TTS failed", { err });
       ttsInFlightRef.current = false;

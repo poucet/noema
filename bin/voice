@@ -1,0 +1,57 @@
+#!/bin/bash
+# voice — manage the local MLX voice server (TTS + STT)
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PORT="${MLX_VOICE_PORT:-8100}"
+
+log() { echo "[voice] $*"; }
+
+voice_is_running() {
+    nc -z 127.0.0.1 "$PORT" 2>/dev/null
+}
+
+case "${1:-status}" in
+    start|run)
+        if voice_is_running; then
+            log "Already running on port $PORT"
+            exit 0
+        fi
+        "$REPO_ROOT/etc/mlx-voice/setup.sh"
+        ;;
+    stop)
+        if voice_is_running; then
+            local port_pid
+            port_pid=$(lsof -ti "tcp:$PORT" 2>/dev/null | head -1)
+            if [ -n "$port_pid" ]; then
+                log "Stopping (pid $port_pid)..."
+                kill "$port_pid" 2>/dev/null || true
+                sleep 1
+                log "Stopped"
+            fi
+        else
+            log "Not running"
+        fi
+        ;;
+    status)
+        if voice_is_running; then
+            log "Running on port $PORT"
+        else
+            log "Not running"
+        fi
+        ;;
+    install)
+        "$REPO_ROOT/etc/mlx-voice/setup.sh" install
+        ;;
+    *)
+        echo "Usage: voice [start|stop|status|install]"
+        echo "  start    Start MLX voice server (installs if needed)"
+        echo "  stop     Stop the server"
+        echo "  status   Check if running"
+        echo "  install  Install dependencies + download models"
+        echo ""
+        echo "Server runs on port $PORT (set MLX_VOICE_PORT to change)"
+        echo "Point daemon to it: export VOXTRAL_BASE_URL=http://localhost:$PORT"
+        ;;
+esac
