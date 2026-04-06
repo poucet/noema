@@ -2,7 +2,7 @@
 
 use simply_audio::BrowserAudioController;
 use simply_audio::VoiceCoordinator;
-use simply_daemon::api::DaemonApi;
+use simply_daemon::api::Daemon;
 use simply_daemon::types::ConversationId;
 use simply_daemon::net::DaemonHandle;
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ pub struct AppState {
     /// Guards against concurrent init_app calls (React StrictMode)
     pub initializing: AtomicBool,
     /// The daemon — primary API for everything (embedded or remote)
-    pub daemon: OnceCell<Arc<dyn DaemonApi>>,
+    pub daemon: OnceCell<Arc<dyn Daemon>>,
     /// Keeps the daemon handle alive (owns server if we're the host)
     pub _daemon_handle: OnceCell<DaemonHandle>,
     /// REST base URL for the daemon (e.g. "http://127.0.0.1:9800")
@@ -41,7 +41,7 @@ impl AppState {
         }
     }
 
-    pub fn get_daemon(&self) -> Result<Arc<dyn DaemonApi>, String> {
+    pub fn get_daemon(&self) -> Result<Arc<dyn Daemon>, String> {
         self.daemon.get().cloned().ok_or_else(|| "Daemon not initialized".to_string())
     }
 

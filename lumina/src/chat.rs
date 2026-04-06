@@ -274,7 +274,7 @@ async fn resolve_model(lx: &LuminaContext, msg: &Message) -> Option<String> {
     };
 
     // Validate the model exists
-    if let Ok(models) = lx.daemon.list_models().await {
+    if let Ok(models) = lx.daemon.model().list_models().await {
         let exists = models.iter().any(|m| m.id.to_string() == model_id);
         if exists {
             return Some(model_id);

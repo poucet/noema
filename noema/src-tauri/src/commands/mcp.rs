@@ -2,7 +2,7 @@
 //!
 //! Thin wrappers around `McpApi` trait methods on the daemon.
 
-use simply_daemon::api::{McpApi, OAuthApi, UpdateMcpServerRequest};
+use simply_daemon::api::{Daemon, McpApi, OAuthApi, UpdateMcpServerRequest};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -14,7 +14,7 @@ pub async fn list_mcp_servers(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<McpServerInfo>, String> {
     let daemon = state.get_daemon()?;
-    let servers = daemon.list_mcp_servers().await.map_err(|e| e.to_string())?;
+    let servers = daemon.mcp().list_mcp_servers().await.map_err(|e| e.to_string())?;
     Ok(servers.into_iter().map(McpServerInfo::from).collect())
 }
 
@@ -24,7 +24,7 @@ pub async fn add_mcp_server(
     request: AddMcpServerRequest,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .add_mcp_server(request.into())
         .await
         .map_err(|e| e.to_string())
@@ -36,7 +36,7 @@ pub async fn remove_mcp_server(
     server_id: String,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .remove_mcp_server(&server_id)
         .await
         .map_err(|e| e.to_string())
@@ -48,7 +48,7 @@ pub async fn connect_mcp_server(
     server_id: String,
 ) -> Result<usize, String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .connect_mcp_server(&server_id)
         .await
         .map_err(|e| e.to_string())
@@ -60,7 +60,7 @@ pub async fn disconnect_mcp_server(
     server_id: String,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .disconnect_mcp_server(&server_id)
         .await
         .map_err(|e| e.to_string())
@@ -72,7 +72,7 @@ pub async fn get_mcp_server_tools(
     server_id: String,
 ) -> Result<Vec<McpToolInfo>, String> {
     let daemon = state.get_daemon()?;
-    let tools = daemon
+    let tools = daemon.mcp()
         .get_mcp_server_tools(&server_id)
         .await
         .map_err(|e| e.to_string())?;
@@ -85,7 +85,7 @@ pub async fn test_mcp_server(
     server_id: String,
 ) -> Result<usize, String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .test_mcp_server(&server_id)
         .await
         .map_err(|e| e.to_string())
@@ -99,7 +99,7 @@ pub async fn update_mcp_server_settings(
     auto_retry: bool,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .update_mcp_server_settings(
             &server_id,
             UpdateMcpServerRequest {
@@ -119,7 +119,7 @@ pub async fn stop_mcp_retry(
     server_id: String,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .stop_mcp_retry(&server_id)
         .await
         .map_err(|e| e.to_string())
@@ -131,7 +131,7 @@ pub async fn start_mcp_retry(
     server_id: String,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon
+    daemon.mcp()
         .start_mcp_retry(&server_id)
         .await
         .map_err(|e| e.to_string())
@@ -144,7 +144,7 @@ pub async fn start_mcp_oauth(
     server_id: String,
 ) -> Result<String, String> {
     let daemon = state.get_daemon()?;
-    let flow = daemon
+    let flow = daemon.oauth()
         .start_oauth(&server_id)
         .await
         .map_err(|e| e.to_string())?;
@@ -160,7 +160,7 @@ pub async fn complete_mcp_oauth(
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
     // Manual code entry — use the code-only completion path
-    daemon
+    daemon.oauth()
         .complete_oauth_with_code(&server_id, &code)
         .await
         .map_err(|e| e.to_string())
@@ -204,13 +204,13 @@ pub async fn handle_deep_link(app: &AppHandle, urls: Vec<url::Url>) {
         };
 
         // Resolve which server this state belongs to
-        let Some(server_id) = daemon.resolve_oauth_state(&oauth_state).await else {
+        let Some(server_id) = daemon.oauth().resolve_oauth_state(&oauth_state).await else {
             tracing::warn!(state = %oauth_state, "No pending OAuth flow for state");
             app.emit("oauth_error", "No pending OAuth flow found").ok();
             continue;
         };
 
-        match daemon.complete_oauth(&server_id, &code, &oauth_state).await {
+        match daemon.oauth().complete_oauth(&server_id, &code, &oauth_state).await {
             Ok(()) => {
                 tracing::info!(server_id, "OAuth completed via deep link");
                 app.emit("oauth_complete", &server_id).ok();

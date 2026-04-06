@@ -12,7 +12,7 @@ use std::sync::Arc;
 use commands::CommandRegistry;
 use serenity::model::id::{ChannelId, GuildId};
 use serenity::prelude::*;
-use simply_daemon::api::{DaemonApi, McpApi, RegisterEphemeralRequest};
+use simply_daemon::api::{Daemon, McpApi, RegisterEphemeralRequest};
 use simply_daemon::net;
 
 /// Key for storing the MCP server in serenity's TypeMap (to inject cache on ready).
@@ -26,7 +26,7 @@ impl TypeMapKey for McpServerKey {
 pub struct DaemonKey;
 
 impl TypeMapKey for DaemonKey {
-    type Value = Arc<dyn DaemonApi>;
+    type Value = Arc<dyn Daemon>;
 }
 
 /// Key for storing the Lumina config in serenity's TypeMap.
@@ -66,17 +66,7 @@ async fn main() -> anyhow::Result<()> {
     // Connect to existing daemon or start embedded
     let _daemon_handle = net::connect_or_host(
         settings.daemon_port,
-        net::discovery::ServiceBuilders {
-            ws_dispatch: Box::new(|_| {
-                use simply_daemon::net::server::DispatchFn;
-                let f: DispatchFn = Arc::new(|_method, _params, _write| {
-                    Box::pin(async { simply_rpc::protocol::WsResponse::ok(0, serde_json::Value::Null) })
-                });
-                f
-            }),
-            rest_dispatcher: Box::new(|_| simply_rpc::Dispatcher::new()),
-            client_name: "lumina".to_string(),
-        },
+        "lumina",
     ).await?;
     tracing::info!(host = _daemon_handle.is_host(), "daemon ready");
 
@@ -90,8 +80,8 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(url = %mcp_url, "lumina MCP server started");
 
     let tool_count = daemon
-        .register_ephemeral_mcp(RegisterEphemeralRequest {
-            id: "lumina-discord".to_string(),
+        .mcp().register_ephemeral_mcp(RegisterEphemeralRequest {
+            id: "discord".to_string(),
             url: mcp_url,
         })
         .await?;

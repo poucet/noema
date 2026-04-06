@@ -79,7 +79,7 @@ pub async fn store_asset(
     data: String,      // base64 encoded
     mime_type: String,
 ) -> Result<AssetId, String> {
-    use simply_daemon::api::AssetApi;
+    use simply_daemon::api::{AssetApi, Daemon};
     use base64::Engine;
 
     let daemon = state.get_daemon()?;
@@ -87,7 +87,7 @@ pub async fn store_asset(
         .decode(&data)
         .map_err(|e| format!("Failed to decode data: {}", e))?;
 
-    let info = daemon
+    let info = daemon.asset()
         .store_asset(simply_rpc::BinaryUpload::new(bytes, mime_type))
         .await
         .map_err(|e| format!("Failed to store asset: {}", e))?;

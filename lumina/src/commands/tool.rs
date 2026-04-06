@@ -14,7 +14,7 @@ use serenity::builder::{
     CreateActionRow, CreateCommand, CreateCommandOption, CreateEmbed, CreateInputText,
     CreateMessage, CreateModal,
 };
-use simply_daemon::api::{CallToolRequestParam, McpApi};
+use simply_daemon::ToolService;
 use std::time::Duration;
 
 use super::LuminaContext;
@@ -78,28 +78,22 @@ impl super::SlashCommand for Tool {
             _ => return Ok(()),
         };
 
-        let partial = if let ResolvedValue::SubCommand(ref sub_opts) = sub.value {
-            sub_opts.iter().find_map(|o| match o {
-                ResolvedOption { name: "name", value: ResolvedValue::String(s), .. } => Some(s.to_lowercase()),
-                _ => None,
-            }).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let partial = ac.data.autocomplete()
+            .map(|opt| opt.value.to_lowercase())
+            .unwrap_or_default();
 
-        let tools = lx.daemon.list_all_tools().await.unwrap_or_default();
+        let tools = lx.daemon.tools().get_definitions().await;
         let choices: Vec<AutocompleteChoice> = tools
             .into_iter()
             .filter(|t| partial.is_empty() || t.name.to_lowercase().contains(&partial))
             .take(25)
             .map(|t| {
-                let name = t.name.as_ref();
                 let display = match t.description.as_deref() {
-                    Some(d) if d.len() <= 80 => format!("{name} — {d}"),
-                    Some(d) => format!("{name} — {}...", &d[..77]),
-                    None => name.to_string(),
+                    Some(d) if d.len() <= 80 => format!("{} — {d}", t.name),
+                    Some(d) => format!("{} — {}...", t.name, &d[..77]),
+                    None => t.name.clone(),
                 };
-                AutocompleteChoice::new(display, name.to_string())
+                AutocompleteChoice::new(display, t.name)
             })
             .collect();
 
@@ -118,21 +112,21 @@ impl super::SlashCommand for Tool {
 // ---------------------------------------------------------------------------
 
 async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str) -> anyhow::Result<()> {
-    let tools = lx.daemon.list_all_tools().await?;
+    let tools = lx.daemon.tools().get_definitions().await;
     let tool = tools
         .iter()
-        .find(|t| t.name.as_ref() == tool_name)
+        .find(|t| t.name == tool_name)
         .ok_or_else(|| anyhow::anyhow!("tool not found: {tool_name}"))?;
 
-    let schema = serde_json::to_value(&*tool.input_schema).unwrap_or_default();
+    let schema = serde_json::to_value(&tool.input_schema).unwrap_or_default();
     let params = extract_params(&schema);
 
     if params.is_empty() {
         // No params — execute immediately
-        let result = lx.daemon.call_tool_direct(
-            CallToolRequestParam::new(tool_name.to_string()),
-        ).await;
-        send_result(lx, cmd, tool_name, result).await
+        let result = lx.daemon.tools()
+            .call_tool(tool_name, serde_json::Value::Object(Default::default()))
+            .await;
+        send_tool_result_from_service(lx, cmd, tool_name, result).await
     } else {
         // Build modal with input fields (Discord max: 5 components)
         let mut components = Vec::new();
@@ -165,7 +159,7 @@ async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str)
 // ---------------------------------------------------------------------------
 
 async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
-    let tools = lx.daemon.list_all_tools().await?;
+    let tools = lx.daemon.tools().get_definitions().await;
 
     if tools.is_empty() {
         cmd.create_response(&lx.http, CreateInteractionResponse::Message(
@@ -176,20 +170,19 @@ async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
 
     let mut text = String::new();
     for tool in &tools {
-        let name = tool.name.as_ref();
         let desc = tool.description.as_deref().unwrap_or("No description");
         let param_count = tool.input_schema.get("properties")
             .and_then(|p| p.as_object())
             .map(|p| p.len())
             .unwrap_or(0);
-        text.push_str(&format!("**`{name}`** — {desc} ({param_count} params)\n"));
+        text.push_str(&format!("**`{}`** — {desc} ({param_count} params)\n", tool.name));
     }
 
     let pages = crate::paginator::paginate_text(&text, 3800);
 
     if pages.len() <= 1 {
         let embed = CreateEmbed::new()
-            .title(format!("MCP Tools ({} total)", tools.len()))
+            .title(format!("Tools ({} total)", tools.len()))
             .description(pages.first().map(|s| s.as_str()).unwrap_or(""))
             .color(0x5865F2);
         cmd.create_response(&lx.http, CreateInteractionResponse::Message(
@@ -197,7 +190,7 @@ async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
         )).await?;
     } else {
         let text_pages: Vec<String> = pages.iter().enumerate().map(|(i, content)| {
-            format!("**MCP Tools** ({} total) — Page {}/{}\n\n{}", tools.len(), i + 1, pages.len(), content)
+            format!("**Tools** ({} total) — Page {}/{}\n\n{}", tools.len(), i + 1, pages.len(), content)
         }).collect();
         crate::paginator::send_paginated(lx, cmd, &text_pages, Duration::from_secs(120)).await?;
     }
@@ -231,11 +224,11 @@ pub async fn handle_modal(lx: &LuminaContext, modal: &serenity::model::applicati
         CreateInteractionResponseMessage::new(),
     )).await?;
 
-    let result = lx.daemon.call_tool_direct(
-        CallToolRequestParam::new(tool_name.to_string()).with_arguments(args),
-    ).await;
+    let result = lx.daemon.tools()
+        .call_tool(tool_name, serde_json::Value::Object(args))
+        .await;
 
-    send_tool_result(lx, modal.channel_id, tool_name, result).await?;
+    send_tool_result_from_service(lx, modal.channel_id, tool_name, result).await?;
     modal.delete_response(&lx.http).await.ok();
     Ok(())
 }
@@ -375,6 +368,79 @@ async fn send_tool_result(
         }
     }
     Ok(())
+}
+
+/// Send a ToolService result (Vec<ToolResultContent>) as a Discord response.
+async fn send_tool_result_from_service(
+    lx: &LuminaContext,
+    target: impl Into<SendTarget<'_>>,
+    tool_name: &str,
+    result: anyhow::Result<Vec<simply_daemon::types::ToolResultContent>>,
+) -> anyhow::Result<()> {
+    let target = target.into();
+    match result {
+        Ok(content) => {
+            let text = content.iter()
+                .filter_map(|c| match c {
+                    simply_daemon::types::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let body = if text.len() > 4000 { format!("{}...", &text[..4000]) } else { text };
+            let embed = CreateEmbed::new()
+                .title(format!("Tool: {tool_name}"))
+                .description(body)
+                .color(0x2ECC71);
+
+            match target {
+                SendTarget::Channel(channel_id) => {
+                    channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
+                }
+                SendTarget::Command(cmd) => {
+                    cmd.create_response(&lx.http, CreateInteractionResponse::Defer(
+                        CreateInteractionResponseMessage::new(),
+                    )).await?;
+                    cmd.channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
+                    cmd.delete_response(&lx.http).await.ok();
+                }
+            }
+        }
+        Err(e) => {
+            let embed = CreateEmbed::new()
+                .title(format!("Tool: {tool_name} (error)"))
+                .description(format!("{e}"))
+                .color(0xE74C3C);
+
+            match target {
+                SendTarget::Channel(channel_id) => {
+                    channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
+                }
+                SendTarget::Command(cmd) => {
+                    cmd.create_response(&lx.http, CreateInteractionResponse::Defer(
+                        CreateInteractionResponseMessage::new(),
+                    )).await?;
+                    cmd.channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
+                    cmd.delete_response(&lx.http).await.ok();
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+enum SendTarget<'a> {
+    Channel(serenity::model::id::ChannelId),
+    Command(&'a CommandInteraction),
+}
+
+impl<'a> From<&'a CommandInteraction> for SendTarget<'a> {
+    fn from(cmd: &'a CommandInteraction) -> Self { Self::Command(cmd) }
+}
+
+impl From<serenity::model::id::ChannelId> for SendTarget<'_> {
+    fn from(id: serenity::model::id::ChannelId) -> Self { Self::Channel(id) }
 }
 
 fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {

@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use serenity::all::CommandInteraction;
 use serenity::builder::CreateCommand;
 use serenity::prelude::*;
-use simply_daemon::api::DaemonApi;
+use simply_daemon::api::Daemon;
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -40,7 +40,7 @@ impl TypeMapKey for SharedState {
 /// Rich context for command handlers. Bundles serenity context, daemon, config, and shared state.
 pub struct LuminaContext {
     pub ctx: Context,
-    pub daemon: Arc<dyn DaemonApi>,
+    pub daemon: Arc<dyn Daemon>,
     pub config: config::LuminaConfig,
     pub state: Arc<SharedState>,
 }

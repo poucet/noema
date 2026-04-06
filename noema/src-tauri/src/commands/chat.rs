@@ -1,7 +1,7 @@
 //! Chat-related Tauri commands
 
 use simply_daemon::api::{
-    ConversationApi, CreateSessionOptions, DaemonEvent, ModelApi, Persistence, SessionApi,
+    ConversationApi, CreateSessionOptions, Daemon, DaemonEvent, ModelApi, Persistence, SessionApi,
     SessionId, UserMessage,
 };
 use simply_daemon::types::{ConversationId, InputContent};
@@ -64,7 +64,7 @@ async fn spawn_event_forwarder(
                             Err(_) => break,
                         };
                         let messages = daemon
-                            .get_messages(&conversation_id)
+                            .conversation().get_messages(&conversation_id)
                             .await
                             .unwrap_or_default()
                             .iter()
@@ -104,7 +104,7 @@ pub async fn get_messages(
 ) -> Result<Vec<DisplayMessage>, String> {
     let daemon = state.get_daemon()?;
     Ok(daemon
-        .get_messages(&conversation_id)
+        .conversation().get_messages(&conversation_id)
         .await
         .map_err(|e| format!("Failed to get messages: {}", e))?
         .iter()
@@ -134,7 +134,7 @@ pub async fn send_message(
 
     let daemon = state.get_daemon()?;
     daemon
-        .send_message(&session_id, UserMessage { content: input_content })
+        .session().send_message(&session_id, UserMessage { content: input_content })
         .await
         .map_err(|e| format!("Failed to send message: {}", e))
 }
@@ -145,7 +145,7 @@ pub async fn close_session(
     session_id: SessionId,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon.close_session(&session_id).await
+    daemon.session().close_session(&session_id).await
         .map_err(|e| format!("Failed to close session: {}", e))
 }
 
@@ -159,10 +159,10 @@ pub async fn set_model(
     let full_model_id = format!("{}/{}", provider, model_id);
     let daemon = state.get_daemon()?;
 
-    daemon.set_model(&session_id, &full_model_id).await
+    daemon.session().set_model(&session_id, &full_model_id).await
         .map_err(|e| format!("Failed to set model: {}", e))?;
 
-    daemon.set_default_model(&full_model_id).await
+    daemon.model().set_default_model(&full_model_id).await
         .map_err(|e| format!("Failed to set default model: {}", e))?;
 
     let display_name = model_id.split('/').last().unwrap_or(&model_id).to_string();
@@ -179,7 +179,7 @@ pub async fn set_model(
 #[tauri::command]
 pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInfo>, String> {
     let daemon = state.get_daemon()?;
-    let all = daemon.list_models().await.map_err(|e| format!("Failed to list models: {}", e))?;
+    let all = daemon.model().list_models().await.map_err(|e| format!("Failed to list models: {}", e))?;
     Ok(all
         .into_iter()
         .filter(|m| m.definition.has_capability(&simply_daemon::types::ModelCapability::Text))
@@ -190,7 +190,7 @@ pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInf
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
     let daemon = state.get_daemon()?;
-    let convos = daemon.list_conversations().await
+    let convos = daemon.conversation().list_conversations().await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
     Ok(convos.into_iter().map(ConversationInfo::from).collect())
 }
@@ -205,7 +205,7 @@ pub async fn load_conversation(
     let daemon = state.get_daemon()?;
 
     let messages: Vec<DisplayMessage> = daemon
-        .get_messages(&conversation_id)
+        .conversation().get_messages(&conversation_id)
         .await
         .map_err(|e| format!("Failed to load messages: {}", e))?
         .iter()
@@ -213,7 +213,7 @@ pub async fn load_conversation(
         .collect();
 
     let (info, rx) = daemon
-        .create_session(CreateSessionOptions {
+        .session().create_session(CreateSessionOptions {
             persistence: Some(Persistence::Persistent { conversation_id: conversation_id.clone() }),
             ..Default::default()
         })
@@ -240,12 +240,12 @@ pub async fn new_conversation(
     });
 
     let conv_id = daemon
-        .create_conversation(Some(conversation_name))
+        .conversation().create_conversation(Some(conversation_name))
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
     let (info, rx) = daemon
-        .create_session(CreateSessionOptions {
+        .session().create_session(CreateSessionOptions {
             persistence: Some(Persistence::Persistent { conversation_id: conv_id.clone() }),
             ..Default::default()
         })
@@ -263,7 +263,7 @@ pub async fn delete_conversation(
     conversation_id: ConversationId,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon.delete_conversation(&conversation_id).await
+    daemon.conversation().delete_conversation(&conversation_id).await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
 
@@ -274,14 +274,14 @@ pub async fn rename_conversation(
     name: String,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon.rename_conversation(&conversation_id, &name).await
+    daemon.conversation().rename_conversation(&conversation_id, &name).await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
 
 #[tauri::command]
 pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let daemon = state.get_daemon()?;
-    let model_id = daemon.default_model_id().await;
+    let model_id = daemon.model().default_model_id().await;
     Ok(model_id.split('/').last().unwrap_or(&model_id).to_string())
 }
 
