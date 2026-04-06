@@ -21,10 +21,6 @@ Non-blocking issues discovered during testing. Fix later.
 
 - No single-conversation GET endpoint — `GET /conversation/{id}` returns "not found" (only list and messages work)
 
-## MCP tools (`GET /mcp/tools` + Lumina `/tool list`)
-
-- Only lists MCP tools from Lumina (Discord) — daemon's built-in tools are missing from the tool list
-
 ## Tool call UX
 
 - Tool params could support autocomplete from related tools (e.g. `get_asset` id field autocompletes from `list_assets` results). Needs a way to annotate param-to-tool relationships in tool schemas.

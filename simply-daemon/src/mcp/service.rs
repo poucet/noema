@@ -165,6 +165,9 @@ impl McpApi for McpService {
 
     async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
+        if registry.is_ephemeral(server_id) {
+            anyhow::bail!("cannot remove ephemeral server '{server_id}' — it is managed by its host process");
+        }
         registry.remove_server(server_id).await?;
         registry.save_config()?;
         Ok(())

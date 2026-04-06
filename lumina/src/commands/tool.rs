@@ -89,9 +89,16 @@ impl super::SlashCommand for Tool {
             .take(25)
             .map(|t| {
                 let display = match t.description.as_deref() {
-                    Some(d) if d.len() <= 80 => format!("{} — {d}", t.name),
-                    Some(d) => format!("{} — {}...", t.name, &d[..77]),
-                    None => t.name.clone(),
+                    Some(d) => {
+                        let full = format!("{} — {d}", t.name);
+                        if full.len() <= 100 { full }
+                        else {
+                            let max_desc = 97_usize.saturating_sub(t.name.len() + 4);
+                            if max_desc > 3 { format!("{} — {}...", t.name, &d[..max_desc]) }
+                            else { t.name.chars().take(100).collect() }
+                        }
+                    }
+                    None => t.name.chars().take(100).collect(),
                 };
                 AutocompleteChoice::new(display, t.name)
             })
@@ -381,7 +388,7 @@ async fn send_tool_result(
 }
 
 /// Format a JSON value into a human-readable Discord-friendly string.
-fn format_tool_output(text: &str) -> String {
+pub fn format_tool_output(text: &str) -> String {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
         return text.to_string();
     };

@@ -103,15 +103,15 @@ pub trait McpApi: Send + Sync {
     /// Register an ephemeral MCP server and connect to it.
     /// Used by external services (e.g. Lumina) to expose tools to the daemon at runtime.
     /// Returns the number of tools discovered.
-    #[rpc(post = "/mcp/ephemeral")]
+    #[rpc(post = "/mcp/ephemeral", no_tool)]
     async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize>;
 
     /// Unregister an ephemeral MCP server and disconnect.
-    #[rpc(delete = "/mcp/ephemeral/{server_id}")]
+    #[rpc(delete = "/mcp/ephemeral/{server_id}", no_tool)]
     async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()>;
 
     /// List all tools across all connected servers (includes schemas).
-    #[rpc(get = "/mcp/tools")]
+    #[rpc(get = "/mcp/tools", no_tool)]
     async fn list_all_tools(&self) -> anyhow::Result<Vec<McpTool>>;
 
     /// Call a tool by name (routed via ToolService to the providing server).

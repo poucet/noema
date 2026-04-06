@@ -64,10 +64,9 @@ BASE=http://127.0.0.1:9800
 
 ## 5. /tool call — Multimodal Content
 
-- [ ] Upload an image via `curl -X POST $BASE/asset -H 'Content-Type: image/png' --data-binary @test.png`
-- [ ] `/tool call get_blob` with the hash — image returned as Discord attachment (not JSON text)
+- [x] `/tool call get_blob` with the hash — image returned as Discord attachment (not JSON text)
 - [ ] Audio asset returns as audio file attachment
-- [ ] Verify path: `BinaryResponse` → `RouteMeta.binary_response` → image/audio `ToolResultContent` → Discord attachment
+- [x] Verify path: `BinaryResponse` → `RouteMeta.binary_response` → image/audio `ToolResultContent` → Discord attachment
 
 ## 6. MCP Instructions (Channel Map)
 

@@ -157,6 +157,11 @@ impl McpRegistry {
         servers
     }
 
+    /// Check if a server is ephemeral (not persisted to config).
+    pub fn is_ephemeral(&self, id: &str) -> bool {
+        self.ephemeral_servers.contains_key(id)
+    }
+
     /// Check if a server is connected
     pub fn is_connected(&self, id: &str) -> bool {
         self.connections.contains_key(id)

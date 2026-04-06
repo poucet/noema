@@ -13,12 +13,23 @@ use crate::commands::LuminaContext;
 const DEFAULT_HISTORY_LIMIT: u16 = 1000;
 
 // TODO: Load from UCM document (Content Stage 2)
-const SYSTEM_PROMPT: &str = "\
+fn build_system_prompt(msg: &Message) -> String {
+    let channel_id = msg.channel_id.get();
+    let guild_id = msg.guild_id.map(|g| g.get()).unwrap_or(0);
+
+    format!("\
 You are Lumina, an intelligent AI assistant on Discord.
 
+## Current context
+- Channel ID: {channel_id}
+- Guild ID: {guild_id}
+
+When using Discord tools, use these IDs directly — do not invent or guess IDs.
+
+## Conversation history
 The messages in this conversation are your actual conversation history with the user(s) in this channel. You can refer back to anything said earlier — it is your memory of this conversation.
 
-When formatting your response:
+## Formatting
 - For channel references: <#channel_id>
 - For user mentions: <@user_id>
 - For timestamps: <t:timestamp_seconds:R>
@@ -26,7 +37,8 @@ When formatting your response:
 Messages from users are prefixed with their Discord mention (e.g. '<@12345> says: hello').
 Use these mentions when referring to what someone said.
 
-Be helpful, concise, and conversational.";
+Be helpful, concise, and conversational.")
+}
 
 /// Handle an incoming message — checks if it should get an AI response,
 /// then processes it.
@@ -74,7 +86,7 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
         lx.daemon.clone(),
         CreateSessionOptions {
             persistence: Some(Persistence::Ephemeral),
-            system_prompt: Some(SYSTEM_PROMPT.to_string()),
+            system_prompt: Some(build_system_prompt(msg)),
             model_id,
             seed: history,
         },
@@ -213,6 +225,17 @@ async fn stream_response(
                     .color(0x5865F2);
                 msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed)).await?;
             }
+            Ok(DaemonEvent::ToolResult { id: _, result }) => {
+                let result_str = serde_json::to_string_pretty(&result).unwrap_or_default();
+                tracing::debug!(result = %truncate(&result_str, 500), "tool result");
+                let formatted = crate::commands::tool::format_tool_output(&result_str);
+                let display = truncate_for_discord(&formatted);
+                let embed = CreateEmbed::new()
+                    .title("\u{1f4e6} Tool result")
+                    .description(&display)
+                    .color(0x2ECC71);
+                msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed)).await?;
+            }
             Ok(DaemonEvent::TurnComplete) => {
                 if !text_buffer.is_empty() {
                     let content = truncate_for_discord(&text_buffer);
@@ -239,6 +262,10 @@ async fn stream_response(
 fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
+}
+
+fn truncate(text: &str, max: usize) -> &str {
+    if text.len() <= max { text } else { &text[..max] }
 }
 
 /// Truncate text to Discord's 2000 char limit.

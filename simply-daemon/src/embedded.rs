@@ -94,7 +94,9 @@ where
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
                 .register(<dyn ModelApi>::service(model.clone()))
-                .register(<dyn CoreApi>::service(core.clone())),
+                .register(<dyn CoreApi>::service(core.clone()))
+                .register(<dyn McpApi>::service(mcp.clone()))
+                .register(<dyn VoiceApi>::service(voice.clone())),
             McpToolRegistry::new(Arc::clone(mcp.registry())),
             Arc::clone(&mcp),
         ));
