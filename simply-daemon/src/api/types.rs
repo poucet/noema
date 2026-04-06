@@ -49,7 +49,7 @@ pub use simply_core::mcp::{ServerStatus, spawn_retry_task, start_auto_connect};
 // ---------------------------------------------------------------------------
 
 /// Opaque session identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SessionId(String);
 
 impl SessionId {
@@ -96,7 +96,7 @@ pub enum DaemonEvent {
 }
 
 /// An event pushed into the daemon (trigger interface).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InboundEvent {
     pub event_type: String,
     pub payload: serde_json::Value,

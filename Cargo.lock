@@ -5474,6 +5474,7 @@ dependencies = [
  "llm",
  "reqwest 0.12.28",
  "rmcp",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "simply-core",

@@ -27,9 +27,10 @@ impl BinaryResponse {
 /// Other parameters go in the query string.
 ///
 /// Over WebSocket, the data is base64-encoded in JSON (transparent to the caller).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BinaryUpload {
     #[serde(with = "crate::base64_bytes")]
+    #[schemars(with = "String")]
     pub data: Vec<u8>,
     pub mime_type: String,
 }

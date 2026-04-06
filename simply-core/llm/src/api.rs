@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug, Deserialize, PartialEq, Eq, Serialize, Default)]
+#[derive(Copy, Clone, Debug, Deserialize, PartialEq, Eq, Serialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     User,

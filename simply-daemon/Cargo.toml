@@ -23,7 +23,8 @@ llm = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 async-trait = { workspace = true }
 
-# Serialization
+# Serialization / schemas
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

@@ -47,7 +47,7 @@ BASE=http://127.0.0.1:9800
 ## 3. Lumina MCP Tools (via daemon)
 
 - [x] Lumina registers as MCP service on connect (check daemon logs: "ephemeral MCP service registered")
-- [ ] `/tool list` shows all tools from daemon + lumina-discord server
+- [x] `/tool list` shows all tools from daemon + lumina-discord server
 - [ ] Tool descriptions and param counts are correct
 - [ ] Pagination works if tool list exceeds one page
 

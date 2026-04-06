@@ -9,7 +9,7 @@ use super::types::{DaemonEvent, InboundEvent, InputContent, SessionId};
 pub use simply_core::Persistence;
 
 /// Options when creating a new session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateSessionOptions {
     pub persistence: Option<Persistence>,
     pub system_prompt: Option<String>,
@@ -28,13 +28,13 @@ pub struct SessionInfo {
 }
 
 /// A user message sent to a session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserMessage {
     pub content: Vec<InputContent>,
 }
 
 /// A seed message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SeedMessage {
     pub role: llm::Role,
     pub content: Vec<InputContent>,

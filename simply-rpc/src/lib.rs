@@ -29,3 +29,6 @@ pub type RpcResult = anyhow::Result<serde_json::Value>;
 
 // Re-export the proc macro
 pub use simply_rpc_macros::rpc_service;
+
+// Re-export schemars so downstream crates don't need it as a direct dependency
+pub use schemars;

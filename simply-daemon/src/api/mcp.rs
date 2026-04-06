@@ -24,7 +24,7 @@ pub struct McpServerInfo {
 }
 
 /// Request to add a new MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AddMcpServerRequest {
     pub id: String,
     pub name: String,
@@ -37,14 +37,14 @@ pub struct AddMcpServerRequest {
 }
 
 /// Request to register an ephemeral MCP server at runtime.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RegisterEphemeralRequest {
     pub id: String,
     pub url: String,
 }
 
 /// Request to update MCP server settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateMcpServerRequest {
     pub name: Option<String>,
     pub url: Option<String>,
@@ -115,6 +115,6 @@ pub trait McpApi: Send + Sync {
     async fn list_all_tools(&self) -> anyhow::Result<Vec<McpTool>>;
 
     /// Call a tool by name (routed via ToolService to the providing server).
-    #[rpc(post = "/mcp/tools/call")]
+    #[rpc(post = "/mcp/tools/call", no_tool)]
     async fn call_tool_direct(&self, request: CallToolRequestParam) -> anyhow::Result<CallToolResult>;
 }

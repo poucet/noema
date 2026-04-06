@@ -240,7 +240,7 @@ pub enum ResolvedContent {
 /// This is what Tauri/UI sends when the user submits a message.
 /// Converted to `ContentBlock` for pending messages, then stored
 /// during `Session::commit()` via `StorageCoordinator::add_message()`.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum InputContent {
     /// Plain text to be stored

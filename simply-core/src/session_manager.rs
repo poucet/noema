@@ -27,7 +27,7 @@ use crate::storage::DocumentResolver;
 // ============================================================================
 
 /// How a session persists its data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum Persistence {
     Ephemeral,
     Persistent { conversation_id: ConversationId },
