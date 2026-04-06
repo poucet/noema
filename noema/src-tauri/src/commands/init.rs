@@ -33,8 +33,7 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     let settings = config::Settings::load();
     let port = settings.daemon_port;
 
-    let daemon_port = port.unwrap_or(9800);
-    let rest_port = daemon_port + 1;
+    let daemon_port = port.unwrap_or(config::DEFAULT_DAEMON_PORT);
 
     let handle = net::connect_or_host(port, service_builders())
         .await
@@ -45,7 +44,7 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
 
     // Set the REST base URL — used by asset protocol handler and other REST clients.
     // When remote, this points to wherever the daemon is running.
-    let rest_base_url = format!("http://127.0.0.1:{rest_port}");
+    let rest_base_url: String = format!("http://127.0.0.1:{daemon_port}");
     let _ = state.rest_base_url.set(rest_base_url);
 
     let model_name = daemon.default_model_id().await;

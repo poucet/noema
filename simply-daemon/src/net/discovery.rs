@@ -1,7 +1,7 @@
 //! Smart daemon discovery.
 //!
 //! - If a daemon is already running on the well-known port, connect to it.
-//! - Otherwise, start an embedded daemon + WS server and become the host.
+//! - Otherwise, start an embedded daemon and become the host.
 //!
 //! The caller provides builders for the WS dispatch and REST dispatcher —
 //! discovery doesn't know which services exist.
@@ -20,15 +20,14 @@ use crate::storage::SqliteStores;
 use simply_rpc::ws_client::ConnectionState;
 use super::{rest, server};
 
-const DEFAULT_DAEMON_PORT: u16 = 9800;
+use config::DEFAULT_DAEMON_PORT;
 
 /// Result of daemon discovery.
 pub enum DaemonHandle {
     /// This process is hosting the daemon. Dropping shuts down servers.
     Host {
         daemon: Arc<dyn DaemonApi>,
-        _ws_server: server::ServerHandle,
-        _rest_server: rest::ServerHandle,
+        _server: rest::ServerHandle,
         /// Fires when `/kill` is called on the REST API.
         kill_rx: Option<tokio::sync::mpsc::Receiver<()>>,
     },
@@ -109,7 +108,7 @@ pub async fn connect_or_host(
     }
 
     // No daemon running — start one
-    tracing::info!(port, "Starting embedded daemon + WS server");
+    tracing::info!(port, "Starting embedded daemon");
 
     config::load_env_file();
     let stores = Arc::new(SqliteStores::open()?);
@@ -117,24 +116,21 @@ pub async fn connect_or_host(
     let daemon: Arc<dyn DaemonApi> = daemon;
 
     let ws_dispatch = (builders.ws_dispatch)(Arc::clone(&daemon));
-    let ws_server = server::start(ws_dispatch, port).await?;
-
-    let tracker = ws_server.tracker().clone();
+    let tracker = server::ConnectionTracker::new();
     let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
 
-    let rest_port = port + 1;
-    let rest_server = rest::start(rest::ServerConfig {
+    let rest_dispatcher = (builders.rest_dispatcher)(Arc::clone(&daemon));
+    let server = rest::start(rest::ServerConfig {
         rest_dispatcher: simply_rpc::RestDispatcher::new(),
-        ws_dispatch: None,
-        port: rest_port,
+        ws_dispatch: Some(ws_dispatch),
+        port,
         tracker,
         kill_tx,
     }).await?;
 
     Ok(DaemonHandle::Host {
         daemon,
-        _ws_server: ws_server,
-        _rest_server: rest_server,
+        _server: server,
         kill_rx: Some(kill_rx),
     })
 }

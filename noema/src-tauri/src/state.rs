@@ -15,9 +15,9 @@ pub struct AppState {
     pub initializing: AtomicBool,
     /// The daemon — primary API for everything (embedded or remote)
     pub daemon: OnceCell<Arc<dyn DaemonApi>>,
-    /// Keeps the daemon handle alive (owns WS server if we're the host)
+    /// Keeps the daemon handle alive (owns server if we're the host)
     pub _daemon_handle: OnceCell<DaemonHandle>,
-    /// REST base URL for the daemon (e.g. "http://127.0.0.1:9801")
+    /// REST base URL for the daemon (e.g. "http://127.0.0.1:9800")
     pub rest_base_url: OnceCell<String>,
     pub voice_coordinator: Mutex<Option<VoiceCoordinator>>,
     pub voice_conversation: Mutex<Option<ConversationId>>,

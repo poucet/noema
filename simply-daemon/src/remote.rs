@@ -28,7 +28,7 @@ impl RemoteDaemon {
         let conn = DaemonWsConnection::connect(addr, daemon_demux()).await?;
         let _ = conn.rpc_call("client.identify", serde_json::json!({ "name": name })).await;
 
-        let base_url = derive_rest_url(addr);
+        let base_url = format!("http://{addr}");
 
         Ok(Arc::new(Self {
             conn,
@@ -48,18 +48,6 @@ impl RemoteDaemon {
     pub fn watch_connection_state(&self) -> watch::Receiver<ConnectionState> {
         self.conn.watch_state()
     }
-}
-
-fn derive_rest_url(ws_addr: &str) -> String {
-    let addr = ws_addr
-        .trim_start_matches("ws://")
-        .trim_start_matches("wss://");
-    if let Some((host, port_str)) = addr.rsplit_once(':') {
-        if let Ok(port) = port_str.parse::<u16>() {
-            return format!("http://{}:{}", host, port + 1);
-        }
-    }
-    format!("http://{addr}")
 }
 
 #[async_trait]

@@ -1,7 +1,7 @@
-//! WebSocket server — generic RPC server over WebSocket.
+//! WebSocket types — dispatch function, connection tracking.
 //!
-//! Knows nothing about specific API traits. Takes a dispatch function
-//! that the caller wires up with the appropriate services.
+//! The actual WebSocket handler lives in `rest.rs` (axum upgrade).
+//! This module provides shared types used by both the server and clients.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -9,14 +9,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
-use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
-use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
-use tokio::task::JoinHandle;
-use tokio_tungstenite::tungstenite::Message;
 
-use super::protocol::*;
+use super::protocol::WsResponse;
 
 /// Dispatch function signature.
 ///
@@ -59,7 +55,7 @@ impl ConnectionTracker {
         }
     }
 
-    async fn add(&self, addr: SocketAddr) -> u64 {
+    pub async fn add(&self, addr: SocketAddr) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let info = ConnectionInfo {
             id,
@@ -71,7 +67,7 @@ impl ConnectionTracker {
         id
     }
 
-    async fn remove(&self, id: u64) {
+    pub async fn remove(&self, id: u64) {
         self.connections.lock().await.remove(&id);
     }
 
@@ -86,128 +82,4 @@ impl ConnectionTracker {
     pub async fn list(&self) -> Vec<ConnectionInfo> {
         self.connections.lock().await.values().cloned().collect()
     }
-}
-
-/// Starts a WebSocket server on the given port using the provided dispatch function.
-pub async fn start(dispatch: DispatchFn, port: u16) -> anyhow::Result<ServerHandle> {
-    let addr = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(&addr).await?;
-    tracing::info!(port, "WebSocket server listening");
-
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let tracker = ConnectionTracker::new();
-    let tracker_clone = tracker.clone();
-
-    let handle = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = &mut shutdown_rx => break,
-                result = listener.accept() => {
-                    match result {
-                        Ok((stream, addr)) => {
-                            tracing::info!(%addr, "WS client connected");
-                            let dispatch = Arc::clone(&dispatch);
-                            let tracker = tracker_clone.clone();
-                            tokio::spawn(async move {
-                                let conn_id = tracker.add(addr).await;
-                                handle_connection(dispatch, stream, &tracker, conn_id).await;
-                                tracker.remove(conn_id).await;
-                            });
-                        }
-                        Err(e) => tracing::error!(error = %e, "WS accept error"),
-                    }
-                }
-            }
-        }
-    });
-
-    Ok(ServerHandle { _task: handle, _shutdown: shutdown_tx, port, tracker })
-}
-
-pub struct ServerHandle {
-    _task: JoinHandle<()>,
-    _shutdown: tokio::sync::oneshot::Sender<()>,
-    port: u16,
-    tracker: ConnectionTracker,
-}
-
-impl ServerHandle {
-    pub fn port(&self) -> u16 { self.port }
-
-    /// Get the connection tracker for admin endpoints.
-    pub fn tracker(&self) -> &ConnectionTracker {
-        &self.tracker
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Connection handler
-// ---------------------------------------------------------------------------
-
-async fn handle_connection(dispatch: DispatchFn, stream: tokio::net::TcpStream, tracker: &ConnectionTracker, conn_id: u64) {
-    let ws_stream = match tokio_tungstenite::accept_async(stream).await {
-        Ok(ws) => ws,
-        Err(e) => { tracing::error!(error = %e, "WS handshake failed"); return; }
-    };
-
-    let (ws_sink, mut ws_source) = ws_stream.split();
-
-    let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
-    let writer_handle = tokio::spawn(async move {
-        let mut sink = ws_sink;
-        while let Some(text) = write_rx.recv().await {
-            if sink.send(Message::Text(text.into())).await.is_err() { break; }
-        }
-    });
-
-    while let Some(msg) = ws_source.next().await {
-        let msg = match msg {
-            Ok(Message::Text(text)) => text.to_string(),
-            Ok(Message::Close(_)) => break,
-            Ok(_) => continue,
-            Err(e) => { tracing::error!(error = %e, "WS read error"); break; }
-        };
-
-        let incoming: WsIncoming = match serde_json::from_str(&msg) {
-            Ok(v) => v,
-            Err(e) => { tracing::warn!(error = %e, "invalid WS message"); continue; }
-        };
-
-        if !incoming.is_request() { continue; }
-
-        let id = incoming.id.unwrap();
-        let method = incoming.method.unwrap();
-        let params = incoming.params;
-
-        // Built-in: client identification (not dispatched to services)
-        if method == "client.identify" {
-            let name = params.as_str()
-                .or_else(|| params.get("name").and_then(|v| v.as_str()))
-                .unwrap_or("unknown");
-            tracker.set_name(conn_id, name.to_string()).await;
-            tracing::info!(conn_id, name, "WS client identified");
-            let response = WsResponse::ok(id, serde_json::json!({ "ok": true }));
-            let text = serde_json::to_string(&response).unwrap_or_default();
-            if write_tx.send(text).await.is_err() { break; }
-            continue;
-        }
-
-        tracing::debug!(id, method = %method, "WS request");
-        tracing::trace!(id, method = %method, params = %params, "WS request params");
-
-        let mut response = dispatch(method.clone(), params, write_tx.clone()).await;
-        response.id = id; // Stamp the request ID on the response
-
-        let is_err = response.error.is_some();
-        tracing::debug!(id, method = %method, error = is_err, "WS response");
-        if is_err {
-            tracing::debug!(id, error = ?response.error, "WS response error");
-        }
-
-        let text = serde_json::to_string(&response).unwrap_or_default();
-        if write_tx.send(text).await.is_err() { break; }
-    }
-
-    writer_handle.abort();
-    tracing::info!("WS client disconnected");
 }

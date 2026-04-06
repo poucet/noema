@@ -1,7 +1,6 @@
 //! Simply Daemon — standalone runner.
 //!
-//! Hosts the daemon as a separate process. Single port for REST + admin.
-//! WebSocket server on a separate port for streaming (to be merged).
+//! Hosts the daemon as a separate process. Single port for REST, admin, and WebSocket.
 
 use std::sync::Arc;
 
@@ -36,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
 
     config::load_env_file();
     let settings = config::Settings::load();
-    let port = settings.daemon_port.unwrap_or(9800);
+    let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
 
     // Open storage and create daemon
     let stores = Arc::new(SqliteStores::open()?);
@@ -52,16 +51,13 @@ async fn main() -> anyhow::Result<()> {
     let voice_svc: Arc<dyn VoiceApi> = daemon.voice_service();
     let daemon_info_svc: Arc<dyn DaemonInfoApi> = daemon.daemon_info_service();
 
-    // WS server — streaming sessions (still separate port, WS upgrade coming to main server)
     let ws_dispatch = build_ws_dispatch(Arc::clone(&session_svc));
-    let _ws_server = net::server::start(ws_dispatch.clone(), port).await?;
-    let tracker = _ws_server.tracker().clone();
+    let tracker = net::server::ConnectionTracker::new();
 
     // Kill channel
     let (kill_tx, mut kill_rx) = mpsc::channel(1);
 
-    // Main server (axum) — REST + admin (+ WS upgrade in future)
-    let rest_port = port + 1;
+    // Unified server (axum) — REST + admin + WebSocket on a single port
     let rest_dispatcher = RestDispatcher::new()
         .register(<dyn SessionApi>::service(session_svc.clone()))
         .register(<dyn ConversationApi>::service(conversation_svc))
@@ -72,15 +68,15 @@ async fn main() -> anyhow::Result<()> {
         .register(<dyn VoiceApi>::service(voice_svc))
         .register(<dyn DaemonInfoApi>::service(daemon_info_svc));
 
-    let _rest_server = net::rest::start(net::rest::ServerConfig {
+    let _server = net::rest::start(net::rest::ServerConfig {
         rest_dispatcher,
         ws_dispatch: Some(ws_dispatch),
-        port: rest_port,
+        port,
         tracker,
         kill_tx: kill_tx.clone(),
     }).await?;
 
-    tracing::info!(ws_port = port, rest_port = rest_port, "daemon ready");
+    tracing::info!(port, "daemon ready");
 
     // Wait for shutdown signal (Ctrl+C, SIGTERM, or /kill REST endpoint)
     tokio::select! {

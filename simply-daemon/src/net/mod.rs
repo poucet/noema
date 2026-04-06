@@ -8,5 +8,4 @@ pub mod discovery;
 
 pub use simply_rpc::ws_client::ConnectionState;
 pub use discovery::{connect_or_host, DaemonHandle, ServiceBuilders};
-pub use server::ServerHandle;
-pub use rest::ServerHandle as RestHandle;
+pub use rest::ServerHandle;

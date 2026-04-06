@@ -1,23 +1,26 @@
 //! Unified HTTP server — REST + WebSocket on a single port.
 //!
 //! Uses axum for routing, REST dispatch, and WebSocket upgrades.
-//! Stream paths (from `#[rpc(stream = "/path")]`) get WebSocket upgrade.
-//! Everything else is REST dispatch.
+//! WebSocket connections upgrade at `/ws`. Everything else is REST dispatch.
 
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ConnectInfo;
 use axum::http::{Method, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use simply_rpc::{HttpMethod, RestDispatcher};
 
 use crate::net::server::{ConnectionTracker, DispatchFn};
+use crate::net::protocol::*;
 
 /// Server configuration.
 pub struct ServerConfig {
@@ -50,6 +53,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/", get(admin_page))
         .route("/admin", get(admin_page))
         .route("/admin/api/connections", get(admin_connections))
+        .route("/ws", get(ws_upgrade_handler))
         .fallback(rest_handler)
         .with_state(state);
 
@@ -60,7 +64,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let handle = tokio::spawn(async move {
-        axum::serve(listener, app)
+        axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .with_graceful_shutdown(async { shutdown_rx.await.ok(); })
             .await
             .ok();
@@ -89,6 +93,96 @@ async fn admin_page() -> Html<&'static str> {
 
 async fn admin_connections(State(state): State<AppState>) -> Json<Vec<crate::net::server::ConnectionInfo>> {
     Json(state.tracker.list().await)
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket upgrade handler
+// ---------------------------------------------------------------------------
+
+async fn ws_upgrade_handler(
+    State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    ws: axum::extract::WebSocketUpgrade,
+) -> Response {
+    let dispatch = match state.ws_dispatch {
+        Some(ref d) => Arc::clone(d),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, "WebSocket not available").into_response(),
+    };
+    let tracker = state.tracker.clone();
+    ws.on_upgrade(move |socket| handle_ws_connection(dispatch, socket, tracker, addr))
+}
+
+async fn handle_ws_connection(
+    dispatch: DispatchFn,
+    socket: WebSocket,
+    tracker: ConnectionTracker,
+    addr: std::net::SocketAddr,
+) {
+    use futures_util::{SinkExt, StreamExt};
+
+    tracing::info!(%addr, "WS client connected");
+    let conn_id = tracker.add(addr).await;
+
+    let (mut ws_sink, mut ws_source) = socket.split();
+    let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
+
+    let writer_handle = tokio::spawn(async move {
+        while let Some(text) = write_rx.recv().await {
+            if ws_sink.send(Message::Text(text.into())).await.is_err() { break; }
+        }
+    });
+
+    while let Some(msg) = ws_source.next().await {
+        let text = match msg {
+            Ok(Message::Text(t)) => t.to_string(),
+            Ok(Message::Close(_)) => break,
+            Ok(_) => continue,
+            Err(e) => { tracing::error!(error = %e, "WS read error"); break; }
+        };
+
+        let incoming: WsIncoming = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => { tracing::warn!(error = %e, "invalid WS message"); continue; }
+        };
+
+        if !incoming.is_request() { continue; }
+
+        let id = incoming.id.unwrap();
+        let method = incoming.method.unwrap();
+        let params = incoming.params;
+
+        // Built-in: client identification
+        if method == "client.identify" {
+            let name = params.as_str()
+                .or_else(|| params.get("name").and_then(|v| v.as_str()))
+                .unwrap_or("unknown");
+            tracker.set_name(conn_id, name.to_string()).await;
+            tracing::info!(conn_id, name, "WS client identified");
+            let response = WsResponse::ok(id, serde_json::json!({ "ok": true }));
+            let text = serde_json::to_string(&response).unwrap_or_default();
+            if write_tx.send(text).await.is_err() { break; }
+            continue;
+        }
+
+        tracing::debug!(id, method = %method, "WS request");
+        tracing::trace!(id, method = %method, params = %params, "WS request params");
+
+        let mut response = dispatch(method.clone(), params, write_tx.clone()).await;
+        response.id = id;
+
+        let is_err = response.error.is_some();
+        tracing::debug!(id, method = %method, error = is_err, "WS response");
+        if is_err {
+            tracing::debug!(id, error = ?response.error, "WS response error");
+        }
+
+        let text = serde_json::to_string(&response).unwrap_or_default();
+        if write_tx.send(text).await.is_err() { break; }
+    }
+
+    writer_handle.abort();
+    tracker.remove(conn_id).await;
+    tracing::info!("WS client disconnected");
 }
 
 // ---------------------------------------------------------------------------

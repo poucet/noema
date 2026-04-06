@@ -144,7 +144,7 @@ async fn establish_connection<E: Clone + Send + 'static>(
     state_tx: watch::Sender<ConnectionState>,
     demux: NotificationDemux<E>,
 ) -> anyhow::Result<LiveConnection> {
-    let url = format!("ws://{}", addr);
+    let url = format!("ws://{}/ws", addr);
     let (ws_stream, _) = tokio_tungstenite::connect_async(&url).await?;
     let (ws_sink, ws_source) = ws_stream.split();
 
