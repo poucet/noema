@@ -182,6 +182,7 @@ pub fn run() {
             commands::voice::start_voice_session,
             commands::voice::process_audio_chunk,
             commands::voice::stop_voice_session,
+            commands::voice::synthesize_speech,
             // File/Asset commands
             commands::files::save_file,
             // Logging

@@ -249,6 +249,7 @@ fn spawn_stt_pipeline(
                     }
                     VadEvent::SpeechChunk(_) => {}
                     VadEvent::SpeechEnd(audio_samples) => {
+                        tracing::info!(samples = audio_samples.len(), "speech ended, transcribing");
                         let _ = event_tx.send(VoiceEvent::Transcribing).await;
 
                         let bytes: Vec<u8> = audio_samples.iter()
@@ -258,10 +259,14 @@ fn spawn_stt_pipeline(
 
                         match stt.transcribe(audio).await {
                             Ok(t) if !t.text.trim().is_empty() => {
+                                tracing::info!(text = %t.text, "STT transcription");
                                 let _ = event_tx.send(VoiceEvent::UserTranscript(t.text)).await;
                             }
-                            Ok(_) => {}
+                            Ok(_) => {
+                                tracing::debug!("STT: empty transcription");
+                            }
                             Err(e) => {
+                                tracing::error!(error = %e, "STT transcription failed");
                                 let _ = event_tx.send(VoiceEvent::Error(format!("STT failed: {e}"))).await;
                             }
                         }
@@ -325,6 +330,7 @@ impl VoiceApi for VoiceService {
     }
 
     async fn voice_connect(&self, provider_id: &str) -> anyhow::Result<simply_rpc::StreamHandle<simply_voice::VoiceInput, simply_voice::VoiceEvent>> {
+        tracing::info!(provider_id, "voice_connect");
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
 
@@ -343,12 +349,12 @@ impl VoiceApi for VoiceService {
         Ok(simply_rpc::StreamHandle::new(input_tx, event_rx))
     }
 
-    async fn synthesize(&self, text: &str, provider_id: &str) -> anyhow::Result<simply_voice::AudioChunk> {
+    async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::AudioChunk> {
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
         let tts = provider.tts.as_ref()
             .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' has no TTS capability"))?;
-        tts.synthesize(text).await
+        tts.synthesize(text, voice).await
     }
 
     async fn list_voices(&self, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>> {

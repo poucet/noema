@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_daemon::ws=debug,simply_core=debug}"
+export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_core=debug,simply_voice=debug,noema_ui_lib::commands::voice=debug}"
 
 case "${1:-dev}" in
   dev)

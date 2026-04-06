@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
+use tracing;
 
-use crate::logging::log_message;
 use crate::state::AppState;
 
 /// Check if voice is available (Whisper model exists)
@@ -43,7 +43,7 @@ pub async fn download_voice_model(app: AppHandle, url: String) -> Result<(), Str
             .map_err(|e| format!("Failed to create model directory: {}", e))?;
     }
 
-    log_message(&format!("Downloading model from {}", url));
+    tracing::info!(url = %url, "downloading voice model");
     app.emit("download_progress", "starting").ok();
 
     let client = reqwest::Client::new();
@@ -69,7 +69,7 @@ pub async fn download_voice_model(app: AppHandle, url: String) -> Result<(), Str
         }
     }
 
-    log_message("Model download complete");
+    tracing::info!("Model download complete");
     app.emit("download_progress", "complete").ok();
     Ok(())
 }
@@ -80,34 +80,40 @@ fn spawn_voice_event_loop(
     mut event_rx: mpsc::Receiver<VoiceEvent>,
 ) {
     tokio::spawn(async move {
+        tracing::debug!("voice event loop started");
         while let Some(event) = event_rx.recv().await {
             match event {
                 VoiceEvent::Listening => {
+                    tracing::debug!("voice: listening");
                     app.emit("voice_status", "listening").ok();
                 }
                 VoiceEvent::Transcribing => {
+                    tracing::debug!("voice: transcribing");
                     app.emit("voice_status", "transcribing").ok();
                 }
-                VoiceEvent::UserTranscript(text) => {
+                VoiceEvent::UserTranscript(ref text) => {
+                    tracing::info!(text = %text, "voice: user transcript");
                     app.emit("voice_status", "enabled").ok();
-                    app.emit("voice_transcription", &text).ok();
+                    app.emit("voice_transcription", text).ok();
                 }
-                VoiceEvent::ModelTranscript(_) => {
-                    // Not used in pipeline mode yet
+                VoiceEvent::ModelTranscript(ref text) => {
+                    tracing::info!(text = %text, "voice: model transcript");
                 }
-                VoiceEvent::Audio(_) => {
-                    // TTS playback — not implemented yet
+                VoiceEvent::Audio(ref chunk) => {
+                    tracing::debug!(bytes = chunk.data.len(), "voice: audio out");
                 }
                 VoiceEvent::TurnEnd => {
+                    tracing::debug!("voice: turn end");
                     app.emit("voice_status", "enabled").ok();
                 }
-                VoiceEvent::Error(e) => {
-                    app.emit("voice_error", &e).ok();
+                VoiceEvent::Error(ref e) => {
+                    tracing::error!(error = %e, "voice: error");
+                    app.emit("voice_error", e).ok();
                     app.emit("voice_status", "enabled").ok();
                 }
             }
         }
-        // Channel closed — session ended
+        tracing::debug!("voice event loop ended");
         app.emit("voice_status", "disabled").ok();
     });
 }
@@ -116,8 +122,10 @@ fn spawn_voice_event_loop(
 #[tauri::command]
 pub async fn list_voice_providers(state: State<'_, Arc<AppState>>) -> Result<Vec<simply_daemon::api::VoiceProviderInfo>, String> {
     let daemon = state.get_daemon()?;
-    daemon.voice().list_voice_providers().await
-        .map_err(|e| format!("Failed to list voice providers: {e}"))
+    let providers = daemon.voice().list_voice_providers().await
+        .map_err(|e| format!("Failed to list voice providers: {e}"))?;
+    tracing::info!(count = providers.len(), providers = ?providers.iter().map(|p| &p.id).collect::<Vec<_>>(), "voice providers loaded");
+    Ok(providers)
 }
 
 /// Start a browser voice session — connects to the daemon's VoiceApi.
@@ -130,10 +138,14 @@ pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>
         }
     }
 
+    tracing::info!(provider_id = %provider_id, "starting voice session");
+
     let daemon = state.get_daemon()?;
 
     let handle = daemon.voice().voice_connect(&provider_id).await
         .map_err(|e| format!("Failed to connect voice: {e}"))?;
+
+    tracing::info!("voice stream connected");
 
     let (input_tx, event_rx) = handle.into_parts();
     *state.voice_audio_tx.lock().await = Some(input_tx);
@@ -141,7 +153,7 @@ pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>
     spawn_voice_event_loop(app.clone(), event_rx);
 
     app.emit("voice_status", "enabled").ok();
-    log_message("Voice session started (daemon pipeline)");
+    tracing::info!("voice session started");
 
     Ok(())
 }
@@ -181,7 +193,7 @@ pub async fn stop_voice_session(
     *state.voice_audio_tx.lock().await = None;
 
     app.emit("voice_status", "disabled").ok();
-    log_message("Voice session stopped");
+    tracing::info!("Voice session stopped");
 
     Ok(None)
 }
@@ -212,4 +224,41 @@ pub async fn toggle_voice(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
 pub async fn get_voice_status(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let has_session = state.voice_audio_tx.lock().await.is_some();
     Ok(if has_session { "enabled" } else { "disabled" }.to_string())
+}
+
+/// Synthesize text to speech. Returns f32 samples ready for Web Audio API playback.
+#[tauri::command]
+pub async fn synthesize_speech(
+    state: State<'_, Arc<AppState>>,
+    text: String,
+    provider_id: String,
+    voice: Option<String>,
+) -> Result<SynthesizeResult, String> {
+    let voice = voice.as_deref().unwrap_or("");
+    tracing::info!(provider_id = %provider_id, voice = %voice, text_len = text.len(), "TTS: synthesizing");
+
+    let daemon = state.get_daemon()?;
+    let chunk = daemon.voice().synthesize(&text, &provider_id, voice).await
+        .map_err(|e| {
+            tracing::error!(error = %e, "TTS: synthesis failed");
+            format!("TTS failed: {e}")
+        })?;
+
+    tracing::info!(audio_bytes = chunk.data.len(), sample_rate = chunk.sample_rate, "TTS: got audio");
+
+    // Convert PCM16 LE to f32 samples for Web Audio API
+    let samples: Vec<f32> = chunk.data.chunks_exact(2)
+        .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+        .collect();
+
+    Ok(SynthesizeResult {
+        samples,
+        sample_rate: chunk.sample_rate,
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct SynthesizeResult {
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
 }

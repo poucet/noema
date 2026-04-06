@@ -84,6 +84,13 @@ function App() {
     onError: handleVoiceError,
   });
 
+  // Refs to access voice/streaming state from event listeners without re-registering
+  const voiceRef = useRef(voice);
+  useEffect(() => { voiceRef.current = voice; }, [voice]);
+
+  const streamingMessageRef = useRef(streamingMessage);
+  useEffect(() => { streamingMessageRef.current = streamingMessage; }, [streamingMessage]);
+
   // Auto-scroll to bottom when new messages arrive
   const prevMessagesLengthRef = useRef(0);
 
@@ -146,6 +153,9 @@ function App() {
         tauri.getFavoriteModels().then(setFavoriteModels).catch(console.error);
 
         setIsInitialized(true);
+
+        // Load voice providers now that daemon is ready
+        voice.refreshProviders();
       } catch (err) {
         const errorMsg = String(err);
         // Check if multiple users exist and selection is needed
@@ -202,15 +212,29 @@ function App() {
       });
     }).then((unlisten) => unlisteners.push(unlisten));
 
-    tauri.onMessageComplete(({ conversationId }) => {
+    tauri.onMessageComplete(({ conversationId, messages: completedMessages }) => {
       // Only update if this event is for the current conversation
       setCurrentConversationId((currentId) => {
         if (currentId === conversationId) {
+          // Auto-TTS: speak the last assistant message if voice is active
+          if (voiceRef.current.status !== "disabled" && completedMessages?.length > 0) {
+            const lastMsg = completedMessages[completedMessages.length - 1];
+            if (lastMsg.role === "assistant") {
+              const text = lastMsg.content
+                .filter((c: any) => "text" in c)
+                .map((c: any) => c.text)
+                .join(" ");
+              if (text.trim()) {
+                voiceRef.current.speakText(text);
+              }
+            }
+          }
+          setStreamingMessage(null);
+
           // Reload messages from storage
           tauri.getMessages(conversationId).then((msgs) => {
             setMessages(Array.isArray(msgs) ? msgs : []);
           }).catch(console.error);
-          setStreamingMessage(null);
           setIsLoading(false);
         }
         return currentId;

@@ -32,8 +32,9 @@ pub trait VoiceApi: Send + Sync {
     async fn voice_connect(&self, provider_id: &str) -> anyhow::Result<StreamHandle<VoiceInput, VoiceEvent>>;
 
     /// Synthesize text to speech. Returns audio data.
+    /// `voice` is a provider-specific voice ID (from list_voices). Pass empty for default.
     #[rpc(post = "/voice/tts")]
-    async fn synthesize(&self, text: &str, provider_id: &str) -> anyhow::Result<AudioChunk>;
+    async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<AudioChunk>;
 
     /// List available TTS voices for a provider.
     #[rpc(get = "/voice/tts/voices/{provider_id}")]

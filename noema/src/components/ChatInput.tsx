@@ -857,31 +857,32 @@ export function ChatInput({
               </button>
             </div>
           )}
-          {voiceProviders.length > 1 && voiceStatus === "disabled" && (
-            <select
-              value={selectedVoiceProvider ?? ""}
-              onChange={(e) => onSelectVoiceProvider?.(e.target.value)}
-              disabled={disabled}
-              className="h-8 px-2 text-xs bg-surface border border-gray-600 rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-teal-500"
-              title="Select voice provider"
-            >
-              {voiceProviders.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          )}
-          <button
-            type="button"
-            onClick={onToggleVoice}
-            disabled={disabled || !voiceAvailable || !modelHasAudioInput}
-            className={getVoiceButtonClass()}
-            title={
-              !modelHasAudioInput
-                ? "Model doesn't support audio input"
-                : !voiceAvailable
-                  ? "Voice input not available"
-                  : voiceStatus === "disabled"
-                    ? `Enable voice input (${voiceProviders.find((p) => p.id === selectedVoiceProvider)?.name ?? "no provider"})`
+          <div className="flex items-center gap-1">
+            {voiceProviders.length > 1 && voiceStatus === "disabled" && (
+              <select
+                value={selectedVoiceProvider ?? ""}
+                onChange={(e) => onSelectVoiceProvider?.(e.target.value)}
+                disabled={disabled}
+                className="h-9 px-2 text-xs bg-surface border border-gray-600 rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-teal-500 max-w-[120px]"
+                title="Select voice provider"
+              >
+                {voiceProviders.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              onClick={onToggleVoice}
+              disabled={disabled || !voiceAvailable || !modelHasAudioInput}
+              className={getVoiceButtonClass()}
+              title={
+                !modelHasAudioInput
+                  ? "Model doesn't support audio input"
+                  : !voiceAvailable
+                    ? "Voice input not available"
+                    : voiceStatus === "disabled"
+                      ? `Enable voice input (${voiceProviders.find((p) => p.id === selectedVoiceProvider)?.name ?? "no provider"})`
                     : voiceStatus === "listening"
                       ? "Listening..."
                       : voiceStatus === "transcribing"
@@ -899,7 +900,8 @@ export function ChatInput({
                 d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
               />
             </svg>
-          </button>
+            </button>
+          </div>
 
           {/* Rich text editor with inline chips */}
           <div className="flex-1 relative">

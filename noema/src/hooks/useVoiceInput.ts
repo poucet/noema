@@ -34,22 +34,37 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     onErrorRef.current = options.onError;
   }, [options.onError]);
 
-  // Load available providers and check availability
+  // Load available providers — retry periodically until daemon is ready
   useEffect(() => {
-    tauri.isVoiceAvailable()
-      .then(setIsAvailable)
-      .catch(() => setIsAvailable(false));
+    let cancelled = false;
 
-    tauri.listVoiceProviders()
-      .then((list) => {
+    const loadProviders = async () => {
+      try {
+        const list = await tauri.listVoiceProviders();
+        if (cancelled) return;
         setProviders(list);
-        // Auto-select first provider if none selected
         if (list.length > 0) {
           setSelectedProvider((prev) => prev ?? list[0].id);
           setIsAvailable(true);
         }
-      })
-      .catch(() => setProviders([]));
+        return true; // loaded
+      } catch {
+        return false; // daemon not ready
+      }
+    };
+
+    // Try immediately, then retry every 2s until loaded
+    const attempt = async () => {
+      if (await loadProviders()) return;
+      const interval = setInterval(async () => {
+        if (cancelled || await loadProviders()) {
+          clearInterval(interval);
+        }
+      }, 2000);
+    };
+    attempt();
+
+    return () => { cancelled = true; };
   }, []);
 
   // Listen for transcription events from backend - only register once
@@ -64,7 +79,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       }
       lastTranscriptionRef.current = text;
       voiceLog.info("Transcription received", { text });
-      setStatus("disabled");
+      setStatus("enabled");
       onTranscriptionRef.current?.(text);
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -216,6 +231,17 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     }
   }, []);
 
+  const refreshProviders = useCallback(async () => {
+    try {
+      const list = await tauri.listVoiceProviders();
+      setProviders(list);
+      if (list.length > 0) {
+        setSelectedProvider((prev) => prev ?? list[0].id);
+        setIsAvailable(true);
+      }
+    } catch { /* daemon not ready */ }
+  }, []);
+
   const toggle = useCallback(async () => {
     if (status === "disabled") {
       await startRecording();
@@ -226,6 +252,39 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     // Don't do anything if transcribing - wait for it to finish
   }, [status, startRecording, stopRecording]);
 
+  /// Speak text aloud via TTS. Finds a provider with TTS capability.
+  const speakText = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+
+    // Find a provider with TTS capability (prefer selected, fall back to any)
+    const provider = providers.find(
+      (p) => p.id === selectedProvider && p.capabilities.includes("tts")
+    ) ?? providers.find((p) => p.capabilities.includes("tts"));
+
+    if (!provider) {
+      voiceLog.debug("TTS: no provider with TTS capability");
+      return;
+    }
+
+    try {
+      voiceLog.info("TTS: synthesizing", { provider: provider.id, length: text.length });
+      const result = await tauri.synthesizeSpeech(text, provider.id);
+
+      const float32 = new Float32Array(result.samples);
+      const ctx = new AudioContext({ sampleRate: result.sampleRate });
+      const buffer = ctx.createBuffer(1, float32.length, result.sampleRate);
+      buffer.getChannelData(0).set(float32);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start();
+      source.onended = () => ctx.close();
+      voiceLog.info("TTS: playing audio");
+    } catch (err) {
+      voiceLog.error("TTS failed", { err });
+    }
+  }, [selectedProvider, providers]);
+
   return {
     status,
     bufferedCount,
@@ -233,8 +292,10 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     providers,
     selectedProvider,
     setSelectedProvider,
+    refreshProviders,
     toggle,
     startRecording,
     stopRecording,
+    speakText,
   };
 }

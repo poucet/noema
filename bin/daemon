@@ -4,11 +4,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PIDFILE="$REPO_ROOT/.daemon.pid"
 DAEMON_PORT="${DAEMON_PORT:-9800}"
 
-export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_core=debug}"
+export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_daemon::services=debug,simply_core=debug,simply_voice=debug}"
 export DAEMON_LOG_FILE="${DAEMON_LOG_FILE:-$REPO_ROOT/logs/daemon.log}"
+
+log() { echo "[daemon] $*"; }
 
 daemon_is_running() {
   nc -z 127.0.0.1 "$DAEMON_PORT" 2>/dev/null
@@ -16,78 +17,67 @@ daemon_is_running() {
 
 daemon_start_bg() {
   if daemon_is_running; then
-    echo "Daemon already running on port $DAEMON_PORT"
+    log "Already running on port $DAEMON_PORT"
     return 0
   fi
 
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
-  echo "Starting daemon... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
+  log "Starting... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
   cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
   local pid=$!
-  echo "$pid" > "$PIDFILE"
 
-  echo "Waiting for daemon on port $DAEMON_PORT..."
+  log "Waiting for port $DAEMON_PORT (pid $pid)..."
   for i in $(seq 1 30); do
     if daemon_is_running; then
-      echo "Daemon ready (pid $pid)"
+      log "Ready (pid $pid)"
       return 0
     fi
     sleep 0.5
   done
 
-  echo "Daemon failed to start"
+  log "Failed to start (timeout)"
   kill "$pid" 2>/dev/null
-  rm -f "$PIDFILE"
   return 1
 }
 
 daemon_stop() {
-  # Try pidfile first
-  if [ -f "$PIDFILE" ]; then
-    local pid
-    pid=$(cat "$PIDFILE")
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "Stopping daemon (pid $pid)..."
-      kill "$pid"
-      wait "$pid" 2>/dev/null || true
-      rm -f "$PIDFILE"
-      echo "Daemon stopped"
-      return 0
-    fi
-    rm -f "$PIDFILE"
-  fi
-
-  # Fallback: use the REST /daemon/kill endpoint
+  # Step 1: Try REST kill endpoint
   if daemon_is_running; then
-    echo "Sending /daemon/kill to daemon on port $DAEMON_PORT..."
+    log "Sending POST /daemon/kill..."
     curl -sf -X POST "http://127.0.0.1:$DAEMON_PORT/daemon/kill" >/dev/null 2>&1 || true
-    sleep 1
-    if ! daemon_is_running; then
-      echo "Daemon stopped"
-      return 0
-    fi
+
+    # Wait for clean shutdown
+    for i in $(seq 1 10); do
+      if ! daemon_is_running; then
+        log "Stopped (clean shutdown)"
+        return 0
+      fi
+      sleep 0.5
+    done
+    log "Still running after /daemon/kill"
   fi
 
-  # Last resort: kill whatever is listening on the port
+  # Step 2: Find and kill process on port
   if daemon_is_running; then
     local port_pid
     port_pid=$(lsof -ti "tcp:$DAEMON_PORT" 2>/dev/null | head -1)
     if [ -n "$port_pid" ]; then
-      echo "Force killing process $port_pid on port $DAEMON_PORT..."
-      kill "$port_pid" 2>/dev/null
+      log "Killing pid $port_pid (SIGTERM)..."
+      kill "$port_pid" 2>/dev/null || true
       sleep 1
       if ! daemon_is_running; then
-        echo "Daemon stopped"
+        log "Stopped (SIGTERM)"
         return 0
       fi
+      log "Killing pid $port_pid (SIGKILL)..."
       kill -9 "$port_pid" 2>/dev/null || true
-      echo "Daemon killed (SIGKILL)"
+      log "Stopped (SIGKILL)"
       return 0
     fi
   fi
 
-  echo "No daemon running"
+  log "Not running"
 }
 
 case "${1:-status}" in
@@ -97,12 +87,12 @@ case "${1:-status}" in
   run)
     # Run in foreground (blocking)
     if daemon_is_running; then
-      echo "Daemon already running on port $DAEMON_PORT"
+      log "Already running on port $DAEMON_PORT"
       exit 1
     fi
     mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
     : > "$DAEMON_LOG_FILE"
-    echo "Starting daemon in foreground... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
+    log "Starting in foreground... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
     cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
     ;;
   stop|kill)
@@ -115,18 +105,23 @@ case "${1:-status}" in
     ;;
   status)
     if daemon_is_running; then
-      echo "Daemon running on port $DAEMON_PORT"
-      [ -f "$PIDFILE" ] && echo "  pid: $(cat "$PIDFILE")"
+      local port_pid
+      port_pid=$(lsof -ti "tcp:$DAEMON_PORT" 2>/dev/null | head -1)
+      log "Running on port $DAEMON_PORT (pid ${port_pid:-unknown})"
     else
-      echo "Daemon not running"
+      log "Not running"
     fi
     ;;
+  log|logs)
+    tail -f "$DAEMON_LOG_FILE"
+    ;;
   *)
-    echo "Usage: daemon [start|run|stop|restart|status]"
-    echo "  start    Start daemon in background (default: status)"
+    echo "Usage: daemon [start|run|stop|restart|status|log]"
+    echo "  start    Start daemon in background"
     echo "  run      Start daemon in foreground"
     echo "  stop     Stop the daemon"
     echo "  restart  Stop + start"
     echo "  status   Check if daemon is running"
+    echo "  log      Tail the daemon log"
     ;;
 esac
