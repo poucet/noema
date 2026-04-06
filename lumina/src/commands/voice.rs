@@ -121,11 +121,18 @@ mod voice {
             "playing TTS in voice channel"
         );
 
-        let bytes: Vec<u8> = stereo.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let input = songbird::input::RawAdapter::new(std::io::Cursor::new(bytes), 48_000, 2);
+        // Build WAV in memory and play via songbird
+        let wav = build_wav_f32(&stereo, 48_000, 2);
+        let cursor = std::io::Cursor::new(wav);
+        let input = songbird::input::Input::Live(
+            songbird::input::LiveInput::Raw(
+                songbird::input::AudioStream { input: Box::new(cursor) },
+            ),
+            None,
+        );
         let mut handler = handler_lock.lock().await;
 
-        let track = handler.play_input(input.into());
+        let track = handler.play_input(input);
         tracing::info!(track_uuid = %track.uuid(), "track queued in songbird");
 
         Ok(())
@@ -319,3 +326,34 @@ async fn load_channel_seed(lx: &LuminaContext, channel_id: ChannelId) -> Vec<See
         })
         .collect()
 }
+
+/// Build a WAV file in memory from f32 interleaved samples.
+fn build_wav_f32(samples: &[f32], sample_rate: u32, channels: u16) -> Vec<u8> {
+    let bits_per_sample: u16 = 32; // f32
+    let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
+    let block_align = channels * bits_per_sample / 8;
+    let data_len = (samples.len() * 4) as u32;
+
+    let mut buf = Vec::with_capacity(44 + data_len as usize);
+    // RIFF header
+    buf.extend_from_slice(b"RIFF");
+    buf.extend_from_slice(&(36 + data_len).to_le_bytes());
+    buf.extend_from_slice(b"WAVE");
+    // fmt chunk — format 3 = IEEE float
+    buf.extend_from_slice(b"fmt ");
+    buf.extend_from_slice(&16u32.to_le_bytes());
+    buf.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
+    buf.extend_from_slice(&channels.to_le_bytes());
+    buf.extend_from_slice(&sample_rate.to_le_bytes());
+    buf.extend_from_slice(&byte_rate.to_le_bytes());
+    buf.extend_from_slice(&block_align.to_le_bytes());
+    buf.extend_from_slice(&bits_per_sample.to_le_bytes());
+    // data chunk
+    buf.extend_from_slice(b"data");
+    buf.extend_from_slice(&data_len.to_le_bytes());
+    for &s in samples {
+        buf.extend_from_slice(&s.to_le_bytes());
+    }
+    buf
+}
+

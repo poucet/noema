@@ -18,6 +18,7 @@ simply-rpc = { workspace = true }
 # Discord
 serenity = { workspace = true }
 songbird = { workspace = true }
+symphonia = { version = "0.5", features = ["wav", "pcm"] }
 
 # Voice
 simply-voice = { workspace = true }
