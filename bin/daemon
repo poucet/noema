@@ -8,8 +8,20 @@ DAEMON_PORT="${DAEMON_PORT:-9800}"
 
 export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_daemon::services=debug,simply_core=debug,simply_voice=debug}"
 export DAEMON_LOG_FILE="${DAEMON_LOG_FILE:-$REPO_ROOT/logs/daemon.log}"
+MLX_VOICE_PORT="${MLX_VOICE_PORT:-8100}"
 
 log() { echo "[daemon] $*"; }
+
+# Auto-detect local MLX voice server
+detect_voice_server() {
+  if [ -n "$VOXTRAL_BASE_URL" ]; then
+    return  # already set explicitly
+  fi
+  if nc -z 127.0.0.1 "$MLX_VOICE_PORT" 2>/dev/null; then
+    export VOXTRAL_BASE_URL="http://127.0.0.1:$MLX_VOICE_PORT"
+    log "Detected local voice server on port $MLX_VOICE_PORT"
+  fi
+}
 
 daemon_is_running() {
   nc -z 127.0.0.1 "$DAEMON_PORT" 2>/dev/null
@@ -21,6 +33,7 @@ daemon_start_bg() {
     return 0
   fi
 
+  detect_voice_server
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
   log "Starting... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
@@ -90,6 +103,7 @@ case "${1:-status}" in
       log "Already running on port $DAEMON_PORT"
       exit 1
     fi
+    detect_voice_server
     mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
     : > "$DAEMON_LOG_FILE"
     log "Starting in foreground... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
