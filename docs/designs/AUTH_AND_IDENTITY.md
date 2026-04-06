@@ -100,12 +100,52 @@ The admin page at `https://daemon:9800/admin` is protected:
 
 ### MCP Tool Call User Context
 
-When the agent calls an MCP tool (e.g., Google Docs):
+Two types of auth for MCP calls:
 
-1. The session carries a `user_id`
-2. The daemon looks up the user's OAuth tokens
-3. The token is passed to the MCP server in the request headers
-4. If the user has no token for that service → tool returns "Please authenticate: {link}"
+**1. Daemon-level auth** (daemon → MCP server trust):
+The daemon authenticates to the MCP server as a trusted client. This is the existing flow — daemon connects, MCP server trusts it.
+
+**2. User-level auth** (per-user OAuth to the MCP service):
+Some MCP services (Google Docs, GitHub) require the *user's* own OAuth token to access *their* data. This is separate from the daemon connection.
+
+**Flow when a user calls a tool that needs user-level OAuth:**
+
+1. Agent calls `google_docs.gdocs_extract(doc_id)`
+2. Daemon looks up: does this user have an OAuth token for the `google-docs` MCP server?
+3. **Yes** → daemon forwards the request with `Authorization: Bearer {user_token}` to the MCP server
+4. **No** → daemon returns a structured error:
+   ```json
+   {"error": "auth_required", "url": "https://daemon:9800/auth/mcp/google-docs?user_id=xxx"}
+   ```
+   The agent (or client) shows this URL to the user. User clicks → OAuth flow → token stored.
+
+**Token storage:**
+
+Per-user, per-MCP-server tokens in the database:
+
+```
+user_mcp_tokens:
+  user_id     TEXT
+  server_id   TEXT
+  access_token  TEXT
+  refresh_token TEXT
+  expires_at    INTEGER
+  scopes        TEXT
+  PRIMARY KEY (user_id, server_id)
+```
+
+The daemon handles token refresh automatically (using the refresh token before expiry).
+
+**OAuth callback flow:**
+
+1. User visits `https://daemon:9800/auth/mcp/{server_id}?user_id={user_id}`
+2. Daemon discovers the MCP server's OAuth config (via `.well-known`)
+3. Daemon redirects to the OAuth provider (Google, GitHub, etc.)
+4. User consents → callback to `https://daemon:9800/auth/callback`
+5. Daemon exchanges code for tokens, stores per `(user_id, server_id)`
+6. Redirects user to "Connected! You can close this tab."
+
+All on the same port. The existing `OAuthService` is extended from global to per-user.
 
 ### Document Ownership
 
