@@ -17,7 +17,7 @@ path = "src/main.rs"
 config = { workspace = true }
 simply-core = { workspace = true, features = ["sqlite"] }
 simply-rpc = { workspace = true }
-simply-voice = { workspace = true, features = ["whisper", "voxtral", "gemini"] }
+simply-voice = { workspace = true, features = ["whisper", "voxtral", "gemini", "elevenlabs"] }
 llm = { workspace = true }
 
 # Async runtime

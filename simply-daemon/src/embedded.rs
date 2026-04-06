@@ -120,6 +120,16 @@ where
             tracing::info!("voxtral STT + TTS registered (Mistral API)");
         }
 
+        // Register ElevenLabs (TTS only)
+        if let Some(key) = settings.get_api_key("elevenlabs")
+            .or_else(|| std::env::var("ELEVENLABS_API_KEY").ok()) {
+            let elevenlabs = Arc::new(simply_voice::ElevenLabsProvider::new(key));
+            voice_service = voice_service.register_tts(
+                "elevenlabs", "ElevenLabs", elevenlabs,
+            );
+            tracing::info!("elevenlabs TTS registered");
+        }
+
         // Register Gemini Realtime
         if let Some(key) = settings.get_api_key("google")
             .or_else(|| std::env::var("GOOGLE_API_KEY").ok()) {

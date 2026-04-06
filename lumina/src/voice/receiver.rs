@@ -83,12 +83,10 @@ pub fn spawn_event_handler(
 
                     match mode {
                         VoiceMode::Transcribe => {
-                            // Post transcript to text channel
-                            let _ = text_channel.say(&http, &text).await;
+                            let _ = text_channel.say(&http, format!("🗣️ {text}")).await;
                         }
                         VoiceMode::Listen => {
-                            // Post transcript to text channel for visibility
-                            let _ = text_channel.say(&http, format!("> {text}")).await;
+                            let _ = text_channel.say(&http, format!("🗣️ {text}")).await;
 
                             // TODO: send to daemon session, get response, TTS it back
                             // This needs access to the VoiceSession's daemon_session

@@ -163,10 +163,12 @@ mod voice {
         match kind.as_str() {
             "stt" => {
                 voice_mgr.set_stt_provider(id.clone()).await;
+                save_voice_config(lx, &voice_mgr).await;
                 lx.reply(cmd, &format!("STT provider set to **{id}**")).await
             }
             "tts" => {
                 voice_mgr.set_tts_provider(id.clone()).await;
+                save_voice_config(lx, &voice_mgr).await;
                 lx.reply(cmd, &format!("TTS provider set to **{id}**")).await
             }
             _ => lx.reply(cmd, "Type must be 'stt' or 'tts'").await,
@@ -181,6 +183,7 @@ mod voice {
     ) -> anyhow::Result<()> {
         let voice_mgr = get_voice_manager(lx).await?;
         voice_mgr.set_tts_voice(id.clone()).await;
+        save_voice_config(lx, &voice_mgr).await;
         lx.reply(cmd, &format!("TTS voice set to **{id}**")).await
     }
 
@@ -272,6 +275,13 @@ mod voice {
 }
 
 // --- Helpers (outside the module, used by subcommands via super::) ---
+
+async fn save_voice_config(lx: &LuminaContext, voice_mgr: &crate::voice::VoiceManager) {
+    let mut cfg = lx.config.clone();
+    if let Err(e) = voice_mgr.save_config(&mut cfg).await {
+        tracing::warn!(error = %e, "failed to save voice config to lumina.toml");
+    }
+}
 
 async fn get_voice_manager(lx: &LuminaContext) -> anyhow::Result<Arc<crate::voice::VoiceManager>> {
     tracing::debug!("get_voice_manager: acquiring data read lock");
