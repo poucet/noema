@@ -23,13 +23,22 @@ ensure_admin_deps() {
   fi
 }
 
-# Start Astro dev server in background, return its PID
+ASTRO_PID=""
+
 start_astro_dev() {
   ensure_admin_deps
   log "Starting Astro dev server (port 4321)..."
-  (cd "$ADMIN_DIR" && npm run dev -- --port 4321) &
-  echo $!
+  (cd "$ADMIN_DIR" && exec npm run dev -- --port 4321) &
+  ASTRO_PID=$!
 }
+
+cleanup() {
+  if [ -n "$ASTRO_PID" ]; then
+    kill "$ASTRO_PID" 2>/dev/null
+    wait "$ASTRO_PID" 2>/dev/null
+  fi
+}
+trap cleanup EXIT INT TERM
 
 daemon_start() {
   local background="${1:-false}"
@@ -44,9 +53,7 @@ daemon_start() {
   log "Building daemon..."
   cd "$REPO_ROOT" && SKIP_ADMIN_BUILD=1 cargo build -p simply-daemon --bin simply-daemon
 
-  local astro_pid
-  astro_pid=$(start_astro_dev)
-  trap "kill $astro_pid 2>/dev/null" EXIT
+  start_astro_dev
 
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
