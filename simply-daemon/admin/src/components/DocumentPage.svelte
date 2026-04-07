@@ -13,10 +13,11 @@
   let selectedDoc = $state<DocumentDetail | null>(null);
   let selectedTab = $state<TabInfo | null>(null);
   let loading = $state(true);
-  let creating = $state(false);
-  let newTitle = $state('');
+  let creatingDoc = $state(false);
+  let creatingTab = $state(false);
+  let newDocTitle = $state('');
+  let newTabTitle = $state('');
 
-  // Load documents on mount
   onMount(() => loadDocuments());
 
   async function loadDocuments() {
@@ -33,28 +34,29 @@
 
   async function selectDocument(id: string) {
     try {
-      selectedDoc = await api.getDocument(id);
-      // Select first tab by default
-      if (selectedDoc.tabs.length > 0) {
-        selectedTab = selectedDoc.tabs[0];
-      } else {
-        selectedTab = null;
-      }
+      const doc = await api.getDocument(id);
+      selectedDoc = doc;
+      selectedTab = doc.tabs.length > 0 ? doc.tabs[0] : null;
     } catch (e) {
       console.error('Failed to load document:', e);
     }
   }
 
-  function selectTab(tab: TabInfo) {
-    selectedTab = tab;
+  async function reloadDocument() {
+    if (!selectedDoc) return;
+    const doc = await api.getDocument(selectedDoc.id);
+    const prevTabId = selectedTab?.id;
+    selectedDoc = doc;
+    selectedTab = doc.tabs.find(t => t.id === prevTabId) ?? doc.tabs[0] ?? null;
   }
 
   async function createDocument() {
-    if (!newTitle.trim()) return;
+    if (!newDocTitle.trim()) return;
     try {
-      const doc = await api.createDocument(newTitle.trim());
-      newTitle = '';
-      creating = false;
+      // Pass empty string as content so backend creates an initial tab
+      const doc = await api.createDocument(newDocTitle.trim(), '');
+      newDocTitle = '';
+      creatingDoc = false;
       await loadDocuments();
       await selectDocument(doc.id);
     } catch (e) {
@@ -86,13 +88,14 @@
   }
 
   async function createTab() {
-    if (!selectedDoc) return;
-    const title = prompt('Tab title:');
-    if (!title?.trim()) return;
+    if (!selectedDoc || !newTabTitle.trim()) return;
     try {
-      const tab = await api.createTab(selectedDoc.id, title.trim());
-      selectedDoc = await api.getDocument(selectedDoc.id);
-      selectedTab = tab;
+      const tab = await api.createTab(selectedDoc.id, newTabTitle.trim());
+      newTabTitle = '';
+      creatingTab = false;
+      await reloadDocument();
+      // Select the newly created tab
+      selectedTab = selectedDoc!.tabs.find(t => t.id === tab.id) ?? selectedTab;
     } catch (e) {
       console.error('Failed to create tab:', e);
     }
@@ -103,10 +106,7 @@
     if (!confirm('Delete this tab?')) return;
     try {
       await api.deleteTab(tabId);
-      selectedDoc = await api.getDocument(selectedDoc.id);
-      if (selectedTab?.id === tabId) {
-        selectedTab = selectedDoc.tabs[0] ?? null;
-      }
+      await reloadDocument();
     } catch (e) {
       console.error('Failed to delete tab:', e);
     }
@@ -171,22 +171,22 @@
     </div>
 
     <div class="p-3 border-t border-border">
-      {#if creating}
+      {#if creatingDoc}
         <form onsubmit={(e) => { e.preventDefault(); createDocument(); }}>
           <!-- svelte-ignore binding_property_non_reactive -->
           <input
             type="text"
-            bind:value={newTitle}
-            placeholder="Document title — Enter to create, Esc to cancel"
+            bind:value={newDocTitle}
+            placeholder="Document name — Enter to create"
             use:autofocus
-            onkeydown={(e) => { if (e.key === 'Escape') { creating = false; } }}
+            onkeydown={(e) => { if (e.key === 'Escape') creatingDoc = false; }}
             class="w-full px-2.5 py-1.5 text-sm bg-bg border border-border rounded text-fg placeholder:text-muted focus:outline-none focus:border-accent"
           />
         </form>
       {:else}
         <button
           class="w-full text-sm px-2.5 py-1.5 border border-dashed border-border rounded text-muted hover:text-accent hover:border-accent transition-colors"
-          onclick={() => creating = true}
+          onclick={() => creatingDoc = true}
         >
           + New document
         </button>
@@ -199,7 +199,7 @@
     {#if selectedDoc}
       <!-- Tab bar -->
       <div class="flex items-center border-b border-border bg-surface px-2 gap-0.5 shrink-0">
-        {#each selectedDoc.tabs as tab}
+        {#each selectedDoc.tabs as tab (tab.id)}
           <button
             class="px-3 py-1.5 text-sm border-b-2 transition-colors group relative"
             class:border-accent={selectedTab?.id === tab.id}
@@ -207,7 +207,7 @@
             class:border-transparent={selectedTab?.id !== tab.id}
             class:text-muted={selectedTab?.id !== tab.id}
             class:hover:text-fg={selectedTab?.id !== tab.id}
-            onclick={() => selectTab(tab)}
+            onclick={() => { selectedTab = tab; }}
           >
             {tab.title}
             {#if selectedDoc.tabs.length > 1}
@@ -218,10 +218,26 @@
             {/if}
           </button>
         {/each}
-        <button
-          class="px-2 py-1.5 text-sm text-muted hover:text-accent"
-          onclick={createTab}
-        >+</button>
+
+        {#if creatingTab}
+          <form class="flex items-center" onsubmit={(e) => { e.preventDefault(); createTab(); }}>
+            <!-- svelte-ignore binding_property_non_reactive -->
+            <input
+              type="text"
+              bind:value={newTabTitle}
+              placeholder="Tab name"
+              use:autofocus
+              onkeydown={(e) => { if (e.key === 'Escape') creatingTab = false; }}
+              class="px-2 py-1 text-sm bg-bg border border-border rounded text-fg placeholder:text-muted focus:outline-none focus:border-accent w-32"
+            />
+          </form>
+        {:else}
+          <button
+            class="px-2 py-1.5 text-sm text-muted hover:text-accent"
+            onclick={() => creatingTab = true}
+          >+</button>
+        {/if}
+
         <div class="flex-1"></div>
         <span class="text-xs text-muted pr-2">{selectedDoc.title}</span>
       </div>
@@ -234,7 +250,7 @@
           {/key}
         {:else}
           <div class="flex items-center justify-center h-full text-muted text-sm">
-            No tabs — click + to create one
+            No tabs yet — click + to create one
           </div>
         {/if}
       </div>

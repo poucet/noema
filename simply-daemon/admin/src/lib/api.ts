@@ -118,28 +118,28 @@ export const api = {
       body: JSON.stringify({ title, content }),
     }),
   renameDocument: (id: string, title: string) =>
-    json(`/api/document/${id}/title`, {
+    json(`/api/document/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(title),
+      body: JSON.stringify({ title }),
     }),
   deleteDocument: (id: string) =>
     fetch(`/api/document/${id}`, { method: 'DELETE' }),
-  getTab: (id: string) => json<TabInfo>(`/api/tab/${id}`),
+  getTab: (id: string) => json<TabInfo>(`/api/document/tab/${id}`),
   updateTab: (id: string, content: string) =>
-    json(`/api/tab/${id}`, {
+    json(`/api/document/tab/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ request: { content } }),
     }),
   createTab: (documentId: string, title: string, content?: string) =>
     json<TabInfo>(`/api/document/${documentId}/tab`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, content }),
+      body: JSON.stringify({ request: { title, content } }),
     }),
   deleteTab: (id: string) =>
-    fetch(`/api/tab/${id}`, { method: 'DELETE' }),
+    fetch(`/api/document/tab/${id}`, { method: 'DELETE' }),
 };
 
 export const PROVIDERS = [

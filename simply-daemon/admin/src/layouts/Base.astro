@@ -18,6 +18,7 @@ const { title = 'simply-daemon', fullWidth = false } = Astro.props;
     <nav class="border-b border-border px-4 py-2 flex items-center gap-6 text-sm">
       <a href="/" class="font-semibold text-white hover:no-underline">simply-daemon</a>
       <a href="/documents" class="text-muted hover:text-accent">Documents</a>
+      <a href="/explorer" class="text-muted hover:text-accent">API Explorer</a>
     </nav>
     <main class:list={[fullWidth ? '' : 'max-w-3xl mx-auto px-5 py-8']}>
       <slot />
