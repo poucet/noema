@@ -19,24 +19,6 @@ tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 
-[[bin]]
-name = "rpc-codegen"
-path = "src/codegen.rs"
-required-features = ["codegen"]
-
-[features]
-default = []
-codegen = ["dep:glob", "dep:syn", "dep:quote"]
-
-[dependencies.glob]
-version = "0.3"
-optional = true
-
-[dependencies.syn]
-version = "2"
-features = ["full", "extra-traits"]
-optional = true
-
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "sync"] }
 reqwest = { workspace = true }

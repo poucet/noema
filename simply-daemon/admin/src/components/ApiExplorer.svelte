@@ -103,7 +103,7 @@
           bind:value={body}
           rows="4"
           class="w-full px-3 py-2 bg-bg border border-border rounded text-sm text-fg font-mono focus:outline-none focus:border-accent resize-y"
-          placeholder='{}'
+          placeholder={'{ }'}
         ></textarea>
       </div>
     {/if}
