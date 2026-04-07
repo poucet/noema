@@ -25,16 +25,7 @@ daemon_is_running() {
 }
 
 build() {
-  local ADMIN_DIR="$REPO_ROOT/simply-daemon/admin"
-  if [ -f "$ADMIN_DIR/package.json" ]; then
-    if [ ! -d "$ADMIN_DIR/node_modules" ]; then
-      log "Installing admin dependencies..."
-      (cd "$ADMIN_DIR" && npm install --silent)
-    fi
-    log "Building admin UI..."
-    (cd "$ADMIN_DIR" && npm run build --silent)
-  fi
-  log "Building daemon..."
+  log "Building daemon (includes admin UI via build.rs)..."
   cd "$REPO_ROOT" && cargo build -p simply-daemon --bin simply-daemon
 }
 
