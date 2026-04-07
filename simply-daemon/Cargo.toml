@@ -53,6 +53,9 @@ futures-util = { workspace = true }
 # MCP protocol
 rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
 
+# TypeScript type generation
+ts-rs = { version = "10", features = ["serde-compat"] }
+
 # HTTP/WS server
 axum = { workspace = true }
 hyper = { workspace = true }

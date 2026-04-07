@@ -2,9 +2,11 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Document summary for listing.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/")]
 pub struct DocumentInfo {
     pub id: String,
     pub title: String,
@@ -16,7 +18,8 @@ pub struct DocumentInfo {
 }
 
 /// Full document with tabs.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/")]
 pub struct DocumentDetail {
     pub id: String,
     pub title: String,
@@ -28,7 +31,8 @@ pub struct DocumentDetail {
 }
 
 /// Tab within a document.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/")]
 pub struct TabInfo {
     pub id: String,
     pub title: String,
@@ -41,7 +45,8 @@ pub struct TabInfo {
 }
 
 /// Request to create a document.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/")]
 pub struct CreateDocumentRequest {
     pub title: String,
     /// Content for the initial tab (markdown).
@@ -49,7 +54,8 @@ pub struct CreateDocumentRequest {
 }
 
 /// Request to create a tab.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/")]
 pub struct CreateTabRequest {
     pub title: String,
     pub content: Option<String>,
@@ -58,7 +64,8 @@ pub struct CreateTabRequest {
 }
 
 /// Request to update a tab's content.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/")]
 pub struct UpdateTabRequest {
     pub content: String,
 }
