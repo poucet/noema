@@ -6,9 +6,8 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{FromRequest, State};
+use axum::extract::{FromRequest, State, ConnectInfo};
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::ConnectInfo;
 use axum::http::{Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Json, Response};
@@ -24,7 +23,7 @@ use simply_rpc::{HttpMethod, ServiceRouter};
 
 use crate::auth::RequestUser;
 use crate::net::admin_api::{self, AdminState};
-use crate::net::auth_routes::{self, AuthState};
+use crate::net::auth_routes::{self, SessionStore};
 use crate::net::server::ConnectionTracker;
 use crate::net::protocol::*;
 
@@ -43,15 +42,12 @@ struct AppState {
     rest_dispatcher: Arc<ServiceRouter>,
     tracker: ConnectionTracker,
     daemon_secret: Arc<str>,
-    user_store: Arc<dyn UserStore>,
+    sessions: SessionStore,
 }
 
 /// Starts the unified server (REST + WS + admin).
 pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
-    let auth_state = AuthState {
-        user_store: Arc::clone(&config.user_store),
-        daemon_port: config.port,
-    };
+    let sessions = SessionStore::new(std::time::Duration::from_secs(24 * 3600));
 
     let admin_state = AdminState {
         user_store: Arc::clone(&config.user_store),
@@ -61,14 +57,8 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         rest_dispatcher: config.rest_dispatcher,
         tracker: config.tracker,
         daemon_secret: Arc::from(config.daemon_secret.as_str()),
-        user_store: config.user_store,
+        sessions: sessions.clone(),
     };
-
-    let auth_routes = Router::new()
-        .route("/auth/login", get(auth_routes::auth_login))
-        .route("/auth/callback", get(auth_routes::auth_callback))
-        .route("/auth/status", get(auth_routes::auth_status))
-        .with_state(auth_state);
 
     let admin_routes = Router::new()
         .route("/admin/api/setup-status", get(admin_api::get_setup_status))
@@ -76,9 +66,11 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/admin/api/api-key", axum::routing::post(admin_api::set_api_key))
         .route("/admin/api/api-key/{provider}", axum::routing::delete(admin_api::remove_api_key))
         .route("/admin/api/users", get(admin_api::list_users).post(admin_api::create_user))
-        .route("/admin/api/tokens", axum::routing::post(admin_api::create_token))
-        .route("/admin/api/tokens/revoke", axum::routing::post(admin_api::revoke_tokens))
         .with_state(admin_state);
+
+    let auth_routes = Router::new()
+        .route("/auth/status", get(auth_routes::auth_status))
+        .with_state(sessions);
 
     let app = Router::new()
         .route("/", get(admin_page))
@@ -127,59 +119,40 @@ impl ServerHandle {
 
 async fn auth_middleware(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     mut req: axum::extract::Request,
     next: Next,
 ) -> Response {
     let path = req.uri().path();
+    let is_localhost = addr.ip().is_loopback();
 
-    // Public routes: admin page, admin API, auth flows, static assets
+    // Public routes: admin page, admin API, auth routes, static assets
+    // Localhost gets admin access automatically
     if path == "/" || path == "/admin" || path.starts_with("/admin/api/")
         || path.starts_with("/auth/") || path.starts_with("/_assets/")
         || path == "/favicon.svg" || path == "/favicon.ico"
     {
-        // Check for session cookie (from Google OAuth sign-in)
-        let cookie_user = req.headers()
-            .get(axum::http::header::COOKIE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|cookies| {
-                cookies.split(';')
-                    .find_map(|c| c.trim().strip_prefix("simply_token="))
-            })
-            .map(|s| s.to_string());
-
-        if let Some(token) = cookie_user {
-            if let Ok(Some(user_id)) = state.user_store.resolve_token(&token).await {
-                req.extensions_mut().insert(RequestUser::User(user_id));
-                return next.run(req).await;
-            }
+        if is_localhost {
+            req.extensions_mut().insert(RequestUser::Admin);
+        } else {
+            req.extensions_mut().insert(RequestUser::Anonymous);
         }
-
-        req.extensions_mut().insert(RequestUser::Anonymous);
         return next.run(req).await;
     }
 
-    // Extract Bearer token or session cookie
-    let bearer = req.headers()
+    // All other routes require Bearer token (daemon_secret)
+    let token = req.headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string());
 
-    let cookie_token = req.headers()
-        .get(axum::http::header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|cookies| cookies.split(';').find_map(|c| c.trim().strip_prefix("simply_token=")))
-        .map(|s| s.to_string());
-
-    let token = bearer.or(cookie_token);
-
     let Some(token) = token else {
         return (StatusCode::UNAUTHORIZED, "missing authorization").into_response();
     };
 
-    // Check if it's the daemon_secret (trusted service client)
+    // Check daemon_secret (trusted service clients)
     if token == state.daemon_secret.as_ref() {
-        // Trusted client — read X-User-Id if present
         let user_id = req.headers()
             .get("X-User-Id")
             .and_then(|v| v.to_str().ok())
@@ -188,16 +161,7 @@ async fn auth_middleware(
         return next.run(req).await;
     }
 
-    // Try resolving as a per-user token
-    match state.user_store.resolve_token(&token).await {
-        Ok(Some(user_id)) => {
-            req.extensions_mut().insert(RequestUser::User(user_id));
-            next.run(req).await
-        }
-        _ => {
-            (StatusCode::UNAUTHORIZED, "invalid token").into_response()
-        }
-    }
+    (StatusCode::UNAUTHORIZED, "invalid token").into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -209,11 +173,9 @@ async fn auth_middleware(
 async fn admin_page(req: axum::extract::Request) -> Response {
     let path = req.uri().path();
 
-    // Resolve the admin dist directory (relative to the binary or workspace root)
     let dist_dir = find_admin_dist();
 
     if let Some(dist) = dist_dir {
-        // Map URL path to file
         let file_path = if path == "/" || path == "/admin" {
             dist.join("index.html")
         } else {
@@ -239,14 +201,17 @@ async fn admin_page(req: axum::extract::Request) -> Response {
         }
     }
 
-    // Fallback: embedded HTML (keeps working even without the build)
     Html(include_str!("../admin/admin.html")).into_response()
 }
 
 fn find_admin_dist() -> Option<std::path::PathBuf> {
-    // Try relative to CWD (development: running from workspace root)
-    let cwd = std::path::PathBuf::from("admin/dist");
-    if cwd.is_dir() { return Some(cwd); }
+    // Try: simply-daemon/admin/dist (relative to CWD which is repo root)
+    let daemon_admin = std::path::PathBuf::from("simply-daemon/admin/dist");
+    if daemon_admin.is_dir() { return Some(daemon_admin); }
+
+    // Try: admin/dist (old location, backward compat)
+    let root_admin = std::path::PathBuf::from("admin/dist");
+    if root_admin.is_dir() { return Some(root_admin); }
 
     // Try relative to the binary location
     if let Ok(exe) = std::env::current_exe() {
@@ -397,7 +362,6 @@ async fn rest_or_stream_handler(
     if req.headers().get("upgrade").and_then(|v| v.to_str().ok()) == Some("websocket")
         && state.rest_dispatcher.has_stream_route(&path)
     {
-        // Re-extract the WebSocketUpgrade from the request
         let ws = match axum::extract::WebSocketUpgrade::from_request(req, &state).await {
             Ok(ws) => ws,
             Err(e) => return e.into_response(),
@@ -409,9 +373,6 @@ async fn rest_or_stream_handler(
     rest_handler(state, req).await
 }
 
-/// Handle a WS connection for a stream route.
-/// Uses `ServiceRouter::ws_dispatch` to set up the stream, then bridges
-/// the WS connection: server events → text frames, client messages → input sink.
 async fn handle_stream_ws(
     dispatcher: Arc<ServiceRouter>,
     path: String,
@@ -422,7 +383,6 @@ async fn handle_stream_ws(
     let (mut ws_sink, mut ws_source) = socket.split();
     let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
 
-    // Spawn writer: forwards queued messages to the WS sink
     let writer_handle = tokio::spawn(async move {
         while let Some(text) = write_rx.recv().await {
             if ws_sink.send(Message::Text(text.into())).await.is_err() { break; }
@@ -430,12 +390,10 @@ async fn handle_stream_ws(
         let _ = ws_sink.close().await;
     });
 
-    // Dispatch the stream — this sets up the server pipeline and forwarders
     let result = dispatcher.ws_dispatch(&path, serde_json::Value::Null, write_tx.clone()).await;
 
     let input_sink = match result {
         Some(dr) => {
-            // Send the initial response
             let response = match dr.result {
                 Ok(v) => WsResponse::ok(0, v),
                 Err(e) => WsResponse::err(0, e),
@@ -456,7 +414,6 @@ async fn handle_stream_ws(
         }
     };
 
-    // Read client messages and forward to the input sink
     while let Some(msg) = ws_source.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -473,7 +430,6 @@ async fn handle_stream_ws(
         }
     }
 
-    // Dropping input_sink closes the channel → pipeline stops
     drop(input_sink);
     writer_handle.abort();
     tracing::debug!(path, "stream WS disconnected");
@@ -491,7 +447,7 @@ async fn rest_handler(
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    // Extract resolved user from auth middleware (before consuming the request body)
+    // Extract resolved user from auth middleware
     let request_user = req.extensions()
         .get::<RequestUser>()
         .cloned()
@@ -518,7 +474,6 @@ async fn rest_handler(
         _ => axum::body::Bytes::new(),
     };
 
-    // Check if this is a binary upload route
     let is_binary_upload = state.rest_dispatcher.is_binary_upload(http_method, &path);
 
     let body = if is_binary_upload {

@@ -28,13 +28,14 @@ daemon_is_running() {
 }
 
 build_admin() {
-  if [ -f "$REPO_ROOT/admin/package.json" ]; then
-    if [ ! -d "$REPO_ROOT/admin/node_modules" ]; then
+  local ADMIN_DIR="$REPO_ROOT/simply-daemon/admin"
+  if [ -f "$ADMIN_DIR/package.json" ]; then
+    if [ ! -d "$ADMIN_DIR/node_modules" ]; then
       log "Installing admin dependencies..."
-      (cd "$REPO_ROOT/admin" && npm install --silent)
+      (cd "$ADMIN_DIR" && npm install --silent)
     fi
     log "Building admin UI..."
-    (cd "$REPO_ROOT/admin" && npm run build --silent)
+    (cd "$ADMIN_DIR" && npm run build --silent)
   fi
 }
 

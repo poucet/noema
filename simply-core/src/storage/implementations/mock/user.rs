@@ -26,15 +26,6 @@ impl UserStore for MockUserStore {
     async fn list_users(&self) -> Result<Vec<StoredUser>> {
         unimplemented!()
     }
-    async fn create_user_token(&self, _: &UserId) -> Result<String> {
-        unimplemented!()
-    }
-    async fn resolve_token(&self, _: &str) -> Result<Option<UserId>> {
-        unimplemented!()
-    }
-    async fn revoke_user_tokens(&self, _: &UserId) -> Result<()> {
-        unimplemented!()
-    }
     async fn map_discord_user(&self, _: &str, _: &UserId) -> Result<()> {
         unimplemented!()
     }

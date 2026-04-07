@@ -1,223 +1,107 @@
 # Admin UI & Setup Wizard
 
-**Status:** draft
-**Depends on:** Auth & Identity (Stage 1-2, in progress)
+**Status:** refined
+**Depends on:** Auth & Identity (Stage 1-2, complete)
 
 ---
 
 ## Problem
 
-Starting the daemon today requires hand-editing `settings.toml` — admin email, API keys, model config. There's no guidance for new users. The admin "page" is a bare HTML dashboard with no configuration capabilities. Every client (Noema, Lumina) has its own config file that must be separately maintained.
-
-A new user who starts the daemon has no idea what to do next.
+Starting the daemon today requires hand-editing `settings.toml` — user email, API keys, model config. There's no guidance for new users. Every client (Noema, Lumina) has its own config file that must be separately maintained.
 
 ## Goals
 
 1. **Zero TOML editing** — all configuration through the web UI
 2. **Guided setup** — first launch walks you through everything needed to get running
-3. **Sign in with Google, nothing else** — built-in OAuth credentials for localhost; no client ID/secret setup for local users
-4. **Cloud-ready** — cloud deployments override OAuth creds via env vars, same flow after that
-5. **Client-contributed pages** — Lumina (and future clients) register their own setup UI with the daemon, served through the daemon's port
+3. **Localhost = admin** — if you're on the machine, you're admin. No login for local use.
+4. **Passkeys for remote access** — future: register a passkey on first visit, use it from anywhere
+5. **Client-contributed pages** — Lumina (and future clients) register their own setup UI with the daemon
 6. **Single admin surface** — daemon, Noema, and Lumina config all managed from one place
+7. **No external OAuth in daemon** — external auth (Google, Discord) handled by MCP servers, not the daemon core
 
 ## Non-Goals
 
 - Multi-tenant admin (separate admin panels per user)
-- Mobile-optimized UI (desktop/laptop browser is fine)
-- Real-time config sync (page reload after changes is acceptable)
+- Google OAuth built into the daemon (security/GDPR risk, too many dependencies)
+- Persistent sessions in the database (in-memory with TTL only)
 
 ---
 
 ## Design
 
+### Auth Model
+
+**Localhost = admin.** No login needed. The daemon binds to `127.0.0.1`, so only local processes can reach it. The admin page and API are fully accessible from localhost.
+
+**Remote access (future):**
+- Phase 1: Passkey registration from localhost, then usable from anywhere
+- A console PIN printed on startup as an interim fallback
+- Sessions are in-memory with TTL — vanish on restart. No cookies in the database.
+
+**Service clients (Noema, Lumina):**
+- Authenticate with `daemon_secret` (Bearer token) — unchanged from current implementation
+- `X-User-Id` header for per-user context — only honored from daemon_secret bearers
+
 ### Tech Stack
 
-**Astro** for the admin frontend:
-- Static site generator — builds to plain HTML/CSS/JS
-- Island architecture — interactive components only where needed (e.g., API key forms)
-- Output embedded in the daemon binary via `include_dir!` or served from a build artifact directory
-- No runtime Node.js dependency — it's just static files
-
-**Build integration:**
-- `admin/` directory in the repo with Astro project
-- `cargo build` triggers `npm run build` in admin/ (build script or build.rs)
-- Output goes to `admin/dist/` → embedded or served by axum
-
-### OAuth Bootstrap
-
-**Local mode (default):**
-- Built-in Google OAuth client ID + secret compiled into the binary
-- Redirect URI: `http://localhost:{port}/auth/callback`
-- User sees "Sign in with Google" immediately — no prerequisites
-
-**Cloud mode:**
-- Operator sets `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` env vars
-- Redirect URI: configured via `OAUTH_REDIRECT_URI` env var or derived from `Host` header
-- Same setup wizard flow after OAuth is configured
-
-**Detection:**
-- If env var overrides present → use them (cloud)
-- Else → use built-in creds with localhost redirect (local)
-- If neither and no built-in → show manual OAuth configuration step (fallback)
-
-### Google OAuth Credential Bootstrap
-
-Three tiers — each user hits the simplest one that works for them:
-
-**Tier 1 — Built-in creds (localhost, zero config):**
-- Ship a `SIMPLY_GOOGLE_CLIENT_ID` + `SIMPLY_GOOGLE_CLIENT_SECRET` compiled into the binary
-- Redirect URI: `http://localhost:{port}/auth/callback`
-- Works immediately for local users — they just click "Sign in with Google"
-
-**Tier 2 — Guided web wizard (cloud / self-hosted):**
-When no creds are available and not localhost, the setup wizard shows an interactive Google Cloud walkthrough:
-1. "Create a Google Cloud project" — direct link to `console.cloud.google.com/projectcreate`
-2. "Configure OAuth branding" — link to `console.cloud.google.com/auth/branding`, set app name to "Simply"
-3. "Set audience" — link to `console.cloud.google.com/auth/audience`, choose "External"
-4. "Create OAuth 2.0 Client ID" — link to `console.cloud.google.com/apis/credentials/oauthclient`, type: Web application, redirect URI pre-filled from current URL
-4. Paste fields for client ID + secret
-5. "Test Connection" button — tries a test OAuth redirect to verify creds work
-6. On success: saves to settings, proceeds to sign-in
-
-Each step has a "I've done this →" button. The wizard remembers progress so you can close and come back.
-
-**Tier 3 — CLI bootstrap (headless / CI):**
-```bash
-simply-daemon setup-google-oauth
-```
-- If `gcloud` CLI is available: automates project creation, API enablement, credential creation
-- Consent screen still requires browser — opens the URL and waits
-- Prompts for paste of client ID + secret
-- Writes to `settings.toml` or stdout for env var piping
-- For fully headless: `simply-daemon setup-google-oauth --client-id=X --client-secret=Y`
+**Astro** frontend in `simply-daemon/admin/`:
+- Static site generator — builds to HTML/CSS/JS
+- Output served by the daemon from `simply-daemon/admin/dist/`
+- Falls back to embedded HTML if build dir not found
+- `bin/daemon` runs `npm run build` before starting
 
 ### Setup Wizard Flow
 
-The admin page detects setup state via `GET /admin/api/setup-status`. If not configured, it shows the wizard instead of the dashboard.
+The admin page detects setup state via `GET /admin/api/setup-status`. If `user_email` is not configured, it shows the wizard instead of the dashboard.
 
-**Step 1 — Sign in with Google (first user becomes admin)**
-- If built-in creds available (localhost): "Sign in with Google" button immediately
-- If no creds (cloud): Google Cloud setup walkthrough first (see above), then sign-in
-- **First sign-in bootstraps the admin:**
-  - Google profile email → saved as `admin_email` in settings
-  - Same email → saved as `user_email` (used by Noema for document ownership etc.)
-  - UCM user record created in the database (`users` table)
-  - Admin session cookie issued
-- After admin exists: sign-in page still shown, but only the admin email gets dashboard access
-- No manual email entry ever — identity comes from Google
+**Step 1 — Who are you?**
+- Enter your email address
+- Saved as `user_email` in settings (used for document ownership, default UCM user)
 
 **Step 2 — API Keys**
-- Cards for each supported provider: Anthropic, OpenAI, Google (Gemini), Mistral, Ollama
-- Each card shows:
-  - Provider name + logo
-  - Direct link to their API key console (e.g., `console.anthropic.com/settings/keys`)
-  - Input field for pasting the key
-  - Status indicator (configured / not configured / invalid)
-  - Brief instructions ("Click the link above, create an API key, paste it here")
-- User adds keys as they have them — none are required to proceed
-- "Skip for now" option — can always come back from the dashboard
-- At least one key recommended before proceeding (show which models become available)
+- Cards for each supported provider: Anthropic, OpenAI, Google (Gemini), Mistral
+- Each card: provider name, direct link to their API key console, input field, status
+- Skip-able — can always add later from the dashboard
 
 **Step 3 — Done**
 - Summary of what's configured
-- Which models are available based on configured keys
 - "Go to Dashboard" button
-- Optionally: "Set up Lumina (Discord bot)" link if Lumina panel is registered
 
-### Dashboard (Post-Setup)
+### Dashboard
 
-The admin dashboard replaces the current bare HTML page:
-
-- **Status overview** — connected clients, active sessions, daemon health
-- **Settings** — admin email, default model, daemon port
-- **API Keys** — add/remove/status per provider
-- **Users** — list users, view linked accounts, issue/revoke tokens
-- **Connections** — live connected clients (WS connections)
-- **Client panels** — tabs/links for registered client setup pages (e.g., Lumina)
+- **Connections** — live WS connections (auto-refreshes)
+- **Sessions** — active LLM sessions
+- **API Keys** — add/remove per provider
+- **Users** — UCM user list
+- **Settings** — user email, default model
 
 ### Admin API Endpoints
 
-All config management happens through REST. The admin page is just a consumer of these APIs.
-
 ```
-GET    /admin/api/setup-status          — is setup complete?
-GET    /admin/api/settings              — current settings (secrets redacted)
-PUT    /admin/api/settings              — update settings fields
-POST   /admin/api/settings/api-key      — set API key for provider
-DELETE /admin/api/settings/api-key      — remove API key for provider
-GET    /admin/api/users                 — list users
-POST   /admin/api/users                 — create user by email
-POST   /admin/api/users/token           — issue user token
-POST   /admin/api/users/revoke-tokens   — revoke all tokens for user
-GET    /admin/api/connections           — active WS connections (existing)
-GET    /admin/api/client-panels         — list registered client panels
+GET    /admin/api/setup-status     — is setup complete?
+GET    /admin/api/settings         — current settings (secrets redacted)
+PUT    /admin/api/settings         — update settings
+POST   /admin/api/api-key          — set API key for provider
+DELETE /admin/api/api-key/{prov}   — remove API key
+GET    /admin/api/users            — list users
+POST   /admin/api/users            — create user by email
+GET    /admin/api/connections      — active WS connections
+GET    /auth/status                — auth method info
 ```
 
-**Auth for admin API:**
-- During setup (no `admin_email` set): accessible without auth (localhost bootstrap)
-- After setup: requires admin session cookie (from Google OAuth) or daemon_secret
-- Cloud: requires admin session cookie (no open localhost assumption)
+### Client-Contributed Admin Pages (Future)
 
-### Client-Contributed Admin Pages
-
-Clients (Lumina, future clients) register their own setup/config pages with the daemon.
-
-**Registration protocol:**
-When a client connects via WebSocket, it can register admin panel assets:
-
-```json
-{
-  "method": "admin.register_panel",
-  "params": {
-    "client_name": "lumina",
-    "display_name": "Discord Bot",
-    "routes": [
-      { "path": "/admin/clients/lumina/*", "type": "static", "assets": "base64-encoded-tarball" }
-    ],
-    "api_routes": [
-      { "path": "/admin/clients/lumina/api/*", "type": "proxy", "target": "ws" }
-    ]
-  }
-}
-```
-
-**How it works:**
-1. Client connects to daemon via WS (existing flow)
-2. Client sends `admin.register_panel` with its static assets + API route definitions
-3. Daemon extracts assets to a temp directory or serves from memory
-4. Daemon adds routes: `/admin/clients/{name}/*` → static files, `/admin/clients/{name}/api/*` → proxied to client via WS
-5. Main admin dashboard shows "Discord Bot" tab linking to `/admin/clients/lumina/`
-6. When client disconnects, panel is unregistered
-
-**Benefits:**
-- Daemon doesn't know about Lumina internals
-- Lumina owns its own UI and API
-- New clients can contribute panels without daemon changes
+Clients register their own setup/config pages with the daemon via WS:
+- Lumina sends static assets + API route definitions on connect
+- Daemon serves at `/admin/clients/{name}/*`
+- Main dashboard shows tabs for registered client panels
 - Panel lifecycle follows client connection lifecycle
-
-### Lumina Setup Panel (Future — separate design)
-
-Served from Lumina through the client panel system:
-
-- **Discord bot token** — input field + validation (test connection)
-- **Invite to server** — generates OAuth2 invite URL with required permissions, user clicks, bot joins, `guild_ids` auto-populated
-- **Owner ID** — Discord OAuth to identify the bot owner (one-time)
-- **Voice config** — STT/TTS provider selection
-- **Status** — connected guilds, registered commands, MCP tools
 
 ---
 
-## Open Questions
+## Migration Path
 
-1. **Astro build integration** — build.rs, Makefile, or manual `npm run build` before `cargo build`? Need to avoid slowing down Rust compilation for non-admin changes.
-2. **Asset embedding vs serving** — `include_dir!` (larger binary, simpler deployment) vs serve from filesystem (smaller binary, needs file path)?
-3. **Session management** — cookie-based sessions for admin page. JWT or opaque token + server-side store?
-4. **Client panel asset size** — how much static content can a client register? Need a size limit to prevent abuse.
-5. **Built-in Google OAuth app** — who owns the Google Cloud project? Need to create one for the "simply" project.
-
-## Migration
-
-- **Phase 1**: Admin API endpoints + setup wizard (plain HTML, no Astro yet) — validate the flow
-- **Phase 2**: Astro frontend — proper UI with components, styling, interactivity
-- **Phase 3**: Client-contributed panels — Lumina registers its setup page
-- **Phase 4**: Cloud hardening — session management, HTTPS, CSRF
+- **Phase 1 (current)**: Admin API + Astro setup wizard + dashboard. Localhost = admin.
+- **Phase 2**: Passkey auth for remote access.
+- **Phase 3**: Client-contributed panels (Lumina setup UI).
+- **Phase 4**: ts-rs auto-generation of TypeScript types for admin API.

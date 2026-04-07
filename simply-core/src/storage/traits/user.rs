@@ -27,15 +27,6 @@ pub trait UserStore: Send + Sync {
     /// List all users in the database
     async fn list_users(&self) -> Result<Vec<StoredUser>>;
 
-    /// Create a user token (returns the opaque token string)
-    async fn create_user_token(&self, user_id: &UserId) -> Result<String>;
-
-    /// Resolve a token to a user ID (returns None if expired or invalid)
-    async fn resolve_token(&self, token: &str) -> Result<Option<UserId>>;
-
-    /// Revoke all tokens for a user
-    async fn revoke_user_tokens(&self, user_id: &UserId) -> Result<()>;
-
     /// Map a Discord user ID to a UCM user
     async fn map_discord_user(&self, discord_user_id: &str, user_id: &UserId) -> Result<()>;
 

@@ -28,15 +28,6 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             updated_at INTEGER NOT NULL
         );
 
-        -- Per-user auth tokens (issued after OAuth login)
-        CREATE TABLE IF NOT EXISTS user_tokens (
-            token TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            created_at INTEGER NOT NULL,
-            expires_at INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS idx_user_tokens_user ON user_tokens(user_id);
-
         -- Discord user mapping (discord_user_id → UCM user)
         CREATE TABLE IF NOT EXISTS discord_user_mappings (
             discord_user_id TEXT PRIMARY KEY,
@@ -148,39 +139,6 @@ impl UserStore for SqliteStore {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(users)
-    }
-
-    async fn create_user_token(&self, user_id: &UserId) -> Result<String> {
-        let conn = self.conn().lock().unwrap();
-        let token = uuid::Uuid::new_v4().to_string();
-        let now = unix_timestamp();
-        conn.execute(
-            "INSERT INTO user_tokens (token, user_id, created_at) VALUES (?1, ?2, ?3)",
-            params![&token, user_id.as_str(), now],
-        )?;
-        Ok(token)
-    }
-
-    async fn resolve_token(&self, token: &str) -> Result<Option<UserId>> {
-        let conn = self.conn().lock().unwrap();
-        let now = unix_timestamp();
-        let user_id = conn
-            .query_row(
-                "SELECT user_id FROM user_tokens WHERE token = ?1 AND (expires_at IS NULL OR expires_at > ?2)",
-                params![token, now],
-                |row| row.get::<_, UserId>(0),
-            )
-            .ok();
-        Ok(user_id)
-    }
-
-    async fn revoke_user_tokens(&self, user_id: &UserId) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
-        conn.execute(
-            "DELETE FROM user_tokens WHERE user_id = ?1",
-            params![user_id.as_str()],
-        )?;
-        Ok(())
     }
 
     async fn map_discord_user(&self, discord_user_id: &str, user_id: &UserId) -> Result<()> {

@@ -2,25 +2,14 @@
 
 export interface SetupStatus {
   is_configured: boolean;
-  has_admin_email: boolean;
-  admin_email: string | null;
-  has_google_oauth: boolean;
   api_keys: string[];
   daemon_port: number;
 }
 
-export interface AuthStatus {
-  google_oauth_available: boolean;
-  admin_email: string | null;
-  is_setup_complete: boolean;
-}
-
 export interface Settings {
-  admin_email: string | null;
   user_email: string | null;
   default_model: string | null;
   daemon_port: number | null;
-  has_google_oauth: boolean;
   api_keys: string[];
 }
 
@@ -51,7 +40,6 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getSetupStatus: () => json<SetupStatus>('/admin/api/setup-status'),
-  getAuthStatus: () => json<AuthStatus>('/auth/status'),
   getSettings: () => json<Settings>('/admin/api/settings'),
 
   updateSettings: (data: Record<string, string>) =>
@@ -77,20 +65,6 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
-    }),
-
-  createToken: (userId: string) =>
-    json<{ token: string }>('/admin/api/tokens', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
-    }),
-
-  revokeTokens: (userId: string) =>
-    json('/admin/api/tokens/revoke', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
     }),
 
   getConnections: () => json<ConnectionInfo[]>('/admin/api/connections'),

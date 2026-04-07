@@ -26,12 +26,6 @@ pub struct Settings {
     pub daemon_port: Option<u16>,
     /// Shared secret for client authentication (auto-generated on first run)
     pub daemon_secret: Option<String>,
-    /// Admin email — the Google account that gets full admin access
-    pub admin_email: Option<String>,
-    /// Google OAuth client ID (for admin page / user login)
-    pub google_client_id: Option<String>,
-    /// Google OAuth client secret
-    pub google_client_secret: Option<String>,
 }
 
 /// Default port for the daemon server.
