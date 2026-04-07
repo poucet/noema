@@ -12,11 +12,8 @@ MLX_VOICE_PORT="${MLX_VOICE_PORT:-8100}"
 
 log() { echo "[daemon] $*"; }
 
-# Auto-detect local MLX voice server
 detect_voice_server() {
-  if [ -n "$VOXTRAL_BASE_URL" ]; then
-    return  # already set explicitly
-  fi
+  if [ -n "$VOXTRAL_BASE_URL" ]; then return; fi
   if nc -z 127.0.0.1 "$MLX_VOICE_PORT" 2>/dev/null; then
     export VOXTRAL_BASE_URL="http://127.0.0.1:$MLX_VOICE_PORT"
     log "Detected local voice server on port $MLX_VOICE_PORT"
@@ -41,7 +38,9 @@ build() {
   cd "$REPO_ROOT" && cargo build -p simply-daemon --bin simply-daemon
 }
 
-daemon_start_bg() {
+daemon_start() {
+  local background="${1:-false}"
+
   if daemon_is_running; then
     log "Already running on port $DAEMON_PORT"
     log "Admin: http://127.0.0.1:$DAEMON_PORT"
@@ -52,32 +51,37 @@ daemon_start_bg() {
   detect_voice_server
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
-  log "Starting... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
-  cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
-  local pid=$!
 
-  log "Waiting for port $DAEMON_PORT (pid $pid)..."
-  for i in $(seq 1 30); do
-    if daemon_is_running; then
-      log "Ready (pid $pid)"
-      log "Admin: http://127.0.0.1:$DAEMON_PORT"
-      return 0
-    fi
-    sleep 0.5
-  done
+  if [ "$background" = "true" ]; then
+    log "Starting in background... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
+    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon &
+    local pid=$!
 
-  log "Failed to start (timeout)"
-  kill "$pid" 2>/dev/null
-  return 1
+    log "Waiting for port $DAEMON_PORT (pid $pid)..."
+    for i in $(seq 1 30); do
+      if daemon_is_running; then
+        log "Ready (pid $pid)"
+        log "Admin: http://127.0.0.1:$DAEMON_PORT"
+        return 0
+      fi
+      sleep 0.5
+    done
+
+    log "Failed to start (timeout)"
+    kill "$pid" 2>/dev/null
+    return 1
+  else
+    log "Starting... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
+    log "Admin: http://127.0.0.1:$DAEMON_PORT"
+    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
+  fi
 }
 
 daemon_stop() {
-  # Step 1: Try REST kill endpoint
   if daemon_is_running; then
     log "Sending POST /daemon/kill..."
     curl -sf -X POST "http://127.0.0.1:$DAEMON_PORT/daemon/kill" >/dev/null 2>&1 || true
 
-    # Wait for clean shutdown
     for i in $(seq 1 10); do
       if ! daemon_is_running; then
         log "Stopped (clean shutdown)"
@@ -88,7 +92,6 @@ daemon_stop() {
     log "Still running after /daemon/kill"
   fi
 
-  # Step 2: Find and kill process on port
   if daemon_is_running; then
     local port_pid
     port_pid=$(lsof -ti "tcp:$DAEMON_PORT" 2>/dev/null | head -1)
@@ -100,7 +103,6 @@ daemon_stop() {
         log "Stopped (SIGTERM)"
         return 0
       fi
-      log "Killing pid $port_pid (SIGKILL)..."
       kill -9 "$port_pid" 2>/dev/null || true
       log "Stopped (SIGKILL)"
       return 0
@@ -110,23 +112,12 @@ daemon_stop() {
   log "Not running"
 }
 
-case "${1:-status}" in
+case "${1:-start}" in
   start)
-    daemon_start_bg
+    daemon_start false
     ;;
-  run)
-    # Run in foreground (blocking)
-    if daemon_is_running; then
-      log "Already running on port $DAEMON_PORT"
-      exit 1
-    fi
-    build
-    detect_voice_server
-    mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
-    : > "$DAEMON_LOG_FILE"
-    log "Starting in foreground... (port: $DAEMON_PORT, log: $DAEMON_LOG_FILE)"
-    log "Admin: http://127.0.0.1:$DAEMON_PORT"
-    cd "$REPO_ROOT" && cargo run -p simply-daemon --bin simply-daemon
+  start-bg)
+    daemon_start true
     ;;
   stop|kill)
     daemon_stop
@@ -134,12 +125,13 @@ case "${1:-status}" in
   restart)
     daemon_stop
     sleep 1
-    daemon_start_bg
+    daemon_start false
     ;;
   status)
     if daemon_is_running; then
       port_pid=$(lsof -ti "tcp:$DAEMON_PORT" 2>/dev/null | head -1)
       log "Running on port $DAEMON_PORT (pid ${port_pid:-unknown})"
+      log "Admin: http://127.0.0.1:$DAEMON_PORT"
     else
       log "Not running"
     fi
@@ -148,12 +140,12 @@ case "${1:-status}" in
     tail -f "$DAEMON_LOG_FILE"
     ;;
   *)
-    echo "Usage: daemon [start|run|stop|restart|status|log]"
-    echo "  start    Start daemon in background"
-    echo "  run      Start daemon in foreground"
-    echo "  stop     Stop the daemon"
-    echo "  restart  Stop + start"
-    echo "  status   Check if daemon is running"
-    echo "  log      Tail the daemon log"
+    echo "Usage: daemon [start|start-bg|stop|restart|status|log]"
+    echo "  start      Build and start daemon (foreground)"
+    echo "  start-bg   Build and start daemon (background)"
+    echo "  stop       Stop the daemon"
+    echo "  restart    Stop + start (foreground)"
+    echo "  status     Check if daemon is running"
+    echo "  log        Tail the daemon log"
     ;;
 esac
