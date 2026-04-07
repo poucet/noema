@@ -53,7 +53,7 @@ async fn handle_asset_request(
                 .unwrap();
         }
     };
-    let url = format!("{base_url}/blob/{blob_hash}");
+    let url = format!("{base_url}/api/blob/{blob_hash}");
     tracing::debug!(url = %url, "asset proxy request");
 
     let http = match app_state.http_client.get() {

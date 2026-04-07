@@ -5,21 +5,20 @@
 //!
 //! Set SKIP_ADMIN_BUILD=1 to skip (useful for CI or when iterating on Rust-only changes).
 
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    let admin_dir = Path::new("admin");
-
-    // Only rebuild when admin sources change
-    println!("cargo:rerun-if-changed=admin/src/");
-    println!("cargo:rerun-if-changed=admin/package.json");
-    println!("cargo:rerun-if-changed=admin/astro.config.mjs");
+    // Always re-run — Astro's own build is fast when nothing changed,
+    // and cargo's rerun-if-changed doesn't handle directories recursively.
+    println!("cargo:rerun-if-changed=build.rs");
 
     if std::env::var("SKIP_ADMIN_BUILD").is_ok() {
-        println!("cargo:warning=SKIP_ADMIN_BUILD set, skipping admin UI build");
         return;
     }
+
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let admin_dir = manifest_dir.join("admin");
 
     if !admin_dir.join("package.json").exists() {
         println!("cargo:warning=admin/package.json not found, skipping admin UI build");
@@ -29,29 +28,26 @@ fn main() {
     // npm install if needed
     if !admin_dir.join("node_modules").exists() {
         let status = Command::new("npm")
-            .args(["install", "--silent"])
-            .current_dir(admin_dir)
+            .args(["install"])
+            .current_dir(&admin_dir)
             .status();
 
         match status {
             Ok(s) if s.success() => {}
-            Ok(s) => println!("cargo:warning=npm install failed with {s}"),
-            Err(e) => {
-                println!("cargo:warning=npm not found ({e}), skipping admin UI build");
-                return;
-            }
+            Ok(s) => panic!("npm install failed with {s}"),
+            Err(e) => panic!("npm not found ({e}) — install Node.js to build the admin UI"),
         }
     }
 
-    // npm run build
+    // npm run build — fail the cargo build if this fails
     let status = Command::new("npm")
-        .args(["run", "build", "--silent"])
-        .current_dir(admin_dir)
+        .args(["run", "build"])
+        .current_dir(&admin_dir)
         .status();
 
     match status {
         Ok(s) if s.success() => {}
-        Ok(s) => println!("cargo:warning=npm run build failed with {s}"),
-        Err(e) => println!("cargo:warning=npm build failed: {e}"),
+        Ok(s) => panic!("admin UI build failed with {s}"),
+        Err(e) => panic!("admin UI build failed: {e}"),
     }
 }

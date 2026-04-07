@@ -82,6 +82,9 @@ fn parse_document_revision(row: &Row<'_>) -> rusqlite::Result<Stored<RevisionId,
 }
 
 pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
+    // Migration: add is_public column to existing databases
+    let _ = conn.execute("ALTER TABLE documents ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0", []);
+
     conn.execute_batch(
         r#"
         -- Documents (Episteme-compatible)

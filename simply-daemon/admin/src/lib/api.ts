@@ -32,6 +32,37 @@ export interface SessionInfo {
   created_at: string;
 }
 
+export interface DocumentInfo {
+  id: string;
+  title: string;
+  source: string;
+  source_id: string | null;
+  tab_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DocumentDetail {
+  id: string;
+  title: string;
+  source: string;
+  source_id: string | null;
+  tabs: TabInfo[];
+  created_at: number;
+  updated_at: number;
+}
+
+export interface TabInfo {
+  id: string;
+  title: string;
+  icon: string | null;
+  parent_tab_id: string | null;
+  tab_index: number;
+  content_markdown: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
@@ -70,11 +101,45 @@ export const api = {
   getConnections: () => json<ConnectionInfo[]>('/admin/api/connections'),
 
   getSessions: async (): Promise<SessionInfo[]> => {
-    try { return await json<SessionInfo[]>('/session'); }
+    try { return await json<SessionInfo[]>('/api/session'); }
     catch { return []; }
   },
 
-  killDaemon: () => fetch('/daemon/kill', { method: 'POST' }),
+  killDaemon: () => fetch('/api/daemon/kill', { method: 'POST' }),
+
+  // Documents (via /api prefix for RPC routes)
+  listDocuments: () => json<DocumentInfo[]>('/api/document'),
+  searchDocuments: (query: string) => json<DocumentInfo[]>(`/api/document/search?q=${encodeURIComponent(query)}`),
+  getDocument: (id: string) => json<DocumentDetail>(`/api/document/${id}`),
+  createDocument: (title: string, content?: string) =>
+    json<DocumentInfo>('/api/document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content }),
+    }),
+  renameDocument: (id: string, title: string) =>
+    json(`/api/document/${id}/title`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(title),
+    }),
+  deleteDocument: (id: string) =>
+    fetch(`/api/document/${id}`, { method: 'DELETE' }),
+  getTab: (id: string) => json<TabInfo>(`/api/tab/${id}`),
+  updateTab: (id: string, content: string) =>
+    json(`/api/tab/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    }),
+  createTab: (documentId: string, title: string, content?: string) =>
+    json<TabInfo>(`/api/document/${documentId}/tab`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, content }),
+    }),
+  deleteTab: (id: string) =>
+    fetch(`/api/tab/${id}`, { method: 'DELETE' }),
 };
 
 export const PROVIDERS = [

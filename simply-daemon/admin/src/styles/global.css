@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f0f1a;
+  --color-surface: #16162a;
+  --color-elevated: #1e1e34;
+  --color-border: #252540;
+  --color-fg: #e0e0e0;
+  --color-muted: #777;
+  --color-accent: #14b8a6;
+  --color-accent-hover: #0d9488;
+  --color-danger: #dc2626;
+}
+
+/* Reusable component classes — outside @layer so Tailwind doesn't purge them */
+  .card {
+    @apply bg-surface border border-border rounded-lg p-5 mb-3;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border-none cursor-pointer text-sm font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply bg-accent text-white hover:bg-accent-hover;
+  }
+  .btn-ghost {
+    @apply bg-transparent border border-border text-muted hover:border-accent hover:text-accent;
+  }
+  .btn-danger {
+    @apply bg-danger text-white hover:bg-red-500;
+  }
+
+  .step-pill {
+    @apply px-3.5 py-1 rounded-full text-xs font-medium bg-surface text-muted;
+  }
+  .step-pill.active {
+    @apply bg-accent text-white;
+  }
+  .step-pill.done {
+    @apply bg-accent/10 text-accent;
+  }
+
+  .badge {
+    @apply inline-block px-2 py-0.5 rounded text-xs font-semibold;
+  }
+  .badge-ok {
+    @apply bg-accent/10 text-accent;
+  }
+  .badge-info {
+    @apply bg-blue-500/10 text-blue-400;
+  }
+
+  .provider-grid {
+    @apply grid grid-cols-2 gap-2.5;
+  }
+  @media (max-width: 640px) {
+    .provider-grid { @apply grid-cols-1; }
+  }
+  .provider-card {
+    @apply bg-surface border border-border rounded-lg p-3.5;
+  }
+  .provider-card.configured {
+    @apply border-accent;
+  }
+  .provider-name {
+    @apply font-semibold text-sm mb-0.5;
+  }
+  .provider-link {
+    @apply text-xs mb-2;
+  }
+  .provider-input {
+    @apply flex gap-1.5;
+  }
+  .provider-input input {
+    @apply flex-1 text-xs px-2.5 py-1.5;
+  }
+  .provider-input .btn {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  .form-row {
+    @apply mb-3.5;
+  }
+  .form-actions {
+    @apply flex gap-2 mt-4;
+  }
+  .steps {
+    @apply flex gap-1.5 mb-5;
+  }
+  .empty {
+    @apply text-center text-muted/60 italic py-5;
+  }
+  .mono {
+    @apply font-mono text-sm;
+  }
+
+  /* Form inputs */
+  input[type="text"], input[type="password"] {
+    @apply w-full px-3 py-2 bg-bg border border-border rounded-md text-fg text-sm font-mono placeholder:text-muted focus:outline-none focus:border-accent;
+  }
+  label {
+    @apply block text-xs text-muted mb-1;
+  }
+
+  /* Tables */
+  table {
+    @apply w-full border-collapse my-1.5 mb-4;
+  }
+  th, td {
+    @apply text-left py-1.5 px-2.5 border-b border-border/50 text-sm;
+  }
+  th {
+    @apply text-muted font-medium uppercase text-xs tracking-wider;
+  }
+
+  /* Links */
+  a {
+    @apply text-accent no-underline hover:underline;
+  }
+
+  /* Headings */
+  h2 {
+    @apply text-lg text-fg/80 mt-7 mb-2.5 flex items-center gap-2;
+  }

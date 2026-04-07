@@ -10,9 +10,10 @@ use axum::extract::{FromRequest, State, ConnectInfo};
 use axum::extract::ws::{Message, WebSocket};
 use axum::http::{Method, StatusCode, header};
 use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Json, Response};
+use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
+use tower_http::services::ServeDir;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -72,17 +73,30 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/auth/status", get(auth_routes::auth_status))
         .with_state(sessions);
 
-    let app = Router::new()
-        .route("/", get(admin_page))
-        .route("/admin", get(admin_page))
-        .route("/_assets/{*path}", get(admin_page))
-        .route("/favicon.svg", get(admin_page))
-        .route("/favicon.ico", get(admin_page))
+    // RPC routes under /api/* — uses fallback handler for dynamic dispatch
+    let api_routes = Router::new()
+        .fallback(rest_or_stream_handler)
+        .with_state(state.clone());
+
+    // Static file serving for the admin UI (Astro build output)
+    let admin_dist = find_admin_dist();
+    let serve_dir = admin_dist.map(|dist| {
+        tracing::info!(path = %dist.display(), "serving admin UI");
+        ServeDir::new(dist).append_index_html_on_directories(true)
+    });
+
+    let mut app = Router::new()
         .route("/admin/api/connections", get(admin_connections))
         .route("/ws", get(ws_upgrade_handler))
         .merge(auth_routes)
         .merge(admin_routes)
-        .fallback(rest_or_stream_handler)
+        .nest("/api", api_routes);
+
+    if let Some(serve) = serve_dir {
+        app = app.fallback_service(serve);
+    }
+
+    let app = app
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
 
@@ -126,21 +140,24 @@ async fn auth_middleware(
     let path = req.uri().path();
     let is_localhost = addr.ip().is_loopback();
 
-    // Public routes: admin page, admin API, auth routes, static assets
-    // Localhost gets admin access automatically
-    if path == "/" || path == "/admin" || path.starts_with("/admin/api/")
-        || path.starts_with("/auth/") || path.starts_with("/_assets/")
-        || path == "/favicon.svg" || path == "/favicon.ico"
-    {
-        if is_localhost {
+    // Localhost = admin for everything (UI, API, RPC)
+    if is_localhost {
+        // Still check for Bearer if present (service clients on localhost)
+        let has_bearer = req.headers().get(header::AUTHORIZATION).is_some();
+        if !has_bearer {
             req.extensions_mut().insert(RequestUser::Admin);
-        } else {
-            req.extensions_mut().insert(RequestUser::Anonymous);
+            return next.run(req).await;
         }
+    }
+
+    // Non-localhost: only /api/* and /ws require Bearer auth
+    let requires_bearer = path.starts_with("/api/") || path == "/ws";
+    if !requires_bearer {
+        req.extensions_mut().insert(RequestUser::Anonymous);
         return next.run(req).await;
     }
 
-    // All other routes require Bearer token (daemon_secret)
+    // Bearer-protected routes
     let token = req.headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -168,67 +185,20 @@ async fn auth_middleware(
 // Admin handlers
 // ---------------------------------------------------------------------------
 
-/// Serve admin frontend files from the admin/dist/ build output.
-/// Falls back to the embedded index.html if the build directory isn't found.
-async fn admin_page(req: axum::extract::Request) -> Response {
-    let path = req.uri().path();
-
-    let dist_dir = find_admin_dist();
-
-    if let Some(dist) = dist_dir {
-        let file_path = if path == "/" || path == "/admin" {
-            dist.join("index.html")
-        } else {
-            dist.join(path.trim_start_matches('/'))
-        };
-
-        if file_path.exists() {
-            if let Ok(contents) = tokio::fs::read(&file_path).await {
-                let mime = match file_path.extension().and_then(|e| e.to_str()) {
-                    Some("html") => "text/html; charset=utf-8",
-                    Some("js") => "application/javascript",
-                    Some("css") => "text/css",
-                    Some("svg") => "image/svg+xml",
-                    Some("ico") => "image/x-icon",
-                    Some("json") => "application/json",
-                    _ => "application/octet-stream",
-                };
-                return Response::builder()
-                    .header("Content-Type", mime)
-                    .body(Body::from(contents))
-                    .unwrap();
-            }
-        }
-    }
-
-    Html(include_str!("../admin/admin.html")).into_response()
-}
-
 fn find_admin_dist() -> Option<std::path::PathBuf> {
-    let candidates = [
-        std::path::PathBuf::from("simply-daemon/admin/dist"),
-        std::path::PathBuf::from("admin/dist"),
-    ];
-
-    for path in &candidates {
-        if path.is_dir() {
-            tracing::debug!(path = %path.display(), "admin dist found");
-            return Some(path.clone());
-        }
+    // Compile-time path: the admin/dist dir next to this crate's Cargo.toml
+    let compile_time = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("admin/dist");
+    if compile_time.is_dir() {
+        return Some(compile_time);
     }
 
-    // Try relative to the binary location
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let near_exe = parent.join("admin/dist");
-            if near_exe.is_dir() {
-                tracing::debug!(path = %near_exe.display(), "admin dist found (near exe)");
-                return Some(near_exe);
-            }
-        }
+    // Runtime fallback: relative to CWD
+    for candidate in &["simply-daemon/admin/dist", "admin/dist"] {
+        let path = std::path::PathBuf::from(candidate);
+        if path.is_dir() { return Some(path); }
     }
 
-    tracing::warn!("admin dist not found — using embedded fallback. Run 'npm run build' in simply-daemon/admin/");
+    tracing::warn!("admin dist not found — using embedded fallback");
     None
 }
 

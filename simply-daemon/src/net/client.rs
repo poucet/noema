@@ -68,7 +68,7 @@ impl RpcConnection for DaemonRpcConnection {
         path: &str,
         body: Value,
     ) -> anyhow::Result<Value> {
-        let url = format!("{}{}", self.base_url, path);
+        let url = format!("{}/api{}", self.base_url, path);
         let max_retries = 2;
 
         for attempt in 0..=max_retries {

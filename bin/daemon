@@ -71,7 +71,7 @@ daemon_start() {
 daemon_stop() {
   if daemon_is_running; then
     log "Sending POST /daemon/kill..."
-    curl -sf -X POST "http://127.0.0.1:$DAEMON_PORT/daemon/kill" >/dev/null 2>&1 || true
+    curl -sf -X POST "http://127.0.0.1:$DAEMON_PORT/api/daemon/kill" >/dev/null 2>&1 || true
 
     for i in $(seq 1 10); do
       if ! daemon_is_running; then
@@ -127,15 +127,41 @@ case "${1:-start}" in
       log "Not running"
     fi
     ;;
+  dev)
+    # Dev mode: run Astro dev server (hot reload) + daemon with SKIP_ADMIN_BUILD
+    if daemon_is_running; then
+      log "Already running on port $DAEMON_PORT"
+      exit 1
+    fi
+    local ADMIN_DIR="$REPO_ROOT/simply-daemon/admin"
+    if [ ! -d "$ADMIN_DIR/node_modules" ]; then
+      (cd "$ADMIN_DIR" && npm install)
+    fi
+    detect_voice_server
+    mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
+    : > "$DAEMON_LOG_FILE"
+
+    log "Starting Astro dev server on port 4321..."
+    (cd "$ADMIN_DIR" && npm run dev -- --port 4321) &
+    local astro_pid=$!
+
+    log "Starting daemon (SKIP_ADMIN_BUILD=1)..."
+    log "Admin (dev): http://127.0.0.1:4321"
+    log "API: http://127.0.0.1:$DAEMON_PORT"
+    cd "$REPO_ROOT" && SKIP_ADMIN_BUILD=1 cargo run -p simply-daemon --bin simply-daemon
+
+    kill "$astro_pid" 2>/dev/null
+    ;;
   log|logs)
     tail -f "$DAEMON_LOG_FILE"
     ;;
   *)
-    echo "Usage: daemon [start|start-bg|stop|restart|status|log]"
+    echo "Usage: daemon [start|start-bg|stop|restart|dev|status|log]"
     echo "  start      Build and start daemon (foreground)"
     echo "  start-bg   Build and start daemon (background)"
     echo "  stop       Stop the daemon"
     echo "  restart    Stop + start (foreground)"
+    echo "  dev        Start with Astro hot-reload (port 4321) + daemon"
     echo "  status     Check if daemon is running"
     echo "  log        Tail the daemon log"
     ;;
