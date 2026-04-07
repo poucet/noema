@@ -136,7 +136,6 @@ case "${1:-status}" in
     ;;
   status)
     if daemon_is_running; then
-      local port_pid
       port_pid=$(lsof -ti "tcp:$DAEMON_PORT" 2>/dev/null | head -1)
       log "Running on port $DAEMON_PORT (pid ${port_pid:-unknown})"
     else
