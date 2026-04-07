@@ -205,22 +205,30 @@ async fn admin_page(req: axum::extract::Request) -> Response {
 }
 
 fn find_admin_dist() -> Option<std::path::PathBuf> {
-    // Try: simply-daemon/admin/dist (relative to CWD which is repo root)
-    let daemon_admin = std::path::PathBuf::from("simply-daemon/admin/dist");
-    if daemon_admin.is_dir() { return Some(daemon_admin); }
+    let candidates = [
+        std::path::PathBuf::from("simply-daemon/admin/dist"),
+        std::path::PathBuf::from("admin/dist"),
+    ];
 
-    // Try: admin/dist (old location, backward compat)
-    let root_admin = std::path::PathBuf::from("admin/dist");
-    if root_admin.is_dir() { return Some(root_admin); }
+    for path in &candidates {
+        if path.is_dir() {
+            tracing::debug!(path = %path.display(), "admin dist found");
+            return Some(path.clone());
+        }
+    }
 
     // Try relative to the binary location
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             let near_exe = parent.join("admin/dist");
-            if near_exe.is_dir() { return Some(near_exe); }
+            if near_exe.is_dir() {
+                tracing::debug!(path = %near_exe.display(), "admin dist found (near exe)");
+                return Some(near_exe);
+            }
         }
     }
 
+    tracing::warn!("admin dist not found — using embedded fallback. Run 'npm run build' in simply-daemon/admin/");
     None
 }
 

@@ -27,7 +27,7 @@ daemon_is_running() {
   nc -z 127.0.0.1 "$DAEMON_PORT" 2>/dev/null
 }
 
-build_admin() {
+build() {
   local ADMIN_DIR="$REPO_ROOT/simply-daemon/admin"
   if [ -f "$ADMIN_DIR/package.json" ]; then
     if [ ! -d "$ADMIN_DIR/node_modules" ]; then
@@ -37,6 +37,8 @@ build_admin() {
     log "Building admin UI..."
     (cd "$ADMIN_DIR" && npm run build --silent)
   fi
+  log "Building daemon..."
+  cd "$REPO_ROOT" && cargo build -p simply-daemon --bin simply-daemon
 }
 
 daemon_start_bg() {
@@ -46,7 +48,7 @@ daemon_start_bg() {
     return 0
   fi
 
-  build_admin
+  build
   detect_voice_server
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
@@ -118,7 +120,7 @@ case "${1:-status}" in
       log "Already running on port $DAEMON_PORT"
       exit 1
     fi
-    build_admin
+    build
     detect_voice_server
     mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
     : > "$DAEMON_LOG_FILE"
