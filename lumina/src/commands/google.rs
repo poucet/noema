@@ -144,8 +144,8 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
     match result {
         Ok(content) => {
             // Parse the extracted document from tool result
-            let text = content.iter().find_map(|c| match c {
-                llm::ToolResultContent::Text { text } => Some(text.clone()),
+            let text: String = content.iter().find_map(|c| match c {
+                llm::ToolResultContent::Text { text } => Some(text.to_string()),
                 _ => None,
             }).unwrap_or_default();
 
