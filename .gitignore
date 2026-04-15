@@ -4,6 +4,7 @@ target/
 .env
 .jj-workspaces
 models/
+.fastembed_cache/
 daemon.log
 noema.log
 node_modules/

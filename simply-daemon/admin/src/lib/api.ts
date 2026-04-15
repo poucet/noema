@@ -35,6 +35,7 @@ export interface SessionInfo {
 export interface DocumentInfo {
   id: string;
   title: string;
+  document_type: string;
   source: string;
   source_id: string | null;
   tab_count: number;
@@ -45,6 +46,7 @@ export interface DocumentInfo {
 export interface DocumentDetail {
   id: string;
   title: string;
+  document_type: string;
   source: string;
   source_id: string | null;
   tabs: TabInfo[];
