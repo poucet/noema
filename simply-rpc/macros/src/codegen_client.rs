@@ -63,6 +63,11 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
         }
 
         // StreamBidi with a path → generate bidi WS connection
+        let ctx_expr = if method.has_context() {
+            quote! { &ctx }
+        } else {
+            quote! { &::simply_rpc::RequestContext::default() }
+        };
         if let ReturnKind::StreamBidi { input_type, output_type } = &method.return_kind {
             let method_str = &method.method_name;
             let path_template = &endpoint.path_template;
@@ -86,7 +91,7 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
             return Ok(quote! {
                 async fn #fn_name(#inputs) #output {
                     #serialize
-                    self.0.rpc_call(#method_str, #rpc_params, &ctx).await?;
+                    self.0.rpc_call(#method_str, #rpc_params, #ctx_expr).await?;
                     let (__raw_tx, mut __raw_rx) = self.0.register_stream(#method_str).await?;
 
                     // Wrap raw channels with typed serialization
@@ -190,20 +195,27 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
         }
     };
 
+    // If method has ctx, use it; otherwise create a default
+    let ctx_expr = if method.has_context() {
+        quote! { &ctx }
+    } else {
+        quote! { &::simply_rpc::RequestContext::default() }
+    };
+
     match &method.return_kind {
         ReturnKind::ResultUnit => quote! {
             let __path = #path_expr;
-            self.0.rest_call(#http_method, &__path, #body_expr, &ctx).await?;
+            self.0.rest_call(#http_method, &__path, #body_expr, #ctx_expr).await?;
             Ok(())
         },
         ReturnKind::ResultValue { .. } => quote! {
             let __path = #path_expr;
-            let __r = self.0.rest_call(#http_method, &__path, #body_expr, &ctx).await?;
+            let __r = self.0.rest_call(#http_method, &__path, #body_expr, #ctx_expr).await?;
             Ok(::serde_json::from_value(__r)?)
         },
         ReturnKind::RawValue { .. } => quote! {
             let __path = #path_expr;
-            self.0.rest_call(#http_method, &__path, #body_expr, &ctx)
+            self.0.rest_call(#http_method, &__path, #body_expr, #ctx_expr)
                 .await
                 .and_then(|r| ::serde_json::from_value(r).map_err(Into::into))
                 .unwrap_or_default()
@@ -274,18 +286,24 @@ fn generate_client_body(
     serialize: &TokenStream,
     rpc_params: &TokenStream,
 ) -> TokenStream {
+    let ctx_expr = if method.has_context() {
+        quote! { &ctx }
+    } else {
+        quote! { &::simply_rpc::RequestContext::default() }
+    };
+
     match &method.return_kind {
         ReturnKind::ResultUnit => {
             quote! {
                 #serialize
-                self.0.rpc_call(#method_str, #rpc_params, &ctx).await?;
+                self.0.rpc_call(#method_str, #rpc_params, #ctx_expr).await?;
                 Ok(())
             }
         }
         ReturnKind::ResultValue { .. } => {
             quote! {
                 #serialize
-                let __r = self.0.rpc_call(#method_str, #rpc_params, &ctx).await?;
+                let __r = self.0.rpc_call(#method_str, #rpc_params, #ctx_expr).await?;
                 Ok(::serde_json::from_value(__r)?)
             }
         }
@@ -300,7 +318,7 @@ fn generate_client_body(
             };
             quote! {
                 #serialize
-                self.0.rpc_call(#method_str, #params_for_raw)
+                self.0.rpc_call(#method_str, #params_for_raw, #ctx_expr)
                     .await
                     .and_then(|r| ::serde_json::from_value(r).map_err(Into::into))
                     .unwrap_or_default()
@@ -311,7 +329,7 @@ fn generate_client_body(
             // Bridge: mpsc::Receiver<Value> → deserialize → broadcast::Sender<Event> → broadcast::Receiver
             quote! {
                 #serialize
-                let __r = self.0.rpc_call(#method_str, #rpc_params, &ctx).await?;
+                let __r = self.0.rpc_call(#method_str, #rpc_params, #ctx_expr).await?;
                 let __value: #value_type = ::serde_json::from_value(__r)?;
                 let (_, mut __raw_rx) = self.0.register_stream(#method_str).await?;
                 let (__broadcast_tx, __broadcast_rx) = ::tokio::sync::broadcast::channel(256);
@@ -328,7 +346,7 @@ fn generate_client_body(
         ReturnKind::StreamBare { stream_type } => {
             quote! {
                 #serialize
-                self.0.rpc_call(#method_str, #rpc_params, &ctx).await?;
+                self.0.rpc_call(#method_str, #rpc_params, #ctx_expr).await?;
                 let (_, mut __raw_rx) = self.0.register_stream(#method_str).await?;
                 let (__broadcast_tx, __broadcast_rx) = ::tokio::sync::broadcast::channel(256);
                 ::tokio::spawn(async move {
@@ -344,7 +362,7 @@ fn generate_client_body(
         ReturnKind::StreamBidi { input_type, output_type } => {
             quote! {
                 #serialize
-                self.0.rpc_call(#method_str, #rpc_params, &ctx).await?;
+                self.0.rpc_call(#method_str, #rpc_params, #ctx_expr).await?;
                 let (__raw_tx, mut __raw_rx) = self.0.register_stream(#method_str).await?;
                 let (__typed_tx, mut __typed_rx) = ::tokio::sync::mpsc::channel::<#input_type>(64);
                 let (output_tx, output_rx) = ::tokio::sync::mpsc::channel::<#output_type>(64);
