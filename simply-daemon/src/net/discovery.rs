@@ -118,7 +118,8 @@ pub async fn connect_or_host(
     config::load_env_file();
     let stores = Arc::new(SqliteStores::open()?);
     let user_store = stores.sqlite();
-    let daemon = EmbeddedDaemon::new(stores).await?;
+    let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
+    let daemon = EmbeddedDaemon::new(stores, vector_store).await?;
 
     // Kill channel
     let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
