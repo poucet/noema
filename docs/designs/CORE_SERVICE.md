@@ -293,10 +293,11 @@ All tools in a single registry, regardless of source:
 | `connect_mcp_server` | `post = "/mcp/{server_id}/connect"` | POST |
 | `disconnect_mcp_server` | `post = "/mcp/{server_id}/disconnect"` | POST |
 | `get_mcp_server_tools` | `get = "/mcp/{server_id}/tools"` | GET |
-| `test_mcp_server` | `post = "/mcp/{server_id}/test"` | POST |
 | `update_mcp_server_settings` | `put = "/mcp/{server_id}"` | PUT |
 | `stop_mcp_retry` | `post = "/mcp/{server_id}/stop-retry"` | POST |
 | `start_mcp_retry` | `post = "/mcp/{server_id}/retry"` | POST |
+| `list_all_tools` | `get = "/mcp/tools"` | GET (user-scoped via RequestContext) |
+| `call_tool_direct` | `post = "/mcp/tools/call"` | POST (user-scoped via RequestContext) |
 
 ### OAuthApi (`oauth`)
 
