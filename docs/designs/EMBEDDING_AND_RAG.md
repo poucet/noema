@@ -1,6 +1,6 @@
 # Embedding & RAG
 
-**Status:** refined
+**Status:** planned
 **Version:** 1.0
 **Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
 **Related:** [STORAGE.md](STORAGE.md), [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md)
@@ -292,6 +292,20 @@ Background service that processes document tab writes asynchronously.
 - Debounced — rapid successive edits to the same tab coalesce (only embed the latest)
 - Retry on transient failures (provider API errors)
 - Logs warnings if embedding falls behind
+
+**Persistence:** The queue itself is in-memory (tokio channel) — not persisted. Instead, on startup the daemon derives pending work by comparing document state against vector state:
+
+```sql
+SELECT d.id, t.id, t.content_markdown
+FROM documents d
+JOIN document_tabs t ON t.document_id = d.id
+LEFT JOIN vector_chunks vc ON vc.tab_id = t.id
+WHERE vc.id IS NULL
+   OR vc.embedded_at < t.updated_at
+   OR vc.model_id != ?current_model_id
+```
+
+This catches: tabs never embedded, tabs updated since last embed, and model mismatches after provider switch. The `reindex` endpoint is just the forced version of this same scan. No queue state to corrupt or lose on crash.
 
 ### 6. SearchApi (simply-daemon)
 

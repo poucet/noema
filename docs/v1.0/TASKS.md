@@ -10,32 +10,39 @@ Four parallel workstreams. Tasks within each are roughly sequential.
 
 UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/proposals/UCM_SERVICE.md)). RAG is core to agent quality, not an add-on.
 
-### Stage 1 — Document CRUD
+### Stage 1 — Document Type + Foundation
 
-- ⬜ 1.1 `DocumentApi` trait on daemon — extract doc CRUD from Noema-only Tauri commands to a shared RPC trait
-- ⬜ 1.2 Named documents — entity slugs so docs are addressed by path (e.g. `lumina/system-prompt`) not raw UUIDs
-- ⬜ 1.3 Frontmatter parsing + indexing in UCM storage layer
-- ⬜ 1.4 Frontmatter-aware query syntax — filter by `type`, `tags`, `done`, `due`, etc.
-- ⬜ 1.5 MCP tools for agents: `create_document`, `query_documents`, `update_document`, `delete_document`, `get_document`
-- ⬜ 1.6 Cross-platform verify: create from Noema, query from Lumina and vice versa
+- ⬜ 1.1 `DocumentType` constants module in `simply-core`
+- ⬜ 1.2 `document_type` column on documents table + migration
+- ⬜ 1.3 `document_type` in `DocumentInfo`/`DocumentDetail`/`CreateDocumentRequest` + type-filtered `list_documents`
 
-### Stage 2 — Embedding Providers
+### Stage 2 — Embedding Providers + Traits
 
-- ⬜ 2.1 `EmbeddingProvider` trait in `simply-core` — `async fn embed(texts: &[&str]) -> Vec<Vec<f32>>`
-- ⬜ 2.2 OpenAI embeddings provider (`text-embedding-3-small`)
-- ⬜ 2.3 Local embeddings provider (e.g. `all-MiniLM-L6-v2` via candle or ONNX on Apple Silicon)
-- ⬜ 2.4 Embedding provider config in `settings.toml` (model, endpoint, API key)
-- ⬜ 2.5 Vector storage in UCM — store embeddings alongside documents in SQLite (or sqlite-vec extension)
-- ⬜ 2.6 Auto-embed on document create/update — daemon indexes document content automatically
+**Design:** [EMBEDDING_AND_RAG.md](../designs/EMBEDDING_AND_RAG.md)
 
-### Stage 3 — RAG Pipeline
+- ⬜ 2.1 `EmbeddingProvider` trait + `Embedding` struct in `simply-core`
+- ⬜ 2.2 `Chunker` trait + `RecursiveCharacterChunker` impl in `simply-core`
+- ⬜ 2.3 `VectorStore` trait + types (`VectorChunk`, `SearchQuery`, `SearchResult`, `SearchFilter`) in `simply-core`
+- ⬜ 2.4 Embedding config in `settings.toml` (`[embedding]` section: provider, model, chunk_size, chunk_overlap)
+- ⬜ 2.5 Mistral embedding provider (`mistral-embed`)
+- ⬜ 2.6 OpenAI, Gemini, Claude/Voyage, Ollama embedding providers
 
-- ⬜ 3.1 Semantic search: `search(query, top_k)` — embed query, nearest-neighbor lookup over stored vectors
-- ⬜ 3.2 Hybrid search — combine semantic similarity with frontmatter filters (e.g. "notes about voice" = semantic + `type: note`)
-- ⬜ 3.3 Context injection — agent session can auto-inject relevant documents into LLM context before generation
-- ⬜ 3.4 MCP tool: `search(query, filters?)` exposed to agents for explicit retrieval
-- ⬜ 3.5 Lumina integration: system prompt from UCM document (replaces hardcoded), RAG-backed answers
-- ⬜ 3.6 Noema integration: search panel, document references in chat
+### Stage 3 — Storage + Indexing
+
+- ⬜ 3.1 sqlite-vec `VectorStore` implementation (chunks table + vec virtual table)
+- ⬜ 3.2 Embedding queue — background worker, debounce, retry, startup scan for stale/missing
+- ⬜ 3.3 Hook document tab writes to enqueue embedding jobs
+
+### Stage 4 — Retrieval API
+
+- ⬜ 4.1 `SearchApi` trait (`search` + `reindex` endpoints)
+- ⬜ 4.2 `SearchService` implementation — embed query, vector search, return hits with doc metadata
+
+### Stage 5 — Client Integration
+
+- ⬜ 5.1 Lumina auto-RAG — query from last N messages, inject relevant chunks into system prompt
+- ⬜ 5.2 Local ONNX embedding provider (`bge-small-en-v1.5` via ort) — optional, for no-network setups
+- ⬜ 5.3 Noema search panel + document refs (deferred — depends on UI work)
 
 ---
 

@@ -1,5 +1,5 @@
 project: simply
 version: v1.0
-phase: multi-user
-stage: 2
+phase: content-rag
+stage: 1
 status: in-progress
