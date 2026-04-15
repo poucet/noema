@@ -67,7 +67,7 @@ daemon_start() {
     for i in $(seq 1 30); do
       if daemon_is_running; then
         log "Ready (pid $pid)"
-        log "Admin: http://127.0.0.1:4321"
+        log "Admin: http://localhost:4321"
         log "API: http://127.0.0.1:$DAEMON_PORT"
         return 0
       fi
@@ -78,9 +78,24 @@ daemon_start() {
     kill "$pid" 2>/dev/null
     return 1
   else
-    log "Admin: http://127.0.0.1:4321"
-    log "API: http://127.0.0.1:$DAEMON_PORT"
-    cd "$REPO_ROOT" && SKIP_ADMIN_BUILD=1 cargo run -p simply-daemon --bin simply-daemon
+    cd "$REPO_ROOT" && SKIP_ADMIN_BUILD=1 cargo run -p simply-daemon --bin simply-daemon &
+    local pid=$!
+
+    log "Waiting for port $DAEMON_PORT (pid $pid)..."
+    for i in $(seq 1 60); do
+      if daemon_is_running; then
+        log "Ready (pid $pid)"
+        log "Admin: http://localhost:4321"
+        log "API: http://127.0.0.1:$DAEMON_PORT"
+        wait "$pid"
+        return $?
+      fi
+      sleep 0.5
+    done
+
+    log "Failed to start (timeout)"
+    kill "$pid" 2>/dev/null
+    return 1
   fi
 }
 
