@@ -33,14 +33,6 @@ start_astro_dev() {
   ASTRO_PID=$!
 }
 
-GDOCS_PORT="${GDOCS_PORT:-9877}"
-
-start_gdocs_mcp() {
-  log "Starting Google Docs MCP server (port $GDOCS_PORT)..."
-  cd "$REPO_ROOT" && cargo run -p noema-mcp-gdocs -- --port "$GDOCS_PORT" &
-  GDOCS_PID=$!
-}
-
 cleanup() {
   if [ -n "$ASTRO_PID" ]; then
     kill "$ASTRO_PID" 2>/dev/null
@@ -67,7 +59,6 @@ daemon_start() {
   cd "$REPO_ROOT" && SKIP_ADMIN_BUILD=1 cargo build -p simply-daemon --bin simply-daemon
 
   start_astro_dev
-  start_gdocs_mcp
 
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
