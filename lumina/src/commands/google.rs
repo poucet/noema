@@ -145,7 +145,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
         Ok(content) => {
             // Parse the extracted document from tool result
             let text: String = content.iter().find_map(|c| match c {
-                llm::ToolResultContent::Text { text } => Some(text.to_string()),
+                simply_daemon::types::ToolResultContent::Text { text } => Some(text.to_string()),
                 _ => None,
             }).unwrap_or_default();
 
@@ -258,7 +258,7 @@ async fn list_user_docs(lx: &LuminaContext, query: Option<&str>) -> anyhow::Resu
 
     // Parse the text result as JSON array of {id, name}
     let text: String = result.iter().find_map(|c| match c {
-        llm::ToolResultContent::Text { text } => Some(text.to_string()),
+        simply_daemon::types::ToolResultContent::Text { text } => Some(text.to_string()),
         _ => None,
     }).unwrap_or_default();
 
