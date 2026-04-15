@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 /// Authentication method for an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -81,6 +80,16 @@ pub struct ServerConfig {
     /// Authentication method
     #[serde(default)]
     pub auth: AuthMethod,
+    /// Well-known OAuth provider (e.g. "google", "github", "notion").
+    /// Interpreted by the daemon to fill in OAuth URLs + scopes automatically.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_provider: Option<String>,
+    /// OAuth client ID (used with oauth_provider)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// OAuth client secret (used with oauth_provider)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
     /// Whether to use .well-known discovery for OAuth endpoints
     #[serde(default)]
     pub use_well_known: bool,
@@ -99,7 +108,8 @@ fn default_true() -> bool {
     true
 }
 
-/// Root configuration containing all MCP servers.
+/// In-memory collection of MCP server configurations.
+/// No file I/O — loading and saving is the daemon's responsibility.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpConfig {
     #[serde(default)]
@@ -107,56 +117,18 @@ pub struct McpConfig {
 }
 
 impl McpConfig {
-    /// Get the default config file path (~/.noema/mcp.toml)
-    pub fn default_path() -> Option<PathBuf> {
-        config::PathManager::mcp_config_path()
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Load configuration from the default path
-    pub fn load() -> anyhow::Result<Self> {
-        match Self::default_path() {
-            Some(path) if path.exists() => Self::load_from(&path),
-            Some(_) => Ok(Self::default()),
-            None => Ok(Self::default()),
-        }
-    }
-
-    /// Load configuration from a specific path
-    pub fn load_from(path: &PathBuf) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let config: McpConfig = toml::from_str(&content)?;
-        Ok(config)
-    }
-
-    /// Save configuration to the default path
-    pub fn save(&self) -> anyhow::Result<()> {
-        match Self::default_path() {
-            Some(path) => self.save_to(&path),
-            None => Err(anyhow::anyhow!("Could not determine config path")),
-        }
-    }
-
-    /// Save configuration to a specific path
-    pub fn save_to(&self, path: &PathBuf) -> anyhow::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let content = toml::to_string_pretty(self)?;
-        std::fs::write(path, content)?;
-        Ok(())
-    }
-
-    /// Add a new server configuration
     pub fn add_server(&mut self, id: String, config: ServerConfig) {
         self.servers.insert(id, config);
     }
 
-    /// Remove a server configuration
     pub fn remove_server(&mut self, id: &str) -> Option<ServerConfig> {
         self.servers.remove(id)
     }
 
-    /// Get a server configuration by ID
     pub fn get_server(&self, id: &str) -> Option<&ServerConfig> {
         self.servers.get(id)
     }

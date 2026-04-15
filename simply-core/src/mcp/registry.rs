@@ -123,12 +123,6 @@ impl McpRegistry {
         }
     }
 
-    /// Load configuration and create a new registry
-    pub fn load() -> Result<Self> {
-        let config = McpConfig::load()?;
-        Ok(Self::new(config))
-    }
-
     /// Get the current configuration
     pub fn config(&self) -> &McpConfig {
         &self.config
@@ -268,11 +262,6 @@ impl McpRegistry {
     pub async fn remove_server(&mut self, id: &str) -> Result<Option<ServerConfig>> {
         self.disconnect(id).await?;
         Ok(self.config.remove_server(id))
-    }
-
-    /// Save the current configuration
-    pub fn save_config(&self) -> Result<()> {
-        self.config.save()
     }
 
     /// Get all connected servers

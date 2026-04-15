@@ -32,10 +32,9 @@ impl McpService {
     pub async fn start(
         config: McpServiceConfig,
     ) -> anyhow::Result<Self> {
-        // Load registry
-        let registry = Arc::new(Mutex::new(
-            McpRegistry::load().unwrap_or_else(|_| McpRegistry::new(Default::default())),
-        ));
+        // Load registry from config file
+        let mcp_config = crate::mcp_config::load_mcp_config();
+        let registry = Arc::new(Mutex::new(McpRegistry::new(mcp_config)));
 
         // Start OAuth callback server
         let oauth = OAuthService::start(Arc::clone(&registry), config.oauth_callback_port).await?;
@@ -152,6 +151,9 @@ impl McpApi for McpService {
             name: request.name,
             url: request.url,
             auth,
+            oauth_provider: None,
+            client_id: request.client_id,
+            client_secret: request.client_secret,
             auth_token: None,
             auto_connect: true,
             auto_retry: true,
@@ -159,7 +161,7 @@ impl McpApi for McpService {
         };
         let mut registry = self.registry.lock().await;
         registry.add_server(request.id.clone(), config);
-        registry.save_config()?;
+        crate::mcp_config::save_mcp_config(registry.config())?;
         Ok(())
     }
 
@@ -169,7 +171,7 @@ impl McpApi for McpService {
             anyhow::bail!("cannot remove ephemeral server '{server_id}' — it is managed by its host process");
         }
         registry.remove_server(server_id).await?;
-        registry.save_config()?;
+        crate::mcp_config::save_mcp_config(registry.config())?;
         Ok(())
     }
 
@@ -229,7 +231,7 @@ impl McpApi for McpService {
                 config.auto_retry = auto_retry;
             }
         }
-        registry.save_config()?;
+        crate::mcp_config::save_mcp_config(registry.config())?;
         Ok(())
     }
 

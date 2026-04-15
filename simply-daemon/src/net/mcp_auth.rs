@@ -11,10 +11,9 @@ use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
-use simply_core::mcp::McpConfig;
 use simply_core::storage::ids::UserId;
-use simply_core::AuthMethod;
 
+use crate::oauth_providers::resolve_server_auth;
 use crate::token_store::{McpUserToken, TransientTokenStore};
 
 /// Shared state for MCP auth routes.
@@ -51,31 +50,22 @@ pub async fn auth_initiate(
     Path(server_id): Path<String>,
     Query(query): Query<AuthInitQuery>,
 ) -> Response {
-    let mcp_config = match McpConfig::load() {
-        Ok(c) => c,
-        Err(e) => return Html(format!("Failed to load MCP config: {e}")).into_response(),
-    };
-
+    let mcp_config = crate::mcp_config::load_mcp_config();
     let server = match mcp_config.get_server(&server_id) {
         Some(s) => s,
         None => return Html(format!("Unknown MCP server: {server_id}")).into_response(),
     };
 
-    let (client_id, authorization_url, scopes) = match &server.auth {
-        AuthMethod::OAuth {
-            client_id,
-            authorization_url,
-            scopes,
-            ..
-        } => {
-            let auth_url = authorization_url.as_deref().unwrap_or_default();
-            if client_id.is_empty() || auth_url.is_empty() {
-                return Html("OAuth not configured for this server. Set client_id and authorization_url in mcp.toml.").into_response();
-            }
-            (client_id.clone(), auth_url.to_string(), scopes.clone())
-        }
-        _ => return Html("This MCP server does not use OAuth.").into_response(),
+    let oauth = match resolve_server_auth(server) {
+        Some(o) => o,
+        None => return Html(format!(
+            "OAuth not configured for server '{server_id}'. Set oauth_provider + client_id in mcp.toml."
+        )).into_response(),
     };
+
+    let client_id = oauth.client_id;
+    let authorization_url = oauth.authorization_url;
+    let scopes = oauth.scopes;
 
     let oauth_state = OAuthState {
         user_id: query.user_id,
@@ -122,33 +112,20 @@ pub async fn auth_callback(
         Err(_) => return auth_error_page("Invalid state parameter"),
     };
 
-    // Look up the server's OAuth config for token exchange
-    let mcp_config = match McpConfig::load() {
-        Ok(c) => c,
-        Err(e) => return auth_error_page(&format!("Failed to load MCP config: {e}")),
-    };
-
+    // Look up OAuth config for token exchange
+    let mcp_config = crate::mcp_config::load_mcp_config();
     let server = match mcp_config.get_server(&oauth_state.server_id) {
         Some(s) => s,
         None => return auth_error_page(&format!("Unknown server: {}", oauth_state.server_id)),
     };
-
-    let (client_id, client_secret, token_url) = match &server.auth {
-        AuthMethod::OAuth {
-            client_id,
-            client_secret,
-            token_url,
-            ..
-        } => {
-            let tok_url = token_url.as_deref().unwrap_or_default();
-            (client_id.clone(), client_secret.clone(), tok_url.to_string())
-        }
-        _ => return auth_error_page("Server OAuth config missing"),
+    let oauth = match resolve_server_auth(server) {
+        Some(o) => o,
+        None => return auth_error_page(&format!("OAuth not configured for server: {}", oauth_state.server_id)),
     };
 
-    if token_url.is_empty() {
-        return auth_error_page("token_url not configured for this server");
-    }
+    let client_id = oauth.client_id;
+    let client_secret = oauth.client_secret;
+    let token_url = oauth.token_url;
 
     // Exchange code for token
     let redirect_uri = format!("{}/auth/mcp/callback", state.public_url);
