@@ -46,6 +46,7 @@ Voice pipeline for desktop and Discord.
 - Lumina Stage 3.5 verification (Noema using Discord tools through daemon)
 - Simplify chat storage: chat messages currently go through content blocks (immutable text with origin tracking), but chat messages are never re-referenced, forked, or organized — the indirection buys little. Consider storing chat turn text inline in the turns/messages table instead, removing the content block indirection for chat. Doesn't affect documents, which genuinely benefit from the content block model.
 - Frontmatter-aware search filtering: extend SearchApi to filter by arbitrary frontmatter key-value conditions (e.g. `tags contains "urgent"`, `due < 2026-05-01`). Needs a well-defined filter syntax and efficient query strategy (parse YAML only on narrowed result sets after type/user pre-filtering).
+- Split `simply-daemon` into `simply-daemon-api` (lightweight: API traits, types, RemoteDaemon, DaemonSession, WS client) and `simply-daemon` (heavy: EmbeddedDaemon, services, storage, LLM, voice, embeddings). Lumina and Noema would depend only on `simply-daemon-api` for much faster builds when running against a remote daemon.
 
 ---
 
