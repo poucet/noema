@@ -104,6 +104,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
 
     let mut app = Router::new()
         .route("/admin/api/connections", get(admin_connections))
+        .route("/admin/api/routes", get(admin_api_routes))
         .route("/ws", get(ws_upgrade_handler))
         .merge(auth_routes)
         .merge(mcp_auth_routes)
@@ -222,6 +223,68 @@ fn find_admin_dist() -> Option<std::path::PathBuf> {
 
 async fn admin_connections(State(state): State<AppState>) -> Json<Vec<crate::net::server::ConnectionInfo>> {
     Json(state.tracker.list().await)
+}
+
+#[derive(serde::Serialize)]
+struct RouteInfo {
+    method: String,
+    path: String,
+    name: String,
+    group: String,
+    description: Option<String>,
+    schema: Option<serde_json::Value>,
+}
+
+async fn admin_api_routes(State(state): State<AppState>) -> Json<Vec<RouteInfo>> {
+    let metas = state.rest_dispatcher.route_metas();
+    let mut routes: Vec<RouteInfo> = metas
+        .iter()
+        .map(|m| {
+            let method = match m.kind {
+                simply_rpc::RouteKind::Rest(hm) => match hm {
+                    HttpMethod::Get => "GET",
+                    HttpMethod::Post => "POST",
+                    HttpMethod::Put => "PUT",
+                    HttpMethod::Delete => "DELETE",
+                },
+                simply_rpc::RouteKind::Stream => "STREAM",
+            };
+            let group = m.method_name.split('.').next().unwrap_or("other").to_string();
+            let schema = (m.tool_schema)()
+                .and_then(|s| serde_json::to_value(s).ok());
+            RouteInfo {
+                method: method.to_string(),
+                path: format!("/api{}", m.path_template),
+                name: m.method_name.to_string(),
+                group,
+                description: m.description.map(|s| s.to_string()),
+                schema,
+            }
+        })
+        .collect();
+
+    for (method, path, name, desc) in [
+        ("GET", "/admin/api/setup-status", "admin.setup_status", "Check setup status"),
+        ("GET", "/admin/api/settings", "admin.get_settings", "Get settings"),
+        ("PUT", "/admin/api/settings", "admin.update_settings", "Update settings"),
+        ("POST", "/admin/api/api-key", "admin.set_api_key", "Set API key"),
+        ("DELETE", "/admin/api/api-key/{provider}", "admin.remove_api_key", "Remove API key"),
+        ("GET", "/admin/api/users", "admin.list_users", "List users"),
+        ("POST", "/admin/api/users", "admin.create_user", "Create user"),
+        ("GET", "/admin/api/connections", "admin.connections", "List connections"),
+        ("GET", "/admin/api/routes", "admin.routes", "List API routes"),
+    ] {
+        routes.push(RouteInfo {
+            method: method.to_string(),
+            path: path.to_string(),
+            name: name.to_string(),
+            group: "admin".to_string(),
+            description: Some(desc.to_string()),
+            schema: None,
+        });
+    }
+
+    Json(routes)
 }
 
 // ---------------------------------------------------------------------------

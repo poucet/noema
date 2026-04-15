@@ -144,6 +144,12 @@ export const sessionApi = (f: Fetch = fetch) => ({
   pushEvent: (event: T.InboundEvent) => json<void>(f, 'POST', '/api/session/event', event),
 });
 
+// UserApi
+export const userApi = (f: Fetch = fetch) => ({
+  /** Resolve an external identity to a daemon user. Creates a new user if one doesn't exist for this identity. The external_id is an opaque string (e.g. "discord:123456789"). */
+  resolveOrCreateUser: (externalId: string) => json<T.UserIdentity>(f, 'POST', `/api/user/resolve/${externalId}`),
+});
+
 // VoiceApi
 export const voiceApi = (f: Fetch = fetch) => ({
   /** List available voice providers. */

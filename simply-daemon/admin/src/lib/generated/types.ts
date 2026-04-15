@@ -188,6 +188,12 @@ export interface ConversationInfo {
   createdAt: number;
 }
 
+/** Resolved user identity. */
+export interface UserIdentity {
+  userId: string;
+  email: string | null;
+}
+
 /** Info about an available voice provider. */
 export interface VoiceProviderInfo {
   id: string;
