@@ -22,6 +22,11 @@ impl OllamaProvider {
             base_url: base_url.to_string(),
         }
     }
+
+    /// Create an embedding provider using this provider's client and base URL.
+    pub fn create_embedding_provider(&self, model: &str) -> OllamaEmbeddingProvider {
+        OllamaEmbeddingProvider::new(self.client.clone(), self.base_url.clone(), model.to_string())
+    }
 }
 
 #[async_trait]

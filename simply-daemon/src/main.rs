@@ -41,7 +41,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Open storage and create daemon
     let stores = Arc::new(SqliteStores::open()?);
-    let daemon = EmbeddedDaemon::new(Arc::clone(&stores)).await?;
+    let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
+    let daemon = EmbeddedDaemon::new(Arc::clone(&stores), vector_store).await?;
 
     // Kill channel — shared with CoreService so /daemon/kill actually works
     let (kill_tx, mut kill_rx) = mpsc::channel(1);
@@ -60,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         .register(<dyn OAuthApi>::service(daemon.oauth_service()))
         .register(<dyn ModelApi>::service(daemon.model_service()))
         .register(<dyn VoiceApi>::service(daemon.voice_service()))
+        .register(<dyn SearchApi>::service(daemon.search_service()))
         .register(<dyn CoreApi>::service(core_svc)));
 
     let tracker = net::server::ConnectionTracker::new();

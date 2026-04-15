@@ -18,7 +18,7 @@ config = { workspace = true }
 simply-core = { workspace = true, features = ["sqlite"] }
 simply-rpc = { workspace = true }
 simply-voice = { workspace = true, features = ["whisper", "voxtral", "gemini", "elevenlabs"] }
-llm = { workspace = true }
+llm = { workspace = true, features = ["local-embedding"] }
 
 # Async runtime
 tokio = { workspace = true, features = ["full"] }

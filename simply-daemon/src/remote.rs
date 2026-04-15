@@ -26,6 +26,7 @@ pub struct RemoteDaemon {
     model: RemoteModelApi,
     voice: RemoteVoiceApi,
     core: RemoteCoreApi,
+    search: RemoteSearchApi,
 }
 
 impl RemoteDaemon {
@@ -42,7 +43,8 @@ impl RemoteDaemon {
             oauth: RemoteOAuthApi::new(rpc.clone()),
             model: RemoteModelApi::new(rpc.clone()),
             voice: RemoteVoiceApi::new(rpc.clone()),
-            core: RemoteCoreApi::new(rpc),
+            core: RemoteCoreApi::new(rpc.clone()),
+            search: RemoteSearchApi::new(rpc),
             conn,
         }))
     }
@@ -66,6 +68,7 @@ impl Daemon for RemoteDaemon {
     fn asset(&self) -> &dyn AssetApi { &self.asset }
     fn voice(&self) -> &dyn VoiceApi { &self.voice }
     fn core(&self) -> &dyn CoreApi { &self.core }
+    fn search(&self) -> &dyn SearchApi { &self.search }
     fn tools(&self) -> &dyn simply_core::ToolService { &self.mcp }
 }
 

@@ -54,6 +54,7 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     document: Arc<DocumentService<S>>,
     voice: Arc<VoiceService>,
     core: Arc<CoreService>,
+    search: Arc<SearchService<S>>,
     tools: Arc<CompositeToolService>,
 }
 
@@ -63,6 +64,7 @@ where
 {
     pub async fn new<T: Stores<S> + 'static>(
         stores: Arc<T>,
+        vector_store: Arc<dyn simply_core::embedding::VectorStore>,
     ) -> anyhow::Result<Arc<Self>>
     where
         S::User: simply_core::storage::traits::UserStore,
@@ -142,8 +144,45 @@ where
         }
 
         let voice = Arc::new(voice_service);
-        let document = Arc::new(DocumentService::new(Arc::clone(&stores), user_id.clone()));
+
+        // -- Embedding / RAG stack -----------------------------------------------
+        let embedding_config = &settings.embedding;
+        let embedding_provider: Arc<dyn llm::EmbeddingProvider> = Self::create_embedding_provider(
+            &embedding_config, &settings,
+        )?;
+        let chunker: Arc<dyn simply_core::embedding::Chunker> = Arc::new(
+            simply_core::embedding::RecursiveCharacterChunker::new(
+                embedding_config.chunk_size,
+                embedding_config.chunk_overlap,
+            ),
+        );
+        let vector_store: Arc<dyn simply_core::embedding::VectorStore> = vector_store;
+        let embedding_queue = Arc::new(
+            crate::embedding_queue::ChannelEmbeddingQueue::new(
+                Arc::clone(&embedding_provider),
+                Arc::clone(&chunker),
+                Arc::clone(&vector_store),
+            ),
+        );
+        tracing::info!(
+            provider = embedding_config.provider.as_str(),
+            model = embedding_config.model.as_str(),
+            "embedding provider initialized"
+        );
+
+        let document = Arc::new(
+            DocumentService::new(Arc::clone(&stores), user_id.clone())
+                .with_embedding_queue(embedding_queue.clone() as Arc<dyn crate::embedding_queue::EmbeddingQueue>)
+        );
         let core = Arc::new(CoreService::embedded());
+
+        let search = Arc::new(SearchService::new(
+            embedding_provider,
+            vector_store,
+            embedding_queue,
+            Arc::clone(&stores),
+            user_id.clone(),
+        ));
 
         let tools = Arc::new(CompositeToolService::new(
             DaemonToolService::new()
@@ -152,7 +191,8 @@ where
                 .register(<dyn ModelApi>::service(model.clone()))
                 .register(<dyn CoreApi>::service(core.clone()))
                 .register(<dyn McpApi>::service(mcp.clone()))
-                .register(<dyn VoiceApi>::service(voice.clone())),
+                .register(<dyn VoiceApi>::service(voice.clone()))
+                .register(<dyn SearchApi>::service(search.clone())),
             McpToolRegistry::new(Arc::clone(mcp.registry())),
             Arc::clone(&mcp),
         ));
@@ -168,6 +208,7 @@ where
             document,
             voice,
             core,
+            search,
             tools,
         });
 
@@ -185,12 +226,39 @@ where
     pub fn document_service(&self) -> Arc<DocumentService<S>> { Arc::clone(&self.document) }
     pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
     pub fn core_service(&self) -> Arc<CoreService> { Arc::clone(&self.core) }
+    pub fn search_service(&self) -> Arc<SearchService<S>> { Arc::clone(&self.search) }
 
     pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
     pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
     pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> { &self.coordinator }
 
     // -- Internal helpers -----------------------------------------------------
+
+    fn create_embedding_provider(
+        embedding_config: &config::EmbeddingConfig,
+        settings: &config::Settings,
+    ) -> anyhow::Result<Arc<dyn llm::EmbeddingProvider>> {
+        match embedding_config.provider.as_str() {
+            "local" => {
+                let provider = llm::providers::LocalEmbeddingProvider::new(&embedding_config.model)?;
+                Ok(Arc::new(provider))
+            }
+            "ollama" => {
+                let base_url = std::env::var("OLLAMA_BASE_URL")
+                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
+                let provider = llm::providers::OllamaProvider::default();
+                Ok(Arc::new(provider.create_embedding_provider(&embedding_config.model)))
+            }
+            "mistral" => {
+                let api_key = settings.get_api_key("mistral")
+                    .or_else(|| std::env::var("MISTRAL_API_KEY").ok())
+                    .ok_or_else(|| anyhow::anyhow!("mistral API key not configured"))?;
+                let provider = llm::providers::MistralProvider::default(&api_key);
+                Ok(Arc::new(provider.create_embedding_provider(&embedding_config.model)))
+            }
+            other => anyhow::bail!("unknown embedding provider: {other}"),
+        }
+    }
 
     fn spawn_session_reaper(daemon: Arc<Self>) {
         tokio::spawn(async move {
@@ -506,5 +574,6 @@ where S::Document: DocumentResolver,
     fn asset(&self) -> &dyn AssetApi { &*self.asset }
     fn voice(&self) -> &dyn VoiceApi { &*self.voice }
     fn core(&self) -> &dyn CoreApi { &*self.core }
+    fn search(&self) -> &dyn SearchApi { &*self.search }
     fn tools(&self) -> &dyn ToolService { &*self.tools }
 }
