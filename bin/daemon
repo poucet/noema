@@ -33,9 +33,11 @@ start_astro_dev() {
   ASTRO_PID=$!
 }
 
+GDOCS_PORT="${GDOCS_PORT:-9877}"
+
 start_gdocs_mcp() {
-  log "Starting Google Docs MCP server..."
-  cd "$REPO_ROOT" && cargo run -p noema-mcp-gdocs &
+  log "Starting Google Docs MCP server (port $GDOCS_PORT)..."
+  cd "$REPO_ROOT" && cargo run -p noema-mcp-gdocs -- --port "$GDOCS_PORT" &
   GDOCS_PID=$!
 }
 
