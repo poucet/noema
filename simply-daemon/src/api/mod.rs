@@ -8,6 +8,7 @@
 //! - [`OAuthApi`] — OAuth flow management
 //! - [`ModelApi`] — model listing and management
 //! - [`VoiceApi`] — voice pipeline
+//! - [`SearchApi`] — semantic search over embedded documents
 
 #[macro_use] mod session;
 #[macro_use] mod conversation;

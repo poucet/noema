@@ -244,9 +244,10 @@ where
                 Ok(Arc::new(provider))
             }
             "ollama" => {
-                let base_url = std::env::var("OLLAMA_BASE_URL")
-                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
-                let provider = llm::providers::OllamaProvider::default();
+                let provider = match std::env::var("OLLAMA_BASE_URL") {
+                    Ok(base_url) => llm::providers::OllamaProvider::new(&base_url),
+                    Err(_) => llm::providers::OllamaProvider::default(),
+                };
                 Ok(Arc::new(provider.create_embedding_provider(&embedding_config.model)))
             }
             "mistral" => {

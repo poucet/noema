@@ -11,11 +11,15 @@ use crate::storage::ids::{ChunkId, DocumentId, TabId, UserId};
 /// Register sqlite-vec as an auto-extension. Call once before opening any connections.
 pub fn register_sqlite_vec() {
     unsafe {
-        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
-            sqlite_vec::sqlite3_vec_init as *const (),
-        )));
+        rusqlite::ffi::sqlite3_auto_extension(Some(
+            std::mem::transmute(sqlite_vec::sqlite3_vec_init as *const ())
+        ));
     }
 }
+
+// Note: if sqlite_vec::sqlite3_vec_init doesn't exist, the crate may export
+// it differently. Check the sqlite-vec crate docs for the exact symbol name.
+// The pattern above follows https://alexgarcia.xyz/sqlite-vec/rust.html
 
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 

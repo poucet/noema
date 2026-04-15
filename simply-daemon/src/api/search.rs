@@ -35,7 +35,7 @@ pub trait SearchApi: Send + Sync {
     async fn search(&self, query: &str, document_type: Option<&str>, top_k: Option<usize>) -> anyhow::Result<Vec<SearchHit>>;
 
     /// Re-embed all documents. Runs in the background; returns immediately.
-    #[rpc(post = "/search/reindex")]
+    #[rpc(post = "/search/reindex", no_tool)]
     async fn reindex(&self) -> anyhow::Result<ReindexStatus>;
 
     /// Get embedding queue status.

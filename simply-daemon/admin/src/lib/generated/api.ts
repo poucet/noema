@@ -122,6 +122,16 @@ export const oAuthApi = (f: Fetch = fetch) => ({
   resolveOauthState: (state: string) => json<string | null>(f, 'GET', `/api/oauth/${state}`),
 });
 
+// SearchApi
+export const searchApi = (f: Fetch = fetch) => ({
+  /** Semantic search over embedded documents. */
+  search: (query: string, documentType: string | null, topK: number | null) => json<T.SearchHit[]>(f, 'POST', '/api/search', { query, documentType, topK }),
+  /** Re-embed all documents. Runs in the background; returns immediately. */
+  reindex: () => json<T.ReindexStatus>(f, 'POST', '/api/search/reindex'),
+  /** Get embedding queue status. */
+  queueStatus: () => json<T.EmbeddingQueueStatus>(f, 'GET', '/api/search/status'),
+});
+
 // SessionApi
 export const sessionApi = (f: Fetch = fetch) => ({
   listSessions: () => json<T.SessionInfo[]>(f, 'GET', '/api/session'),

@@ -122,6 +122,23 @@ export interface OAuthFlowInfo {
   state: string;
 }
 
+/** A search result with document context. */
+export interface SearchHit {
+  documentId: string;
+  documentTitle: string;
+  documentType: string;
+  tabId: string;
+  chunkText: string;
+  chunkIndex: number;
+  score: number;
+}
+
+/** Status of a reindex operation. */
+export interface ReindexStatus {
+  message: string;
+  tabsQueued: number;
+}
+
 /** Options when creating a new session. */
 export interface CreateSessionOptions {
   persistence: T.Persistence | null;

@@ -42,20 +42,10 @@ impl LocalEmbeddingProvider {
 impl EmbeddingProvider for LocalEmbeddingProvider {
     async fn embed(&self, texts: &[&str]) -> Result<Vec<Embedding>> {
         let texts: Vec<String> = texts.iter().map(|s| s.to_string()).collect();
-        let model = &self.model;
 
-        // fastembed is sync, so run in a blocking thread
-        let vectors = tokio::task::spawn_blocking({
-            let texts = texts.clone();
-            let model = model as *const Mutex<TextEmbedding>;
-            // SAFETY: model lives as long as self, and we hold the Mutex
-            move || {
-                let model = unsafe { &*model };
-                let model = model.lock().unwrap();
-                model.embed(texts, None)
-            }
-        })
-        .await??;
+        // fastembed ONNX inference is fast (~10-30ms per chunk), run synchronously
+        let model = self.model.lock().unwrap();
+        let vectors = model.embed(texts, None)?;
 
         Ok(vectors
             .into_iter()

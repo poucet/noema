@@ -6,7 +6,7 @@ pub mod settings;
 pub use crypto::{decrypt_string, encrypt_string};
 pub use lumina::{LuminaConfig, VoiceConfig};
 pub use paths::PathManager;
-pub use settings::{Settings, DEFAULT_DAEMON_PORT};
+pub use settings::{EmbeddingConfig, Settings, DEFAULT_DAEMON_PORT};
 
 /// Load environment variables from .env files.
 /// First loads from ~/.env (home directory), then from ./.env (project directory).
