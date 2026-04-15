@@ -200,7 +200,7 @@ impl ServiceRouter {
         params: Value,
     ) -> Option<RpcResult> {
         for svc in &self.services {
-            if let Some(result) = svc.rest_dispatch_by_name(method_name, ctx.clone(), params.clone()).await {
+            if let Some(result) = svc.rest_dispatch_by_name(method_name, ctx, params.clone()).await {
                 return Some(result);
             }
         }
@@ -217,7 +217,7 @@ impl ServiceRouter {
         write_tx: tokio::sync::mpsc::Sender<String>,
     ) -> Option<WsDispatchResult> {
         for svc in &self.services {
-            if let Some(result) = svc.ws_dispatch_by_name(method_name, ctx.clone(), params.clone(), write_tx.clone()).await {
+            if let Some(result) = svc.ws_dispatch_by_name(method_name, ctx, params.clone(), write_tx.clone()).await {
                 return Some(result);
             }
         }
