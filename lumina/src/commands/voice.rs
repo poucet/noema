@@ -65,12 +65,12 @@ mod voice {
 
         let session = simply_daemon::DaemonSession::create(
             voice_mgr.daemon().clone(),
+            RequestContext::anonymous(),
             CreateSessionOptions {
                 persistence: Some(Persistence::Ephemeral),
                 system_prompt: Some(system_prompt),
                 model_id: None,
                 seed: history,
-                user_id: None,
             },
         ).await?;
 

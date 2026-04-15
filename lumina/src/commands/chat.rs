@@ -90,8 +90,8 @@ impl super::SlashCommand for Chat {
 
         tracing::debug!(partial = %partial, "model autocomplete");
 
-        let anon = simply_rpc::RequestContext::anonymous();
-        let models = lx.daemon.model().list_models(&anon).await.unwrap_or_default();
+        let ctx = lx.ctx_for(ac.user.id.get()).await;
+        let models = lx.daemon.model().list_models(&ctx).await.unwrap_or_default();
         let choices: Vec<AutocompleteChoice> = models
             .into_iter()
             .filter(|m| m.definition.capabilities.contains(&simply_daemon::api::ModelCapability::Text))
@@ -240,8 +240,8 @@ async fn cmd_model(
     match model_id {
         Some(id) => {
             // Validate the model exists and supports text/chat
-            let anon = simply_rpc::RequestContext::anonymous();
-            let models = lx.daemon.model().list_models(&anon).await.unwrap_or_default();
+            let ctx = lx.ctx_for(cmd.user.id.get()).await;
+            let models = lx.daemon.model().list_models(&ctx).await.unwrap_or_default();
             let model = models.iter().find(|m| m.id.to_string() == id);
             match model {
                 None => {

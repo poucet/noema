@@ -107,14 +107,15 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     // 3. Create session with seed and resolved model
     let model_id = resolve_model(lx, msg).await;
     tracing::debug!(seed_count = history.len(), "creating session");
+    let session_ctx = lx.ctx_for(msg.author.id.get()).await;
     let mut session = simply_daemon::DaemonSession::create(
         lx.daemon.clone(),
+        session_ctx,
         CreateSessionOptions {
             persistence: Some(Persistence::Ephemeral),
             system_prompt: Some(system_prompt),
             model_id,
             seed: history,
-            user_id: None,
         },
     )
     .await?;
@@ -380,8 +381,8 @@ async fn resolve_model(lx: &LuminaContext, msg: &Message) -> Option<String> {
     };
 
     // Validate the model exists
-    let anon = RequestContext::anonymous();
-    if let Ok(models) = lx.daemon.model().list_models(&anon).await {
+    let ctx = lx.ctx_for(msg.author.id.get()).await;
+    if let Ok(models) = lx.daemon.model().list_models(&ctx).await {
         let exists = models.iter().any(|m| m.id.to_string() == model_id);
         if exists {
             return Some(model_id);

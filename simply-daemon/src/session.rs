@@ -5,39 +5,29 @@
 
 use std::sync::Arc;
 
+use simply_rpc::RequestContext;
 use tokio::sync::broadcast;
 
 use crate::api::*;
 
 /// A client-side session handle. Wraps create/send/close lifecycle.
-///
-/// ```ignore
-/// let session = DaemonSession::create(daemon.clone(), opts).await?;
-/// session.send(UserMessage { content: vec![...] }).await?;
-/// while let Ok(event) = session.events().recv().await {
-///     match event {
-///         DaemonEvent::TextDelta(t) => { /* ... */ }
-///         DaemonEvent::TurnComplete => break,
-///         _ => {}
-///     }
-/// }
-/// // session is closed on drop (or call session.close().await)
-/// ```
 pub struct DaemonSession {
     daemon: Arc<dyn Daemon>,
+    ctx: RequestContext,
     pub info: SessionInfo,
     events: broadcast::Receiver<DaemonEvent>,
     closed: bool,
 }
 
 impl DaemonSession {
-    /// Create a new session.
+    /// Create a new session with a request context.
     pub async fn create(
         daemon: Arc<dyn Daemon>,
+        ctx: RequestContext,
         options: CreateSessionOptions,
     ) -> anyhow::Result<Self> {
-        let (info, events) = daemon.session().create_session(options).await?;
-        Ok(Self { daemon, info, events, closed: false })
+        let (info, events) = daemon.session().create_session(&ctx, options).await?;
+        Ok(Self { daemon, ctx, info, events, closed: false })
     }
 
     /// Session ID.
@@ -52,7 +42,7 @@ impl DaemonSession {
 
     /// Send a user message. Events arrive via `recv()`.
     pub async fn send(&self, message: UserMessage) -> anyhow::Result<()> {
-        self.daemon.session().send_message(&self.info.id, message).await
+        self.daemon.session().send_message(&self.ctx, &self.info.id, message).await
     }
 
     /// Receive the next event from this session's stream.
@@ -68,7 +58,7 @@ impl DaemonSession {
     /// Explicitly close the session.
     pub async fn close(mut self) -> anyhow::Result<()> {
         self.closed = true;
-        self.daemon.session().close_session(&self.info.id).await
+        self.daemon.session().close_session(&self.ctx, &self.info.id).await
     }
 }
 
@@ -76,9 +66,10 @@ impl Drop for DaemonSession {
     fn drop(&mut self) {
         if !self.closed {
             let daemon = Arc::clone(&self.daemon);
+            let ctx = self.ctx.clone();
             let session_id = self.info.id.clone();
             tokio::spawn(async move {
-                let _ = daemon.session().close_session(&session_id).await;
+                let _ = daemon.session().close_session(&ctx, &session_id).await;
             });
         }
     }

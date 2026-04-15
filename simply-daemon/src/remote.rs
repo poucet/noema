@@ -79,7 +79,8 @@ impl Daemon for RemoteDaemon {
 #[async_trait]
 impl simply_core::ToolService for RemoteMcpApi {
     async fn get_definitions(&self) -> Vec<llm::ToolDefinition> {
-        McpApi::list_all_tools(self).await
+        let anon = simply_rpc::RequestContext::anonymous();
+        McpApi::list_all_tools(self, &anon).await
             .unwrap_or_default()
             .into_iter()
             .map(|t| llm::ToolDefinition {
@@ -97,8 +98,10 @@ impl simply_core::ToolService for RemoteMcpApi {
         name: &str,
         arguments: serde_json::Value,
     ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
+        let anon = simply_rpc::RequestContext::anonymous();
         let result = McpApi::call_tool_direct(
             self,
+            &anon,
             CallToolRequestParam::new(name.to_string())
                 .with_arguments(arguments.as_object().cloned().unwrap_or_default()),
         ).await?;

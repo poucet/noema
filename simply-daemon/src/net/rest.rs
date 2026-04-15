@@ -477,7 +477,7 @@ async fn handle_stream_ws(
         let _ = ws_sink.close().await;
     });
 
-    let result = dispatcher.ws_dispatch(&path, serde_json::Value::Null, write_tx.clone()).await;
+    let result = dispatcher.ws_dispatch(&path, &ctx, serde_json::Value::Null, write_tx.clone()).await;
 
     let input_sink = match result {
         Some(dr) => {
@@ -550,6 +550,12 @@ async fn rest_handler(
         _ => return (StatusCode::METHOD_NOT_ALLOWED, "method not allowed").into_response(),
     };
 
+    // Extract context header before consuming the body
+    let ctx_header = req.headers()
+        .get("X-Request-Context")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| serde_json::from_str::<simply_rpc::RequestContext>(s).ok());
+
     // Read raw body for POST/PUT
     let raw_bytes = match http_method {
         HttpMethod::Post | HttpMethod::Put => {
@@ -574,11 +580,7 @@ async fn rest_handler(
 
     // Build RequestContext: prefer X-Request-Context header (from RemoteDaemon client),
     // fall back to auth middleware's user resolution
-    let ctx = req.headers()
-        .get("X-Request-Context")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| serde_json::from_str::<simply_rpc::RequestContext>(s).ok())
-        .unwrap_or_else(|| match request_user.user_id() {
+    let ctx = ctx_header.unwrap_or_else(|| match request_user.user_id() {
             Some(uid) => simply_rpc::RequestContext::with_scope(
                 simply_rpc::Scope::user(uid.as_str()),
             ),

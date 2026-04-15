@@ -17,8 +17,8 @@ mod model {
         cmd: &CommandInteraction,
         #[describe("Filter by provider name")] provider: Option<String>,
     ) -> anyhow::Result<()> {
-        let anon = RequestContext::anonymous();
-        let models = lx.daemon.model().list_models(&anon).await?;
+        let ctx = lx.ctx_for(cmd.user.id.get()).await;
+        let models = lx.daemon.model().list_models(&ctx).await?;
 
         let filtered: Vec<_> = match &provider {
             Some(p) => {
@@ -87,8 +87,8 @@ mod model {
         lx: &LuminaContext,
         cmd: &CommandInteraction,
     ) -> anyhow::Result<()> {
-        let anon = RequestContext::anonymous();
-        let providers = lx.daemon.model().list_providers(&anon).await;
+        let ctx = lx.ctx_for(cmd.user.id.get()).await;
+        let providers = lx.daemon.model().list_providers(&ctx).await;
         if providers.is_empty() {
             return reply_ephemeral(lx, cmd, "No providers configured").await;
         }

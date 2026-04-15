@@ -582,7 +582,7 @@ where
         Ok(result)
     }
 
-    async fn delete_conversation(&self, _ctx: &simply_rpc::RequestContext, conversation_id: &ConversationId) -> anyhow::Result<()> {
+    async fn delete_conversation(&self, ctx: &simply_rpc::RequestContext, conversation_id: &ConversationId) -> anyhow::Result<()> {
         use simply_core::storage::EntityStore;
         let session_id = {
             let sessions = self.sessions.lock().await;
@@ -594,7 +594,7 @@ where
                 .map(|(sid, _)| sid.clone())
         };
         if let Some(sid) = session_id {
-            let _ = self.close_session(&sid).await;
+            let _ = self.close_session(ctx, &sid).await;
         }
         self.stores.entity().delete_entity(conversation_id).await
     }

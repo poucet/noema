@@ -40,14 +40,14 @@ fn value_to_tool_result(value: serde_json::Value, binary_response: bool) -> Vec<
 /// Create a scoped instance via `with_context()` for per-user sessions.
 pub struct DaemonToolService {
     services: Vec<Arc<dyn RestService>>,
-    ctx: &simply_rpc::RequestContext,
+    ctx: simply_rpc::RequestContext,
 }
 
 impl DaemonToolService {
     pub fn new() -> Self {
         Self {
             services: Vec::new(),
-            ctx: &simply_rpc::RequestContext::default(),
+            ctx: simply_rpc::RequestContext::default(),
         }
     }
 
@@ -58,7 +58,7 @@ impl DaemonToolService {
 
     /// Create a new DaemonToolService with the same services but a different context.
     /// Used to scope daemon tools to a specific user's session.
-    pub fn with_context(&self, ctx: &simply_rpc::RequestContext) -> Self {
+    pub fn with_context(&self, ctx: simply_rpc::RequestContext) -> Self {
         Self {
             services: self.services.clone(),
             ctx,
