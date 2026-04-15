@@ -93,7 +93,7 @@ impl UserToolServiceCache {
         let registry = self.mcp_registry.lock().await;
         let mut ids = Vec::new();
 
-        for (id, server) in registry.connected_servers() {
+        for (id, _server) in registry.connected_servers() {
             let config = registry.config().get_server(id)
                 .or_else(|| registry.get_ephemeral(id));
 
@@ -174,13 +174,11 @@ struct McpCaller {
 impl McpCaller {
     fn from_connected(connected: &simply_core::mcp::ConnectedServer) -> Self {
         let tools = connected.tools.iter().map(|t| {
+            let schema = serde_json::Value::Object((*t.input_schema).clone());
             ToolDefinition {
                 name: t.name.to_string(),
                 description: t.description.as_ref().map(|s| s.to_string()),
-                input_schema: t.input_schema.as_ref()
-                    .map(|s| serde_json::Value::Object((**s).clone()))
-                    .and_then(|v| serde_json::from_value(v).ok())
-                    .unwrap_or_default(),
+                input_schema: serde_json::from_value(schema).unwrap_or_default(),
             }
         }).collect();
         Self {
