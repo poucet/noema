@@ -22,6 +22,7 @@ pub mod storage;
 pub mod token_store;
 pub mod net;
 pub mod tools;
+pub mod user_tools;
 /// Re-exported types for clients.
 pub use api::types as types;
 pub use simply_core::ToolService;

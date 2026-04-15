@@ -49,14 +49,12 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 **Design:** [GOOGLE_DOCS_IMPORT.md](../designs/GOOGLE_DOCS_IMPORT.md)
 
-- 🔄 6.1 `TransientTokenStore`: in-memory `(user_id, server_id) → token` map
-- 🔄 6.2 OAuth flow: `/auth/mcp/{server_id}?user_id=...` → provider → callback → store token
-- 🔄 6.3 Token injection: daemon adds `Authorization` header when calling MCP servers for authed users
-- 🔄 6.4 `auth_required` error response when user has no token for a service
-- 🔄 6.5 Admin config: `public_url` in settings.toml + per-MCP-server OAuth credentials in admin UI
-- 🔄 6.6 `GoogleApi` trait + `GoogleService`: status, list docs, import (extract → store → embed, re-import = update)
-- 🔄 6.7 Lumina `/google auth` + `/google import` (autocomplete + URL) + `/google status`
-- ⬜ 6.8 Admin UI: MCP OAuth config, import button on documents page
+- ✅ 6.1 `TransientTokenStore`: in-memory `(user_id, server_id) → token` map
+- ✅ 6.2 OAuth flow: `/auth/mcp/{server_id}?user_id=...` → provider → callback → store token
+- ⬜ 6.3 Token injection: daemon adds `Authorization` header when calling MCP servers for authed users
+- ⬜ 6.4 `auth_required` error response when user has no token for a service
+- ⬜ 6.5 Lumina `/google auth` + `/google import` (MCP tool call + DocumentApi) + `/google status`
+- ⬜ 6.6 Admin UI: MCP OAuth config in settings page
 
 ---
 

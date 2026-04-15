@@ -16,6 +16,8 @@ pub struct CreateSessionOptions {
     pub model_id: Option<String>,
     #[serde(default)]
     pub seed: Vec<SeedMessage>,
+    /// User ID for per-user tool scoping. If not set, uses the daemon's default user.
+    pub user_id: Option<super::types::UserId>,
 }
 
 /// Information about a session.

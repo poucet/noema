@@ -56,6 +56,7 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     core: Arc<CoreService>,
     search: Arc<SearchService<S>>,
     tools: Arc<CompositeToolService>,
+    user_tools: Arc<crate::user_tools::UserToolServiceCache>,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -65,6 +66,7 @@ where
     pub async fn new<T: Stores<S> + 'static>(
         stores: Arc<T>,
         vector_store: Arc<dyn simply_core::embedding::VectorStore>,
+        token_store: Arc<crate::token_store::TransientTokenStore>,
     ) -> anyhow::Result<Arc<Self>>
     where
         S::User: simply_core::storage::traits::UserStore,
@@ -185,6 +187,17 @@ where
             user_id.clone(),
         ));
 
+        let daemon_tools = Arc::new(
+            DaemonToolService::new()
+                .register(<dyn AssetApi>::service(asset.clone()))
+                .register(<dyn DocumentApi>::service(document.clone()))
+                .register(<dyn ModelApi>::service(model.clone()))
+                .register(<dyn CoreApi>::service(core.clone()))
+                .register(<dyn McpApi>::service(mcp.clone()))
+                .register(<dyn VoiceApi>::service(voice.clone()))
+                .register(<dyn SearchApi>::service(search.clone())),
+        );
+
         let tools = Arc::new(CompositeToolService::new(
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
@@ -196,6 +209,13 @@ where
                 .register(<dyn SearchApi>::service(search.clone())),
             McpToolRegistry::new(Arc::clone(mcp.registry())),
             Arc::clone(&mcp),
+        ));
+
+        // Per-user tool service cache — resolves MCP tools based on user's OAuth tokens
+        let user_tools = Arc::new(crate::user_tools::UserToolServiceCache::new(
+            daemon_tools,
+            token_store,
+            Arc::clone(mcp.registry()),
         ));
 
         let daemon = Arc::new(Self {
@@ -211,6 +231,7 @@ where
             core,
             search,
             tools,
+            user_tools,
         });
 
         Self::spawn_session_reaper(Arc::clone(&daemon));
@@ -438,7 +459,15 @@ where
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
         let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
-        let tools: Arc<dyn ToolService> = self.tools.clone();
+        // Resolve user-scoped tools: user gets daemon tools + MCP servers they've authed with
+        let session_user_id = options.user_id.clone().unwrap_or_else(|| self.user_id.clone());
+        let tools: Arc<dyn ToolService> = match self.user_tools.get(&session_user_id).await {
+            Ok(user_tools) => user_tools,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to build user tools, falling back to global");
+                self.tools.clone()
+            }
+        };
         let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
         let evt_tx = Self::spawn_event_forwarder(&session_id, &broadcast_tx);
 
