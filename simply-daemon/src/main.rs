@@ -69,8 +69,6 @@ async fn main() -> anyhow::Result<()> {
 
     let tracker = net::server::ConnectionTracker::new();
 
-    let token_store = Arc::new(simply_daemon::token_store::TransientTokenStore::new());
-
     let server = net::rest::start(net::rest::ServerConfig {
         rest_dispatcher,
         port,
