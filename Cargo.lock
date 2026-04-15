@@ -4359,7 +4359,6 @@ dependencies = [
  "config",
  "inventory",
  "lumina-macros",
- "noema-mcp-gdocs",
  "rand 0.9.2",
  "rmcp",
  "schemars 1.2.1",
@@ -4523,6 +4522,29 @@ checksum = "8ea1f30cedd69f0a2954655f7188c6a834246d2bcf1e315e2ac40c4b24dc9519"
 dependencies = [
  "cfg-if",
  "rayon",
+]
+
+[[package]]
+name = "mcp-gdocs"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "html2md",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "reqwest 0.12.28",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4753,8 +4775,8 @@ dependencies = [
  "config",
  "dirs",
  "futures",
+ "mcp-gdocs",
  "noema-ext",
- "noema-mcp-gdocs",
  "regex",
  "reqwest 0.12.28",
  "serde",
@@ -4793,29 +4815,6 @@ dependencies = [
  "lopdf",
  "pdf-extract",
  "pdfium-render",
-]
-
-[[package]]
-name = "noema-mcp-gdocs"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "clap",
- "html2md",
- "http",
- "http-body-util",
- "hyper",
- "hyper-util",
- "reqwest 0.12.28",
- "rmcp",
- "serde",
- "serde_json",
- "tokio",
- "tower-service",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

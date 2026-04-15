@@ -1,0 +1,9 @@
+#!/bin/bash
+# gdocs — start the Google Docs MCP server
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+GDOCS_PORT="${GDOCS_PORT:-9877}"
+
+cd "$REPO_ROOT" && exec cargo run -p mcp-gdocs -- --port "$GDOCS_PORT"

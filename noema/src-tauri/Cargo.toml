@@ -41,7 +41,7 @@ simply-voice = { workspace = true }
 noema-ext = { workspace = true }
 simply-daemon = { workspace = true }
 simply-rpc = { workspace = true }
-noema-mcp-gdocs = { workspace = true }
+mcp-gdocs = { workspace = true }
 thiserror = "2.0.17"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

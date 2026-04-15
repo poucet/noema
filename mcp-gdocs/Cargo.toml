@@ -1,8 +1,8 @@
 [package]
-name = "noema-mcp-gdocs"
+name = "mcp-gdocs"
 version.workspace = true
 edition.workspace = true
-description = "Google Docs MCP server for Noema"
+description = "Google Docs MCP server"
 
 [lib]
 name = "noema_mcp_gdocs"

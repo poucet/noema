@@ -9,7 +9,7 @@ use simply_daemon::types::{
     AssetId, DocumentId, RevisionId, TabId, UserId,
     Document, DocumentSource, DocumentStore, DocumentTab, StoredEditable, Stores, UserStore,
 };
-use noema_mcp_gdocs::GoogleDocsClient;
+use mcp_gdocs::GoogleDocsClient;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;

@@ -47,7 +47,7 @@ pub fn init_logging() {
                     // Include all noema crates at debug level
                     // streaming target captures the full request->response lifecycle for debugging
                     let filter = EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("info,noema_ui_lib=debug,simply_core=info,noema_mcp_gdocs=debug,streaming=debug"));
+                        .unwrap_or_else(|_| EnvFilter::new("info,noema_ui_lib=debug,simply_core=info,mcp_gdocs=debug,streaming=debug"));
 
                     let subscriber = tracing_subscriber::registry()
                         .with(filter)
@@ -85,7 +85,7 @@ pub fn init_logging() {
 
 fn init_stderr_logging() {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,noema_ui_lib=debug,simply_core=debug,noema_mcp_gdocs=debug,streaming=debug"));
+        .unwrap_or_else(|_| EnvFilter::new("info,noema_ui_lib=debug,simply_core=debug,mcp_gdocs=debug,streaming=debug"));
 
     let subscriber = tracing_subscriber::registry().with(filter).with(
         fmt::layer()
