@@ -257,6 +257,21 @@ where
                 let provider = llm::providers::MistralProvider::default(&api_key);
                 Ok(Arc::new(provider.create_embedding_provider(&embedding_config.model)))
             }
+            "gemini" => {
+                let api_key = settings.get_api_key("google")
+                    .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+                    .or_else(|| settings.get_api_key("gemini"))
+                    .or_else(|| std::env::var("GEMINI_API_KEY").ok())
+                    .ok_or_else(|| anyhow::anyhow!("google/gemini API key not configured"))?;
+                let provider = llm::providers::GeminiProvider::default(&api_key);
+                Ok(Arc::new(provider.create_embedding_provider(&embedding_config.model)))
+            }
+            "claude" | "voyage" => {
+                let api_key = settings.get_api_key("voyage")
+                    .or_else(|| std::env::var("VOYAGE_API_KEY").ok())
+                    .ok_or_else(|| anyhow::anyhow!("voyage API key not configured (Claude embeddings use Voyage AI)"))?;
+                Ok(Arc::new(llm::providers::VoyageEmbeddingProvider::new(&api_key, embedding_config.model.clone())))
+            }
             other => anyhow::bail!("unknown embedding provider: {other}"),
         }
     }

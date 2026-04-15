@@ -5,8 +5,8 @@ pub(crate) mod mistral;
 pub(crate) mod ollama;
 pub(crate) mod openai;
 
-pub use claude::{ClaudeChatModel, ClaudeProvider};
-pub use gemini::{GeminiChatModel, GeminiProvider};
+pub use claude::{ClaudeChatModel, ClaudeProvider, VoyageEmbeddingProvider};
+pub use gemini::{GeminiChatModel, GeminiEmbeddingProvider, GeminiProvider};
 pub use mistral::{MistralChatModel, MistralEmbeddingProvider, MistralProvider};
 #[cfg(feature = "local-embedding")]
 pub use local::LocalEmbeddingProvider;

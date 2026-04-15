@@ -1,5 +1,6 @@
 use super::chat::api::ListModelsResponse;
 use super::chat::model::GeminiChatModel;
+use super::embedding::GeminiEmbeddingProvider;
 use crate::{ChatModel, ModelProvider};
 use crate::client::Client;
 use async_trait::async_trait;
@@ -22,6 +23,11 @@ impl GeminiProvider {
     /// The API version path (/v1beta) is automatically appended.
     pub fn new(base_url: &str, api_key: &str) -> Self {
         Self::with_base_url(base_url, api_key)
+    }
+
+    /// Create an embedding provider using this provider's client and base URL.
+    pub fn create_embedding_provider(&self, model: &str) -> GeminiEmbeddingProvider {
+        GeminiEmbeddingProvider::new(self.client.clone(), self.base_url.clone(), model.to_string())
     }
 
     fn with_base_url(base_url: &str, api_key: &str) -> Self {

@@ -26,7 +26,7 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 - ✅ 2.4 Embedding config in `settings.toml` (`[embedding]` section: provider, model, chunk_size, chunk_overlap)
 - ✅ 2.5 Local embedding provider (`fastembed`/ONNX, `bge-small-en-v1.5` — default, zero config)
 - ✅ 2.6 Ollama + Mistral embedding providers
-- ⬜ 2.7 OpenAI, Gemini, Claude/Voyage embedding providers
+- ✅ 2.7 Gemini + Claude/Voyage embedding providers (OpenAI deferred)
 
 ### Stage 3 — Storage + Indexing
 
@@ -42,7 +42,7 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 ### Stage 5 — Client Integration
 
 - ✅ 5.1 Lumina auto-RAG — query from last N messages, inject relevant chunks into system prompt
-- ⬜ 5.2 Local ONNX embedding provider (`bge-small-en-v1.5` via ort) — optional, for no-network setups
+- ✅ 5.2 Local ONNX embedding provider (`bge-small-en-v1.5` via fastembed/ort) — default, zero config
 - ⬜ 5.3 Noema search panel + document refs (deferred — depends on UI work)
 
 ---
