@@ -44,6 +44,8 @@ Voice pipeline for desktop and Discord.
 - Persist desktop voice settings
 - Handle voice interruptions
 - Lumina Stage 3.5 verification (Noema using Discord tools through daemon)
+- Simplify chat storage: chat messages currently go through content blocks (immutable text with origin tracking), but chat messages are never re-referenced, forked, or organized — the indirection buys little. Consider storing chat turn text inline in the turns/messages table instead, removing the content block indirection for chat. Doesn't affect documents, which genuinely benefit from the content block model.
+- Frontmatter-aware search filtering: extend SearchApi to filter by arbitrary frontmatter key-value conditions (e.g. `tags contains "urgent"`, `due < 2026-05-01`). Needs a well-defined filter syntax and efficient query strategy (parse YAML only on narrowed result sets after type/user pre-filtering).
 
 ---
 

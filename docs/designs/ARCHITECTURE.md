@@ -206,6 +206,7 @@ Only features with **active behavior** (event processing, intent execution, iden
 |----------|---------|
 | [UNIFIED_CONTENT_MODEL.md](UNIFIED_CONTENT_MODEL.md) | UCM three-layer architecture (detailed specification) |
 | [STORAGE.md](STORAGE.md) | UCM database schema reference |
+| [EMBEDDING_AND_RAG.md](EMBEDDING_AND_RAG.md) | Embedding providers, vector storage, retrieval API, Lumina RAG integration |
 | [proposals/ACTIONS.md](proposals/ACTIONS.md) | Action system — unified capability primitive, composition chains, MCP projection (proposal) |
 | [proposals/AGENTIC.md](proposals/AGENTIC.md) | Event & Intent engine — triggers, Action AST, service registry, engine loop (proposal) |
 | [CORE_SERVICE.md](CORE_SERVICE.md) | Daemon communication — WebSocket, REST, MCP interfaces |
