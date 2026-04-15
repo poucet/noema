@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use simply_core::storage::ids::UserId;
 
-use crate::oauth_providers::resolve_server_auth;
+use crate::oauth::providers::resolve_server_auth;
 use crate::token_store::{McpUserToken, TransientTokenStore};
 
 /// Shared state for MCP auth routes.

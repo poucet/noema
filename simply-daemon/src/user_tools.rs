@@ -97,11 +97,16 @@ impl UserToolServiceCache {
             let config = registry.config().get_server(id)
                 .or_else(|| registry.get_ephemeral(id));
 
-            let include = match config.map(|c| &c.auth) {
+            let needs_oauth = config.map(|c| {
+                c.oauth_provider.is_some() || matches!(c.auth, AuthMethod::OAuth { .. })
+            }).unwrap_or(false);
+
+            let include = if needs_oauth {
+                // OAuth server: only if user has a token
+                self.token_store.has_token(user_id, id)
+            } else {
                 // No auth / static token: everyone gets it (role filtering is future)
-                Some(AuthMethod::None) | Some(AuthMethod::Token { .. }) | None => true,
-                // OAuth: only if user has a token
-                Some(AuthMethod::OAuth { .. }) => self.token_store.has_token(user_id, id),
+                true
             };
 
             if include {
@@ -130,7 +135,7 @@ impl UserToolServiceCache {
                     .or_else(|| registry.get_ephemeral(id));
 
                 let is_oauth = config
-                    .map(|c| matches!(c.auth, AuthMethod::OAuth { .. }))
+                    .map(|c| c.oauth_provider.is_some() || matches!(c.auth, AuthMethod::OAuth { .. }))
                     .unwrap_or(false);
 
                 if is_oauth {

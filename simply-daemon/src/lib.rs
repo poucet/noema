@@ -22,7 +22,6 @@ pub mod storage;
 pub mod token_store;
 pub mod mcp_config;
 pub mod net;
-pub mod oauth_providers;
 pub mod tools;
 pub mod user_tools;
 /// Re-exported types for clients.

@@ -5,6 +5,7 @@
 //! Both `EmbeddedDaemon` and the future standalone daemon share this.
 
 pub mod callback;
+pub mod providers;
 
 use std::collections::HashMap;
 use std::sync::Arc;
