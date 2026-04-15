@@ -75,13 +75,13 @@ impl UserStore for MemoryUserStore {
         Ok(users.values().cloned().collect())
     }
 
-    async fn map_discord_user(&self, discord_user_id: &str, user_id: &UserId) -> Result<()> {
-        self.discord_mappings.lock().unwrap().insert(discord_user_id.to_string(), user_id.clone());
+    async fn map_external_user(&self, external_id: &str, user_id: &UserId) -> Result<()> {
+        self.discord_mappings.lock().unwrap().insert(external_id.to_string(), user_id.clone());
         Ok(())
     }
 
-    async fn resolve_discord_user(&self, discord_user_id: &str) -> Result<Option<UserId>> {
-        Ok(self.discord_mappings.lock().unwrap().get(discord_user_id).cloned())
+    async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>> {
+        Ok(self.discord_mappings.lock().unwrap().get(external_id).cloned())
     }
 }
 

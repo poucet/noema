@@ -55,6 +55,7 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     voice: Arc<VoiceService>,
     core: Arc<CoreService>,
     search: Arc<SearchService<S>>,
+    user_svc: Arc<UserService<S>>,
     tools: Arc<CompositeToolService>,
     user_tools: Arc<crate::user_tools::UserToolServiceCache>,
 }
@@ -179,6 +180,8 @@ where
         );
         let core = Arc::new(CoreService::embedded());
 
+        let user_svc = Arc::new(UserService::new(Arc::clone(&stores)));
+
         let search = Arc::new(SearchService::new(
             embedding_provider,
             vector_store,
@@ -230,6 +233,7 @@ where
             voice,
             core,
             search,
+            user_svc,
             tools,
             user_tools,
         });
@@ -249,6 +253,7 @@ where
     pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
     pub fn core_service(&self) -> Arc<CoreService> { Arc::clone(&self.core) }
     pub fn search_service(&self) -> Arc<SearchService<S>> { Arc::clone(&self.search) }
+    pub fn user_service(&self) -> Arc<UserService<S>> { Arc::clone(&self.user_svc) }
 
     pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
     pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
@@ -624,5 +629,6 @@ where S::Document: DocumentResolver,
     fn voice(&self) -> &dyn VoiceApi { &*self.voice }
     fn core(&self) -> &dyn CoreApi { &*self.core }
     fn search(&self) -> &dyn SearchApi { &*self.search }
+    fn user(&self) -> &dyn UserApi { &*self.user_svc }
     fn tools(&self) -> &dyn ToolService { &*self.tools }
 }

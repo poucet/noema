@@ -705,6 +705,52 @@ impl CoreApi for CoreService {
 }
 
 // ---------------------------------------------------------------------------
+// UserService
+// ---------------------------------------------------------------------------
+
+pub struct UserService<S: StorageTypes> {
+    stores: Arc<dyn Stores<S>>,
+}
+
+impl<S: StorageTypes> UserService<S> {
+    pub fn new(stores: Arc<dyn Stores<S>>) -> Self {
+        Self { stores }
+    }
+}
+
+#[async_trait]
+impl<S: StorageTypes> UserApi for UserService<S>
+where
+    S::User: simply_core::storage::traits::UserStore,
+{
+    async fn resolve_or_create_user(&self, external_id: String) -> anyhow::Result<UserIdentity> {
+        use simply_core::storage::traits::UserStore;
+
+        let user_store = self.stores.user();
+
+        // Check if this external_id is already mapped
+        if let Some(user_id) = user_store.resolve_external_user(&external_id).await? {
+            if let Some(user) = user_store.get_user_by_id(&user_id).await? {
+                return Ok(UserIdentity {
+                    user_id: user.id.as_str().to_string(),
+                    email: Some(user.email.clone()),
+                });
+            }
+        }
+
+        // Create a new user with the external_id as email placeholder
+        let user = user_store.get_or_create_user_by_email(&external_id).await?;
+        // Map external_id → user_id
+        user_store.map_external_user(&external_id, &user.id).await?;
+
+        Ok(UserIdentity {
+            user_id: user.id.as_str().to_string(),
+            email: Some(user.email.clone()),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SearchService
 // ---------------------------------------------------------------------------
 

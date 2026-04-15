@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
         .register(<dyn ModelApi>::service(daemon.model_service()))
         .register(<dyn VoiceApi>::service(daemon.voice_service()))
         .register(<dyn SearchApi>::service(daemon.search_service()))
+        .register(<dyn UserApi>::service(daemon.user_service()))
         .register(<dyn CoreApi>::service(core_svc)));
 
     let tracker = net::server::ConnectionTracker::new();

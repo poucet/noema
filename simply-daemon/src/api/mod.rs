@@ -20,6 +20,7 @@
 #[macro_use] mod voice;
 #[macro_use] mod core;
 #[macro_use] mod search;
+#[macro_use] mod user;
 pub mod types;
 
 pub use session::*;
@@ -32,6 +33,7 @@ pub use model::*;
 pub use voice::*;
 pub use self::core::*;
 pub use search::*;
+pub use user::*;
 pub use types::*;
 pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
@@ -52,6 +54,7 @@ pub trait Daemon: Send + Sync {
     fn voice(&self) -> &dyn VoiceApi;
     fn core(&self) -> &dyn CoreApi;
     fn search(&self) -> &dyn SearchApi;
-    /// Composite tool service — includes daemon REST tools + MCP tools.
+    fn user(&self) -> &dyn UserApi;
+    /// Composite tool service — includes daemon REST tools + MCP tools (global, no user context).
     fn tools(&self) -> &dyn simply_core::ToolService;
 }

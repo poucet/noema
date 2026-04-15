@@ -27,9 +27,9 @@ pub trait UserStore: Send + Sync {
     /// List all users in the database
     async fn list_users(&self) -> Result<Vec<StoredUser>>;
 
-    /// Map a Discord user ID to a UCM user
-    async fn map_discord_user(&self, discord_user_id: &str, user_id: &UserId) -> Result<()>;
+    /// Map an external identity (e.g. "discord:123") to a UCM user
+    async fn map_external_user(&self, external_id: &str, user_id: &UserId) -> Result<()>;
 
-    /// Resolve a Discord user ID to a UCM user ID
-    async fn resolve_discord_user(&self, discord_user_id: &str) -> Result<Option<UserId>>;
+    /// Resolve an external identity to a UCM user ID
+    async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>>;
 }

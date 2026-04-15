@@ -141,21 +141,21 @@ impl UserStore for SqliteStore {
         Ok(users)
     }
 
-    async fn map_discord_user(&self, discord_user_id: &str, user_id: &UserId) -> Result<()> {
+    async fn map_external_user(&self, external_id: &str, user_id: &UserId) -> Result<()> {
         let conn = self.conn().lock().unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO discord_user_mappings (discord_user_id, user_id) VALUES (?1, ?2)",
-            params![discord_user_id, user_id.as_str()],
+            params![external_id, user_id.as_str()],
         )?;
         Ok(())
     }
 
-    async fn resolve_discord_user(&self, discord_user_id: &str) -> Result<Option<UserId>> {
+    async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>> {
         let conn = self.conn().lock().unwrap();
         let user_id = conn
             .query_row(
                 "SELECT user_id FROM discord_user_mappings WHERE discord_user_id = ?1",
-                params![discord_user_id],
+                params![external_id],
                 |row| row.get::<_, UserId>(0),
             )
             .ok();
