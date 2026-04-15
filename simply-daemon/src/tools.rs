@@ -35,18 +35,34 @@ fn value_to_tool_result(value: serde_json::Value, binary_response: bool) -> Vec<
 }
 
 /// Exposes daemon REST methods as tools.
+///
+/// Holds a `RequestContext` that's passed to every dispatch call.
+/// Create a scoped instance via `with_context()` for per-user sessions.
 pub struct DaemonToolService {
     services: Vec<Arc<dyn RestService>>,
+    ctx: simply_rpc::RequestContext,
 }
 
 impl DaemonToolService {
     pub fn new() -> Self {
-        Self { services: Vec::new() }
+        Self {
+            services: Vec::new(),
+            ctx: simply_rpc::RequestContext::default(),
+        }
     }
 
     pub fn register(mut self, svc: Arc<dyn RestService>) -> Self {
         self.services.push(svc);
         self
+    }
+
+    /// Create a new DaemonToolService with the same services but a different context.
+    /// Used to scope daemon tools to a specific user's session.
+    pub fn with_context(&self, ctx: simply_rpc::RequestContext) -> Self {
+        Self {
+            services: self.services.clone(),
+            ctx,
+        }
     }
 }
 
@@ -76,7 +92,7 @@ impl ToolService for DaemonToolService {
         for svc in &self.services {
             let route = svc.meta().routes.iter().find(|rm| rm.method_name == name);
             if let Some(rm) = route {
-                if let Some(result) = svc.rest_dispatch_by_name(name, arguments.clone()).await {
+                if let Some(result) = svc.rest_dispatch_by_name(name, self.ctx.clone(), arguments.clone()).await {
                     let value = result?;
                     return Ok(value_to_tool_result(value, rm.binary_response));
                 }

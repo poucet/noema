@@ -65,10 +65,15 @@ impl UserToolServiceCache {
             }
         }
 
-        // Build fresh
+        // Build fresh — scope daemon tools to this user
         let mcp_callers = self.build_mcp_callers(user_id, &accessible).await?;
+        let scoped_daemon_tools = Arc::new(self.daemon_tools.with_context(
+            simply_rpc::RequestContext::with_scope(
+                simply_rpc::Scope::user(user_id.as_str()),
+            ),
+        ));
         let svc = Arc::new(UserToolService {
-            daemon_tools: Arc::clone(&self.daemon_tools),
+            daemon_tools: scoped_daemon_tools,
             mcp_callers,
         });
 
