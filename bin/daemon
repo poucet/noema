@@ -24,6 +24,7 @@ ensure_admin_deps() {
 }
 
 ASTRO_PID=""
+GDOCS_PID=""
 
 start_astro_dev() {
   ensure_admin_deps
@@ -32,10 +33,20 @@ start_astro_dev() {
   ASTRO_PID=$!
 }
 
+start_gdocs_mcp() {
+  log "Starting Google Docs MCP server..."
+  cd "$REPO_ROOT" && cargo run -p noema-mcp-gdocs &
+  GDOCS_PID=$!
+}
+
 cleanup() {
   if [ -n "$ASTRO_PID" ]; then
     kill "$ASTRO_PID" 2>/dev/null
     wait "$ASTRO_PID" 2>/dev/null
+  fi
+  if [ -n "$GDOCS_PID" ]; then
+    kill "$GDOCS_PID" 2>/dev/null
+    wait "$GDOCS_PID" 2>/dev/null
   fi
 }
 trap cleanup EXIT INT TERM
@@ -54,6 +65,7 @@ daemon_start() {
   cd "$REPO_ROOT" && SKIP_ADMIN_BUILD=1 cargo build -p simply-daemon --bin simply-daemon
 
   start_astro_dev
+  start_gdocs_mcp
 
   mkdir -p "$(dirname "$DAEMON_LOG_FILE")"
   : > "$DAEMON_LOG_FILE"
