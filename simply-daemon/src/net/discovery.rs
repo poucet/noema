@@ -138,12 +138,14 @@ pub async fn connect_or_host(
         .register(<dyn CoreApi>::service(core_svc)));
 
     let tracker = server::ConnectionTracker::new();
+    let token_store = Arc::new(crate::token_store::TransientTokenStore::new());
     let server = rest::start(rest::ServerConfig {
         rest_dispatcher,
         port,
         tracker,
         daemon_secret,
         user_store,
+        token_store,
     }).await?;
 
     Ok(DaemonHandle::Host {

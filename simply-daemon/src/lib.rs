@@ -19,6 +19,7 @@ pub mod remote;
 pub mod services;
 pub mod session;
 pub mod storage;
+pub mod token_store;
 pub mod net;
 pub mod tools;
 /// Re-exported types for clients.

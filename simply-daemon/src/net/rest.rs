@@ -25,8 +25,10 @@ use simply_rpc::{HttpMethod, ServiceRouter};
 use crate::auth::RequestUser;
 use crate::net::admin_api::{self, AdminState};
 use crate::net::auth_routes::{self, SessionStore};
+use crate::net::mcp_auth::{self, McpAuthState};
 use crate::net::server::ConnectionTracker;
 use crate::net::protocol::*;
+use crate::token_store::TransientTokenStore;
 
 /// Server configuration.
 pub struct ServerConfig {
@@ -35,6 +37,7 @@ pub struct ServerConfig {
     pub tracker: ConnectionTracker,
     pub daemon_secret: String,
     pub user_store: Arc<dyn UserStore>,
+    pub token_store: Arc<TransientTokenStore>,
 }
 
 /// Shared state for axum handlers.
@@ -69,9 +72,23 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/admin/api/users", get(admin_api::list_users).post(admin_api::create_user))
         .with_state(admin_state);
 
+    let settings = config::Settings::load();
+    let public_url = settings.public_url
+        .unwrap_or_else(|| format!("http://localhost:{}", config.port));
+
+    let mcp_auth_state = McpAuthState {
+        token_store: Arc::clone(&config.token_store),
+        public_url,
+    };
+
     let auth_routes = Router::new()
         .route("/auth/status", get(auth_routes::auth_status))
         .with_state(sessions);
+
+    let mcp_auth_routes = Router::new()
+        .route("/auth/mcp/callback", get(mcp_auth::auth_callback))
+        .route("/auth/mcp/{server_id}", get(mcp_auth::auth_initiate))
+        .with_state(mcp_auth_state);
 
     // RPC routes under /api/* — uses fallback handler for dynamic dispatch
     let api_routes = Router::new()
@@ -89,6 +106,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/admin/api/connections", get(admin_connections))
         .route("/ws", get(ws_upgrade_handler))
         .merge(auth_routes)
+        .merge(mcp_auth_routes)
         .merge(admin_routes)
         .nest("/api", api_routes);
 

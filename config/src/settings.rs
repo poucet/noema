@@ -29,6 +29,9 @@ pub struct Settings {
     /// Embedding provider configuration
     #[serde(default)]
     pub embedding: EmbeddingConfig,
+    /// Public URL for OAuth callbacks (defaults to http://localhost:{daemon_port}).
+    /// Set this when hosting the daemon on a remote server.
+    pub public_url: Option<String>,
 }
 
 /// Embedding provider configuration.

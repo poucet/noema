@@ -2,6 +2,7 @@
 
 pub mod admin_api;
 pub mod auth_routes;
+pub mod mcp_auth;
 pub mod protocol;
 pub mod server;
 pub mod rest;
