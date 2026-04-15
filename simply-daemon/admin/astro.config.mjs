@@ -19,11 +19,17 @@ export default defineConfig({
 
   vite: {
     build: {
-      // Single CSS/JS bundle for easy embedding
       cssCodeSplit: false,
     },
-
     plugins: [tailwindcss()],
+    server: {
+      proxy: {
+        '/api': 'http://127.0.0.1:9800',
+        '/admin/api': 'http://127.0.0.1:9800',
+        '/auth': 'http://127.0.0.1:9800',
+        '/ws': { target: 'ws://127.0.0.1:9800', ws: true },
+      },
+    },
   },
 
   integrations: [svelte()],
