@@ -112,8 +112,8 @@ impl McpApi for McpService {
                 token: request.auth_token.unwrap_or_default(),
             },
             "oauth" => simply_core::AuthMethod::OAuth {
-                client_id: request.client_id.unwrap_or_else(|| "simply".to_string()),
-                client_secret: request.client_secret,
+                client_id: request.client_id.clone().unwrap_or_else(|| "simply".to_string()),
+                client_secret: request.client_secret.clone(),
                 authorization_url: None,
                 token_url: None,
                 scopes: request.scopes.unwrap_or_default(),
