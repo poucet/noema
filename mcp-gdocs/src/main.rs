@@ -4,8 +4,6 @@
 //! For embedded use, import the library directly.
 
 use clap::Parser;
-use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -27,22 +25,16 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Set up logging
-    let level = match args.log_level.to_lowercase().as_str() {
-        "trace" => Level::TRACE,
-        "debug" => Level::DEBUG,
-        "info" => Level::INFO,
-        "warn" => Level::WARN,
-        "error" => Level::ERROR,
-        _ => Level::INFO,
-    };
+    // Set up logging — use RUST_LOG env var if set, otherwise CLI arg
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| {
+            let level = &args.log_level;
+            tracing_subscriber::EnvFilter::new(format!("mcp_gdocs={level}"))
+        });
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(level)
-        .with_target(false)
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber)?;
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .init();
 
     // Start the server
     let handle = noema_mcp_gdocs::start_server_on(&args.host, args.port).await?;
