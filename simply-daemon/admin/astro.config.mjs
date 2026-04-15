@@ -23,6 +23,9 @@ export default defineConfig({
     },
     plugins: [tailwindcss()],
     server: {
+      watch: {
+        ignored: ['**/dist/**', '**/.astro/**'],
+      },
       proxy: {
         '/api': 'http://127.0.0.1:9800',
         '/admin/api': 'http://127.0.0.1:9800',
