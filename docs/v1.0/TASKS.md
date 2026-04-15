@@ -45,6 +45,18 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 - ✅ 5.2 Local ONNX embedding provider (`bge-small-en-v1.5` via fastembed/ort) — default, zero config
 - ⬜ 5.3 Noema search panel + document refs (deferred — depends on UI work)
 
+### Stage 6 — Google Docs Import
+
+**Design:** [GOOGLE_DOCS_IMPORT.md](../designs/GOOGLE_DOCS_IMPORT.md)
+
+- ⬜ 6.1 Admin config: `google_client_id`, `google_client_secret`, `public_url` in settings.toml + admin UI
+- ⬜ 6.2 Transient Google OAuth: `/auth/google` endpoint, in-memory token store, callback handler
+- ⬜ 6.3 `GoogleApi` trait: `google_status`, `list_google_docs`, `import_google_doc` REST endpoints
+- ⬜ 6.4 `GoogleService` implementation: extract doc via `GoogleDocsClient`, store as UCM document, re-import = update
+- ⬜ 6.5 Lumina `/google auth` command — generates auth URL, posts to Discord
+- ⬜ 6.6 Lumina `/google import` command — autocomplete from doc list + URL option
+- ⬜ 6.7 Admin UI: Google config in settings, import button on documents page
+
 ---
 
 ## 2. Events & Intents

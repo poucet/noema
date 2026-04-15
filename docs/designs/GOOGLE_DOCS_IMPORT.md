@@ -1,6 +1,6 @@
 # Google Docs Import
 
-**Status:** refined
+**Status:** planned
 **Version:** 1.0
 **Parent:** [ARCHITECTURE.md](ARCHITECTURE.md)
 **Related:** [AUTH_AND_IDENTITY.md](AUTH_AND_IDENTITY.md), [EMBEDDING_AND_RAG.md](EMBEDDING_AND_RAG.md)
@@ -188,6 +188,6 @@ The import endpoint:
 3. **Reuse `GoogleDocsClient`** — the extraction logic in `noema-mcp-gdocs/src/google_api.rs` is used directly from the daemon, no MCP hop.
 4. **Public URL config** — defaults to `http://localhost:{daemon_port}`, configurable for cloud hosting via admin UI.
 
-## Open Questions
+## Resolved
 
-1. **Re-import behavior** — if the same Google Doc is imported again, update the existing document (matched by `source_id`) or create a new one? Leaning toward update (delete old tabs, create new ones).
+1. **Re-import behavior** — re-importing the same Google Doc updates the existing document (matched by `source_id`). Old tabs are deleted, new tabs created from the latest content. Embeddings re-queued automatically.
