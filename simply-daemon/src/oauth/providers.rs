@@ -16,6 +16,22 @@ pub struct OAuthProviderDefaults {
     pub scopes: Vec<String>,
 }
 
+/// Default oauth_providers.toml content, compiled in for first-run copy.
+const DEFAULT_PROVIDERS: &str = include_str!("defaults/oauth_providers.toml");
+
+/// Ensure oauth_providers.toml exists in the config dir.
+/// Copies the default if missing.
+pub fn ensure_config() {
+    let Some(dir) = config::PathManager::config_dir() else { return };
+    let path = dir.join("oauth_providers.toml");
+    if !path.exists() {
+        let _ = std::fs::create_dir_all(&dir);
+        if std::fs::write(&path, DEFAULT_PROVIDERS).is_ok() {
+            tracing::info!("Created default {}", path.display());
+        }
+    }
+}
+
 /// Load all provider defaults from ~/.config/noema/oauth_providers.toml.
 fn load_providers() -> HashMap<String, OAuthProviderDefaults> {
     let Some(dir) = config::PathManager::config_dir() else {

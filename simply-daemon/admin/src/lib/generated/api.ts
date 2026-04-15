@@ -40,6 +40,8 @@ export const coreApi = (f: Fetch = fetch) => ({
   kill: () => json<void>(f, 'POST', '/api/daemon/kill'),
   /** Get daemon version. */
   version: () => json<string>(f, 'GET', '/api/daemon/version'),
+  /** Get the daemon's public URL (for OAuth callbacks, auth links, etc.). */
+  publicUrl: () => json<string>(f, 'GET', '/api/daemon/public-url'),
 });
 
 // DocumentApi
@@ -125,7 +127,7 @@ export const oAuthApi = (f: Fetch = fetch) => ({
 // SearchApi
 export const searchApi = (f: Fetch = fetch) => ({
   /** Semantic search over embedded documents. */
-  search: (query: string, documentType: string | null, topK: number | null) => json<T.SearchHit[]>(f, 'POST', '/api/search', { query, documentType, topK }),
+  search: (request: T.SearchRequest) => json<T.SearchHit[]>(f, 'POST', '/api/search', request),
   /** Re-embed all documents. Runs in the background; returns immediately. */
   reindex: () => json<T.ReindexStatus>(f, 'POST', '/api/search/reindex'),
   /** Get embedding queue status. */

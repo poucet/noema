@@ -1,0 +1,23 @@
+# OAuth provider defaults.
+# Automatically copied to ~/.config/noema/oauth_providers.toml on first run.
+# When an MCP server in mcp.toml has oauth_provider = "google",
+# the daemon fills in authorization_url, token_url, and scopes from here.
+# Users only need to provide client_id and client_secret in mcp.toml.
+
+[google]
+authorization_url = "https://accounts.google.com/o/oauth2/v2/auth"
+token_url = "https://oauth2.googleapis.com/token"
+scopes = [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/documents.readonly",
+]
+
+[github]
+authorization_url = "https://github.com/login/oauth/authorize"
+token_url = "https://github.com/login/oauth/access_token"
+scopes = ["repo", "read:user"]
+
+[notion]
+authorization_url = "https://api.notion.com/v1/oauth/authorize"
+token_url = "https://api.notion.com/v1/oauth/token"
+scopes = []

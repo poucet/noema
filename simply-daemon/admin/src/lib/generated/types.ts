@@ -133,6 +133,13 @@ export interface SearchHit {
   score: number;
 }
 
+/** Search request. */
+export interface SearchRequest {
+  query: string;
+  documentType: string | null;
+  topK: number | null;
+}
+
 /** Status of a reindex operation. */
 export interface ReindexStatus {
   message: string;
@@ -145,6 +152,7 @@ export interface CreateSessionOptions {
   systemPrompt: string | null;
   modelId: string | null;
   seed: T.SeedMessage[];
+  userId: T.UserId | null;
 }
 
 /** Information about a session. */

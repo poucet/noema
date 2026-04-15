@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("simply-daemon starting");
 
     config::load_env_file();
+    simply_daemon::oauth::providers::ensure_config();
     let mut settings = config::Settings::load();
     let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
     let daemon_secret = settings.ensure_daemon_secret().to_string();
