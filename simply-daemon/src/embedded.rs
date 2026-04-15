@@ -516,7 +516,7 @@ where
         Ok(())
     }
 
-    async fn close_all_sessions(&self, _ctx: &simply_rpc::RequestContext) -> anyhow::Result<()> {
+    async fn close_all_sessions(&self) -> anyhow::Result<()> {
         let mut sessions = self.sessions.lock().await;
         let count = sessions.len();
         sessions.clear();

@@ -76,7 +76,7 @@ pub trait SessionApi: Send + Sync {
     async fn close_session(&self, ctx: &RequestContext, session_id: &SessionId) -> anyhow::Result<()>;
 
     #[rpc(delete = "/session")]
-    async fn close_all_sessions(&self, ctx: &RequestContext) -> anyhow::Result<()>;
+    async fn close_all_sessions(&self) -> anyhow::Result<()>;
 
     #[rpc(post = "/session/event")]
     async fn push_event(&self, ctx: &RequestContext, event: InboundEvent) -> anyhow::Result<()>;
