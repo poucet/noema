@@ -12,6 +12,7 @@ path = "src/main.rs"
 # Internal crates
 config = { workspace = true }
 lumina-macros = { workspace = true }
+noema-mcp-gdocs = { workspace = true }
 simply-daemon = { workspace = true }
 simply-rpc = { workspace = true }
 

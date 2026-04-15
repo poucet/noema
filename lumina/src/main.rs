@@ -92,6 +92,19 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     tracing::info!(tool_count, "registered lumina MCP service with daemon");
 
+    // Start Google Docs MCP server and register with daemon
+    let _gdocs_handle = noema_mcp_gdocs::start_server().await?;
+    let gdocs_url = _gdocs_handle.url();
+    tracing::info!(url = %gdocs_url, "google docs MCP server started");
+
+    let gdocs_tool_count = daemon
+        .mcp().register_ephemeral_mcp(RegisterEphemeralRequest {
+            id: "google-docs".to_string(),
+            url: gdocs_url,
+        })
+        .await?;
+    tracing::info!(gdocs_tool_count, "registered google docs MCP service with daemon");
+
     // Collect all auto-registered commands
     let registry = CommandRegistry::collect();
     tracing::info!(count = registry.len(), "commands registered");
