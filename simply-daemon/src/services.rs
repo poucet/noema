@@ -316,6 +316,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         Ok(DocumentInfo {
             id: doc.id.to_string(),
             title: doc.title.clone(),
+            document_type: doc.document_type.clone(),
             source: format!("{:?}", doc.source),
             source_id: doc.source_id.clone(),
             tab_count: tabs.len(),
@@ -721,7 +722,7 @@ impl<S: StorageTypes> SearchService<S> {
 
 #[async_trait]
 impl<S: StorageTypes> SearchApi for SearchService<S> {
-    async fn search(&self, query: &str, document_type: Option<&str>, top_k: Option<usize>) -> anyhow::Result<Vec<SearchHit>> {
+    async fn search(&self, query: &str, document_type: Option<String>, top_k: Option<usize>) -> anyhow::Result<Vec<SearchHit>> {
         let top_k = top_k.unwrap_or(5);
 
         // Embed the query
@@ -732,7 +733,7 @@ impl<S: StorageTypes> SearchApi for SearchService<S> {
 
         // Search
         let filter = simply_core::embedding::SearchFilter {
-            document_type: document_type.map(|s| s.to_string()),
+            document_type,
             user_id: Some(self.user_id.clone()),
         };
 
