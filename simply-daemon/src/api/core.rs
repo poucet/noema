@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use simply_rpc::RequestContext;
 
 /// Health check response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,17 +14,17 @@ pub struct DaemonHealth {
 pub trait CoreApi: Send + Sync {
     /// Check daemon health.
     #[rpc(get = "/daemon")]
-    async fn health(&self, ctx: &RequestContext) -> anyhow::Result<DaemonHealth>;
+    async fn health(&self) -> anyhow::Result<DaemonHealth>;
 
     /// Shut down the daemon.
     #[rpc(post = "/daemon/kill", no_tool)]
-    async fn kill(&self, ctx: &RequestContext) -> anyhow::Result<()>;
+    async fn kill(&self) -> anyhow::Result<()>;
 
     /// Get daemon version.
     #[rpc(get = "/daemon/version")]
-    async fn version(&self, ctx: &RequestContext) -> anyhow::Result<String>;
+    async fn version(&self) -> anyhow::Result<String>;
 
     /// Get the daemon's public URL (for OAuth callbacks, auth links, etc.).
     #[rpc(get = "/daemon/public-url")]
-    async fn public_url(&self, ctx: &RequestContext) -> anyhow::Result<String>;
+    async fn public_url(&self) -> anyhow::Result<String>;
 }

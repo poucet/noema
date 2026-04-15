@@ -52,22 +52,22 @@ impl ModelService {
 
 #[async_trait]
 impl ModelApi for ModelService {
-    async fn list_models(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<llm::ModelInfo>> {
+    async fn list_models(&self) -> anyhow::Result<Vec<llm::ModelInfo>> {
         if let Some(cached) = self.cached_models.lock().await.clone() {
             return Ok(cached);
         }
         Ok(self.fetch_all_models().await)
     }
 
-    async fn list_providers(&self, _ctx: &RequestContext) -> Vec<llm::ProviderInfo> {
+    async fn list_providers(&self) -> Vec<llm::ProviderInfo> {
         llm::list_providers()
     }
 
-    async fn default_model_id(&self, _ctx: &RequestContext) -> String {
+    async fn default_model_id(&self) -> String {
         self.default_model_id.lock().await.clone()
     }
 
-    async fn set_default_model(&self, _ctx: &RequestContext, model_id: &str) -> anyhow::Result<()> {
+    async fn set_default_model(&self, model_id: &str) -> anyhow::Result<()> {
         let _ = llm::create_model(model_id)?;
         *self.default_model_id.lock().await = model_id.to_string();
         // Invalidate cache when model changes (provider config may have changed)
@@ -614,11 +614,11 @@ fn spawn_realtime_pipeline(
 
 #[async_trait]
 impl VoiceApi for VoiceService {
-    async fn list_voice_providers(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<VoiceProviderInfo>> {
+    async fn list_voice_providers(&self) -> anyhow::Result<Vec<VoiceProviderInfo>> {
         Ok(self.providers.values().map(|p| p.info.clone()).collect())
     }
 
-    async fn voice_connect(&self, _ctx: &RequestContext, provider_id: &str) -> anyhow::Result<simply_rpc::StreamHandle<simply_voice::VoiceInput, simply_voice::VoiceEvent>> {
+    async fn voice_connect(&self, provider_id: &str) -> anyhow::Result<simply_rpc::StreamHandle<simply_voice::VoiceInput, simply_voice::VoiceEvent>> {
         tracing::info!(provider_id, "voice_connect");
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
@@ -638,7 +638,7 @@ impl VoiceApi for VoiceService {
         Ok(simply_rpc::StreamHandle::new(input_tx, event_rx))
     }
 
-    async fn synthesize(&self, _ctx: &RequestContext, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::Audio> {
+    async fn synthesize(&self, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::Audio> {
         tracing::info!(provider_id, voice, text_len = text.len(), "synthesize called");
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
@@ -649,7 +649,7 @@ impl VoiceApi for VoiceService {
         result
     }
 
-    async fn list_voices(&self, _ctx: &RequestContext, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>> {
+    async fn list_voices(&self, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>> {
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
         let tts = provider.tts.as_ref()
@@ -657,7 +657,7 @@ impl VoiceApi for VoiceService {
         tts.voices().await
     }
 
-    async fn voice_disconnect(&self, _ctx: &RequestContext, _session_id: &str) -> anyhow::Result<()> {
+    async fn voice_disconnect(&self, _session_id: &str) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -682,22 +682,22 @@ impl CoreService {
 
 #[async_trait]
 impl CoreApi for CoreService {
-    async fn health(&self, _ctx: &RequestContext) -> anyhow::Result<DaemonHealth> {
+    async fn health(&self) -> anyhow::Result<DaemonHealth> {
         Ok(DaemonHealth { status: "ok".to_string() })
     }
 
-    async fn kill(&self, _ctx: &RequestContext) -> anyhow::Result<()> {
+    async fn kill(&self) -> anyhow::Result<()> {
         if let Some(tx) = &self.kill_tx {
             let _ = tx.send(()).await;
         }
         Ok(())
     }
 
-    async fn version(&self, _ctx: &RequestContext) -> anyhow::Result<String> {
+    async fn version(&self) -> anyhow::Result<String> {
         Ok(env!("CARGO_PKG_VERSION").to_string())
     }
 
-    async fn public_url(&self, _ctx: &RequestContext) -> anyhow::Result<String> {
+    async fn public_url(&self) -> anyhow::Result<String> {
         let settings = config::Settings::load();
         Ok(settings.public_url.unwrap_or_else(|| {
             let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);

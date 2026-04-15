@@ -67,7 +67,7 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     let admin_ctx = simply_rpc::RequestContext::with_scope(admin_scope);
     let _ = state.admin_ctx.set(admin_ctx.clone());
 
-    let model_name = daemon.model().default_model_id(&admin_ctx).await;
+    let model_name = daemon.model().default_model_id().await;
     let _ = state.daemon.set(daemon);
     let _ = state._daemon_handle.set(handle);
 

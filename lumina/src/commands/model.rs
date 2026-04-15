@@ -3,7 +3,6 @@
 use lumina_macros::command_group;
 use serenity::all::{CommandInteraction, CreateInteractionResponse, CreateInteractionResponseMessage};
 use simply_daemon::api::ModelApi;
-use simply_rpc::RequestContext;
 
 use super::LuminaContext;
 
@@ -17,8 +16,7 @@ mod model {
         cmd: &CommandInteraction,
         #[describe("Filter by provider name")] provider: Option<String>,
     ) -> anyhow::Result<()> {
-        let ctx = lx.ctx_for(cmd.user.id.get()).await;
-        let models = lx.daemon.model().list_models(&ctx).await?;
+        let models = lx.daemon.model().list_models().await?;
 
         let filtered: Vec<_> = match &provider {
             Some(p) => {
@@ -87,8 +85,7 @@ mod model {
         lx: &LuminaContext,
         cmd: &CommandInteraction,
     ) -> anyhow::Result<()> {
-        let ctx = lx.ctx_for(cmd.user.id.get()).await;
-        let providers = lx.daemon.model().list_providers(&ctx).await;
+        let providers = lx.daemon.model().list_providers().await;
         if providers.is_empty() {
             return reply_ephemeral(lx, cmd, "No providers configured").await;
         }

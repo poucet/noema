@@ -126,7 +126,7 @@ async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
     // Cache the scope so all subsequent commands use it
     lx.register_user_scope(discord_id, scope).await;
 
-    let base_url = lx.daemon.core().public_url(&ctx).await?;
+    let base_url = lx.daemon.core().public_url().await?;
 
     let auth_url = format!("{base_url}/auth/mcp/{GOOGLE_DOCS_SERVER_ID}?user_id={user_id}");
 
@@ -232,8 +232,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
 
 async fn cmd_status(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     // Check if the google-docs MCP server is connected and the user has tools
-    let ctx = lx.ctx_for(cmd.user.id.get()).await;
-    let servers = lx.daemon.mcp().list_mcp_servers(&ctx).await?;
+    let servers = lx.daemon.mcp().list_mcp_servers().await?;
     let google = servers.iter().find(|s| s.id == GOOGLE_DOCS_SERVER_ID);
 
     let (status_text, color) = match google {

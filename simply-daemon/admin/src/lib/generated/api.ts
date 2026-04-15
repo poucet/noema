@@ -35,13 +35,13 @@ export const conversationApi = (f: Fetch = fetch) => ({
 // CoreApi
 export const coreApi = (f: Fetch = fetch) => ({
   /** Check daemon health. */
-  health: (ctx: T.RequestContext) => json<T.DaemonHealth>(f, 'GET', '/api/daemon', ctx),
+  health: () => json<T.DaemonHealth>(f, 'GET', '/api/daemon'),
   /** Shut down the daemon. */
-  kill: (ctx: T.RequestContext) => json<void>(f, 'POST', '/api/daemon/kill', ctx),
+  kill: () => json<void>(f, 'POST', '/api/daemon/kill'),
   /** Get daemon version. */
-  version: (ctx: T.RequestContext) => json<string>(f, 'GET', '/api/daemon/version', ctx),
+  version: () => json<string>(f, 'GET', '/api/daemon/version'),
   /** Get the daemon's public URL (for OAuth callbacks, auth links, etc.). */
-  publicUrl: (ctx: T.RequestContext) => json<string>(f, 'GET', '/api/daemon/public-url', ctx),
+  publicUrl: () => json<string>(f, 'GET', '/api/daemon/public-url'),
 });
 
 // DocumentApi
@@ -71,29 +71,27 @@ export const documentApi = (f: Fetch = fetch) => ({
 // McpApi
 export const mcpApi = (f: Fetch = fetch) => ({
   /** List all configured MCP servers with their status. */
-  listMcpServers: (ctx: T.RequestContext) => json<T.McpServerInfo[]>(f, 'GET', '/api/mcp', ctx),
-  /** Add a new MCP server configuration. If `auth_type` is "auto" or empty, probes `.well-known` to detect OAuth. */
-  addMcpServer: (ctx: T.RequestContext, request: T.AddMcpServerRequest) => json<void>(f, 'POST', '/api/mcp', { ctx, request }),
+  listMcpServers: () => json<T.McpServerInfo[]>(f, 'GET', '/api/mcp'),
+  /** Add a new MCP server configuration. */
+  addMcpServer: (request: T.AddMcpServerRequest) => json<void>(f, 'POST', '/api/mcp', request),
   /** Remove an MCP server configuration. */
-  removeMcpServer: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'DELETE', `/api/mcp/${serverId}`, { ctx }),
+  removeMcpServer: (serverId: string) => json<void>(f, 'DELETE', `/api/mcp/${serverId}`),
   /** Connect to an MCP server. Returns tool count. */
-  connectMcpServer: (ctx: T.RequestContext, serverId: string) => json<number>(f, 'POST', `/api/mcp/${serverId}/connect`, { ctx }),
+  connectMcpServer: (serverId: string) => json<number>(f, 'POST', `/api/mcp/${serverId}/connect`),
   /** Disconnect from an MCP server. */
-  disconnectMcpServer: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/disconnect`, { ctx }),
+  disconnectMcpServer: (serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/disconnect`),
   /** Get tools provided by a specific MCP server. */
-  getMcpServerTools: (ctx: T.RequestContext, serverId: string) => json<T.McpTool[]>(f, 'GET', `/api/mcp/${serverId}/tools`, { ctx }),
-  /** Test connection to an MCP server. Returns tool count. */
-  testMcpServer: (ctx: T.RequestContext, serverId: string) => json<number>(f, 'POST', `/api/mcp/${serverId}/test`, { ctx }),
+  getMcpServerTools: (serverId: string) => json<T.McpTool[]>(f, 'GET', `/api/mcp/${serverId}/tools`),
   /** Update settings for an MCP server. */
-  updateMcpServerSettings: (ctx: T.RequestContext, serverId: string, request: T.UpdateMcpServerRequest) => json<void>(f, 'PUT', `/api/mcp/${serverId}`, { ctx, request }),
+  updateMcpServerSettings: (serverId: string, request: T.UpdateMcpServerRequest) => json<void>(f, 'PUT', `/api/mcp/${serverId}`, { request }),
   /** Stop retry attempts for an MCP server. */
-  stopMcpRetry: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/stop-retry`, { ctx }),
+  stopMcpRetry: (serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/stop-retry`),
   /** Start retry attempts for an MCP server. */
-  startMcpRetry: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/retry`, { ctx }),
+  startMcpRetry: (serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/retry`),
   /** Register an ephemeral MCP server and connect to it. */
-  registerEphemeralMcp: (ctx: T.RequestContext, request: T.RegisterEphemeralRequest) => json<number>(f, 'POST', '/api/mcp/ephemeral', { ctx, request }),
+  registerEphemeralMcp: (request: T.RegisterEphemeralRequest) => json<number>(f, 'POST', '/api/mcp/ephemeral', request),
   /** Unregister an ephemeral MCP server and disconnect. */
-  unregisterEphemeralMcp: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'DELETE', `/api/mcp/ephemeral/${serverId}`, { ctx }),
+  unregisterEphemeralMcp: (serverId: string) => json<void>(f, 'DELETE', `/api/mcp/ephemeral/${serverId}`),
   /** List all tools across all connected servers (includes schemas). */
   listAllTools: (ctx: T.RequestContext) => json<T.McpTool[]>(f, 'GET', '/api/mcp/tools', ctx),
   /** Call a tool by name (routed via ToolService to the providing server). */
@@ -103,25 +101,25 @@ export const mcpApi = (f: Fetch = fetch) => ({
 // ModelApi
 export const modelApi = (f: Fetch = fetch) => ({
   /** List available models from all providers. */
-  listModels: (ctx: T.RequestContext) => json<T.ModelInfo[]>(f, 'GET', '/api/model', ctx),
+  listModels: () => json<T.ModelInfo[]>(f, 'GET', '/api/model'),
   /** List available providers and their configuration. */
-  listProviders: (ctx: T.RequestContext) => json<T.ProviderInfo[]>(f, 'GET', '/api/model/provider', ctx),
+  listProviders: () => json<T.ProviderInfo[]>(f, 'GET', '/api/model/provider'),
   /** Get the current default model ID. */
-  defaultModelId: (ctx: T.RequestContext) => json<string>(f, 'GET', '/api/model/default', ctx),
+  defaultModelId: () => json<string>(f, 'GET', '/api/model/default'),
   /** Set the default model for new sessions. */
-  setDefaultModel: (ctx: T.RequestContext, modelId: string) => json<void>(f, 'PUT', '/api/model/default', { ctx, modelId }),
+  setDefaultModel: (modelId: string) => json<void>(f, 'PUT', '/api/model/default', modelId),
 });
 
 // OAuthApi
 export const oAuthApi = (f: Fetch = fetch) => ({
-  /** Start an OAuth flow for an MCP server. Starts a local callback server, builds the authorization URL, and returns the URL + state. The caller should open the URL in a browser. */
-  startOauth: (ctx: T.RequestContext, serverId: string) => json<T.OAuthFlowInfo>(f, 'POST', `/api/oauth/${serverId}`, { ctx }),
-  /** Complete an OAuth flow by exchanging an authorization code for tokens. Verifies the state parameter, saves tokens, and reconnects. */
-  completeOauth: (ctx: T.RequestContext, serverId: string, code: string, state: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/complete`, { ctx, code, state }),
+  /** Start an OAuth flow for an MCP server. */
+  startOauth: (serverId: string) => json<T.OAuthFlowInfo>(f, 'POST', `/api/oauth/${serverId}`),
+  /** Complete an OAuth flow by exchanging an authorization code for tokens. */
+  completeOauth: (serverId: string, code: string, state: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/complete`, { code, state }),
   /** Complete an OAuth flow using just a code (manual entry, no state verification). */
-  completeOauthWithCode: (ctx: T.RequestContext, serverId: string, code: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/code`, { ctx, code }),
-  /** Look up which server ID a pending OAuth state parameter belongs to. Returns `None` if the state is unknown or already consumed. */
-  resolveOauthState: (ctx: T.RequestContext, state: string) => json<string | null>(f, 'GET', `/api/oauth/${state}`, { ctx }),
+  completeOauthWithCode: (serverId: string, code: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/code`, { code }),
+  /** Look up which server ID a pending OAuth state parameter belongs to. */
+  resolveOauthState: (state: string) => json<string | null>(f, 'GET', `/api/oauth/${state}`),
 });
 
 // SearchApi
@@ -155,12 +153,12 @@ export const userApi = (f: Fetch = fetch) => ({
 // VoiceApi
 export const voiceApi = (f: Fetch = fetch) => ({
   /** List available voice providers. */
-  listVoiceProviders: (ctx: T.RequestContext) => json<T.VoiceProviderInfo[]>(f, 'GET', '/api/voice/provider', ctx),
+  listVoiceProviders: () => json<T.VoiceProviderInfo[]>(f, 'GET', '/api/voice/provider'),
   /** Synthesize text to speech. Returns audio data. */
-  synthesize: (ctx: T.RequestContext, text: string, providerId: string, voice: string) => json<T.Audio>(f, 'POST', '/api/voice/tts', { ctx, text, providerId, voice }),
+  synthesize: (text: string, providerId: string, voice: string) => json<T.Audio>(f, 'POST', '/api/voice/tts', { text, providerId, voice }),
   /** List available TTS voices for a provider. */
-  listVoices: (ctx: T.RequestContext, providerId: string) => json<T.Voice[]>(f, 'GET', `/api/voice/tts/voices/${providerId}`, { ctx }),
+  listVoices: (providerId: string) => json<T.Voice[]>(f, 'GET', `/api/voice/tts/voices/${providerId}`),
   /** Disconnect a voice stream. */
-  voiceDisconnect: (ctx: T.RequestContext, sessionId: string) => json<void>(f, 'DELETE', `/api/voice/${sessionId}`, { ctx }),
+  voiceDisconnect: (sessionId: string) => json<void>(f, 'DELETE', `/api/voice/${sessionId}`),
 });
 

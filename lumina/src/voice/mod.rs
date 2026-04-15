@@ -12,7 +12,6 @@ mod receiver;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use simply_rpc::RequestContext;
 
 use serenity::model::id::{ChannelId, GuildId};
 use simply_daemon::api::{Daemon, VoiceApi};
@@ -103,13 +102,11 @@ impl VoiceManager {
         call: Arc<Mutex<Call>>,
         http: Arc<serenity::http::Http>,
     ) -> anyhow::Result<()> {
-        let anon = RequestContext::anonymous();
-
         // Connect to daemon STT — use configured provider or first available
         let stt_provider_id = match self.stt_provider_id().await {
             Some(id) => id,
             None => {
-                let providers = self.daemon.voice().list_voice_providers(&anon).await?;
+                let providers = self.daemon.voice().list_voice_providers().await?;
                 providers.iter()
                     .find(|p| p.capabilities.contains(&"stt".to_string()))
                     .map(|p| p.id.clone())
@@ -117,7 +114,7 @@ impl VoiceManager {
             }
         };
 
-        let stt_handle = self.daemon.voice().voice_connect(&anon, &stt_provider_id).await?;
+        let stt_handle = self.daemon.voice().voice_connect(&stt_provider_id).await?;
         let (stt_input, stt_events) = stt_handle.into_parts();
 
         // Register songbird receive handler — pipes audio to daemon STT
@@ -175,14 +172,13 @@ impl VoiceManager {
     /// Synthesize text and return audio ready for songbird (interleaved stereo f32 48kHz).
     pub async fn synthesize_for_discord(&self, text: &str) -> anyhow::Result<Vec<f32>> {
         tracing::info!(text_len = text.len(), "TTS: starting synthesis");
-        let anon = RequestContext::anonymous();
 
         // Use configured TTS provider or first available
         let tts_provider_id = match self.tts_provider_id().await {
             Some(id) => id,
             None => {
                 tracing::debug!("TTS: no configured provider, fetching list");
-                let providers = self.daemon.voice().list_voice_providers(&anon).await?;
+                let providers = self.daemon.voice().list_voice_providers().await?;
                 tracing::debug!(count = providers.len(), "TTS: got providers");
                 providers.iter()
                     .find(|p| p.capabilities.contains(&"tts".to_string()))
@@ -196,7 +192,7 @@ impl VoiceManager {
             Some(id) => id,
             None => {
                 tracing::debug!(provider = %tts_provider_id, "TTS: no configured voice, fetching list");
-                match self.daemon.voice().list_voices(&anon, &tts_provider_id).await {
+                match self.daemon.voice().list_voices(&tts_provider_id).await {
                     Ok(voices) if !voices.is_empty() => {
                         use rand::Rng;
                         let idx = rand::rng().random_range(0..voices.len());
@@ -209,7 +205,7 @@ impl VoiceManager {
         };
 
         tracing::info!(provider = %tts_provider_id, voice = %voice_id, "TTS: calling synthesize");
-        let audio = self.daemon.voice().synthesize(&anon, text, &tts_provider_id, &voice_id).await?;
+        let audio = self.daemon.voice().synthesize(text, &tts_provider_id, &voice_id).await?;
         let mono = audio.to_f32_samples();
 
         tracing::info!(

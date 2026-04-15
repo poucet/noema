@@ -122,8 +122,7 @@ fn spawn_voice_event_loop(
 #[tauri::command]
 pub async fn list_voice_providers(state: State<'_, Arc<AppState>>) -> Result<Vec<simply_daemon::api::VoiceProviderInfo>, String> {
     let daemon = state.get_daemon()?;
-    let ctx = state.ctx();
-    let providers = daemon.voice().list_voice_providers(&ctx).await
+    let providers = daemon.voice().list_voice_providers().await
         .map_err(|e| format!("Failed to list voice providers: {e}"))?;
     tracing::info!(count = providers.len(), providers = ?providers.iter().map(|p| &p.id).collect::<Vec<_>>(), "voice providers loaded");
     Ok(providers)
@@ -142,9 +141,8 @@ pub async fn start_voice_session(app: AppHandle, state: State<'_, Arc<AppState>>
     tracing::info!(provider_id = %provider_id, "starting voice session");
 
     let daemon = state.get_daemon()?;
-    let ctx = state.ctx();
 
-    let handle = daemon.voice().voice_connect(&ctx, &provider_id).await
+    let handle = daemon.voice().voice_connect(&provider_id).await
         .map_err(|e| format!("Failed to connect voice: {e}"))?;
 
     tracing::info!("voice stream connected");
@@ -211,8 +209,7 @@ pub async fn toggle_voice(app: AppHandle, state: State<'_, Arc<AppState>>) -> Re
     } else {
         // Use first available provider as default
         let daemon = state.get_daemon()?;
-        let ctx = state.ctx();
-        let providers = daemon.voice().list_voice_providers(&ctx).await
+        let providers = daemon.voice().list_voice_providers().await
             .map_err(|e| format!("{e}"))?;
         let provider_id = providers.first()
             .map(|p| p.id.clone())
@@ -241,8 +238,7 @@ pub async fn speak(
     tracing::info!(provider_id = %provider_id, voice = %voice, text_len = text.len(), "TTS: speak");
 
     let daemon = state.get_daemon()?;
-    let ctx = state.ctx();
-    let chunk = daemon.voice().synthesize(&ctx, &text, &provider_id, voice).await
+    let chunk = daemon.voice().synthesize(&text, &provider_id, voice).await
         .map_err(|e| format!("TTS failed: {e}"))?;
 
     let sample_rate = chunk.format.sample_rate;
@@ -281,8 +277,7 @@ pub async fn synthesize_speech(
     tracing::info!(provider_id = %provider_id, voice = %voice, text_len = text.len(), "TTS: synthesizing");
 
     let daemon = state.get_daemon()?;
-    let ctx = state.ctx();
-    let chunk = daemon.voice().synthesize(&ctx, &text, &provider_id, voice).await
+    let chunk = daemon.voice().synthesize(&text, &provider_id, voice).await
         .map_err(|e| {
             tracing::error!(error = %e, "TTS: synthesis failed");
             format!("TTS failed: {e}")
@@ -315,8 +310,7 @@ pub async fn list_tts_voices(
     provider_id: String,
 ) -> Result<Vec<simply_voice::Voice>, String> {
     let daemon = state.get_daemon()?;
-    let ctx = state.ctx();
-    daemon.voice().list_voices(&ctx, &provider_id).await
+    daemon.voice().list_voices(&provider_id).await
         .map_err(|e| format!("Failed to list voices: {e}"))
 }
 

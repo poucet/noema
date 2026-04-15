@@ -7,7 +7,6 @@ use serenity::builder::{CreateEmbed, GetMessages};
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use simply_daemon::api::*;
-use simply_rpc::RequestContext;
 
 use crate::commands::LuminaContext;
 
@@ -381,8 +380,7 @@ async fn resolve_model(lx: &LuminaContext, msg: &Message) -> Option<String> {
     };
 
     // Validate the model exists
-    let ctx = lx.ctx_for(msg.author.id.get()).await;
-    if let Ok(models) = lx.daemon.model().list_models(&ctx).await {
+    if let Ok(models) = lx.daemon.model().list_models().await {
         let exists = models.iter().any(|m| m.id.to_string() == model_id);
         if exists {
             return Some(model_id);

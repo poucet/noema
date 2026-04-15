@@ -207,7 +207,6 @@ pub fn run() {
             commands::mcp::connect_mcp_server,
             commands::mcp::disconnect_mcp_server,
             commands::mcp::get_mcp_server_tools,
-            commands::mcp::test_mcp_server,
             commands::mcp::start_mcp_oauth,
             commands::mcp::complete_mcp_oauth,
             commands::mcp::update_mcp_server_settings,

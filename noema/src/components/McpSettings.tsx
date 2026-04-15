@@ -127,8 +127,8 @@ export function McpSettings({ onClose }: McpSettingsProps) {
   const handleTestConnection = async (serverId: string) => {
     try {
       setError(null);
-      const toolCount = await tauri.testMcpServer(serverId);
-      alert(`Connection successful! Found ${toolCount} tools.`);
+      const tools = await tauri.getMcpServerTools(serverId);
+      alert(`Connection successful! Found ${tools.length} tools.`);
     } catch (err) {
       setError(String(err));
     }

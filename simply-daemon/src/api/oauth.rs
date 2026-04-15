@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use simply_rpc::RequestContext;
 
 /// Information returned when starting an OAuth flow.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,33 +16,18 @@ pub struct OAuthFlowInfo {
 #[async_trait]
 pub trait OAuthApi: Send + Sync {
     /// Start an OAuth flow for an MCP server.
-    /// Starts a local callback server, builds the authorization URL, and returns
-    /// the URL + state. The caller should open the URL in a browser.
     #[rpc(post = "/oauth/{server_id}")]
-    async fn start_oauth(&self, ctx: &RequestContext, server_id: &str) -> anyhow::Result<OAuthFlowInfo>;
+    async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo>;
 
     /// Complete an OAuth flow by exchanging an authorization code for tokens.
-    /// Verifies the state parameter, saves tokens, and reconnects.
     #[rpc(post = "/oauth/{server_id}/complete")]
-    async fn complete_oauth(
-        &self,
-        ctx: &RequestContext,
-        server_id: &str,
-        code: &str,
-        state: &str,
-    ) -> anyhow::Result<()>;
+    async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()>;
 
     /// Complete an OAuth flow using just a code (manual entry, no state verification).
     #[rpc(post = "/oauth/{server_id}/code")]
-    async fn complete_oauth_with_code(
-        &self,
-        ctx: &RequestContext,
-        server_id: &str,
-        code: &str,
-    ) -> anyhow::Result<()>;
+    async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()>;
 
     /// Look up which server ID a pending OAuth state parameter belongs to.
-    /// Returns `None` if the state is unknown or already consumed.
     #[rpc(get = "/oauth/{state}")]
-    async fn resolve_oauth_state(&self, ctx: &RequestContext, state: &str) -> Option<String>;
+    async fn resolve_oauth_state(&self, state: &str) -> Option<String>;
 }

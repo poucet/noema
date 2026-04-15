@@ -294,16 +294,11 @@ async fn admin_api_routes(State(state): State<AppState>) -> Json<Vec<RouteInfo>>
 async fn ws_upgrade_handler(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
-    req: axum::extract::Request,
+    axum::Extension(request_user): axum::Extension<RequestUser>,
     ws: axum::extract::WebSocketUpgrade,
 ) -> Response {
     let dispatcher = Arc::clone(&state.rest_dispatcher);
     let tracker = state.tracker.clone();
-    // Extract user from request extensions (set by auth middleware)
-    let request_user = req.extensions()
-        .get::<RequestUser>()
-        .cloned()
-        .unwrap_or(RequestUser::Anonymous);
     let ctx = match request_user.user_id() {
         Some(uid) => simply_rpc::RequestContext::with_scope(
             simply_rpc::Scope::user(uid.as_str()),

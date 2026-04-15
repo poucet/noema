@@ -260,9 +260,6 @@ export async function getMcpServerTools(serverId: string): Promise<McpToolInfo[]
   return invoke<McpToolInfo[]>("get_mcp_server_tools", { serverId });
 }
 
-export async function testMcpServer(serverId: string): Promise<number> {
-  return invoke<number>("test_mcp_server", { serverId });
-}
 
 export async function startMcpOauth(serverId: string): Promise<string> {
   return invoke<string>("start_mcp_oauth", { serverId });

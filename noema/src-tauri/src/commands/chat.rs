@@ -167,7 +167,7 @@ pub async fn set_model(
     daemon.session().set_model(&ctx, &session_id, &full_model_id).await
         .map_err(|e| format!("Failed to set model: {}", e))?;
 
-    daemon.model().set_default_model(&ctx, &full_model_id).await
+    daemon.model().set_default_model(&full_model_id).await
         .map_err(|e| format!("Failed to set default model: {}", e))?;
 
     let display_name = model_id.split('/').last().unwrap_or(&model_id).to_string();
@@ -184,8 +184,7 @@ pub async fn set_model(
 #[tauri::command]
 pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInfo>, String> {
     let daemon = state.get_daemon()?;
-    let ctx = state.ctx();
-    let all = daemon.model().list_models(&ctx).await.map_err(|e| format!("Failed to list models: {}", e))?;
+    let all = daemon.model().list_models().await.map_err(|e| format!("Failed to list models: {}", e))?;
     Ok(all
         .into_iter()
         .filter(|m| m.definition.has_capability(&simply_daemon::types::ModelCapability::Text))
@@ -292,8 +291,7 @@ pub async fn rename_conversation(
 #[tauri::command]
 pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let daemon = state.get_daemon()?;
-    let ctx = state.ctx();
-    let model_id = daemon.model().default_model_id(&ctx).await;
+    let model_id = daemon.model().default_model_id().await;
     Ok(model_id.split('/').last().unwrap_or(&model_id).to_string())
 }
 

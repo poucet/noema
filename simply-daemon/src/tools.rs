@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 use llm::{ToolDefinition, ToolResultContent};
+use rmcp::model::CallToolRequestParams;
 use simply_rpc::{BinaryResponse, RestService};
 
 use simply_core::{McpToolRegistry, ToolService};
@@ -151,19 +152,18 @@ impl ToolService for CompositeToolService {
 
 #[async_trait]
 impl McpApi for CompositeToolService {
-    // MCP management — delegate to inner McpService (pass ctx through)
-    async fn list_mcp_servers(&self, ctx: &simply_rpc::RequestContext) -> anyhow::Result<Vec<McpServerInfo>> { self.mcp.list_mcp_servers(ctx).await }
-    async fn add_mcp_server(&self, ctx: &simply_rpc::RequestContext, request: AddMcpServerRequest) -> anyhow::Result<()> { self.mcp.add_mcp_server(ctx, request).await }
-    async fn remove_mcp_server(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<()> { self.mcp.remove_mcp_server(ctx, server_id).await }
-    async fn connect_mcp_server(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<usize> { self.mcp.connect_mcp_server(ctx, server_id).await }
-    async fn disconnect_mcp_server(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<()> { self.mcp.disconnect_mcp_server(ctx, server_id).await }
-    async fn get_mcp_server_tools(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<Vec<McpTool>> { self.mcp.get_mcp_server_tools(ctx, server_id).await }
-    async fn test_mcp_server(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<usize> { self.mcp.test_mcp_server(ctx, server_id).await }
-    async fn update_mcp_server_settings(&self, ctx: &simply_rpc::RequestContext, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> { self.mcp.update_mcp_server_settings(ctx, server_id, request).await }
-    async fn stop_mcp_retry(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<()> { self.mcp.stop_mcp_retry(ctx, server_id).await }
-    async fn start_mcp_retry(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<()> { self.mcp.start_mcp_retry(ctx, server_id).await }
-    async fn register_ephemeral_mcp(&self, ctx: &simply_rpc::RequestContext, request: RegisterEphemeralRequest) -> anyhow::Result<usize> { self.mcp.register_ephemeral_mcp(ctx, request).await }
-    async fn unregister_ephemeral_mcp(&self, ctx: &simply_rpc::RequestContext, server_id: &str) -> anyhow::Result<()> { self.mcp.unregister_ephemeral_mcp(ctx, server_id).await }
+    // MCP management — delegate to inner McpService
+    async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>> { self.mcp.list_mcp_servers().await }
+    async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> { self.mcp.add_mcp_server(request).await }
+    async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.remove_mcp_server(server_id).await }
+    async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize> { self.mcp.connect_mcp_server(server_id).await }
+    async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.disconnect_mcp_server(server_id).await }
+    async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpTool>> { self.mcp.get_mcp_server_tools(server_id).await }
+    async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> { self.mcp.update_mcp_server_settings(server_id, request).await }
+    async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.stop_mcp_retry(server_id).await }
+    async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.start_mcp_retry(server_id).await }
+    async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize> { self.mcp.register_ephemeral_mcp(request).await }
+    async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.unregister_ephemeral_mcp(server_id).await }
 
     // Tool listing/calling — use the composite
     async fn list_all_tools(&self, _ctx: &simply_rpc::RequestContext) -> anyhow::Result<Vec<McpTool>> {
@@ -175,7 +175,7 @@ impl McpApi for CompositeToolService {
         }).collect())
     }
 
-    async fn call_tool_direct(&self, _ctx: &simply_rpc::RequestContext, request: CallToolRequestParam) -> anyhow::Result<CallToolResult> {
+    async fn call_tool_direct(&self, _ctx: &simply_rpc::RequestContext, request: CallToolRequestParams) -> anyhow::Result<CallToolResult> {
         let name = request.name.as_ref();
         let args = request.arguments
             .map(serde_json::Value::Object)
