@@ -14,6 +14,8 @@ use serenity::all::{
 use serenity::builder::{CreateCommand, CreateCommandOption, CreateEmbed};
 use simply_daemon::api::Daemon;
 
+use simply_core::storage::ids::UserId;
+
 use super::LuminaContext;
 use crate::register_command;
 
@@ -112,10 +114,17 @@ impl super::SlashCommand for Google {
     }
 }
 
+/// Resolve a Discord user to a daemon UCM user_id.
+/// Creates the user in the daemon if they don't exist yet.
+async fn resolve_user(lx: &LuminaContext, discord_user_id: u64) -> anyhow::Result<String> {
+    let external_id = format!("discord:{discord_user_id}");
+    let identity = lx.daemon.user().resolve_or_create_user(external_id).await?;
+    Ok(identity.user_id)
+}
+
 async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let base_url = lx.daemon.core().public_url().await?;
-    // TODO: resolve Discord user → UCM user_id. For now use Discord ID as placeholder.
-    let user_id = cmd.user.id.get().to_string();
+    let user_id = resolve_user(lx, cmd.user.id.get()).await?;
 
     let auth_url = format!("{base_url}/auth/mcp/{GOOGLE_DOCS_SERVER_ID}?user_id={user_id}");
 
