@@ -19,7 +19,6 @@ tracing = { workspace = true }
 llm = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "transport-worker"] }
 config = { workspace = true }
-toml = "0.9.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
