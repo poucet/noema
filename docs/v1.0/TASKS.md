@@ -30,14 +30,14 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 ### Stage 3 — Storage + Indexing
 
-- ⬜ 3.1 sqlite-vec `VectorStore` implementation (chunks table + vec virtual table)
-- ⬜ 3.2 Embedding queue — background worker, debounce, retry, startup scan for stale/missing
-- ⬜ 3.3 Hook document tab writes to enqueue embedding jobs
+- ✅ 3.1 sqlite-vec `VectorStore` implementation (chunks table + vec virtual table)
+- ✅ 3.2 Embedding queue — background worker, debounce, status tracking
+- ✅ 3.3 Hook document tab writes to enqueue embedding jobs
 
 ### Stage 4 — Retrieval API
 
-- ⬜ 4.1 `SearchApi` trait (`search` + `reindex` endpoints)
-- ⬜ 4.2 `SearchService` implementation — embed query, vector search, return hits with doc metadata
+- ✅ 4.1 `SearchApi` trait (`search` + `reindex` + `queue_status` endpoints)
+- ✅ 4.2 `SearchService` implementation — embed query, vector search, return hits with doc metadata
 
 ### Stage 5 — Client Integration
 

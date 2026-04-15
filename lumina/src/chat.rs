@@ -71,6 +71,9 @@ pub async fn handle_message(lx: &LuminaContext, msg: &Message) {
     drop(typing);
 }
 
+/// Number of recent user messages to use as the RAG query.
+const RAG_QUERY_MESSAGES: usize = 5;
+
 /// Core chat flow: load history, create session, send message, stream response.
 async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let bot_id = lx.ctx.cache.current_user().id;
@@ -79,14 +82,22 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     let limit = lx.config.discord.history_limit.unwrap_or(DEFAULT_HISTORY_LIMIT);
     let history = load_channel_history(lx, msg.channel_id, bot_id.get(), limit).await?;
 
-    // 2. Create session with seed and resolved model
+    // 2. Build system prompt with RAG context
+    let mut system_prompt = build_system_prompt(msg);
+    let rag_context = build_rag_context(lx, msg, &history).await;
+    if !rag_context.is_empty() {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&rag_context);
+    }
+
+    // 3. Create session with seed and resolved model
     let model_id = resolve_model(lx, msg).await;
     tracing::debug!(seed_count = history.len(), "creating session");
     let mut session = simply_daemon::DaemonSession::create(
         lx.daemon.clone(),
         CreateSessionOptions {
             persistence: Some(Persistence::Ephemeral),
-            system_prompt: Some(build_system_prompt(msg)),
+            system_prompt: Some(system_prompt),
             model_id,
             seed: history,
         },
@@ -106,6 +117,52 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
 
     // 4. Stream response back to Discord (session closes on drop)
     stream_response(lx, msg, &mut session).await
+}
+
+/// Build RAG context by searching for relevant documents based on recent messages.
+async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMessage]) -> String {
+    // Build query from the current message + last N user messages from history
+    let mut query_parts: Vec<&str> = Vec::new();
+
+    // Add recent user messages from history (last N)
+    let user_messages: Vec<&str> = history.iter()
+        .rev()
+        .filter(|m| matches!(m.role, Role::User))
+        .take(RAG_QUERY_MESSAGES)
+        .filter_map(|m| m.content.iter().find_map(|c| match c {
+            InputContent::Text { text } => Some(text.as_str()),
+            _ => None,
+        }))
+        .collect();
+    query_parts.extend(user_messages.iter().rev());
+
+    // Add the current message
+    query_parts.push(&msg.content);
+
+    let query = query_parts.join("\n");
+    if query.trim().is_empty() {
+        return String::new();
+    }
+
+    // Search for relevant documents
+    match lx.daemon.search().search(&query, None, Some(5)).await {
+        Ok(hits) if !hits.is_empty() => {
+            let mut context = String::from("## Relevant knowledge\nThe following documents may be relevant to this conversation:\n");
+            for hit in &hits {
+                context.push_str(&format!(
+                    "\n### {} (type: {})\n> {}\n",
+                    hit.document_title, hit.document_type, hit.chunk_text,
+                ));
+            }
+            tracing::info!(hits = hits.len(), "RAG context injected");
+            context
+        }
+        Ok(_) => String::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "RAG search failed, continuing without context");
+            String::new()
+        }
+    }
 }
 
 /// Load recent channel messages and convert to seed messages for the daemon.
