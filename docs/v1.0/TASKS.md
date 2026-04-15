@@ -41,7 +41,7 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 ### Stage 5 — Client Integration
 
-- ⬜ 5.1 Lumina auto-RAG — query from last N messages, inject relevant chunks into system prompt
+- ✅ 5.1 Lumina auto-RAG — query from last N messages, inject relevant chunks into system prompt
 - ⬜ 5.2 Local ONNX embedding provider (`bge-small-en-v1.5` via ort) — optional, for no-network setups
 - ⬜ 5.3 Noema search panel + document refs (deferred — depends on UI work)
 
