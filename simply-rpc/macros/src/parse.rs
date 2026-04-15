@@ -117,6 +117,20 @@ impl ParsedTrait {
             let doc_comment = extract_doc_comment(&method.attrs);
             let method_name = format!("{}.{}", prefix, method.sig.ident);
             let params = parse_params(&method.sig)?;
+
+            // Validate: first param must be RequestContext (except skipped methods)
+            if rpc_attrs.kind != RpcKind::Skip {
+                if params.is_empty() || !params[0].is_context {
+                    return Err(syn::Error::new_spanned(
+                        &method.sig.ident,
+                        format!(
+                            "rpc_service method `{}` must have `ctx: RequestContext` as its first parameter",
+                            method.sig.ident,
+                        ),
+                    ));
+                }
+            }
+
             let return_kind = parse_return_type(&method.sig.output, &rpc_attrs.kind)?;
 
             methods.push(ParsedMethod {

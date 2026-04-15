@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use simply_rpc::{BinaryResponse, BinaryUpload};
+use simply_rpc::{BinaryResponse, BinaryUpload, RequestContext};
 use super::types::{AssetId, BlobHash};
 
 /// Asset metadata.
@@ -27,21 +27,21 @@ pub struct Asset {
 pub trait AssetApi: Send + Sync {
     /// Store binary content. Returns the asset ID and blob hash.
     #[rpc(post = "/asset")]
-    async fn store_asset(&self, upload: BinaryUpload) -> anyhow::Result<AssetInfo>;
+    async fn store_asset(&self, ctx: RequestContext, upload: BinaryUpload) -> anyhow::Result<AssetInfo>;
 
     /// List all asset IDs.
     #[rpc(get = "/asset")]
-    async fn list_assets(&self) -> anyhow::Result<Vec<AssetId>>;
+    async fn list_assets(&self, ctx: RequestContext) -> anyhow::Result<Vec<AssetId>>;
 
     /// Get asset metadata by ID.
     #[rpc(get = "/asset/{id}/info")]
-    async fn get_asset_info(&self, id: &AssetId) -> anyhow::Result<AssetInfo>;
+    async fn get_asset_info(&self, ctx: RequestContext, id: &AssetId) -> anyhow::Result<AssetInfo>;
 
     /// Get an asset (metadata + binary data) by ID.
     #[rpc(get = "/asset/{id}", binary_response)]
-    async fn get_asset(&self, id: &AssetId) -> anyhow::Result<BinaryResponse>;
+    async fn get_asset(&self, ctx: RequestContext, id: &AssetId) -> anyhow::Result<BinaryResponse>;
 
     /// Get blob data + mime type by content hash.
     #[rpc(get = "/blob/{hash}", immutable_cache)]
-    async fn get_blob(&self, hash: &BlobHash) -> anyhow::Result<BinaryResponse>;
+    async fn get_blob(&self, ctx: RequestContext, hash: &BlobHash) -> anyhow::Result<BinaryResponse>;
 }

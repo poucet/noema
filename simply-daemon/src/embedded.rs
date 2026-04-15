@@ -439,6 +439,7 @@ where
 {
     async fn create_session(
         &self,
+        ctx: simply_rpc::RequestContext,
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)> {
         let persistence = options.persistence.clone().unwrap_or(Persistence::Ephemeral);
@@ -464,10 +465,9 @@ where
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
         let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
-        // Resolve user-scoped tools: user gets daemon tools + MCP servers they've authed with
-        // None = unauthenticated user (global tools only, no user-specific MCP servers)
-        let tools: Arc<dyn ToolService> = match &options.user_id {
-            Some(uid) => match self.user_tools.get(uid).await {
+        // Resolve user-scoped tools from request context
+        let tools: Arc<dyn ToolService> = match &ctx.scope.user_id {
+            Some(uid) => match self.user_tools.get(&simply_core::storage::ids::UserId::from_string(uid)).await {
                 Ok(user_tools) => user_tools,
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to build user tools, falling back to global");
@@ -502,21 +502,21 @@ where
         Ok((info, broadcast_rx))
     }
 
-    async fn subscribe_session(&self, session_id: &SessionId) -> anyhow::Result<broadcast::Receiver<DaemonEvent>> {
+    async fn subscribe_session(&self, _ctx: simply_rpc::RequestContext, session_id: &SessionId) -> anyhow::Result<broadcast::Receiver<DaemonEvent>> {
         let sessions = self.sessions.lock().await;
         let managed = sessions.get(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
         Ok(managed.event_broadcast.subscribe())
     }
 
-    async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()> {
+    async fn close_session(&self, _ctx: simply_rpc::RequestContext, session_id: &SessionId) -> anyhow::Result<()> {
         if self.sessions.lock().await.remove(session_id).is_some() {
             tracing::info!(session_id = %session_id, "session closed");
         }
         Ok(())
     }
 
-    async fn close_all_sessions(&self) -> anyhow::Result<()> {
+    async fn close_all_sessions(&self, _ctx: simply_rpc::RequestContext) -> anyhow::Result<()> {
         let mut sessions = self.sessions.lock().await;
         let count = sessions.len();
         sessions.clear();
@@ -524,11 +524,11 @@ where
         Ok(())
     }
 
-    async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>> {
+    async fn list_sessions(&self, _ctx: simply_rpc::RequestContext) -> anyhow::Result<Vec<SessionInfo>> {
         Ok(self.sessions.lock().await.values().map(|s| s.info.clone()).collect())
     }
 
-    async fn send_message(&self, session_id: &SessionId, message: UserMessage) -> anyhow::Result<()> {
+    async fn send_message(&self, _ctx: simply_rpc::RequestContext, session_id: &SessionId, message: UserMessage) -> anyhow::Result<()> {
         let sessions = self.sessions.lock().await;
         let managed = sessions.get(session_id)
             .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
@@ -536,7 +536,7 @@ where
         Ok(())
     }
 
-    async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()> {
+    async fn set_model(&self, _ctx: simply_rpc::RequestContext, session_id: &SessionId, model_id: &str) -> anyhow::Result<()> {
         let new_model = llm::create_model(model_id)?;
         let mut sessions = self.sessions.lock().await;
         let managed = sessions.get_mut(session_id)
@@ -546,7 +546,7 @@ where
         Ok(())
     }
 
-    async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()> {
+    async fn push_event(&self, _ctx: simply_rpc::RequestContext, event: InboundEvent) -> anyhow::Result<()> {
         tracing::info!(event_type = %event.event_type, "inbound event received");
         Ok(())
     }
@@ -561,11 +561,11 @@ impl<S: StorageTypes> ConversationApi for EmbeddedDaemon<S>
 where
     S::Document: DocumentResolver,
 {
-    async fn create_conversation(&self, name: Option<String>) -> anyhow::Result<ConversationId> {
+    async fn create_conversation(&self, _ctx: simply_rpc::RequestContext, name: Option<String>) -> anyhow::Result<ConversationId> {
         self.coordinator.create_conversation(&self.user_id, name.as_deref()).await
     }
 
-    async fn list_conversations(&self) -> anyhow::Result<Vec<ConversationInfo>> {
+    async fn list_conversations(&self, _ctx: simply_rpc::RequestContext) -> anyhow::Result<Vec<ConversationInfo>> {
         use simply_core::storage::{EntityStore, EntityType, TurnStore};
         let entities = self.stores.entity()
             .list_entities(&self.user_id, Some(&EntityType::conversation())).await?;
@@ -582,7 +582,7 @@ where
         Ok(result)
     }
 
-    async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
+    async fn delete_conversation(&self, _ctx: simply_rpc::RequestContext, conversation_id: &ConversationId) -> anyhow::Result<()> {
         use simply_core::storage::EntityStore;
         let session_id = {
             let sessions = self.sessions.lock().await;
@@ -599,7 +599,7 @@ where
         self.stores.entity().delete_entity(conversation_id).await
     }
 
-    async fn rename_conversation(&self, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()> {
+    async fn rename_conversation(&self, _ctx: simply_rpc::RequestContext, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()> {
         use simply_core::storage::EntityStore;
         let mut entity = self.stores.entity().get_entity(conversation_id).await?
             .ok_or_else(|| anyhow::anyhow!("conversation not found: {conversation_id}"))?;
@@ -607,7 +607,7 @@ where
         self.stores.entity().update_entity(conversation_id, &entity).await
     }
 
-    async fn get_messages(&self, conversation_id: &ConversationId) -> anyhow::Result<Vec<ResolvedMessage>> {
+    async fn get_messages(&self, _ctx: simply_rpc::RequestContext, conversation_id: &ConversationId) -> anyhow::Result<Vec<ResolvedMessage>> {
         self.coordinator.open_session(conversation_id).await
     }
 }

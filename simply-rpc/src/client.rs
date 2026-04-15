@@ -17,6 +17,7 @@ pub trait RpcConnection: Send + Sync {
         &self,
         method: &str,
         params: Value,
+        ctx: &crate::RequestContext,
     ) -> anyhow::Result<Value>;
 
     /// Make a REST HTTP call.
@@ -25,6 +26,7 @@ pub trait RpcConnection: Send + Sync {
         http_method: crate::HttpMethod,
         path: &str,
         body: Value,
+        ctx: &crate::RequestContext,
     ) -> anyhow::Result<Value>;
 
     /// Register a bidirectional stream.

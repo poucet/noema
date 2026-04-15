@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use simply_rpc::RequestContext;
 use tokio::sync::broadcast;
 
 use super::types::{DaemonEvent, InboundEvent, InputContent, SessionId};
@@ -16,8 +17,6 @@ pub struct CreateSessionOptions {
     pub model_id: Option<String>,
     #[serde(default)]
     pub seed: Vec<SeedMessage>,
-    /// User ID for per-user tool scoping. If not set, uses the daemon's default user.
-    pub user_id: Option<super::types::UserId>,
 }
 
 /// Information about a session.
@@ -48,34 +47,37 @@ pub trait SessionApi: Send + Sync {
     #[rpc(stream = "/session/new")]
     async fn create_session(
         &self,
+        ctx: RequestContext,
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
     #[rpc(stream = "/session/{session_id}/subscribe")]
     async fn subscribe_session(
         &self,
+        ctx: RequestContext,
         session_id: &SessionId,
     ) -> anyhow::Result<broadcast::Receiver<DaemonEvent>>;
 
     #[rpc(get = "/session")]
-    async fn list_sessions(&self) -> anyhow::Result<Vec<SessionInfo>>;
+    async fn list_sessions(&self, ctx: RequestContext) -> anyhow::Result<Vec<SessionInfo>>;
 
     #[rpc(post = "/session/{session_id}/message")]
     async fn send_message(
         &self,
+        ctx: RequestContext,
         session_id: &SessionId,
         message: UserMessage,
     ) -> anyhow::Result<()>;
 
     #[rpc(put = "/session/{session_id}/model")]
-    async fn set_model(&self, session_id: &SessionId, model_id: &str) -> anyhow::Result<()>;
+    async fn set_model(&self, ctx: RequestContext, session_id: &SessionId, model_id: &str) -> anyhow::Result<()>;
 
     #[rpc(delete = "/session/{session_id}")]
-    async fn close_session(&self, session_id: &SessionId) -> anyhow::Result<()>;
+    async fn close_session(&self, ctx: RequestContext, session_id: &SessionId) -> anyhow::Result<()>;
 
     #[rpc(delete = "/session")]
-    async fn close_all_sessions(&self) -> anyhow::Result<()>;
+    async fn close_all_sessions(&self, ctx: RequestContext) -> anyhow::Result<()>;
 
     #[rpc(post = "/session/event")]
-    async fn push_event(&self, event: InboundEvent) -> anyhow::Result<()>;
+    async fn push_event(&self, ctx: RequestContext, event: InboundEvent) -> anyhow::Result<()>;
 }
