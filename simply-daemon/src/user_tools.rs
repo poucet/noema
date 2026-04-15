@@ -119,95 +119,45 @@ impl UserToolServiceCache {
         user_id: &UserId,
         server_ids: &[String],
     ) -> Result<Vec<McpCaller>> {
-        let registry = self.mcp_registry.lock().await;
-        let mut callers = Vec::new();
+        // Phase 1: under lock, collect global callers and configs for per-user connections
+        let (global_callers, user_configs) = {
+            let registry = self.mcp_registry.lock().await;
+            let mut global = Vec::new();
+            let mut needs_user_conn = Vec::new();
 
-        for id in server_ids {
-            let config = registry.config().get_server(id)
-                .or_else(|| registry.get_ephemeral(id));
+            for id in server_ids {
+                let config = registry.config().get_server(id)
+                    .or_else(|| registry.get_ephemeral(id));
 
-            let needs_user_connection = config
-                .map(|c| matches!(c.auth, AuthMethod::OAuth { .. }))
-                .unwrap_or(false);
+                let is_oauth = config
+                    .map(|c| matches!(c.auth, AuthMethod::OAuth { .. }))
+                    .unwrap_or(false);
 
-            if needs_user_connection {
-                // OAuth server: create a per-user connection with user's token
-                if let (Some(config), Some(token)) = (config, self.token_store.get(user_id, id)) {
-                    let mut user_config = config.clone();
-                    user_config.auth = AuthMethod::Token {
-                        token: token.access_token,
-                    };
-                    // Drop registry lock before connecting
-                    drop(registry);
-                    match McpRegistry::connect_to_server(&user_config).await {
-                        Ok(connected) => {
-                            callers.push(McpCaller::from_connected(&connected));
-                        }
-                        Err(e) => {
-                            tracing::warn!(server_id = id, error = %e, "per-user MCP connection failed");
-                        }
+                if is_oauth {
+                    if let (Some(cfg), Some(token)) = (config, self.token_store.get(user_id, id)) {
+                        let mut user_cfg = cfg.clone();
+                        user_cfg.auth = AuthMethod::Token { token: token.access_token };
+                        needs_user_conn.push((id.clone(), user_cfg));
                     }
-                    // Re-acquire for remaining iterations
-                    // Note: this is safe because we sorted server_ids and won't revisit
-                    return self.build_remaining_callers(callers, user_id, server_ids, id).await;
-                }
-            } else {
-                // Non-OAuth: reuse the global connection
-                if let Some(connected) = registry.get_connection(id) {
-                    callers.push(McpCaller::from_connected(connected));
+                } else if let Some(connected) = registry.get_connection(id) {
+                    global.push(McpCaller::from_connected(connected));
                 }
             }
-        }
 
-        Ok(callers)
-    }
+            (global, needs_user_conn)
+        };
+        // Lock released here
 
-    /// Continue building callers after dropping and re-acquiring the registry lock.
-    async fn build_remaining_callers(
-        &self,
-        mut callers: Vec<McpCaller>,
-        user_id: &UserId,
-        all_ids: &[String],
-        completed_id: &str,
-    ) -> Result<Vec<McpCaller>> {
-        let registry = self.mcp_registry.lock().await;
-        let mut past_completed = false;
-
-        for id in all_ids {
-            if id == completed_id {
-                past_completed = true;
-                continue;
-            }
-            if !past_completed {
-                continue;
-            }
-
-            let config = registry.config().get_server(id)
-                .or_else(|| registry.get_ephemeral(id));
-
-            let needs_user_connection = config
-                .map(|c| matches!(c.auth, AuthMethod::OAuth { .. }))
-                .unwrap_or(false);
-
-            if needs_user_connection {
-                if let (Some(config), Some(token)) = (config, self.token_store.get(user_id, id)) {
-                    let mut user_config = config.clone();
-                    user_config.auth = AuthMethod::Token {
-                        token: token.access_token,
-                    };
-                    drop(registry);
-                    match McpRegistry::connect_to_server(&user_config).await {
-                        Ok(connected) => {
-                            callers.push(McpCaller::from_connected(&connected));
-                        }
-                        Err(e) => {
-                            tracing::warn!(server_id = id, error = %e, "per-user MCP connection failed");
-                        }
-                    }
-                    return self.build_remaining_callers(callers, user_id, all_ids, id).await;
+        // Phase 2: connect to OAuth servers with per-user tokens (no lock held)
+        let mut callers = global_callers;
+        for (id, config) in user_configs {
+            match McpRegistry::connect_to_server(&config).await {
+                Ok(connected) => {
+                    callers.push(McpCaller::from_connected(&connected));
                 }
-            } else if let Some(connected) = registry.get_connection(id) {
-                callers.push(McpCaller::from_connected(connected));
+                Err(e) => {
+                    tracing::warn!(server_id = %id, error = %e, "per-user MCP connection failed");
+                }
             }
         }
 
