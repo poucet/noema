@@ -14,8 +14,6 @@ use serenity::all::{
 use serenity::builder::{CreateCommand, CreateCommandOption, CreateEmbed};
 use simply_daemon::api::Daemon;
 
-use simply_core::storage::ids::UserId;
-
 use super::LuminaContext;
 use crate::register_command;
 
