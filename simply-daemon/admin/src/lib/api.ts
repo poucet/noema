@@ -140,7 +140,40 @@ export const api = {
     }),
   deleteTab: (id: string) =>
     fetch(`/api/document/tab/${id}`, { method: 'DELETE' }),
+
+  // Search / RAG
+  search: (query: string, documentType?: string, topK?: number) =>
+    json<SearchHit[]>('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, document_type: documentType, top_k: topK }),
+    }),
+  reindex: () =>
+    json<ReindexStatus>('/api/search/reindex', { method: 'POST' }),
+  getQueueStatus: () => json<EmbeddingQueueStatus>('/api/search/status'),
 };
+
+export interface SearchHit {
+  document_id: string;
+  document_title: string;
+  document_type: string;
+  tab_id: string;
+  chunk_text: string;
+  chunk_index: number;
+  score: number;
+}
+
+export interface ReindexStatus {
+  message: string;
+  tabs_queued: number;
+}
+
+export interface EmbeddingQueueStatus {
+  pending: number;
+  processing: number;
+  completed: number;
+  failed: number;
+}
 
 export const PROVIDERS = [
   { id: 'anthropic', name: 'Anthropic', url: 'https://console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' },
