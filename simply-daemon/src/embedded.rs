@@ -201,6 +201,13 @@ where
                 .register(<dyn SearchApi>::service(search.clone())),
         );
 
+        // Per-user tool service cache — resolves MCP tools based on user's OAuth tokens
+        let user_tools = Arc::new(crate::user_tools::UserToolServiceCache::new(
+            daemon_tools,
+            token_store,
+            Arc::clone(mcp.registry()),
+        ));
+
         let tools = Arc::new(CompositeToolService::new(
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
@@ -212,13 +219,7 @@ where
                 .register(<dyn SearchApi>::service(search.clone())),
             McpToolRegistry::new(Arc::clone(mcp.registry())),
             Arc::clone(&mcp),
-        ));
-
-        // Per-user tool service cache — resolves MCP tools based on user's OAuth tokens
-        let user_tools = Arc::new(crate::user_tools::UserToolServiceCache::new(
-            daemon_tools,
-            token_store,
-            Arc::clone(mcp.registry()),
+            Arc::clone(&user_tools),
         ));
 
         let daemon = Arc::new(Self {

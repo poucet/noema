@@ -117,6 +117,7 @@ pub struct CompositeToolService {
     daemon_tools: DaemonToolService,
     mcp_tools: McpToolRegistry,
     mcp: Arc<McpService>,
+    user_tools: Arc<crate::user_tools::UserToolServiceCache>,
 }
 
 impl CompositeToolService {
@@ -124,8 +125,9 @@ impl CompositeToolService {
         daemon_tools: DaemonToolService,
         mcp_tools: McpToolRegistry,
         mcp: Arc<McpService>,
+        user_tools: Arc<crate::user_tools::UserToolServiceCache>,
     ) -> Self {
-        Self { daemon_tools, mcp_tools, mcp }
+        Self { daemon_tools, mcp_tools, mcp, user_tools }
     }
 }
 
@@ -175,13 +177,19 @@ impl McpApi for CompositeToolService {
         }).collect())
     }
 
-    async fn call_tool_direct(&self, _ctx: &simply_rpc::RequestContext, request: CallToolRequestParams) -> anyhow::Result<CallToolResult> {
+    async fn call_tool_direct(&self, ctx: &simply_rpc::RequestContext, request: CallToolRequestParams) -> anyhow::Result<CallToolResult> {
         let name = request.name.as_ref();
         let args = request.arguments
             .map(serde_json::Value::Object)
-            .unwrap_or(serde_json::Value::Object(Default::default()));
+            .unwrap_or_default();
 
-        let content = self.call_tool(name, args).await?;
+        // Use per-user tool service if authenticated, global otherwise
+        let content = if let Some(ref user_id) = ctx.scope.user_id {
+            let uid = simply_core::storage::ids::UserId::from_string(user_id);
+            self.user_tools.get(&uid).await?.call_tool(name, args).await?
+        } else {
+            self.call_tool(name, args).await?
+        };
 
         let mcp_content: Vec<rmcp::model::Content> = content.into_iter().map(|c| {
             match c {

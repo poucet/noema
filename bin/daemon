@@ -24,7 +24,6 @@ ensure_admin_deps() {
 }
 
 ASTRO_PID=""
-GDOCS_PID=""
 
 start_astro_dev() {
   ensure_admin_deps
@@ -37,10 +36,6 @@ cleanup() {
   if [ -n "$ASTRO_PID" ]; then
     kill "$ASTRO_PID" 2>/dev/null
     wait "$ASTRO_PID" 2>/dev/null
-  fi
-  if [ -n "$GDOCS_PID" ]; then
-    kill "$GDOCS_PID" 2>/dev/null
-    wait "$GDOCS_PID" 2>/dev/null
   fi
 }
 trap cleanup EXIT INT TERM
