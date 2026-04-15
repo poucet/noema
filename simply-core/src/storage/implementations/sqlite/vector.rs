@@ -193,9 +193,10 @@ impl VectorStore for SqliteStore {
             let mut stmt = conn.prepare(
                 "SELECT id FROM vector_chunks WHERE tab_id = ?1",
             )?;
-            stmt.query_map(params![tab_id.as_str()], |row| row.get(0))?
+            let ids = stmt.query_map(params![tab_id.as_str()], |row| row.get(0))?
                 .filter_map(|r| r.ok())
-                .collect()
+                .collect();
+            ids
         };
 
         for id in &ids {
@@ -219,9 +220,10 @@ impl VectorStore for SqliteStore {
             let mut stmt = conn.prepare(
                 "SELECT id FROM vector_chunks WHERE document_id = ?1",
             )?;
-            stmt.query_map(params![document_id.as_str()], |row| row.get(0))?
+            let ids = stmt.query_map(params![document_id.as_str()], |row| row.get(0))?
                 .filter_map(|r| r.ok())
-                .collect()
+                .collect();
+            ids
         };
 
         for id in &ids {

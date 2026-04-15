@@ -3,6 +3,30 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+/// Stable replacement for str::floor_char_boundary (unstable).
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Stable replacement for str::ceil_char_boundary (unstable).
+fn ceil_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
 /// A chunk of text produced by a `Chunker`.
 #[derive(Debug, Clone)]
 pub struct Chunk {
@@ -59,7 +83,7 @@ impl RecursiveCharacterChunker {
             while start < text.len() {
                 let end = (start + self.chunk_size).min(text.len());
                 // Don't split in the middle of a UTF-8 character
-                let end = text.floor_char_boundary(end);
+                let end = floor_char_boundary(text, end);
                 result.push(&text[start..end]);
                 start = end;
             }
@@ -122,7 +146,7 @@ impl RecursiveCharacterChunker {
                 // Prepend the tail of the previous chunk as overlap
                 let prev = &chunks[i - 1];
                 let overlap_start = prev.len().saturating_sub(self.chunk_overlap);
-                let overlap_start = prev.ceil_char_boundary(overlap_start);
+                let overlap_start = ceil_char_boundary(prev, overlap_start);
                 let overlap = &prev[overlap_start..];
                 if overlap.is_empty() {
                     result.push(chunk.clone());
