@@ -51,9 +51,9 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 - ✅ 6.1 `TransientTokenStore`: in-memory `(user_id, server_id) → token` map
 - ✅ 6.2 OAuth flow: `/auth/mcp/{server_id}?user_id=...` → provider → callback → store token
-- ⬜ 6.3 Token injection: daemon adds `Authorization` header when calling MCP servers for authed users
-- ⬜ 6.4 `auth_required` error response when user has no token for a service
-- ⬜ 6.5 Lumina `/google auth` + `/google import` (MCP tool call + DocumentApi) + `/google status`
+- ✅ 6.3 Per-user MCP connections: `UserToolServiceCache` with token-based connection per user
+- ✅ 6.4 `CoreApi::public_url()` — daemon exposes its public URL for clients
+- ✅ 6.5 Lumina `/google auth` + `/google import` (autocomplete + URL) + `/google status`
 - ⬜ 6.6 Admin UI: MCP OAuth config in settings page
 
 ---
