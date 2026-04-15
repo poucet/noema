@@ -19,6 +19,15 @@ pub struct SearchHit {
     pub score: f32,
 }
 
+/// Search request.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/")]
+pub struct SearchRequest {
+    pub query: String,
+    pub document_type: Option<String>,
+    pub top_k: Option<usize>,
+}
+
 /// Status of a reindex operation.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
 #[ts(export, export_to = "admin/src/lib/generated/")]
@@ -32,7 +41,7 @@ pub struct ReindexStatus {
 pub trait SearchApi: Send + Sync {
     /// Semantic search over embedded documents.
     #[rpc(post = "/search")]
-    async fn search(&self, query: &str, document_type: Option<String>, top_k: Option<usize>) -> anyhow::Result<Vec<SearchHit>>;
+    async fn search(&self, request: SearchRequest) -> anyhow::Result<Vec<SearchHit>>;
 
     /// Re-embed all documents. Runs in the background; returns immediately.
     #[rpc(post = "/search/reindex", no_tool)]

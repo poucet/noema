@@ -159,7 +159,12 @@ async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMes
     }
 
     // Search for relevant documents
-    match lx.daemon.search().search(&query, None, Some(5)).await {
+    let search_request = SearchRequest {
+        query,
+        document_type: None,
+        top_k: Some(5),
+    };
+    match lx.daemon.search().search(search_request).await {
         Ok(hits) if !hits.is_empty() => {
             let mut context = String::from("## Relevant knowledge\nThe following documents may be relevant to this conversation:\n");
             for hit in &hits {

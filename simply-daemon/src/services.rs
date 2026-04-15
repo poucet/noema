@@ -722,18 +722,18 @@ impl<S: StorageTypes> SearchService<S> {
 
 #[async_trait]
 impl<S: StorageTypes> SearchApi for SearchService<S> {
-    async fn search(&self, query: &str, document_type: Option<String>, top_k: Option<usize>) -> anyhow::Result<Vec<SearchHit>> {
-        let top_k = top_k.unwrap_or(5);
+    async fn search(&self, request: SearchRequest) -> anyhow::Result<Vec<SearchHit>> {
+        let top_k = request.top_k.unwrap_or(5);
 
         // Embed the query
-        let embeddings = self.embedding_provider.embed(&[query]).await?;
+        let embeddings = self.embedding_provider.embed(&[&request.query]).await?;
         let vector = embeddings.into_iter().next()
             .ok_or_else(|| anyhow::anyhow!("embedding provider returned no vectors"))?
             .vector;
 
         // Search
         let filter = simply_core::embedding::SearchFilter {
-            document_type,
+            document_type: request.document_type,
             user_id: Some(self.user_id.clone()),
         };
 

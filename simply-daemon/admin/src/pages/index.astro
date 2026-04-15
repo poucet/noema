@@ -69,6 +69,15 @@ import Base from '../layouts/Base.astro';
       <tbody id="sess-body"><tr><td colspan="4" class="empty">No active sessions</td></tr></tbody>
     </table>
 
+    <h2>Embedding Queue</h2>
+    <div class="card" id="embed-status">
+      <div class="form-row"><label>Status</label><span id="eq-status" class="mono">—</span></div>
+      <div class="form-row"><label>Pending</label><span id="eq-pending" class="mono">0</span></div>
+      <div class="form-row"><label>Processing</label><span id="eq-processing" class="mono">0</span></div>
+      <div class="form-row"><label>Completed</label><span id="eq-completed" class="mono">0</span></div>
+      <div class="form-row"><label>Failed</label><span id="eq-failed" class="mono">0</span></div>
+    </div>
+
     <h2>API Keys</h2>
     <div class="provider-grid" id="dash-providers"></div>
 
@@ -230,6 +239,18 @@ import Base from '../layouts/Base.astro';
       const s = await api.getSettings();
       document.getElementById('d-email')!.textContent = s.user_email || '—';
       document.getElementById('d-model')!.textContent = s.default_model || '(auto)';
+    } catch {}
+
+    try {
+      const eq = await api.getQueueStatus();
+      const active = eq.pending > 0 || eq.processing > 0;
+      document.getElementById('eq-status')!.textContent = active ? 'Active' : 'Idle';
+      (document.getElementById('eq-status') as HTMLElement).style.color = active ? '#f59e0b' : '#14b8a6';
+      document.getElementById('eq-pending')!.textContent = String(eq.pending);
+      document.getElementById('eq-processing')!.textContent = String(eq.processing);
+      document.getElementById('eq-completed')!.textContent = String(eq.completed);
+      document.getElementById('eq-failed')!.textContent = String(eq.failed);
+      if (eq.failed > 0) (document.getElementById('eq-failed') as HTMLElement).style.color = '#ef4444';
     } catch {}
   }
 
