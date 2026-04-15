@@ -2,12 +2,14 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use simply_rpc::StreamHandle;
 use simply_voice::{Audio, VoiceEvent, VoiceInput};
 
 /// Info about an available voice provider.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct VoiceProviderInfo {
     /// Unique identifier (e.g. "whisper", "voxtral", "gemini").
     pub id: String,

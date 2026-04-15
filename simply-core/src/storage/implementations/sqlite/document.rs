@@ -220,6 +220,21 @@ impl DocumentStore for SqliteStore {
         Ok(docs)
     }
 
+    async fn list_all_documents(&self) -> Result<Vec<StoredEditable<DocumentId, Document>>> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, user_id, title, source, source_id, document_type, is_public, created_at, updated_at
+             FROM documents ORDER BY updated_at DESC",
+        )?;
+
+        let docs = stmt
+            .query_map([], parse_document)?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(docs)
+    }
+
     async fn search_documents(
         &self,
         user_id: &UserId,

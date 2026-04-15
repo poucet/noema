@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use simply_rpc::RequestContext;
+use ts_rs::TS;
 use tokio::sync::broadcast;
 
 use super::types::{DaemonEvent, InboundEvent, InputContent, SessionId};
@@ -10,7 +11,8 @@ use super::types::{DaemonEvent, InboundEvent, InputContent, SessionId};
 pub use simply_core::Persistence;
 
 /// Options when creating a new session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct CreateSessionOptions {
     pub persistence: Option<Persistence>,
     pub system_prompt: Option<String>,
@@ -20,7 +22,8 @@ pub struct CreateSessionOptions {
 }
 
 /// Information about a session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct SessionInfo {
     pub id: SessionId,
     pub persistence: Persistence,
@@ -29,13 +32,15 @@ pub struct SessionInfo {
 }
 
 /// A user message sent to a session.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct UserMessage {
     pub content: Vec<InputContent>,
 }
 
 /// A seed message.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct SeedMessage {
     pub role: llm::Role,
     pub content: Vec<InputContent>,

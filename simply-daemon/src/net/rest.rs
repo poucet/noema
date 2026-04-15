@@ -70,6 +70,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/admin/api/api-key", axum::routing::post(admin_api::set_api_key))
         .route("/admin/api/api-key/{provider}", axum::routing::delete(admin_api::remove_api_key))
         .route("/admin/api/users", get(admin_api::list_users).post(admin_api::create_user))
+        .route("/admin/api/users/{user_id}", axum::routing::delete(admin_api::delete_user))
         .with_state(admin_state);
 
     let settings = config::Settings::load();
@@ -78,6 +79,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
 
     let mcp_auth_state = McpAuthState {
         token_store: Arc::clone(&config.token_store),
+        user_store: Arc::clone(&config.user_store),
         public_url,
     };
 

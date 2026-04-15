@@ -15,32 +15,37 @@ struct Args {
     /// Host to bind to
     #[arg(short = 'H', long, default_value = "127.0.0.1")]
     host: String,
-
-    /// Log level
-    #[arg(short, long, default_value = "info")]
-    log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Set up logging — use RUST_LOG env var if set, otherwise CLI arg
+    // Log to file if GDOCS_LOG_FILE is set, otherwise stderr
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            let level = &args.log_level;
-            tracing_subscriber::EnvFilter::new(format!("mcp_gdocs={level}"))
-        });
+        .unwrap_or_else(|_| "mcp_gdocs=info".into());
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .init();
+    if let Ok(log_path) = std::env::var("GDOCS_LOG_FILE") {
+        let file = std::fs::File::create(&log_path)?;
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_writer(file)
+            .with_ansi(false)
+            .init();
+        eprintln!("Logging to {log_path}");
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .init();
+    };
+
+    tracing::info!("mcp-gdocs starting");
 
     // Start the server
-    let handle = noema_mcp_gdocs::start_server_on(&args.host, args.port).await?;
+    let handle = mcp_gdocs::start_server_on(&args.host, args.port).await?;
 
-    println!("Google Docs MCP server running at {}", handle.url());
-    println!("Press Ctrl+C to stop");
+    eprintln!("Google Docs MCP server running at {}", handle.url());
+    tracing::info!(url = %handle.url(), "server ready");
 
     // Wait for shutdown signal
     tokio::signal::ctrl_c().await?;

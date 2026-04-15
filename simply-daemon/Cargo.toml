@@ -19,8 +19,8 @@ path = "src/main.rs"
 [dependencies]
 # Internal crates
 config = { workspace = true }
-simply-core = { workspace = true, features = ["sqlite"] }
-simply-rpc = { workspace = true }
+simply-core = { workspace = true, features = ["sqlite", "ts"] }
+simply-rpc = { workspace = true, features = ["ts"] }
 simply-voice = { workspace = true, features = ["voxtral", "gemini", "elevenlabs"] }
 llm = { workspace = true, features = ["local-embedding"] }
 
@@ -59,7 +59,7 @@ futures-util = { workspace = true }
 rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
 
 # TypeScript type generation
-ts-rs = { version = "10", features = ["serde-compat"] }
+ts-rs = { version = "10", features = ["serde-compat", "serde-json-impl"] }
 
 # HTTP/WS server
 axum = { workspace = true }

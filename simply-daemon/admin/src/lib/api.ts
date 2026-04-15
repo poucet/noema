@@ -1,4 +1,18 @@
 // Admin API client — all calls go to the daemon on the same origin.
+//
+// RPC service types are imported from generated types (ts-rs + build.rs).
+// Admin-only types (not part of RPC services) are defined here.
+
+import type {
+  DocumentInfo,
+  DocumentDetail,
+  TabInfo,
+  SearchHit,
+  ReindexStatus,
+  EmbeddingQueueStatus,
+} from './generated/types';
+
+// --- Admin-only types (no Rust struct, returned as inline JSON) ---
 
 export interface SetupStatus {
   is_configured: boolean;
@@ -25,51 +39,42 @@ export interface ConnectionInfo {
   connected_at: string;
 }
 
-export interface SessionInfo {
+export interface SessionListItem {
   id: string;
   model_id: string;
   persistence: string;
   created_at: string;
 }
 
-export interface DocumentInfo {
-  id: string;
-  title: string;
-  document_type: string;
-  source: string;
-  source_id: string | null;
-  tab_count: number;
-  created_at: number;
-  updated_at: number;
+// --- User context scoping ---
+
+const USER_KEY = 'simply-admin-user-id';
+
+export function setCurrentUser(userId: string | null) {
+  if (userId) localStorage.setItem(USER_KEY, userId);
+  else localStorage.removeItem(USER_KEY);
 }
 
-export interface DocumentDetail {
-  id: string;
-  title: string;
-  document_type: string;
-  source: string;
-  source_id: string | null;
-  tabs: TabInfo[];
-  created_at: number;
-  updated_at: number;
+export function getCurrentUser(): string | null {
+  return localStorage.getItem(USER_KEY);
 }
 
-export interface TabInfo {
-  id: string;
-  title: string;
-  icon: string | null;
-  parent_tab_id: string | null;
-  tab_index: number;
-  content_markdown: string | null;
-  created_at: number;
-  updated_at: number;
+function contextHeaders(): Record<string, string> {
+  const userId = getCurrentUser();
+  if (!userId) return {};
+  return {
+    'X-Request-Context': JSON.stringify({ scope: { user_id: userId } }),
+  };
 }
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const headers = { ...contextHeaders(), ...(init?.headers ?? {}) };
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
   return res.json();
 }
+
+// --- Admin API (hand-written endpoints, not part of RPC services) ---
 
 export const api = {
   getSetupStatus: () => json<SetupStatus>('/admin/api/setup-status'),
@@ -93,6 +98,8 @@ export const api = {
     fetch(`/admin/api/api-key/${provider}`, { method: 'DELETE' }),
 
   getUsers: () => json<UserInfo[]>('/admin/api/users'),
+  deleteUser: (id: string) =>
+    fetch(`/admin/api/users/${id}`, { method: 'DELETE' }),
   createUser: (email: string) =>
     json<UserInfo>('/admin/api/users', {
       method: 'POST',
@@ -102,15 +109,15 @@ export const api = {
 
   getConnections: () => json<ConnectionInfo[]>('/admin/api/connections'),
 
-  getSessions: async (): Promise<SessionInfo[]> => {
-    try { return await json<SessionInfo[]>('/api/session'); }
+  getSessions: async (): Promise<SessionListItem[]> => {
+    try { return await json<SessionListItem[]>('/api/session'); }
     catch { return []; }
   },
 
   killDaemon: () => fetch('/api/daemon/kill', { method: 'POST' }),
 
   // Documents (via /api prefix for RPC routes)
-  listDocuments: () => json<DocumentInfo[]>('/api/document'),
+  listDocuments: () => json<DocumentInfo[]>('/api/document/all'),
   searchDocuments: (query: string) => json<DocumentInfo[]>(`/api/document/search?q=${encodeURIComponent(query)}`),
   getDocument: (id: string) => json<DocumentDetail>(`/api/document/${id}`),
   createDocument: (title: string, content?: string) =>
@@ -126,7 +133,7 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
   deleteDocument: (id: string) =>
-    fetch(`/api/document/${id}`, { method: 'DELETE' }),
+    fetch(`/api/document/${id}`, { method: 'DELETE', headers: contextHeaders() }),
   getTab: (id: string) => json<TabInfo>(`/api/document/tab/${id}`),
   updateTab: (id: string, content: string) =>
     json(`/api/document/tab/${id}`, {
@@ -141,7 +148,7 @@ export const api = {
       body: JSON.stringify({ request: { title, content } }),
     }),
   deleteTab: (id: string) =>
-    fetch(`/api/document/tab/${id}`, { method: 'DELETE' }),
+    fetch(`/api/document/tab/${id}`, { method: 'DELETE', headers: contextHeaders() }),
 
   // Search / RAG
   search: (query: string, documentType?: string, topK?: number) =>
@@ -154,28 +161,6 @@ export const api = {
     json<ReindexStatus>('/api/search/reindex', { method: 'POST' }),
   getQueueStatus: () => json<EmbeddingQueueStatus>('/api/search/status'),
 };
-
-export interface SearchHit {
-  document_id: string;
-  document_title: string;
-  document_type: string;
-  tab_id: string;
-  chunk_text: string;
-  chunk_index: number;
-  score: number;
-}
-
-export interface ReindexStatus {
-  message: string;
-  tabs_queued: number;
-}
-
-export interface EmbeddingQueueStatus {
-  pending: number;
-  processing: number;
-  completed: number;
-  failed: number;
-}
 
 export const PROVIDERS = [
   { id: 'anthropic', name: 'Anthropic', url: 'https://console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' },

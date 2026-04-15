@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 /// (resolving per-user MCP connections, etc.) only happens when services
 /// need it and `user_id` is `Some`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Scope {
     /// None = anonymous/default, Some = authenticated user.
     pub user_id: Option<String>,

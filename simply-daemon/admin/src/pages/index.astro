@@ -83,8 +83,8 @@ import Base from '../layouts/Base.astro';
 
     <h2>Users</h2>
     <table>
-      <thead><tr><th>ID</th><th>Email</th></tr></thead>
-      <tbody id="user-body"><tr><td colspan="2" class="empty">No users</td></tr></tbody>
+      <thead><tr><th>ID</th><th>Email</th><th></th></tr></thead>
+      <tbody id="user-body"><tr><td colspan="3" class="empty">No users</td></tr></tbody>
     </table>
 
     <h2>Settings</h2>
@@ -231,8 +231,16 @@ import Base from '../layouts/Base.astro';
     try {
       const users = await api.getUsers();
       document.getElementById('user-body')!.innerHTML = users.length === 0
-        ? '<tr><td colspan="2" class="empty">No users</td></tr>'
-        : users.map(u => `<tr><td class="mono" style="font-size:0.78em">${u.id}</td><td>${u.email}</td></tr>`).join('');
+        ? '<tr><td colspan="3" class="empty">No users</td></tr>'
+        : users.map(u => `<tr><td class="mono" style="font-size:0.78em">${u.id}</td><td>${u.email ?? '—'}</td><td><button class="btn btn-ghost del-user-btn" data-uid="${u.id}" style="color:#ef4444;font-size:0.78em">&times;</button></td></tr>`).join('');
+      document.querySelectorAll('.del-user-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const uid = (btn as HTMLElement).dataset.uid!;
+          if (!confirm(`Delete user ${uid}?`)) return;
+          await api.deleteUser(uid);
+          refresh();
+        });
+      });
     } catch {}
 
     try {

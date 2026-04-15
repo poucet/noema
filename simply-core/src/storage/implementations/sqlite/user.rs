@@ -141,6 +141,16 @@ impl UserStore for SqliteStore {
         Ok(users)
     }
 
+    async fn delete_user(&self, id: &UserId) -> Result<bool> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "DELETE FROM discord_user_mappings WHERE user_id = ?1",
+            params![id.as_str()],
+        )?;
+        let rows = conn.execute("DELETE FROM users WHERE id = ?1", params![id.as_str()])?;
+        Ok(rows > 0)
+    }
+
     async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>> {
         let conn = self.conn().lock().unwrap();
         let user_id = conn

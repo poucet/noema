@@ -27,7 +27,7 @@ pub struct EmbedJob {
 
 /// Status of the embedding queue.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, ts_rs::TS)]
-#[ts(export, export_to = "admin/src/lib/generated/")]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct EmbeddingQueueStatus {
     /// Number of jobs waiting to be processed.
     pub pending: usize,

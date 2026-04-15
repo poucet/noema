@@ -192,9 +192,24 @@ impl ServerHandler for GoogleDocsServer {
     fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
-        std::future::ready(Ok(ListToolsResult { meta: None, next_cursor: None, tools: Self::get_tools() }))
+        async move {
+            // Check for auth header on list_tools too (first call after connect)
+            if let Some(parts) = context.extensions.get::<http::request::Parts>() {
+                if let Some(auth_header) = parts.headers.get(http::header::AUTHORIZATION) {
+                    if let Ok(auth_str) = auth_header.to_str() {
+                        info!("list_tools: found Authorization header, setting access token");
+                        self.set_access_token(auth_str.to_string()).await;
+                    }
+                } else {
+                    info!("list_tools: no Authorization header in request");
+                }
+            } else {
+                info!("list_tools: no HTTP request parts in context");
+            }
+            Ok(ListToolsResult { meta: None, next_cursor: None, tools: Self::get_tools() })
+        }
     }
 
     fn call_tool(
@@ -210,12 +225,17 @@ impl ServerHandler for GoogleDocsServer {
 
             // Try to extract Authorization header from HTTP request parts
             if let Some(parts) = context.extensions.get::<http::request::Parts>() {
+                info!(tool = %name, "call_tool: HTTP parts available, checking auth header");
                 if let Some(auth_header) = parts.headers.get(http::header::AUTHORIZATION) {
                     if let Ok(auth_str) = auth_header.to_str() {
-                        debug!("Found Authorization header, setting access token");
+                        info!(tool = %name, "call_tool: found Authorization header, setting token");
                         self.set_access_token(auth_str.to_string()).await;
                     }
+                } else {
+                    info!(tool = %name, "call_tool: no Authorization header in request");
                 }
+            } else {
+                info!(tool = %name, "call_tool: no HTTP parts in context extensions");
             }
 
             let client = match self.get_client().await {

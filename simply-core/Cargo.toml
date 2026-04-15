@@ -7,6 +7,7 @@ edition.workspace = true
 default = []
 sqlite = ["rusqlite", "dep:sqlite-vec"]
 rusqlite = ["dep:rusqlite"]
+ts = ["dep:ts-rs", "llm/ts"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -36,6 +37,9 @@ sqlite-vec = { version = "0.1", optional = true }
 
 # UUID for ID generation (always required)
 uuid = { workspace = true }
+
+# TypeScript type generation (optional)
+ts-rs = { version = "10", features = ["serde-compat"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

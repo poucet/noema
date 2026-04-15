@@ -8,6 +8,7 @@ models/
 daemon.log
 noema.log
 node_modules/
+**/bindings/
 *.swp
 *.pid
 lumina.log

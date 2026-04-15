@@ -36,6 +36,9 @@ impl DocumentStore for MockDocumentStore {
     async fn list_documents(&self, _: &UserId) -> Result<Vec<StoredEditable<DocumentId, Document>>> {
         unimplemented!()
     }
+    async fn list_all_documents(&self) -> Result<Vec<StoredEditable<DocumentId, Document>>> {
+        unimplemented!()
+    }
     async fn search_documents(
         &self,
         _: &UserId,

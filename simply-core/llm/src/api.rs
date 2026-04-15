@@ -1,8 +1,11 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ts")]
+use ts_rs::TS;
 
 #[derive(Copy, Clone, Debug, Deserialize, PartialEq, Eq, Serialize, Default, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     User,
@@ -47,6 +50,7 @@ pub struct ToolDefinition {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
@@ -59,6 +63,7 @@ pub struct ToolCall {
 /// Content within a tool result - can be text, images, audio, etc.
 /// This is a subset of ContentBlock without recursive tool calls.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolResultContent {
     Text { text: String },
@@ -88,6 +93,7 @@ impl ToolResultContent {
 
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
 pub struct ToolResult {
     pub tool_call_id: String,
     pub content: Vec<ToolResultContent>,
@@ -108,6 +114,7 @@ impl ToolResult {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text { text: String },
@@ -139,6 +146,7 @@ impl ContentBlock {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[cfg_attr(feature = "ts", derive(TS))]
 pub struct ChatPayload {
     pub content: Vec<ContentBlock>,
 }
@@ -287,6 +295,7 @@ impl ChatPayload {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[cfg_attr(feature = "ts", derive(TS))]
 pub struct ChatMessage {
     #[serde(default)]
     pub role: Role,

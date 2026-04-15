@@ -27,6 +27,9 @@ pub trait UserStore: Send + Sync {
     /// List all users in the database
     async fn list_users(&self) -> Result<Vec<StoredUser>>;
 
+    /// Delete a user and all their external identity mappings.
+    async fn delete_user(&self, id: &UserId) -> Result<bool>;
+
     /// Resolve an external identity (e.g. "discord:123") to a UCM user ID.
     /// Returns None if the identity is not mapped.
     async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>>;

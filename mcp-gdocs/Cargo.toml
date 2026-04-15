@@ -5,11 +5,11 @@ edition.workspace = true
 description = "Google Docs MCP server"
 
 [lib]
-name = "noema_mcp_gdocs"
+name = "mcp_gdocs"
 path = "src/lib.rs"
 
 [[bin]]
-name = "noema-mcp-gdocs"
+name = "mcp-gdocs"
 path = "src/main.rs"
 
 [dependencies]

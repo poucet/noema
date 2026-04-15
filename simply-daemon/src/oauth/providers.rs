@@ -12,6 +12,9 @@ use std::collections::HashMap;
 pub struct OAuthProviderDefaults {
     pub authorization_url: String,
     pub token_url: String,
+    /// Endpoint to fetch user identity (email) after token exchange.
+    /// Response must be JSON with an `email` field.
+    pub userinfo_url: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
 }
@@ -65,6 +68,7 @@ pub fn resolve_server_auth(config: &simply_core::ServerConfig) -> Option<Resolve
         client_secret: config.client_secret.clone(),
         authorization_url: defaults.authorization_url,
         token_url: defaults.token_url,
+        userinfo_url: defaults.userinfo_url,
         scopes: defaults.scopes,
     })
 }
@@ -75,5 +79,6 @@ pub struct ResolvedOAuth {
     pub client_secret: Option<String>,
     pub authorization_url: String,
     pub token_url: String,
+    pub userinfo_url: Option<String>,
     pub scopes: Vec<String>,
 }

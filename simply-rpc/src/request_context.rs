@@ -10,6 +10,7 @@ use crate::Scope;
 /// handles serialization/deserialization transparently — it's injected
 /// by the dispatch layer, not deserialized from user-provided params.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RequestContext {
     /// User identity and authorization scope.
     pub scope: Scope,

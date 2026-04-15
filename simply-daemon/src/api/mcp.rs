@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use simply_rpc::RequestContext;
+use ts_rs::TS;
 
 // Re-export rmcp types used in the API.
 pub use rmcp::model::{
@@ -10,7 +11,8 @@ pub use rmcp::model::{
 };
 
 /// Information about a configured MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct McpServerInfo {
     pub id: String,
     pub name: String,
@@ -25,7 +27,8 @@ pub struct McpServerInfo {
 }
 
 /// Request to add a new MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct AddMcpServerRequest {
     pub id: String,
     pub name: String,
@@ -38,14 +41,16 @@ pub struct AddMcpServerRequest {
 }
 
 /// Request to register an ephemeral MCP server at runtime.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct RegisterEphemeralRequest {
     pub id: String,
     pub url: String,
 }
 
 /// Request to update MCP server settings.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct UpdateMcpServerRequest {
     pub name: Option<String>,
     pub url: Option<String>,

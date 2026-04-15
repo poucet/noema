@@ -215,6 +215,7 @@ impl StoredContent {
 /// Similar to `ContentBlock` but preserves refs so the UI can
 /// fetch binary data and document details separately via their endpoints.
 #[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResolvedContent {
     Text {
@@ -241,6 +242,7 @@ pub enum ResolvedContent {
 /// Converted to `ContentBlock` for pending messages, then stored
 /// during `Session::commit()` via `StorageCoordinator::add_message()`.
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum InputContent {
     /// Plain text to be stored

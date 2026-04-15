@@ -17,11 +17,13 @@ llm_macros = { workspace = true }
 schemars = { workspace = true }
 config = { workspace = true }
 chrono = { workspace = true }
+ts-rs = { version = "10", features = ["serde-compat", "serde-json-impl"], optional = true }
 fastembed = { version = "4", optional = true }
 
 [features]
 default = ["local-embedding"]
 local-embedding = ["dep:fastembed"]
+ts = ["dep:ts-rs"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -92,6 +92,11 @@ impl DocumentStore for MemoryDocumentStore {
             .collect())
     }
 
+    async fn list_all_documents(&self) -> Result<Vec<StoredEditable<DocumentId, Document>>> {
+        let documents = self.documents.lock().unwrap();
+        Ok(documents.values().cloned().collect())
+    }
+
     async fn search_documents(
         &self,
         user_id: &UserId,

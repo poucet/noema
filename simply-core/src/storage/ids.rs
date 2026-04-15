@@ -11,6 +11,7 @@ macro_rules! define_id {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
         #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+        #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -50,6 +51,12 @@ macro_rules! define_id {
 
         impl AsRef<str> for $name {
             fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl std::borrow::Borrow<str> for $name {
+            fn borrow(&self) -> &str {
                 &self.0
             }
         }

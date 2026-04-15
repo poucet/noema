@@ -75,6 +75,10 @@ impl UserStore for MemoryUserStore {
         Ok(users.values().cloned().collect())
     }
 
+    async fn delete_user(&self, id: &UserId) -> Result<bool> {
+        Ok(self.users.lock().unwrap().remove(id.as_str()).is_some())
+    }
+
     async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>> {
         Ok(self.discord_mappings.lock().unwrap().get(external_id).cloned())
     }

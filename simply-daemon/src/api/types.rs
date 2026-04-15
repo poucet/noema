@@ -4,6 +4,7 @@
 //! not from simply-core or llm directly.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
 // Re-exported IDs
@@ -49,7 +50,8 @@ pub use simply_core::mcp::{ServerStatus, spawn_retry_task, start_auto_connect};
 // ---------------------------------------------------------------------------
 
 /// Opaque session identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct SessionId(String);
 
 impl SessionId {
@@ -75,7 +77,8 @@ impl std::fmt::Display for SessionId {
 }
 
 /// Events streamed from the daemon to session subscribers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub enum DaemonEvent {
     SessionReady { session_id: SessionId },
     UserMessage(ChatMessage),
@@ -96,14 +99,16 @@ pub enum DaemonEvent {
 }
 
 /// An event pushed into the daemon (trigger interface).
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct InboundEvent {
     pub event_type: String,
     pub payload: serde_json::Value,
 }
 
 /// Information about a stored conversation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct ConversationInfo {
     pub id: ConversationId,
     pub name: Option<String>,

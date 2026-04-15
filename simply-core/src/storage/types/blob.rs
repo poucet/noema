@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 
 /// Result of storing a blob
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(transparent)]
 pub struct BlobHash(String);
 

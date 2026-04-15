@@ -4255,6 +4255,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "ts-rs",
 ]
 
 [[package]]
@@ -7609,6 +7610,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "ts-rs",
  "uuid",
 ]
 
@@ -7671,6 +7673,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tracing",
+ "ts-rs",
 ]
 
 [[package]]

@@ -14,7 +14,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
-use simply_core::mcp::McpRegistry;
+use simply_core::mcp::{McpRegistry, ServerConfig};
 use simply_core::storage::ids::UserId;
 use simply_core::{AuthMethod, ToolService};
 use llm::{ToolDefinition, ToolResultContent};
@@ -161,7 +161,7 @@ impl UserToolServiceCache {
                         needs_user_conn.push((id.clone(), user_cfg));
                     }
                 } else if let Some(connected) = registry.get_connection(id) {
-                    global.push(McpCaller::from_connected(connected));
+                    global.push(McpCaller::from_shared(connected));
                 }
             }
 
@@ -169,12 +169,16 @@ impl UserToolServiceCache {
         };
         // Lock released here
 
-        // Phase 2: connect to OAuth servers with per-user tokens (no lock held)
+        // Phase 2: for OAuth servers, connect once to fetch tool definitions,
+        // then store config for on-demand reconnection per tool call.
         let mut callers = global_callers;
         for (id, config) in user_configs {
             match McpRegistry::connect_to_server(&config).await {
                 Ok(connected) => {
-                    callers.push(McpCaller::from_connected(&connected));
+                    let tools = McpCaller::extract_tools(&connected);
+                    // Drop the connection — McpCaller will reconnect on demand
+                    drop(connected);
+                    callers.push(McpCaller::on_demand(tools, config));
                 }
                 Err(e) => {
                     tracing::warn!(server_id = %id, error = %e, "per-user MCP connection failed");
@@ -186,26 +190,60 @@ impl UserToolServiceCache {
     }
 }
 
-/// A single MCP server's tool caller + definitions.
+/// How a caller connects to an MCP server.
+enum CallerKind {
+    /// Global connection owned by the registry — just holds a cloned peer handle.
+    Shared(simply_core::mcp::McpToolCaller),
+    /// Per-user OAuth connection — reconnects on demand for each tool call.
+    OnDemand { config: ServerConfig },
+}
+
+/// A single MCP server's tool definitions + connection strategy.
 struct McpCaller {
     tools: Vec<ToolDefinition>,
-    caller: simply_core::mcp::McpToolCaller,
+    kind: CallerKind,
 }
 
 impl McpCaller {
-    fn from_connected(connected: &simply_core::mcp::ConnectedServer) -> Self {
-        let tools = connected.tools.iter().map(|t| {
+    /// Create from a shared/global connection (peer cloned, registry owns the connection).
+    fn from_shared(connected: &simply_core::mcp::ConnectedServer) -> Self {
+        Self {
+            tools: Self::extract_tools(connected),
+            kind: CallerKind::Shared(connected.tool_caller()),
+        }
+    }
+
+    /// Create for a per-user OAuth server (connects on demand per tool call).
+    fn on_demand(tools: Vec<ToolDefinition>, config: ServerConfig) -> Self {
+        Self { tools, kind: CallerKind::OnDemand { config } }
+    }
+
+    /// Call a tool, connecting on demand for per-user servers.
+    async fn call_tool(
+        &self,
+        name: String,
+        arguments: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<rmcp::model::CallToolResult> {
+        match &self.kind {
+            CallerKind::Shared(caller) => caller.call_tool(name, arguments).await,
+            CallerKind::OnDemand { config } => {
+                let connected = McpRegistry::connect_to_server(config).await?;
+                let result = connected.tool_caller().call_tool(name, arguments).await;
+                // connected drops here, closing the connection cleanly
+                result
+            }
+        }
+    }
+
+    fn extract_tools(connected: &simply_core::mcp::ConnectedServer) -> Vec<ToolDefinition> {
+        connected.tools.iter().map(|t| {
             let schema = serde_json::Value::Object((*t.input_schema).clone());
             ToolDefinition {
                 name: t.name.to_string(),
                 description: t.description.as_ref().map(|s| s.to_string()),
                 input_schema: serde_json::from_value(schema).unwrap_or_default(),
             }
-        }).collect();
-        Self {
-            tools,
-            caller: connected.tool_caller(),
-        }
+        }).collect()
     }
 }
 
@@ -243,7 +281,7 @@ impl ToolService for UserToolService {
 
         for caller in &self.mcp_callers {
             if caller.tools.iter().any(|t| t.name == name) {
-                let result = caller.caller.call_tool(name.to_string(), args_map).await?;
+                let result = caller.call_tool(name.to_string(), args_map).await?;
                 let content: Vec<ToolResultContent> = result.content.into_iter().map(|c| {
                     match c.raw {
                         rmcp::model::RawContent::Text(t) => ToolResultContent::text(t.text),

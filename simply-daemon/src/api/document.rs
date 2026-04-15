@@ -7,9 +7,10 @@ use ts_rs::TS;
 
 /// Document summary for listing.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/")]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct DocumentInfo {
     pub id: String,
+    pub user_id: String,
     pub title: String,
     pub document_type: String,
     pub source: String,
@@ -21,7 +22,7 @@ pub struct DocumentInfo {
 
 /// Full document with tabs.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/")]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct DocumentDetail {
     pub id: String,
     pub title: String,
@@ -35,7 +36,7 @@ pub struct DocumentDetail {
 
 /// Tab within a document.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/")]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct TabInfo {
     pub id: String,
     pub title: String,
@@ -49,18 +50,21 @@ pub struct TabInfo {
 
 /// Request to create a document.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/")]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct CreateDocumentRequest {
     pub title: String,
     /// Document type (e.g. "note", "todo", "knowledge"). Defaults to "document".
     pub document_type: Option<String>,
     /// Content for the initial tab (markdown).
     pub content: Option<String>,
+    /// External source ID (e.g. Google Doc ID). If set and a document with the
+    /// same source already exists for this user, the old document is replaced.
+    pub source_id: Option<String>,
 }
 
 /// Request to create a tab.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/")]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct CreateTabRequest {
     pub title: String,
     pub content: Option<String>,
@@ -70,7 +74,7 @@ pub struct CreateTabRequest {
 
 /// Request to update a tab's content.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/")]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct UpdateTabRequest {
     pub content: String,
 }
@@ -78,9 +82,13 @@ pub struct UpdateTabRequest {
 #[simply_rpc::rpc_service("document")]
 #[async_trait]
 pub trait DocumentApi: Send + Sync {
-    /// List all documents.
+    /// List all documents for the authenticated user.
     #[rpc(get = "/document")]
     async fn list_documents(&self, ctx: &RequestContext) -> anyhow::Result<Vec<DocumentInfo>>;
+
+    /// List all documents across all users (admin).
+    #[rpc(get = "/document/all", no_tool)]
+    async fn list_all_documents(&self) -> anyhow::Result<Vec<DocumentInfo>>;
 
     /// Search documents by title.
     #[rpc(get = "/document/search/{query}")]

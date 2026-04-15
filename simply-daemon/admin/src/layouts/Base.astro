@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import UserPicker from '../components/UserPicker.svelte';
 
 interface Props {
   title?: string;
@@ -20,6 +21,10 @@ const { title = 'simply-daemon', fullWidth = false } = Astro.props;
       <a href="/documents" class="text-muted hover:text-accent">Documents</a>
       <a href="/search" class="text-muted hover:text-accent">Search</a>
       <a href="/explorer" class="text-muted hover:text-accent">API Explorer</a>
+      <div class="ml-auto flex items-center gap-2 text-xs text-muted">
+        <span>User:</span>
+        <UserPicker client:load />
+      </div>
     </nav>
     <main class:list={[fullWidth ? '' : 'max-w-3xl mx-auto px-5 py-8']}>
       <slot />

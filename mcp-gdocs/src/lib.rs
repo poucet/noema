@@ -7,7 +7,7 @@
 //!
 //! Can be used as:
 //! - An embedded server (via `start_server`)
-//! - A standalone binary (`noema-mcp-gdocs`)
+//! - A standalone binary (`mcp-gdocs`)
 
 pub mod google_api;
 pub mod tools;
@@ -120,7 +120,8 @@ pub async fn start_server_on(host: &str, port: u16) -> anyhow::Result<ServerHand
                 }
                 result = listener.accept() => {
                     match result {
-                        Ok((stream, _)) => {
+                        Ok((stream, remote_addr)) => {
+                            info!("Accepted connection from {}", remote_addr);
                             let io = TokioIo::new(stream);
                             let service = mcp_service.clone();
 
@@ -131,8 +132,13 @@ pub async fn start_server_on(host: &str, port: u16) -> anyhow::Result<ServerHand
                                         hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| {
                                             let mut svc = service.clone();
                                             async move {
+                                                let method = req.method().clone();
+                                                let path = req.uri().path().to_string();
+                                                let has_auth = req.headers().contains_key(hyper::header::AUTHORIZATION);
+                                                info!(%method, %path, has_auth, "incoming request");
+
                                                 // Handle .well-known OAuth discovery endpoint
-                                                if req.uri().path() == "/.well-known/oauth-authorization-server" {
+                                                if path == "/.well-known/oauth-authorization-server" {
                                                     return handle_well_known();
                                                 }
                                                 svc.call(req).await

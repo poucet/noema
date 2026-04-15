@@ -117,6 +117,18 @@ pub struct CreateUserRequest {
     pub email: String,
 }
 
+pub async fn delete_user(
+    State(state): State<AdminState>,
+    axum::extract::Path(user_id): axum::extract::Path<String>,
+) -> Response {
+    let id = simply_core::storage::ids::UserId::from_string(&user_id);
+    match state.user_store.delete_user(&id).await {
+        Ok(true) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, "user not found").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 pub async fn create_user(State(state): State<AdminState>, Json(req): Json<CreateUserRequest>) -> Response {
     match state.user_store.get_or_create_user_by_email(&req.email).await {
         Ok(user) => Json(serde_json::json!({

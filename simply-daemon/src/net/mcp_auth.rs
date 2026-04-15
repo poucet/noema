@@ -12,6 +12,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use simply_core::storage::ids::UserId;
+use simply_core::storage::traits::UserStore;
 
 use crate::oauth::providers::resolve_server_auth;
 use crate::token_store::{McpUserToken, TransientTokenStore};
@@ -20,6 +21,7 @@ use crate::token_store::{McpUserToken, TransientTokenStore};
 #[derive(Clone)]
 pub struct McpAuthState {
     pub token_store: Arc<TransientTokenStore>,
+    pub user_store: Arc<dyn UserStore>,
     pub public_url: String,
 }
 
@@ -40,6 +42,9 @@ pub struct AuthCallbackQuery {
 struct OAuthState {
     user_id: String,
     server_id: String,
+    /// OAuth provider name (e.g. "google", "github") — used to look up
+    /// provider-specific config (userinfo_url, etc.) in the callback.
+    provider: String,
 }
 
 /// `GET /auth/mcp/{server_id}?user_id=...`
@@ -67,9 +72,11 @@ pub async fn auth_initiate(
     let authorization_url = oauth.authorization_url;
     let scopes = oauth.scopes;
 
+    let provider_name = server.oauth_provider.as_deref().unwrap_or("").to_string();
     let oauth_state = OAuthState {
         user_id: query.user_id,
         server_id,
+        provider: provider_name,
     };
     let state_json = serde_json::to_string(&oauth_state).unwrap_or_default();
     let state_encoded = urlencoding::encode(&state_json);
@@ -168,24 +175,68 @@ pub async fn auth_callback(
         .expires_in
         .map(|secs| Instant::now() + Duration::from_secs(secs));
 
-    let user_id = UserId::from_string(&oauth_state.user_id);
+    let mut user_id = UserId::from_string(&oauth_state.user_id);
+    let mut identity: Option<String> = None;
+
+    // If the provider has a userinfo endpoint, fetch the user's email
+    // and link identities with existing users.
+    if let Some(ref userinfo_url) = oauth.userinfo_url {
+        if let Ok(email) = fetch_userinfo_email(userinfo_url, &token_resp.access_token).await {
+            identity = Some(email.clone());
+            tracing::info!(%email, user_id = %oauth_state.user_id, "OAuth: got email from provider");
+
+            // If a user with this email already exists, store the token under that user
+            if let Ok(Some(existing_user)) = state.user_store.get_user_by_email(&email).await {
+                if existing_user.id != user_id {
+                    tracing::info!(
+                        %email,
+                        existing_user_id = %existing_user.id,
+                        oauth_user_id = %user_id,
+                        "OAuth: linking to existing user with same email"
+                    );
+                    user_id = existing_user.id;
+                }
+            }
+        }
+    }
+
     state.token_store.store(
         &user_id,
         &oauth_state.server_id,
         McpUserToken {
             access_token: token_resp.access_token,
             expires_at,
-            identity: None,
+            identity,
         },
     );
 
     tracing::info!(
-        user_id = %oauth_state.user_id,
+        user_id = %user_id,
         server_id = %oauth_state.server_id,
         "OAuth token stored"
     );
 
     auth_success_page(&oauth_state.server_id)
+}
+
+/// Fetch the user's email from an OAuth provider's userinfo endpoint.
+/// Expects a JSON response with an `email` field.
+async fn fetch_userinfo_email(userinfo_url: &str, access_token: &str) -> anyhow::Result<String> {
+    let resp = reqwest::Client::new()
+        .get(userinfo_url)
+        .bearer_auth(access_token)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("userinfo request failed: {}", resp.status());
+    }
+
+    let json: serde_json::Value = resp.json().await?;
+    json.get("email")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("no email in userinfo response"))
 }
 
 fn auth_success_page(server_id: &str) -> Response {

@@ -17,6 +17,7 @@ use crate::storage::types::{BlobHash};
 
 /// A resolved message with cached content
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ResolvedMessage {
     pub role: Role,
     pub content: Vec<ResolvedContent>,
@@ -40,6 +41,7 @@ impl ResolvedMessage {
 /// - Display: Uses the variant fields directly (ignores `resolved`)
 /// - LLM: Uses cached `resolved` ContentBlock, populates on first access
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum ResolvedContent {
     /// Text content - already resolved, no caching needed
     Text { text: String },

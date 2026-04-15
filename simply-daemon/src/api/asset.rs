@@ -3,10 +3,12 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use simply_rpc::{BinaryResponse, BinaryUpload, RequestContext};
+use ts_rs::TS;
 use super::types::{AssetId, BlobHash};
 
 /// Asset metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct AssetInfo {
     pub id: AssetId,
     pub blob_hash: BlobHash,

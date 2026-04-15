@@ -12,4 +12,4 @@ export LUMINA_LOG_FILE="$REPO_ROOT/logs/lumina.log"
 mkdir -p "$(dirname "$LUMINA_LOG_FILE")"
 : > "$LUMINA_LOG_FILE"
 echo "Starting lumina... (log: $LUMINA_LOG_FILE)"
-cd "$REPO_ROOT" && cargo run -p lumina
+cd "$REPO_ROOT" && exec cargo run -p lumina

@@ -182,18 +182,21 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
                 return Ok(());
             }
 
-            // Try to parse as ExtractedDocument JSON and create via DocumentApi
+            // Parse the ExtractResponse JSON and assemble markdown from tabs
             match serde_json::from_str::<serde_json::Value>(&text) {
                 Ok(extracted) => {
                     let title = extracted.get("title")
                         .and_then(|v| v.as_str())
                         .unwrap_or("Imported Google Doc");
 
-                    // Create document via DocumentApi
+                    // Assemble markdown from tabs (matching Python processDocument)
+                    let content = assemble_document_markdown(&extracted);
+
                     let doc_request = simply_daemon::api::CreateDocumentRequest {
                         title: title.to_string(),
                         document_type: Some("knowledge".to_string()),
-                        content: Some(text.clone()),
+                        content: Some(content),
+                        source_id: Some(doc_id.clone()),
                     };
 
                     match lx.daemon.document().create_document(&ctx, doc_request).await {
@@ -222,6 +225,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
                         title: format!("Google Doc {}", &doc_id[..8.min(doc_id.len())]),
                         document_type: Some("knowledge".to_string()),
                         content: Some(text.to_string()),
+                        source_id: Some(doc_id.clone()),
                     };
                     lx.daemon.document().create_document(&ctx, doc_request).await?;
 
@@ -303,6 +307,37 @@ async fn list_user_docs(lx: &LuminaContext, discord_user_id: u64, query: Option<
         let name = d.get("name").and_then(|v| v.as_str())?;
         Some((id.to_string(), name.to_string()))
     }).collect())
+}
+
+/// Assemble a markdown document from the ExtractResponse JSON.
+///
+/// Produces a single markdown string with YAML frontmatter header and
+/// each tab's markdown content separated by `---`.
+fn assemble_document_markdown(extracted: &serde_json::Value) -> String {
+    let title = extracted.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
+    let tabs = extracted.get("tabs").and_then(|v| v.as_array());
+    let tab_count = tabs.map(|t| t.len()).unwrap_or(0);
+
+    let mut sections = Vec::new();
+
+    // Document header (no external IDs — those confuse the LLM in RAG chunks)
+    sections.push(format!("---\ntitle: {title}\n---"));
+
+    if let Some(tabs) = tabs {
+        for tab in tabs {
+            let tab_title = tab.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let content = tab.get("content_markdown").and_then(|v| v.as_str()).unwrap_or("");
+
+            // Only add tab header if there are multiple tabs
+            if tab_count > 1 {
+                sections.push(format!("## {tab_title}\n\n{content}"));
+            } else {
+                sections.push(content.to_string());
+            }
+        }
+    }
+
+    sections.join("\n\n")
 }
 
 /// Extract a Google Doc ID from a URL or return the input as-is.

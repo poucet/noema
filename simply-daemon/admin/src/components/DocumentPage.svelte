@@ -159,6 +159,7 @@
               <span>{doc.tab_count} tab{doc.tab_count !== 1 ? 's' : ''}</span>
               <span>{formatDate(doc.updated_at)}</span>
             </div>
+            <div class="text-xs text-muted truncate opacity-60">{doc.user_id}</div>
             <button
               class="absolute right-2 top-2 text-xs text-muted hover:text-danger opacity-0 group-hover:opacity-100"
               onclick={(e) => { e.stopPropagation(); deleteDocument(doc.id); }}

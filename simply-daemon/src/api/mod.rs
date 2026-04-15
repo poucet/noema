@@ -58,3 +58,58 @@ pub trait Daemon: Send + Sync {
     /// Composite tool service — includes daemon REST tools + MCP tools (global, no user context).
     fn tools(&self) -> &dyn simply_core::ToolService;
 }
+
+#[cfg(test)]
+mod ts_export {
+    use ts_rs::TS;
+
+    /// Export all API types to TypeScript via ts-rs.
+    ///
+    /// Run with: cargo test -p simply-daemon ts_export
+    /// Output goes to: admin/src/lib/generated/types/
+    #[test]
+    fn export_all_types() {
+        // Daemon-owned types
+        super::types::SessionId::export_all().expect("SessionId");
+        super::types::DaemonEvent::export_all().expect("DaemonEvent");
+        super::types::InboundEvent::export_all().expect("InboundEvent");
+        super::types::ConversationInfo::export_all().expect("ConversationInfo");
+
+        // Session types
+        super::session::SessionInfo::export_all().expect("SessionInfo");
+        super::session::CreateSessionOptions::export_all().expect("CreateSessionOptions");
+        super::session::UserMessage::export_all().expect("UserMessage");
+        super::session::SeedMessage::export_all().expect("SeedMessage");
+
+        // Document types
+        super::document::DocumentInfo::export_all().expect("DocumentInfo");
+        super::document::DocumentDetail::export_all().expect("DocumentDetail");
+        super::document::TabInfo::export_all().expect("TabInfo");
+        super::document::CreateDocumentRequest::export_all().expect("CreateDocumentRequest");
+        super::document::CreateTabRequest::export_all().expect("CreateTabRequest");
+        super::document::UpdateTabRequest::export_all().expect("UpdateTabRequest");
+
+        // MCP types
+        super::mcp::McpServerInfo::export_all().expect("McpServerInfo");
+        super::mcp::AddMcpServerRequest::export_all().expect("AddMcpServerRequest");
+        super::mcp::RegisterEphemeralRequest::export_all().expect("RegisterEphemeralRequest");
+        super::mcp::UpdateMcpServerRequest::export_all().expect("UpdateMcpServerRequest");
+
+        // OAuth types
+        super::oauth::OAuthFlowInfo::export_all().expect("OAuthFlowInfo");
+
+        // Asset types
+        super::asset::AssetInfo::export_all().expect("AssetInfo");
+
+        // Voice types
+        super::voice::VoiceProviderInfo::export_all().expect("VoiceProviderInfo");
+
+        // Search types
+        super::search::SearchHit::export_all().expect("SearchHit");
+        super::search::SearchRequest::export_all().expect("SearchRequest");
+        super::search::ReindexStatus::export_all().expect("ReindexStatus");
+
+        // Embedding queue
+        crate::embedding_queue::EmbeddingQueueStatus::export_all().expect("EmbeddingQueueStatus");
+    }
+}

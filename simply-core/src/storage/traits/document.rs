@@ -44,6 +44,9 @@ pub trait DocumentStore: Send + Sync {
     /// List all documents for a user
     async fn list_documents(&self, user_id: &UserId) -> Result<Vec<StoredDocument>>;
 
+    /// List all documents across all users (for admin/reindex).
+    async fn list_all_documents(&self) -> Result<Vec<StoredDocument>>;
+
     /// Search documents by title (case-insensitive)
     async fn search_documents(
         &self,

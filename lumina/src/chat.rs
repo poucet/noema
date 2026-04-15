@@ -172,8 +172,8 @@ async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMes
             let mut context = String::from("## Relevant knowledge\nThe following documents may be relevant to this conversation:\n");
             for hit in &hits {
                 context.push_str(&format!(
-                    "\n### {} (type: {})\n> {}\n",
-                    hit.document_title, hit.document_type, hit.chunk_text,
+                    "\n---\ndocument_id: {}\ntab_id: {}\ntitle: {}\ntype: {}\n---\n{}\n",
+                    hit.document_id, hit.tab_id, hit.document_title, hit.document_type, hit.chunk_text,
                 ));
             }
             tracing::info!(hits = hits.len(), "RAG context injected");

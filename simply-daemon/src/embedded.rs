@@ -45,8 +45,6 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
     stores: Arc<dyn Stores<S>>,
     sessions: Mutex<HashMap<SessionId, ManagedSession>>,
-    user_id: simply_core::storage::ids::UserId,
-
     // Individual services
     mcp: Arc<McpService>,
     model: Arc<ModelService>,
@@ -75,8 +73,6 @@ where
         let coordinator = Arc::new(StorageCoordinator::from_stores(&*stores));
         let stores: Arc<dyn Stores<S>> = stores;
         let settings = config::Settings::load();
-
-        let user_id = Self::resolve_user(&*stores, &settings).await?;
 
         const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
         let default_model_id = settings
@@ -175,8 +171,11 @@ where
         );
 
         let document = Arc::new(
-            DocumentService::new(Arc::clone(&stores), user_id.clone())
-                .with_embedding_queue(embedding_queue.clone() as Arc<dyn crate::embedding_queue::EmbeddingQueue>)
+            DocumentService::new(Arc::clone(&stores))
+                .with_embedding(
+                    embedding_queue.clone() as Arc<dyn crate::embedding_queue::EmbeddingQueue>,
+                    Arc::clone(&vector_store),
+                )
         );
         let core = Arc::new(CoreService::embedded());
 
@@ -187,7 +186,6 @@ where
             vector_store,
             embedding_queue,
             Arc::clone(&stores),
-            user_id.clone(),
         ));
 
         let daemon_tools = Arc::new(
@@ -226,7 +224,6 @@ where
             coordinator,
             stores,
             sessions: Mutex::new(HashMap::new()),
-            user_id,
             mcp,
             model,
             asset,
@@ -388,30 +385,10 @@ where
             .collect()
     }
 
-    async fn resolve_user(
-        stores: &dyn Stores<S>,
-        settings: &config::Settings,
-    ) -> anyhow::Result<simply_core::storage::ids::UserId>
-    where
-        S::User: simply_core::storage::traits::UserStore,
-    {
-        use simply_core::storage::traits::UserStore;
-        let user_store = stores.user();
-
-        let user = if let Some(ref email) = settings.user_email {
-            user_store.get_or_create_user_by_email(email).await?
-        } else {
-            let users = user_store.list_users().await?;
-            match users.len() {
-                0 => user_store.get_or_create_default_user().await?,
-                1 => users.into_iter().next().unwrap(),
-                _ => {
-                    let emails: Vec<String> = users.iter().map(|u| u.email.clone().unwrap_or_else(|| u.id.to_string())).collect();
-                    anyhow::bail!("MULTIPLE_USERS:{}", emails.join(","));
-                }
-            }
-        };
-        Ok(user.id)
+    fn require_user(&self, ctx: &simply_rpc::RequestContext) -> anyhow::Result<simply_core::storage::ids::UserId> {
+        ctx.scope.user_id.as_ref()
+            .map(|id| simply_core::storage::ids::UserId::from_string(id))
+            .ok_or_else(|| anyhow::anyhow!("authentication required"))
     }
 
     fn make_session_info(session_id: &SessionId, persistence: Persistence, model_id: String) -> SessionInfo {
@@ -562,14 +539,16 @@ impl<S: StorageTypes> ConversationApi for EmbeddedDaemon<S>
 where
     S::Document: DocumentResolver,
 {
-    async fn create_conversation(&self, _ctx: &simply_rpc::RequestContext, name: Option<String>) -> anyhow::Result<ConversationId> {
-        self.coordinator.create_conversation(&self.user_id, name.as_deref()).await
+    async fn create_conversation(&self, ctx: &simply_rpc::RequestContext, name: Option<String>) -> anyhow::Result<ConversationId> {
+        let user_id = self.require_user(ctx)?;
+        self.coordinator.create_conversation(&user_id, name.as_deref()).await
     }
 
-    async fn list_conversations(&self, _ctx: &simply_rpc::RequestContext) -> anyhow::Result<Vec<ConversationInfo>> {
+    async fn list_conversations(&self, ctx: &simply_rpc::RequestContext) -> anyhow::Result<Vec<ConversationInfo>> {
         use simply_core::storage::{EntityStore, EntityType, TurnStore};
+        let user_id = self.require_user(ctx)?;
         let entities = self.stores.entity()
-            .list_entities(&self.user_id, Some(&EntityType::conversation())).await?;
+            .list_entities(&user_id, Some(&EntityType::conversation())).await?;
         let mut result = Vec::with_capacity(entities.len());
         for entity in entities {
             let turn_count = self.stores.turn().get_turn_count(&entity.id).await.unwrap_or(0);
