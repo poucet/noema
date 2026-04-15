@@ -694,6 +694,14 @@ impl CoreApi for CoreService {
     async fn version(&self) -> anyhow::Result<String> {
         Ok(env!("CARGO_PKG_VERSION").to_string())
     }
+
+    async fn public_url(&self) -> anyhow::Result<String> {
+        let settings = config::Settings::load();
+        Ok(settings.public_url.unwrap_or_else(|| {
+            let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
+            format!("http://localhost:{port}")
+        }))
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -23,4 +23,8 @@ pub trait CoreApi: Send + Sync {
     /// Get daemon version.
     #[rpc(get = "/daemon/version")]
     async fn version(&self) -> anyhow::Result<String>;
+
+    /// Get the daemon's public URL (for OAuth callbacks, auth links, etc.).
+    #[rpc(get = "/daemon/public-url")]
+    async fn public_url(&self) -> anyhow::Result<String>;
 }
