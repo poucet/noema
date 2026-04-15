@@ -242,6 +242,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
                 ctx: &::simply_rpc::RequestContext,
                 params: ::serde_json::Value,
             ) -> Option<::simply_rpc::DispatchResult<Self::Stream>> {
+                let _ = ctx; // suppress unused if no method uses ctx
                 match method {
                     #(#match_arms)*
                     _ => None,
@@ -503,9 +504,10 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
         .collect();
 
     if arms.is_empty() {
-        quote! { None }
+        quote! { let _ = (method_name, ctx, params); None }
     } else {
         quote! {
+            let _ = ctx; // suppress unused if no method uses ctx
             match method_name {
                 #(#arms)*
                 _ => None,
@@ -729,7 +731,7 @@ fn generate_ws_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
         .collect();
 
     if arms.is_empty() {
-        quote! { let _ = (method_name, params, write_tx); None }
+        quote! { let _ = (method_name, ctx, params, write_tx); None }
     } else {
         quote! {
             match method_name {

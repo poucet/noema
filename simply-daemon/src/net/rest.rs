@@ -472,7 +472,8 @@ async fn handle_stream_ws(
         let _ = ws_sink.close().await;
     });
 
-    let result = dispatcher.ws_dispatch(&path, &ctx, serde_json::Value::Null, write_tx.clone()).await;
+    let anon = simply_rpc::RequestContext::anonymous();
+    let result = dispatcher.ws_dispatch(&path, &anon, serde_json::Value::Null, write_tx.clone()).await;
 
     let input_sink = match result {
         Some(dr) => {
