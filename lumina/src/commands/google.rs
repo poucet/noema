@@ -94,7 +94,7 @@ impl super::SlashCommand for Google {
         };
 
         // Call the gdocs_list MCP tool to get user's docs for autocomplete
-        let choices = match list_user_docs(lx, if partial.is_empty() { None } else { Some(&partial) }).await {
+        let choices = match list_user_docs(lx, ac.user.id.get(), if partial.is_empty() { None } else { Some(&partial) }).await {
             Ok(docs) => docs.into_iter().take(25).map(|(id, name)| {
                 AutocompleteChoice::new(
                     if name.len() > 100 { format!("{}...", &name[..97]) } else { name },
@@ -147,17 +147,29 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
 
     lx.defer(cmd).await?;
 
-    // Call the gdocs_extract MCP tool
-    let args = serde_json::json!({ "doc_id": doc_id });
-    let result = lx.daemon.tools().call_tool("gdocs_extract", args).await;
+    // Call the gdocs_extract MCP tool with user's context (for per-user OAuth token)
+    let tool_request = simply_daemon::api::CallToolRequestParams::new("gdocs_extract".to_string())
+        .with_arguments(serde_json::json!({ "doc_id": doc_id }).as_object().cloned().unwrap_or_default());
+    let result = lx.daemon.mcp().call_tool_direct(&ctx, tool_request).await;
 
     match result {
-        Ok(content) => {
+        Ok(tool_result) => {
             // Parse the extracted document from tool result
-            let text: String = content.iter().find_map(|c| match c {
-                simply_daemon::types::ToolResultContent::Text { text } => Some(text.to_string()),
-                _ => None,
+            let text: String = tool_result.content.iter().find_map(|c| {
+                match &c.raw {
+                    rmcp::model::RawContent::Text(t) => Some(t.text.to_string()),
+                    _ => None,
+                }
             }).unwrap_or_default();
+
+            // Don't create a document if the tool returned an error
+            if tool_result.is_error.unwrap_or(false) || text.contains("Not authenticated") {
+                cmd.edit_response(&lx.http,
+                    serenity::builder::EditInteractionResponse::new()
+                        .content(format!("Google Docs error: {}", text))
+                ).await?;
+                return Ok(());
+            }
 
             // Try to parse as ExtractedDocument JSON and create via DocumentApi
             match serde_json::from_str::<serde_json::Value>(&text) {
@@ -254,22 +266,24 @@ async fn cmd_status(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Res
 }
 
 /// List user's Google Docs via the gdocs_list MCP tool.
-async fn list_user_docs(lx: &LuminaContext, query: Option<&str>) -> anyhow::Result<Vec<(String, String)>> {
+async fn list_user_docs(lx: &LuminaContext, discord_user_id: u64, query: Option<&str>) -> anyhow::Result<Vec<(String, String)>> {
+    let ctx = lx.ctx_for(discord_user_id).await;
     let mut args = serde_json::Map::new();
     if let Some(q) = query {
         args.insert("query".to_string(), serde_json::Value::String(q.to_string()));
     }
     args.insert("limit".to_string(), serde_json::Value::Number(25.into()));
 
-    let result = lx.daemon.tools().call_tool(
-        "gdocs_list",
-        serde_json::Value::Object(args),
-    ).await?;
+    let tool_request = simply_daemon::api::CallToolRequestParams::new("gdocs_list".to_string())
+        .with_arguments(args);
+    let result = lx.daemon.mcp().call_tool_direct(&ctx, tool_request).await?;
 
     // Parse the text result as JSON array of {id, name}
-    let text: String = result.iter().find_map(|c| match c {
-        simply_daemon::types::ToolResultContent::Text { text } => Some(text.to_string()),
-        _ => None,
+    let text: String = result.content.iter().find_map(|c| {
+        match &c.raw {
+            rmcp::model::RawContent::Text(t) => Some(t.text.to_string()),
+            _ => None,
+        }
     }).unwrap_or_default();
 
     let docs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap_or_default();

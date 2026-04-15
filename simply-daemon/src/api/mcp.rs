@@ -6,7 +6,7 @@ use simply_rpc::RequestContext;
 
 // Re-export rmcp types used in the API.
 pub use rmcp::model::{
-    CallToolRequestParam, CallToolResult, Tool as McpTool,
+    CallToolRequestParam, CallToolRequestParams, CallToolResult, Tool as McpTool,
 };
 
 /// Information about a configured MCP server.
