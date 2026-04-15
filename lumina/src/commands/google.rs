@@ -188,7 +188,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
                     let doc_request = simply_daemon::api::CreateDocumentRequest {
                         title: format!("Google Doc {}", &doc_id[..8.min(doc_id.len())]),
                         document_type: Some("knowledge".to_string()),
-                        content: Some(text),
+                        content: Some(text.to_string()),
                     };
                     lx.daemon.document().create_document(doc_request).await?;
 
@@ -257,8 +257,8 @@ async fn list_user_docs(lx: &LuminaContext, query: Option<&str>) -> anyhow::Resu
     ).await?;
 
     // Parse the text result as JSON array of {id, name}
-    let text = result.iter().find_map(|c| match c {
-        llm::ToolResultContent::Text { text } => Some(text.clone()),
+    let text: String = result.iter().find_map(|c| match c {
+        llm::ToolResultContent::Text { text } => Some(text.to_string()),
         _ => None,
     }).unwrap_or_default();
 

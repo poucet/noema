@@ -460,13 +460,16 @@ where
         let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
         // Resolve user-scoped tools: user gets daemon tools + MCP servers they've authed with
-        let session_user_id = options.user_id.clone().unwrap_or_else(|| self.user_id.clone());
-        let tools: Arc<dyn ToolService> = match self.user_tools.get(&session_user_id).await {
-            Ok(user_tools) => user_tools,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to build user tools, falling back to global");
-                self.tools.clone()
-            }
+        // None = unauthenticated user (global tools only, no user-specific MCP servers)
+        let tools: Arc<dyn ToolService> = match &options.user_id {
+            Some(uid) => match self.user_tools.get(uid).await {
+                Ok(user_tools) => user_tools,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to build user tools, falling back to global");
+                    self.tools.clone()
+                }
+            },
+            None => self.tools.clone(),
         };
         let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
         let evt_tx = Self::spawn_event_forwarder(&session_id, &broadcast_tx);

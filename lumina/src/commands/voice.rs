@@ -69,6 +69,7 @@ mod voice {
                 system_prompt: Some(system_prompt),
                 model_id: None,
                 seed: history,
+                user_id: None,
             },
         ).await?;
 
