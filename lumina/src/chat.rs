@@ -84,10 +84,23 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
 
     // 2. Build system prompt with RAG context
     let mut system_prompt = build_system_prompt(msg);
-    let rag_context = build_rag_context(lx, msg, &history).await;
+    let (rag_context, rag_hits) = build_rag_context(lx, msg, &history).await;
     if !rag_context.is_empty() {
         system_prompt.push_str("\n\n");
         system_prompt.push_str(&rag_context);
+
+        // Show debug embed if channel has [rag-debug] topic tag
+        if crate::commands::chat::has_topic_tag(lx, msg.channel_id, "rag-debug") {
+            let desc = rag_hits.iter()
+                .map(|h| format!("`{}` ({}) — {:.0}%", h.document_title, h.document_type, h.score * 100.0))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let embed = CreateEmbed::new()
+                .title(format!("RAG: {} docs injected", rag_hits.len()))
+                .description(desc)
+                .color(0x9B59B6);
+            let _ = msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed)).await;
+        }
     }
 
     // 3. Create session with seed and resolved model
@@ -120,7 +133,8 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
 }
 
 /// Build RAG context by searching for relevant documents based on recent messages.
-async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMessage]) -> String {
+/// Returns (context_string, hits) so callers can use the hits for debug display.
+async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMessage]) -> (String, Vec<SearchHit>) {
     // Build query from the current message + last N user messages from history
     let mut query_parts: Vec<&str> = Vec::new();
 
@@ -141,7 +155,7 @@ async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMes
 
     let query = query_parts.join("\n");
     if query.trim().is_empty() {
-        return String::new();
+        return (String::new(), vec![]);
     }
 
     // Search for relevant documents
@@ -155,12 +169,12 @@ async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMes
                 ));
             }
             tracing::info!(hits = hits.len(), "RAG context injected");
-            context
+            (context, hits)
         }
-        Ok(_) => String::new(),
+        Ok(_) => (String::new(), vec![]),
         Err(e) => {
             tracing::warn!(error = %e, "RAG search failed, continuing without context");
-            String::new()
+            (String::new(), vec![])
         }
     }
 }
