@@ -5,7 +5,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 GDOCS_PORT="${GDOCS_PORT:-9877}"
+GDOCS_LOG_FILE="${GDOCS_LOG_FILE:-$REPO_ROOT/logs/gdocs.log}"
 
 export RUST_LOG="${RUST_LOG:-mcp_gdocs=debug}"
 
-cd "$REPO_ROOT" && exec cargo run -p mcp-gdocs -- --port "$GDOCS_PORT"
+mkdir -p "$(dirname "$GDOCS_LOG_FILE")"
+: > "$GDOCS_LOG_FILE"
+echo "Starting Google Docs MCP server on port $GDOCS_PORT (log: $GDOCS_LOG_FILE)"
+cd "$REPO_ROOT" && exec cargo run -p mcp-gdocs -- --port "$GDOCS_PORT" 2>"$GDOCS_LOG_FILE"
