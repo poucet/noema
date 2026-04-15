@@ -7,6 +7,7 @@ use serenity::builder::{CreateEmbed, GetMessages};
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use simply_daemon::api::*;
+use simply_rpc::RequestContext;
 
 use crate::commands::LuminaContext;
 
@@ -165,7 +166,8 @@ async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMes
         document_type: None,
         top_k: Some(5),
     };
-    match lx.daemon.search().search(search_request).await {
+    let ctx = lx.ctx_for(msg.author.id.get()).await;
+    match lx.daemon.search().search(&ctx, search_request).await {
         Ok(hits) if !hits.is_empty() => {
             let mut context = String::from("## Relevant knowledge\nThe following documents may be relevant to this conversation:\n");
             for hit in &hits {
@@ -378,7 +380,8 @@ async fn resolve_model(lx: &LuminaContext, msg: &Message) -> Option<String> {
     };
 
     // Validate the model exists
-    if let Ok(models) = lx.daemon.model().list_models().await {
+    let anon = RequestContext::anonymous();
+    if let Ok(models) = lx.daemon.model().list_models(&anon).await {
         let exists = models.iter().any(|m| m.id.to_string() == model_id);
         if exists {
             return Some(model_id);

@@ -67,7 +67,7 @@ impl McpService {
 
 #[async_trait]
 impl McpApi for McpService {
-    async fn list_mcp_servers(&self, _ctx: RequestContext) -> anyhow::Result<Vec<McpServerInfo>> {
+    async fn list_mcp_servers(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<McpServerInfo>> {
         let registry = self.registry.lock().await;
         let mut servers = Vec::new();
         for (id, config) in registry.list_servers() {
@@ -107,7 +107,7 @@ impl McpApi for McpService {
         Ok(servers)
     }
 
-    async fn add_mcp_server(&self, _ctx: RequestContext, request: AddMcpServerRequest) -> anyhow::Result<()> {
+    async fn add_mcp_server(&self, _ctx: &RequestContext, request: AddMcpServerRequest) -> anyhow::Result<()> {
         let auth = match request.auth_type.as_str() {
             "token" => simply_core::AuthMethod::Token {
                 token: request.auth_token.unwrap_or_default(),
@@ -166,7 +166,7 @@ impl McpApi for McpService {
         Ok(())
     }
 
-    async fn remove_mcp_server(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<()> {
+    async fn remove_mcp_server(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
         if registry.is_ephemeral(server_id) {
             anyhow::bail!("cannot remove ephemeral server '{server_id}' — it is managed by its host process");
@@ -176,7 +176,7 @@ impl McpApi for McpService {
         Ok(())
     }
 
-    async fn connect_mcp_server(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<usize> {
+    async fn connect_mcp_server(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<usize> {
         let mut registry = self.registry.lock().await;
         registry.connect(server_id).await?;
         Ok(registry
@@ -185,7 +185,7 @@ impl McpApi for McpService {
             .unwrap_or(0))
     }
 
-    async fn disconnect_mcp_server(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<()> {
+    async fn disconnect_mcp_server(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
         registry.disconnect(server_id).await?;
         Ok(())
@@ -193,7 +193,7 @@ impl McpApi for McpService {
 
     async fn get_mcp_server_tools(
         &self,
-        _ctx: RequestContext,
+        _ctx: &RequestContext,
         server_id: &str,
     ) -> anyhow::Result<Vec<McpTool>> {
         let registry = self.registry.lock().await;
@@ -203,7 +203,7 @@ impl McpApi for McpService {
         Ok(conn.tools.clone())
     }
 
-    async fn test_mcp_server(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<usize> {
+    async fn test_mcp_server(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<usize> {
         let mut registry = self.registry.lock().await;
         let _ = registry.disconnect(server_id).await;
         registry.connect(server_id).await?;
@@ -215,7 +215,7 @@ impl McpApi for McpService {
 
     async fn update_mcp_server_settings(
         &self,
-        _ctx: RequestContext,
+        _ctx: &RequestContext,
         server_id: &str,
         request: UpdateMcpServerRequest,
     ) -> anyhow::Result<()> {
@@ -238,13 +238,13 @@ impl McpApi for McpService {
         Ok(())
     }
 
-    async fn stop_mcp_retry(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<()> {
+    async fn stop_mcp_retry(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
         registry.cancel_retry(server_id);
         Ok(())
     }
 
-    async fn start_mcp_retry(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<()> {
+    async fn start_mcp_retry(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<()> {
         let config = {
             let registry = self.registry.lock().await;
             registry
@@ -263,7 +263,7 @@ impl McpApi for McpService {
         Ok(())
     }
 
-    async fn register_ephemeral_mcp(&self, _ctx: RequestContext, request: RegisterEphemeralRequest) -> anyhow::Result<usize> {
+    async fn register_ephemeral_mcp(&self, _ctx: &RequestContext, request: RegisterEphemeralRequest) -> anyhow::Result<usize> {
         let mut registry = self.registry.lock().await;
         registry.register_ephemeral(request.id.clone(), request.url);
         registry.connect(&request.id).await?;
@@ -275,14 +275,14 @@ impl McpApi for McpService {
         Ok(tool_count)
     }
 
-    async fn unregister_ephemeral_mcp(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<()> {
+    async fn unregister_ephemeral_mcp(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<()> {
         let mut registry = self.registry.lock().await;
         registry.unregister_ephemeral(server_id).await;
         tracing::info!(id = %server_id, "ephemeral MCP service unregistered");
         Ok(())
     }
 
-    async fn list_all_tools(&self, _ctx: RequestContext) -> anyhow::Result<Vec<McpTool>> {
+    async fn list_all_tools(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<McpTool>> {
         let registry = self.registry.lock().await;
         let mut tools = Vec::new();
         for (_server_id, server) in registry.connected_servers() {
@@ -291,7 +291,7 @@ impl McpApi for McpService {
         Ok(tools)
     }
 
-    async fn call_tool_direct(&self, _ctx: RequestContext, request: CallToolRequestParam) -> anyhow::Result<CallToolResult> {
+    async fn call_tool_direct(&self, _ctx: &RequestContext, request: CallToolRequestParam) -> anyhow::Result<CallToolResult> {
         let registry = self.registry.lock().await;
 
         let (tool_caller, arguments) = {
@@ -320,13 +320,13 @@ impl McpApi for McpService {
 
 #[async_trait]
 impl OAuthApi for McpService {
-    async fn start_oauth(&self, _ctx: RequestContext, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
+    async fn start_oauth(&self, _ctx: &RequestContext, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
         self.oauth.start_flow(server_id).await
     }
 
     async fn complete_oauth(
         &self,
-        _ctx: RequestContext,
+        _ctx: &RequestContext,
         server_id: &str,
         code: &str,
         state: &str,
@@ -336,14 +336,14 @@ impl OAuthApi for McpService {
 
     async fn complete_oauth_with_code(
         &self,
-        _ctx: RequestContext,
+        _ctx: &RequestContext,
         server_id: &str,
         code: &str,
     ) -> anyhow::Result<()> {
         self.oauth.complete_with_code(server_id, code).await
     }
 
-    async fn resolve_oauth_state(&self, _ctx: RequestContext, state: &str) -> Option<String> {
+    async fn resolve_oauth_state(&self, _ctx: &RequestContext, state: &str) -> Option<String> {
         self.oauth.resolve_state(state).await
     }
 }

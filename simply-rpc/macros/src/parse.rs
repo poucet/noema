@@ -336,11 +336,15 @@ fn parse_params(sig: &syn::Signature) -> syn::Result<Vec<ParsedParam>> {
     Ok(params)
 }
 
-/// Check if a type is `RequestContext` or `simply_rpc::RequestContext`.
+/// Check if a type is `RequestContext`, `&RequestContext`, or `simply_rpc::RequestContext`.
 fn is_request_context_type(ty: &Type) -> bool {
-    let Type::Path(path) = ty else { return false };
-    let last = path.path.segments.last();
-    last.map(|s| s.ident == "RequestContext").unwrap_or(false)
+    match ty {
+        Type::Path(path) => {
+            path.path.segments.last().map(|s| s.ident == "RequestContext").unwrap_or(false)
+        }
+        Type::Reference(ref_type) => is_request_context_type(&ref_type.elem),
+        _ => false,
+    }
 }
 
 /// Determine if a type is a reference and compute its owned form.

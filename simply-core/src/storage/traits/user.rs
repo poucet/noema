@@ -27,9 +27,12 @@ pub trait UserStore: Send + Sync {
     /// List all users in the database
     async fn list_users(&self) -> Result<Vec<StoredUser>>;
 
-    /// Map an external identity (e.g. "discord:123") to a UCM user
-    async fn map_external_user(&self, external_id: &str, user_id: &UserId) -> Result<()>;
-
-    /// Resolve an external identity to a UCM user ID
+    /// Resolve an external identity (e.g. "discord:123") to a UCM user ID.
+    /// Returns None if the identity is not mapped.
     async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>>;
+
+    /// Resolve an external identity to a UCM user, creating both the user
+    /// and the mapping if they don't exist yet. Idempotent — same external_id
+    /// always returns the same user. A single user can have multiple external IDs.
+    async fn resolve_or_create_external_user(&self, external_id: &str) -> Result<StoredUser>;
 }

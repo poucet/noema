@@ -203,7 +203,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             async fn rest_dispatch_by_name(
                 &self,
                 method_name: &str,
-                ctx: ::simply_rpc::RequestContext,
+                ctx: &::simply_rpc::RequestContext,
                 params: ::serde_json::Value,
             ) -> Option<::simply_rpc::RpcResult> {
                 #rest_dispatch_arms
@@ -212,7 +212,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             async fn ws_dispatch_by_name(
                 &self,
                 method_name: &str,
-                ctx: ::simply_rpc::RequestContext,
+                ctx: &::simply_rpc::RequestContext,
                 params: ::serde_json::Value,
                 write_tx: ::tokio::sync::mpsc::Sender<String>,
             ) -> Option<::simply_rpc::WsDispatchResult> {
@@ -239,6 +239,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             async fn dispatch(
                 &self,
                 method: &str,
+                ctx: &::simply_rpc::RequestContext,
                 params: ::serde_json::Value,
             ) -> Option<::simply_rpc::DispatchResult<Self::Stream>> {
                 match method {
@@ -317,9 +318,9 @@ fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStre
     let wire_params = method.wire_params();
     let mut call_args = Vec::new();
 
-    // Inject RequestContext::default() for context params (generic dispatch has no ctx)
+    // Inject ctx from the dispatch method parameter
     if method.has_context() {
-        call_args.push(quote! { ::simply_rpc::RequestContext::default() });
+        call_args.push(quote! { ctx });
     }
 
     if wire_params.is_empty() {
@@ -383,7 +384,7 @@ fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStre
         }
     }
 
-    (deser, args)
+    (deser, call_args)
 }
 
 /// Check if a type is `Vec<u8>`.
@@ -419,7 +420,7 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
 
             // If method has a RequestContext param, inject it from `ctx`
             if m.has_context() {
-                call_args.push(quote! { ctx.clone() });
+                call_args.push(quote! { &ctx });
             }
 
             if wire_params.is_empty() {
@@ -538,7 +539,7 @@ fn generate_ws_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
 
             // Inject context if method needs it
             if m.has_context() {
-                call_args.push(quote! { ctx.clone() });
+                call_args.push(quote! { &ctx });
             }
 
             if wire_params.is_empty() {

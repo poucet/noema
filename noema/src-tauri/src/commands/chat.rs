@@ -63,8 +63,9 @@ async fn spawn_event_forwarder(
                             Ok(d) => d,
                             Err(_) => break,
                         };
+                        let ctx = state.ctx();
                         let messages = daemon
-                            .conversation().get_messages(&conversation_id)
+                            .conversation().get_messages(&ctx, &conversation_id)
                             .await
                             .unwrap_or_default()
                             .iter()
@@ -103,8 +104,9 @@ pub async fn get_messages(
     conversation_id: ConversationId,
 ) -> Result<Vec<DisplayMessage>, String> {
     let daemon = state.get_daemon()?;
+    let ctx = state.ctx();
     Ok(daemon
-        .conversation().get_messages(&conversation_id)
+        .conversation().get_messages(&ctx, &conversation_id)
         .await
         .map_err(|e| format!("Failed to get messages: {}", e))?
         .iter()
@@ -133,8 +135,9 @@ pub async fn send_message(
     }
 
     let daemon = state.get_daemon()?;
+    let ctx = state.ctx();
     daemon
-        .session().send_message(&session_id, UserMessage { content: input_content })
+        .session().send_message(&ctx, &session_id, UserMessage { content: input_content })
         .await
         .map_err(|e| format!("Failed to send message: {}", e))
 }
@@ -145,7 +148,8 @@ pub async fn close_session(
     session_id: SessionId,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon.session().close_session(&session_id).await
+    let ctx = state.ctx();
+    daemon.session().close_session(&ctx, &session_id).await
         .map_err(|e| format!("Failed to close session: {}", e))
 }
 
@@ -158,11 +162,12 @@ pub async fn set_model(
 ) -> Result<String, String> {
     let full_model_id = format!("{}/{}", provider, model_id);
     let daemon = state.get_daemon()?;
+    let ctx = state.ctx();
 
-    daemon.session().set_model(&session_id, &full_model_id).await
+    daemon.session().set_model(&ctx, &session_id, &full_model_id).await
         .map_err(|e| format!("Failed to set model: {}", e))?;
 
-    daemon.model().set_default_model(&full_model_id).await
+    daemon.model().set_default_model(&ctx, &full_model_id).await
         .map_err(|e| format!("Failed to set default model: {}", e))?;
 
     let display_name = model_id.split('/').last().unwrap_or(&model_id).to_string();
@@ -179,7 +184,8 @@ pub async fn set_model(
 #[tauri::command]
 pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInfo>, String> {
     let daemon = state.get_daemon()?;
-    let all = daemon.model().list_models().await.map_err(|e| format!("Failed to list models: {}", e))?;
+    let ctx = state.ctx();
+    let all = daemon.model().list_models(&ctx).await.map_err(|e| format!("Failed to list models: {}", e))?;
     Ok(all
         .into_iter()
         .filter(|m| m.definition.has_capability(&simply_daemon::types::ModelCapability::Text))
@@ -190,7 +196,8 @@ pub async fn list_models(state: State<'_, Arc<AppState>>) -> Result<Vec<ModelInf
 #[tauri::command]
 pub async fn list_conversations(state: State<'_, Arc<AppState>>) -> Result<Vec<ConversationInfo>, String> {
     let daemon = state.get_daemon()?;
-    let convos = daemon.conversation().list_conversations().await
+    let ctx = state.ctx();
+    let convos = daemon.conversation().list_conversations(&ctx).await
         .map_err(|e| format!("Failed to list conversations: {}", e))?;
     Ok(convos.into_iter().map(ConversationInfo::from).collect())
 }
@@ -203,9 +210,10 @@ pub async fn load_conversation(
     conversation_id: ConversationId,
 ) -> Result<(String, Vec<DisplayMessage>), String> {
     let daemon = state.get_daemon()?;
+    let ctx = state.ctx();
 
     let messages: Vec<DisplayMessage> = daemon
-        .conversation().get_messages(&conversation_id)
+        .conversation().get_messages(&ctx, &conversation_id)
         .await
         .map_err(|e| format!("Failed to load messages: {}", e))?
         .iter()
@@ -213,7 +221,7 @@ pub async fn load_conversation(
         .collect();
 
     let (info, rx) = daemon
-        .session().create_session(CreateSessionOptions {
+        .session().create_session(&ctx, CreateSessionOptions {
             persistence: Some(Persistence::Persistent { conversation_id: conversation_id.clone() }),
             ..Default::default()
         })
@@ -233,6 +241,7 @@ pub async fn new_conversation(
     name: Option<String>,
 ) -> Result<(String, String), String> {
     let daemon = state.get_daemon()?;
+    let ctx = state.ctx();
 
     let conversation_name = name.unwrap_or_else(|| {
         let now = chrono::Utc::now();
@@ -240,12 +249,12 @@ pub async fn new_conversation(
     });
 
     let conv_id = daemon
-        .conversation().create_conversation(Some(conversation_name))
+        .conversation().create_conversation(&ctx, Some(conversation_name))
         .await
         .map_err(|e| format!("Failed to create conversation: {}", e))?;
 
     let (info, rx) = daemon
-        .session().create_session(CreateSessionOptions {
+        .session().create_session(&ctx, CreateSessionOptions {
             persistence: Some(Persistence::Persistent { conversation_id: conv_id.clone() }),
             ..Default::default()
         })
@@ -263,7 +272,8 @@ pub async fn delete_conversation(
     conversation_id: ConversationId,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon.conversation().delete_conversation(&conversation_id).await
+    let ctx = state.ctx();
+    daemon.conversation().delete_conversation(&ctx, &conversation_id).await
         .map_err(|e| format!("Failed to delete conversation: {}", e))
 }
 
@@ -274,14 +284,16 @@ pub async fn rename_conversation(
     name: String,
 ) -> Result<(), String> {
     let daemon = state.get_daemon()?;
-    daemon.conversation().rename_conversation(&conversation_id, &name).await
+    let ctx = state.ctx();
+    daemon.conversation().rename_conversation(&ctx, &conversation_id, &name).await
         .map_err(|e| format!("Failed to rename conversation: {}", e))
 }
 
 #[tauri::command]
 pub async fn get_model_name(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     let daemon = state.get_daemon()?;
-    let model_id = daemon.model().default_model_id().await;
+    let ctx = state.ctx();
+    let model_id = daemon.model().default_model_id(&ctx).await;
     Ok(model_id.split('/').last().unwrap_or(&model_id).to_string())
 }
 

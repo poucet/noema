@@ -52,22 +52,22 @@ impl ModelService {
 
 #[async_trait]
 impl ModelApi for ModelService {
-    async fn list_models(&self, _ctx: RequestContext) -> anyhow::Result<Vec<llm::ModelInfo>> {
+    async fn list_models(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<llm::ModelInfo>> {
         if let Some(cached) = self.cached_models.lock().await.clone() {
             return Ok(cached);
         }
         Ok(self.fetch_all_models().await)
     }
 
-    async fn list_providers(&self, _ctx: RequestContext) -> Vec<llm::ProviderInfo> {
+    async fn list_providers(&self, _ctx: &RequestContext) -> Vec<llm::ProviderInfo> {
         llm::list_providers()
     }
 
-    async fn default_model_id(&self, _ctx: RequestContext) -> String {
+    async fn default_model_id(&self, _ctx: &RequestContext) -> String {
         self.default_model_id.lock().await.clone()
     }
 
-    async fn set_default_model(&self, _ctx: RequestContext, model_id: &str) -> anyhow::Result<()> {
+    async fn set_default_model(&self, _ctx: &RequestContext, model_id: &str) -> anyhow::Result<()> {
         let _ = llm::create_model(model_id)?;
         *self.default_model_id.lock().await = model_id.to_string();
         // Invalidate cache when model changes (provider config may have changed)
@@ -96,7 +96,7 @@ impl<S: StorageTypes> AssetApi for AssetService<S>
 where
     S::Document: DocumentResolver,
 {
-    async fn store_asset(&self, _ctx: RequestContext, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetInfo> {
+    async fn store_asset(&self, _ctx: &RequestContext, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetInfo> {
         use base64::{engine::general_purpose::STANDARD, Engine};
         use simply_core::storage::traits::AssetStore;
         let b64 = STANDARD.encode(&upload.data);
@@ -111,12 +111,12 @@ where
         })
     }
 
-    async fn list_assets(&self, _ctx: RequestContext) -> anyhow::Result<Vec<AssetId>> {
+    async fn list_assets(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<AssetId>> {
         use simply_core::storage::traits::AssetStore;
         self.stores.asset().list().await
     }
 
-    async fn get_asset_info(&self, _ctx: RequestContext, id: &AssetId) -> anyhow::Result<AssetInfo> {
+    async fn get_asset_info(&self, _ctx: &RequestContext, id: &AssetId) -> anyhow::Result<AssetInfo> {
         use simply_core::storage::traits::AssetStore;
         let stored = self.stores.asset().get(id).await?
             .ok_or_else(|| anyhow::anyhow!("asset not found: {id}"))?;
@@ -128,7 +128,7 @@ where
         })
     }
 
-    async fn get_asset(&self, _ctx: RequestContext, id: &AssetId) -> anyhow::Result<simply_rpc::BinaryResponse> {
+    async fn get_asset(&self, _ctx: &RequestContext, id: &AssetId) -> anyhow::Result<simply_rpc::BinaryResponse> {
         use simply_core::storage::traits::AssetStore;
         let stored = self.stores.asset().get(id).await?
             .ok_or_else(|| anyhow::anyhow!("asset not found: {id}"))?;
@@ -136,7 +136,7 @@ where
         Ok(simply_rpc::BinaryResponse { data, mime_type: stored.mime_type.clone() })
     }
 
-    async fn get_blob(&self, _ctx: RequestContext, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> {
+    async fn get_blob(&self, _ctx: &RequestContext, hash: &simply_core::storage::types::BlobHash) -> anyhow::Result<simply_rpc::BinaryResponse> {
         use simply_core::storage::traits::AssetStore;
         let data = self.coordinator.get_blob(hash).await?;
         let mime_type = self.stores.asset()
@@ -209,7 +209,7 @@ impl<S: StorageTypes> DocumentService<S> {
 
 #[async_trait]
 impl<S: StorageTypes> DocumentApi for DocumentService<S> {
-    async fn list_documents(&self, _ctx: RequestContext) -> anyhow::Result<Vec<DocumentInfo>> {
+    async fn list_documents(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<DocumentInfo>> {
         use simply_core::storage::traits::DocumentStore;
         let docs = self.stores.document().list_documents(&self.user_id).await?;
         let mut result = Vec::new();
@@ -229,7 +229,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         Ok(result)
     }
 
-    async fn search_documents(&self, _ctx: RequestContext, query: &str) -> anyhow::Result<Vec<DocumentInfo>> {
+    async fn search_documents(&self, _ctx: &RequestContext, query: &str) -> anyhow::Result<Vec<DocumentInfo>> {
         use simply_core::storage::traits::DocumentStore;
         let docs = self.stores.document().search_documents(&self.user_id, query, 50).await?;
         let mut result = Vec::new();
@@ -249,7 +249,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         Ok(result)
     }
 
-    async fn get_document(&self, _ctx: RequestContext, document_id: &str) -> anyhow::Result<DocumentDetail> {
+    async fn get_document(&self, _ctx: &RequestContext, document_id: &str) -> anyhow::Result<DocumentDetail> {
         use simply_core::storage::ids::DocumentId;
         use simply_core::storage::traits::DocumentStore;
 
@@ -282,7 +282,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         })
     }
 
-    async fn create_document(&self, _ctx: RequestContext, request: CreateDocumentRequest) -> anyhow::Result<DocumentInfo> {
+    async fn create_document(&self, _ctx: &RequestContext, request: CreateDocumentRequest) -> anyhow::Result<DocumentInfo> {
         use simply_core::storage::traits::DocumentStore;
         use simply_core::storage::types::DocumentSource;
 
@@ -327,7 +327,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         })
     }
 
-    async fn rename_document(&self, _ctx: RequestContext, document_id: &str, title: &str) -> anyhow::Result<()> {
+    async fn rename_document(&self, _ctx: &RequestContext, document_id: &str, title: &str) -> anyhow::Result<()> {
         use simply_core::storage::ids::DocumentId;
         use simply_core::storage::traits::DocumentStore;
         let id = DocumentId::from_string(document_id);
@@ -335,7 +335,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         self.stores.document().update_document_title(&id, title).await
     }
 
-    async fn delete_document(&self, _ctx: RequestContext, document_id: &str) -> anyhow::Result<()> {
+    async fn delete_document(&self, _ctx: &RequestContext, document_id: &str) -> anyhow::Result<()> {
         use simply_core::storage::ids::DocumentId;
         use simply_core::storage::traits::DocumentStore;
         let id = DocumentId::from_string(document_id);
@@ -344,7 +344,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         Ok(())
     }
 
-    async fn create_tab(&self, _ctx: RequestContext, document_id: &str, request: CreateTabRequest) -> anyhow::Result<TabInfo> {
+    async fn create_tab(&self, _ctx: &RequestContext, document_id: &str, request: CreateTabRequest) -> anyhow::Result<TabInfo> {
         use simply_core::storage::ids::{DocumentId, TabId};
         use simply_core::storage::traits::DocumentStore;
 
@@ -385,7 +385,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         })
     }
 
-    async fn get_tab(&self, _ctx: RequestContext, tab_id: &str) -> anyhow::Result<TabInfo> {
+    async fn get_tab(&self, _ctx: &RequestContext, tab_id: &str) -> anyhow::Result<TabInfo> {
         use simply_core::storage::ids::TabId;
         use simply_core::storage::traits::DocumentStore;
 
@@ -406,7 +406,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         })
     }
 
-    async fn update_tab(&self, _ctx: RequestContext, tab_id: &str, request: UpdateTabRequest) -> anyhow::Result<()> {
+    async fn update_tab(&self, _ctx: &RequestContext, tab_id: &str, request: UpdateTabRequest) -> anyhow::Result<()> {
         use simply_core::storage::ids::TabId;
         use simply_core::storage::traits::DocumentStore;
         let tid = TabId::from_string(tab_id);
@@ -424,7 +424,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         Ok(())
     }
 
-    async fn delete_tab(&self, _ctx: RequestContext, tab_id: &str) -> anyhow::Result<()> {
+    async fn delete_tab(&self, _ctx: &RequestContext, tab_id: &str) -> anyhow::Result<()> {
         use simply_core::storage::ids::TabId;
         use simply_core::storage::traits::DocumentStore;
         let tid = TabId::from_string(tab_id);
@@ -614,11 +614,11 @@ fn spawn_realtime_pipeline(
 
 #[async_trait]
 impl VoiceApi for VoiceService {
-    async fn list_voice_providers(&self, _ctx: RequestContext) -> anyhow::Result<Vec<VoiceProviderInfo>> {
+    async fn list_voice_providers(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<VoiceProviderInfo>> {
         Ok(self.providers.values().map(|p| p.info.clone()).collect())
     }
 
-    async fn voice_connect(&self, _ctx: RequestContext, provider_id: &str) -> anyhow::Result<simply_rpc::StreamHandle<simply_voice::VoiceInput, simply_voice::VoiceEvent>> {
+    async fn voice_connect(&self, _ctx: &RequestContext, provider_id: &str) -> anyhow::Result<simply_rpc::StreamHandle<simply_voice::VoiceInput, simply_voice::VoiceEvent>> {
         tracing::info!(provider_id, "voice_connect");
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
@@ -638,7 +638,7 @@ impl VoiceApi for VoiceService {
         Ok(simply_rpc::StreamHandle::new(input_tx, event_rx))
     }
 
-    async fn synthesize(&self, _ctx: RequestContext, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::Audio> {
+    async fn synthesize(&self, _ctx: &RequestContext, text: &str, provider_id: &str, voice: &str) -> anyhow::Result<simply_voice::Audio> {
         tracing::info!(provider_id, voice, text_len = text.len(), "synthesize called");
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
@@ -649,7 +649,7 @@ impl VoiceApi for VoiceService {
         result
     }
 
-    async fn list_voices(&self, _ctx: RequestContext, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>> {
+    async fn list_voices(&self, _ctx: &RequestContext, provider_id: &str) -> anyhow::Result<Vec<simply_voice::Voice>> {
         let provider = self.providers.get(provider_id)
             .ok_or_else(|| anyhow::anyhow!("unknown voice provider: {provider_id}"))?;
         let tts = provider.tts.as_ref()
@@ -657,7 +657,7 @@ impl VoiceApi for VoiceService {
         tts.voices().await
     }
 
-    async fn voice_disconnect(&self, _ctx: RequestContext, _session_id: &str) -> anyhow::Result<()> {
+    async fn voice_disconnect(&self, _ctx: &RequestContext, _session_id: &str) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -682,22 +682,22 @@ impl CoreService {
 
 #[async_trait]
 impl CoreApi for CoreService {
-    async fn health(&self, _ctx: RequestContext) -> anyhow::Result<DaemonHealth> {
+    async fn health(&self, _ctx: &RequestContext) -> anyhow::Result<DaemonHealth> {
         Ok(DaemonHealth { status: "ok".to_string() })
     }
 
-    async fn kill(&self, _ctx: RequestContext) -> anyhow::Result<()> {
+    async fn kill(&self, _ctx: &RequestContext) -> anyhow::Result<()> {
         if let Some(tx) = &self.kill_tx {
             let _ = tx.send(()).await;
         }
         Ok(())
     }
 
-    async fn version(&self, _ctx: RequestContext) -> anyhow::Result<String> {
+    async fn version(&self, _ctx: &RequestContext) -> anyhow::Result<String> {
         Ok(env!("CARGO_PKG_VERSION").to_string())
     }
 
-    async fn public_url(&self, _ctx: RequestContext) -> anyhow::Result<String> {
+    async fn public_url(&self, _ctx: &RequestContext) -> anyhow::Result<String> {
         let settings = config::Settings::load();
         Ok(settings.public_url.unwrap_or_else(|| {
             let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
@@ -725,21 +725,18 @@ impl<S: StorageTypes> UserApi for UserService<S>
 where
     S::User: simply_core::storage::traits::UserStore,
 {
-    async fn resolve_or_create_user(&self, _ctx: RequestContext, external_id: String) -> anyhow::Result<simply_rpc::Scope> {
+    async fn resolve_user(&self, _ctx: &RequestContext, external_id: String) -> anyhow::Result<Option<simply_rpc::Scope>> {
         use simply_core::storage::traits::UserStore;
-
         let user_store = self.stores.user();
-
-        // Check if this external_id is already mapped
-        if let Some(user_id) = user_store.resolve_external_user(&external_id).await? {
-            return Ok(simply_rpc::Scope::user(user_id.as_str()));
+        match user_store.resolve_external_user(&external_id).await? {
+            Some(user_id) => Ok(Some(simply_rpc::Scope::user(user_id.as_str()))),
+            None => Ok(None),
         }
+    }
 
-        // Create a new user with the external_id as email placeholder
-        let user = user_store.get_or_create_user_by_email(&external_id).await?;
-        // Map external_id → user_id
-        user_store.map_external_user(&external_id, &user.id).await?;
-
+    async fn resolve_or_create_user(&self, _ctx: &RequestContext, external_id: String) -> anyhow::Result<simply_rpc::Scope> {
+        use simply_core::storage::traits::UserStore;
+        let user = self.stores.user().resolve_or_create_external_user(&external_id).await?;
         Ok(simply_rpc::Scope::user(user.id.as_str()))
     }
 }
@@ -770,7 +767,7 @@ impl<S: StorageTypes> SearchService<S> {
 
 #[async_trait]
 impl<S: StorageTypes> SearchApi for SearchService<S> {
-    async fn search(&self, _ctx: RequestContext, request: SearchRequest) -> anyhow::Result<Vec<SearchHit>> {
+    async fn search(&self, _ctx: &RequestContext, request: SearchRequest) -> anyhow::Result<Vec<SearchHit>> {
         let top_k = request.top_k.unwrap_or(5);
 
         // Embed the query
@@ -814,7 +811,7 @@ impl<S: StorageTypes> SearchApi for SearchService<S> {
         Ok(hits)
     }
 
-    async fn reindex(&self, _ctx: RequestContext) -> anyhow::Result<ReindexStatus> {
+    async fn reindex(&self, _ctx: &RequestContext) -> anyhow::Result<ReindexStatus> {
         use simply_core::storage::traits::DocumentStore;
 
         // Delete all existing vectors
@@ -848,7 +845,7 @@ impl<S: StorageTypes> SearchApi for SearchService<S> {
         })
     }
 
-    async fn queue_status(&self, _ctx: RequestContext) -> anyhow::Result<crate::embedding_queue::EmbeddingQueueStatus> {
+    async fn queue_status(&self, _ctx: &RequestContext) -> anyhow::Result<crate::embedding_queue::EmbeddingQueueStatus> {
         Ok(self.embedding_queue.status().await)
     }
 }

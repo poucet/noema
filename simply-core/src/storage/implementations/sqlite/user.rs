@@ -53,7 +53,7 @@ impl UserStore for SqliteStore {
                 |row| {
                     Ok(Keyed::new(
                         row.get::<_, UserId>(0)?,
-                        User::new(row.get::<_, String>(1)?),
+                        User { email: row.get::<_, Option<String>>(1)? },
                     ))
                 },
             )
@@ -83,7 +83,7 @@ impl UserStore for SqliteStore {
                 |row| {
                     Ok(Keyed::new(
                         row.get::<_, UserId>(0)?,
-                        User::new(row.get::<_, String>(1)?),
+                        User { email: row.get::<_, Option<String>>(1)? },
                     ))
                 },
             )
@@ -119,7 +119,7 @@ impl UserStore for SqliteStore {
                 |row| {
                     Ok(Keyed::new(
                         row.get::<_, UserId>(0)?,
-                        User::new(row.get::<_, String>(1)?),
+                        User { email: row.get::<_, Option<String>>(1)? },
                     ))
                 },
             )
@@ -134,20 +134,11 @@ impl UserStore for SqliteStore {
             .query_map([], |row| {
                 Ok(Keyed::new(
                     row.get::<_, UserId>(0)?,
-                    User::new(row.get::<_, String>(1)?),
+                    User { email: row.get::<_, Option<String>>(1)? },
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(users)
-    }
-
-    async fn map_external_user(&self, external_id: &str, user_id: &UserId) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO discord_user_mappings (discord_user_id, user_id) VALUES (?1, ?2)",
-            params![external_id, user_id.as_str()],
-        )?;
-        Ok(())
     }
 
     async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>> {
@@ -160,5 +151,31 @@ impl UserStore for SqliteStore {
             )
             .ok();
         Ok(user_id)
+    }
+
+    async fn resolve_or_create_external_user(&self, external_id: &str) -> Result<StoredUser> {
+        // Check if already mapped
+        if let Some(user_id) = self.resolve_external_user(external_id).await? {
+            if let Some(user) = self.get_user_by_id(&user_id).await? {
+                return Ok(user);
+            }
+        }
+
+        // Create new user + mapping atomically
+        let conn = self.conn().lock().unwrap();
+        let id = UserId::new();
+        let now = unix_timestamp();
+
+        conn.execute(
+            "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, NULL, ?2, ?3)",
+            params![id.as_str(), now, now],
+        )?;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO discord_user_mappings (discord_user_id, user_id) VALUES (?1, ?2)",
+            params![external_id, id.as_str()],
+        )?;
+
+        Ok(Keyed::new(id, User::anonymous()))
     }
 }

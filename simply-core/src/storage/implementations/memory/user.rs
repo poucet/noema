@@ -48,7 +48,7 @@ impl UserStore for MemoryUserStore {
 
     async fn get_user_by_email(&self, email: &str) -> Result<Option<StoredUser>> {
         let users = self.users.lock().unwrap();
-        Ok(users.values().find(|u| u.email == email).cloned())
+        Ok(users.values().find(|u| u.email.as_deref() == Some(email)).cloned())
     }
 
     async fn get_or_create_user_by_email(&self, email: &str) -> Result<StoredUser> {
@@ -75,13 +75,25 @@ impl UserStore for MemoryUserStore {
         Ok(users.values().cloned().collect())
     }
 
-    async fn map_external_user(&self, external_id: &str, user_id: &UserId) -> Result<()> {
-        self.discord_mappings.lock().unwrap().insert(external_id.to_string(), user_id.clone());
-        Ok(())
-    }
-
     async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>> {
         Ok(self.discord_mappings.lock().unwrap().get(external_id).cloned())
+    }
+
+    async fn resolve_or_create_external_user(&self, external_id: &str) -> Result<StoredUser> {
+        // Check if already mapped
+        if let Some(user_id) = self.resolve_external_user(external_id).await? {
+            if let Some(user) = self.get_user_by_id(&user_id).await? {
+                return Ok(user);
+            }
+        }
+
+        // Create new user + mapping
+        let id = UserId::new();
+        let user = User::anonymous();
+        let stored = Keyed::new(id.clone(), user);
+        self.users.lock().unwrap().insert(id.as_str().to_string(), stored.clone());
+        self.discord_mappings.lock().unwrap().insert(external_id.to_string(), id);
+        Ok(stored)
     }
 }
 
@@ -98,7 +110,7 @@ mod tests {
 
         // Same user returned
         assert_eq!(user1.id, user2.id);
-        assert_eq!(user1.email, "default@localhost");
+        assert_eq!(user1.email.as_deref(), Some("default@localhost"));
     }
 
     #[tokio::test]
@@ -110,7 +122,7 @@ mod tests {
 
         // Same user returned
         assert_eq!(user1.id, user2.id);
-        assert_eq!(user1.email, "test@example.com");
+        assert_eq!(user1.email.as_deref(), Some("test@example.com"));
     }
 
     #[tokio::test]

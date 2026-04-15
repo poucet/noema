@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(url = %mcp_url, "lumina MCP server started");
 
     let tool_count = daemon
-        .mcp().register_ephemeral_mcp(RegisterEphemeralRequest {
+        .mcp().register_ephemeral_mcp(simply_rpc::RequestContext::anonymous(), RegisterEphemeralRequest {
             id: "discord".to_string(),
             url: mcp_url,
         })
@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(url = %gdocs_url, "google docs MCP server started");
 
     let gdocs_tool_count = daemon
-        .mcp().register_ephemeral_mcp(RegisterEphemeralRequest {
+        .mcp().register_ephemeral_mcp(simply_rpc::RequestContext::anonymous(), RegisterEphemeralRequest {
             id: "google-docs".to_string(),
             url: gdocs_url,
         })

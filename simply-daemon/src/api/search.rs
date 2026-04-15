@@ -42,13 +42,13 @@ pub struct ReindexStatus {
 pub trait SearchApi: Send + Sync {
     /// Semantic search over embedded documents.
     #[rpc(post = "/search")]
-    async fn search(&self, ctx: RequestContext, request: SearchRequest) -> anyhow::Result<Vec<SearchHit>>;
+    async fn search(&self, ctx: &RequestContext, request: SearchRequest) -> anyhow::Result<Vec<SearchHit>>;
 
     /// Re-embed all documents. Runs in the background; returns immediately.
     #[rpc(post = "/search/reindex", no_tool)]
-    async fn reindex(&self, ctx: RequestContext) -> anyhow::Result<ReindexStatus>;
+    async fn reindex(&self, ctx: &RequestContext) -> anyhow::Result<ReindexStatus>;
 
     /// Get embedding queue status.
     #[rpc(get = "/search/status")]
-    async fn queue_status(&self, ctx: RequestContext) -> anyhow::Result<EmbeddingQueueStatus>;
+    async fn queue_status(&self, ctx: &RequestContext) -> anyhow::Result<EmbeddingQueueStatus>;
 }

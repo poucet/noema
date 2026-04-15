@@ -9,6 +9,7 @@ use serenity::all::{
 };
 use serenity::builder::GetMessages;
 use simply_daemon::api::*;
+use simply_rpc::RequestContext;
 
 use super::LuminaContext;
 use crate::voice::{VoiceManagerKey, VoiceMode};
@@ -197,7 +198,8 @@ mod voice {
     #[sub_command(description = "List available providers and voices")]
     pub async fn list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
         let voice_mgr = get_voice_manager(lx).await?;
-        let providers = voice_mgr.daemon().voice().list_voice_providers().await?;
+        let anon = RequestContext::anonymous();
+        let providers = voice_mgr.daemon().voice().list_voice_providers(&anon).await?;
 
         let mut lines = vec!["**Providers:**".to_string()];
         for p in &providers {
@@ -205,7 +207,7 @@ mod voice {
         }
 
         for p in providers.iter().filter(|p| p.capabilities.contains(&"tts".to_string())) {
-            if let Ok(voices) = voice_mgr.daemon().voice().list_voices(&p.id).await {
+            if let Ok(voices) = voice_mgr.daemon().voice().list_voices(&anon, &p.id).await {
                 if !voices.is_empty() {
                     lines.push(format!("\n**Voices for {}:**", p.id));
                     for v in voices.iter().take(15) {
@@ -250,13 +252,14 @@ mod voice {
     /// Autocomplete handler — called by the macro-generated `autocomplete` method.
     pub async fn autocomplete(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
         let voice_mgr = get_voice_manager(lx).await?;
+        let anon = RequestContext::anonymous();
         let options = cmd.data.options();
         let subcommand = options.first().map(|o| o.name).unwrap_or("");
         tracing::debug!(subcommand, "voice autocomplete");
 
         let choices: Vec<AutocompleteChoice> = match subcommand {
             "provider" => {
-                let providers = voice_mgr.daemon().voice().list_voice_providers().await.unwrap_or_default();
+                let providers = voice_mgr.daemon().voice().list_voice_providers(&anon).await.unwrap_or_default();
                 providers.iter()
                     .map(|p| AutocompleteChoice::new(
                         format!("{} ({})", p.name, p.capabilities.join(", ")),
@@ -270,7 +273,7 @@ mod voice {
                 if tts_id.is_empty() {
                     vec![AutocompleteChoice::new("Set a TTS provider first (/voice provider tts ...)", "")]
                 } else {
-                    let voices = voice_mgr.daemon().voice().list_voices(&tts_id).await.unwrap_or_default();
+                    let voices = voice_mgr.daemon().voice().list_voices(&anon, &tts_id).await.unwrap_or_default();
                     tracing::debug!(count = voices.len(), "got voices for autocomplete");
                     voices.iter()
                         .map(|v| AutocompleteChoice::new(&v.name, v.id.clone()))

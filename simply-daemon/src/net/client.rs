@@ -58,7 +58,16 @@ impl DaemonRpcConnection {
 
 #[async_trait]
 impl RpcConnection for DaemonRpcConnection {
-    async fn rpc_call(&self, method: &str, params: Value) -> anyhow::Result<Value> {
+    async fn rpc_call(&self, method: &str, params: Value, ctx: &simply_rpc::RequestContext) -> anyhow::Result<Value> {
+        // Inject ctx into params as __ctx field for WS transport
+        let params = match params {
+            Value::Object(mut map) => {
+                map.insert("__ctx".to_string(), serde_json::to_value(ctx).unwrap_or_default());
+                Value::Object(map)
+            }
+            Value::Null => serde_json::json!({ "__ctx": ctx }),
+            other => other,
+        };
         self.conn.rpc_call(method, params).await
     }
 
@@ -67,17 +76,25 @@ impl RpcConnection for DaemonRpcConnection {
         http_method: simply_rpc::HttpMethod,
         path: &str,
         body: Value,
+        ctx: &simply_rpc::RequestContext,
     ) -> anyhow::Result<Value> {
         let url = format!("{}/api{}", self.base_url, path);
         let max_retries = 2;
 
         for attempt in 0..=max_retries {
-            let resp = match http_method {
-                simply_rpc::HttpMethod::Get => self.http.get(&url).send().await?,
-                simply_rpc::HttpMethod::Post => self.http.post(&url).json(&body).send().await?,
-                simply_rpc::HttpMethod::Put => self.http.put(&url).json(&body).send().await?,
-                simply_rpc::HttpMethod::Delete => self.http.delete(&url).send().await?,
+            let mut req = match http_method {
+                simply_rpc::HttpMethod::Get => self.http.get(&url),
+                simply_rpc::HttpMethod::Post => self.http.post(&url).json(&body),
+                simply_rpc::HttpMethod::Put => self.http.put(&url).json(&body),
+                simply_rpc::HttpMethod::Delete => self.http.delete(&url),
             };
+
+            // Send the full RequestContext as a JSON header
+            if let Ok(ctx_json) = serde_json::to_string(ctx) {
+                req = req.header("X-Request-Context", ctx_json);
+            }
+
+            let resp = req.send().await?;
 
             let status = resp.status();
             if status.is_success() {

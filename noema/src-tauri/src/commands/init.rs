@@ -55,7 +55,19 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
         .unwrap_or_else(|_| reqwest::Client::new());
     let _ = state.http_client.set(http_client);
 
-    let model_name = daemon.model().default_model_id().await;
+    // Resolve admin identity from settings
+    let admin_external_id = settings.user_email
+        .as_deref()
+        .map(|e| format!("email:{e}"))
+        .unwrap_or_else(|| "noema:admin".to_string());
+    let admin_scope = daemon.user()
+        .resolve_or_create_user(simply_rpc::RequestContext::anonymous(), admin_external_id)
+        .await
+        .unwrap_or_default();
+    let admin_ctx = simply_rpc::RequestContext::with_scope(admin_scope);
+    let _ = state.admin_ctx.set(admin_ctx.clone());
+
+    let model_name = daemon.model().default_model_id(&admin_ctx).await;
     let _ = state.daemon.set(daemon);
     let _ = state._daemon_handle.set(handle);
 

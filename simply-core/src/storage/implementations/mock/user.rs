@@ -26,10 +26,10 @@ impl UserStore for MockUserStore {
     async fn list_users(&self) -> Result<Vec<StoredUser>> {
         unimplemented!()
     }
-    async fn map_external_user(&self, _: &str, _: &UserId) -> Result<()> {
+    async fn resolve_external_user(&self, _: &str) -> Result<Option<UserId>> {
         unimplemented!()
     }
-    async fn resolve_external_user(&self, _: &str) -> Result<Option<UserId>> {
+    async fn resolve_or_create_external_user(&self, _: &str) -> Result<StoredUser> {
         unimplemented!()
     }
 }

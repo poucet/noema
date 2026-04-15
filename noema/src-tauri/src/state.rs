@@ -3,6 +3,7 @@
 use simply_daemon::api::Daemon;
 use simply_daemon::types::ConversationId;
 use simply_daemon::net::DaemonHandle;
+use simply_rpc::RequestContext;
 use simply_voice::VoiceInput;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,6 +15,8 @@ pub struct AppState {
     pub initializing: AtomicBool,
     /// The daemon — primary API for everything (embedded or remote)
     pub daemon: OnceCell<Arc<dyn Daemon>>,
+    /// Admin user's request context — set during initialization
+    pub admin_ctx: OnceCell<RequestContext>,
     /// Keeps the daemon handle alive (owns server if we're the host)
     pub _daemon_handle: OnceCell<DaemonHandle>,
     /// REST base URL for the daemon (e.g. "http://127.0.0.1:9800")
@@ -33,6 +36,7 @@ impl AppState {
         Self {
             initializing: AtomicBool::new(false),
             daemon: OnceCell::new(),
+            admin_ctx: OnceCell::new(),
             _daemon_handle: OnceCell::new(),
             rest_base_url: OnceCell::new(),
             http_client: OnceCell::new(),
@@ -45,6 +49,11 @@ impl AppState {
 
     pub fn get_daemon(&self) -> Result<Arc<dyn Daemon>, String> {
         self.daemon.get().cloned().ok_or_else(|| "Daemon not initialized".to_string())
+    }
+
+    /// Get the admin user's RequestContext. Panics if not initialized.
+    pub fn ctx(&self) -> RequestContext {
+        self.admin_ctx.get().cloned().unwrap_or_default()
     }
 
     pub fn is_initialized(&self) -> bool {

@@ -382,14 +382,29 @@ async fn handle_ws_connection(
         tracing::debug!(id, method = %method, "WS request");
         tracing::trace!(id, method = %method, params = %params, "WS request params");
 
+        // Extract per-message ctx if present (from RemoteDaemon client), otherwise use connection ctx
+        let msg_ctx = if let Some(ctx_val) = params.get("__ctx") {
+            serde_json::from_value::<simply_rpc::RequestContext>(ctx_val.clone()).unwrap_or(ctx.clone())
+        } else {
+            ctx.clone()
+        };
+        // Remove __ctx from params before dispatching
+        let params = match params {
+            serde_json::Value::Object(mut map) => {
+                map.remove("__ctx");
+                serde_json::Value::Object(map)
+            }
+            other => other,
+        };
+
         // Try stream dispatch first, then regular RPC
-        let (mut response, sink) = if let Some(ws_result) = dispatcher.ws_dispatch_by_method(&method, ctx.clone(), params.clone(), write_tx.clone()).await {
+        let (mut response, sink) = if let Some(ws_result) = dispatcher.ws_dispatch_by_method(&method, &msg_ctx, params.clone(), write_tx.clone()).await {
             let r = match ws_result.result {
                 Ok(v) => WsResponse::ok(0, v),
                 Err(e) => WsResponse::err(0, e),
             };
             (r, Some(ws_result.input_sink))
-        } else if let Some(rpc_result) = dispatcher.dispatch_by_method(&method, ctx.clone(), params).await {
+        } else if let Some(rpc_result) = dispatcher.dispatch_by_method(&method, &msg_ctx, params).await {
             let r = match rpc_result {
                 Ok(v) => WsResponse::ok(0, v),
                 Err(e) => WsResponse::err(0, e),
@@ -557,15 +572,20 @@ async fn rest_handler(
         serde_json::from_slice(&raw_bytes).unwrap_or(serde_json::Value::Null)
     };
 
-    // Build RequestContext from the authenticated user
-    let ctx = match request_user.user_id() {
-        Some(uid) => simply_rpc::RequestContext::with_scope(
-            simply_rpc::Scope::user(uid.as_str()),
-        ),
-        None => simply_rpc::RequestContext::anonymous(),
-    };
+    // Build RequestContext: prefer X-Request-Context header (from RemoteDaemon client),
+    // fall back to auth middleware's user resolution
+    let ctx = req.headers()
+        .get("X-Request-Context")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| serde_json::from_str::<simply_rpc::RequestContext>(s).ok())
+        .unwrap_or_else(|| match request_user.user_id() {
+            Some(uid) => simply_rpc::RequestContext::with_scope(
+                simply_rpc::Scope::user(uid.as_str()),
+            ),
+            None => simply_rpc::RequestContext::anonymous(),
+        });
 
-    let rest_result = match state.rest_dispatcher.dispatch(http_method, &path, ctx, body).await {
+    let rest_result = match state.rest_dispatcher.dispatch(http_method, &path, &ctx, body).await {
         Some(r) => r,
         None => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };

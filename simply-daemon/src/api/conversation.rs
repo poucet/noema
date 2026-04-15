@@ -13,21 +13,21 @@ use super::types::{ConversationId, ConversationInfo, ResolvedMessage};
 pub trait ConversationApi: Send + Sync {
     /// Create a new conversation. Returns the conversation ID.
     #[rpc(post = "/conversation")]
-    async fn create_conversation(&self, ctx: RequestContext, name: Option<String>) -> anyhow::Result<ConversationId>;
+    async fn create_conversation(&self, ctx: &RequestContext, name: Option<String>) -> anyhow::Result<ConversationId>;
 
     /// List all conversations for the current user.
     #[rpc(get = "/conversation")]
-    async fn list_conversations(&self, ctx: RequestContext) -> anyhow::Result<Vec<ConversationInfo>>;
+    async fn list_conversations(&self, ctx: &RequestContext) -> anyhow::Result<Vec<ConversationInfo>>;
 
     /// Delete a conversation (closes session if open, deletes entity).
     #[rpc(delete = "/conversation/{conversation_id}")]
-    async fn delete_conversation(&self, ctx: RequestContext, conversation_id: &ConversationId) -> anyhow::Result<()>;
+    async fn delete_conversation(&self, ctx: &RequestContext, conversation_id: &ConversationId) -> anyhow::Result<()>;
 
     /// Rename a conversation.
     #[rpc(put = "/conversation/{conversation_id}")]
-    async fn rename_conversation(&self, ctx: RequestContext, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()>;
+    async fn rename_conversation(&self, ctx: &RequestContext, conversation_id: &ConversationId, name: &str) -> anyhow::Result<()>;
 
     /// Get messages for a conversation (resolved content with turn IDs).
     #[rpc(get = "/conversation/{conversation_id}/messages")]
-    async fn get_messages(&self, ctx: RequestContext, conversation_id: &ConversationId) -> anyhow::Result<Vec<ResolvedMessage>>;
+    async fn get_messages(&self, ctx: &RequestContext, conversation_id: &ConversationId) -> anyhow::Result<Vec<ResolvedMessage>>;
 }

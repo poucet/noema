@@ -7,158 +7,160 @@ import type * as T from './types';
 // AssetApi
 export const assetApi = (f: Fetch = fetch) => ({
   /** Store binary content. Returns the asset ID and blob hash. */
-  storeAsset: (upload: T.BinaryUpload) => json<T.AssetInfo>(f, 'POST', '/api/asset', upload),
+  storeAsset: (ctx: T.RequestContext, upload: T.BinaryUpload) => json<T.AssetInfo>(f, 'POST', '/api/asset', { ctx, upload }),
   /** List all asset IDs. */
-  listAssets: () => json<T.AssetId[]>(f, 'GET', '/api/asset'),
+  listAssets: (ctx: T.RequestContext) => json<T.AssetId[]>(f, 'GET', '/api/asset', ctx),
   /** Get asset metadata by ID. */
-  getAssetInfo: (id: T.AssetId) => json<T.AssetInfo>(f, 'GET', `/api/asset/${id}/info`),
+  getAssetInfo: (ctx: T.RequestContext, id: T.AssetId) => json<T.AssetInfo>(f, 'GET', `/api/asset/${id}/info`, { ctx }),
   /** Get an asset (metadata + binary data) by ID. */
-  getAsset: (id: T.AssetId) => json<T.BinaryResponse>(f, 'GET', `/api/asset/${id}`),
+  getAsset: (ctx: T.RequestContext, id: T.AssetId) => json<T.BinaryResponse>(f, 'GET', `/api/asset/${id}`, { ctx }),
   /** Get blob data + mime type by content hash. */
-  getBlob: (hash: T.BlobHash) => json<T.BinaryResponse>(f, 'GET', `/api/blob/${hash}`),
+  getBlob: (ctx: T.RequestContext, hash: T.BlobHash) => json<T.BinaryResponse>(f, 'GET', `/api/blob/${hash}`, { ctx }),
 });
 
 // ConversationApi
 export const conversationApi = (f: Fetch = fetch) => ({
   /** Create a new conversation. Returns the conversation ID. */
-  createConversation: (name: string | null) => json<T.ConversationId>(f, 'POST', '/api/conversation', name),
+  createConversation: (ctx: T.RequestContext, name: string | null) => json<T.ConversationId>(f, 'POST', '/api/conversation', { ctx, name }),
   /** List all conversations for the current user. */
-  listConversations: () => json<T.ConversationInfo[]>(f, 'GET', '/api/conversation'),
+  listConversations: (ctx: T.RequestContext) => json<T.ConversationInfo[]>(f, 'GET', '/api/conversation', ctx),
   /** Delete a conversation (closes session if open, deletes entity). */
-  deleteConversation: (conversationId: T.ConversationId) => json<void>(f, 'DELETE', `/api/conversation/${conversationId}`),
+  deleteConversation: (ctx: T.RequestContext, conversationId: T.ConversationId) => json<void>(f, 'DELETE', `/api/conversation/${conversationId}`, { ctx }),
   /** Rename a conversation. */
-  renameConversation: (conversationId: T.ConversationId, name: string) => json<void>(f, 'PUT', `/api/conversation/${conversationId}`, { name }),
+  renameConversation: (ctx: T.RequestContext, conversationId: T.ConversationId, name: string) => json<void>(f, 'PUT', `/api/conversation/${conversationId}`, { ctx, name }),
   /** Get messages for a conversation (resolved content with turn IDs). */
-  getMessages: (conversationId: T.ConversationId) => json<T.ResolvedMessage[]>(f, 'GET', `/api/conversation/${conversationId}/messages`),
+  getMessages: (ctx: T.RequestContext, conversationId: T.ConversationId) => json<T.ResolvedMessage[]>(f, 'GET', `/api/conversation/${conversationId}/messages`, { ctx }),
 });
 
 // CoreApi
 export const coreApi = (f: Fetch = fetch) => ({
   /** Check daemon health. */
-  health: () => json<T.DaemonHealth>(f, 'GET', '/api/daemon'),
+  health: (ctx: T.RequestContext) => json<T.DaemonHealth>(f, 'GET', '/api/daemon', ctx),
   /** Shut down the daemon. */
-  kill: () => json<void>(f, 'POST', '/api/daemon/kill'),
+  kill: (ctx: T.RequestContext) => json<void>(f, 'POST', '/api/daemon/kill', ctx),
   /** Get daemon version. */
-  version: () => json<string>(f, 'GET', '/api/daemon/version'),
+  version: (ctx: T.RequestContext) => json<string>(f, 'GET', '/api/daemon/version', ctx),
   /** Get the daemon's public URL (for OAuth callbacks, auth links, etc.). */
-  publicUrl: () => json<string>(f, 'GET', '/api/daemon/public-url'),
+  publicUrl: (ctx: T.RequestContext) => json<string>(f, 'GET', '/api/daemon/public-url', ctx),
 });
 
 // DocumentApi
 export const documentApi = (f: Fetch = fetch) => ({
   /** List all documents. */
-  listDocuments: () => json<T.DocumentInfo[]>(f, 'GET', '/api/document'),
+  listDocuments: (ctx: T.RequestContext) => json<T.DocumentInfo[]>(f, 'GET', '/api/document', ctx),
   /** Search documents by title. */
-  searchDocuments: (query: string) => json<T.DocumentInfo[]>(f, 'GET', `/api/document/search/${query}`),
+  searchDocuments: (ctx: T.RequestContext, query: string) => json<T.DocumentInfo[]>(f, 'GET', `/api/document/search/${query}`, { ctx }),
   /** Get a document with all its tabs. */
-  getDocument: (documentId: string) => json<T.DocumentDetail>(f, 'GET', `/api/document/${documentId}`),
+  getDocument: (ctx: T.RequestContext, documentId: string) => json<T.DocumentDetail>(f, 'GET', `/api/document/${documentId}`, { ctx }),
   /** Create a new document (with optional initial content). */
-  createDocument: (request: T.CreateDocumentRequest) => json<T.DocumentInfo>(f, 'POST', '/api/document', request),
+  createDocument: (ctx: T.RequestContext, request: T.CreateDocumentRequest) => json<T.DocumentInfo>(f, 'POST', '/api/document', { ctx, request }),
   /** Update a document's title. */
-  renameDocument: (documentId: string, title: string) => json<void>(f, 'PUT', `/api/document/${documentId}`, { title }),
+  renameDocument: (ctx: T.RequestContext, documentId: string, title: string) => json<void>(f, 'PUT', `/api/document/${documentId}`, { ctx, title }),
   /** Delete a document and all its tabs. */
-  deleteDocument: (documentId: string) => json<void>(f, 'DELETE', `/api/document/${documentId}`),
+  deleteDocument: (ctx: T.RequestContext, documentId: string) => json<void>(f, 'DELETE', `/api/document/${documentId}`, { ctx }),
   /** Create a tab in a document. */
-  createTab: (documentId: string, request: T.CreateTabRequest) => json<T.TabInfo>(f, 'POST', `/api/document/${documentId}/tab`, { request }),
+  createTab: (ctx: T.RequestContext, documentId: string, request: T.CreateTabRequest) => json<T.TabInfo>(f, 'POST', `/api/document/${documentId}/tab`, { ctx, request }),
   /** Get a tab's content. */
-  getTab: (tabId: string) => json<T.TabInfo>(f, 'GET', `/api/document/tab/${tabId}`),
+  getTab: (ctx: T.RequestContext, tabId: string) => json<T.TabInfo>(f, 'GET', `/api/document/tab/${tabId}`, { ctx }),
   /** Update a tab's content. */
-  updateTab: (tabId: string, request: T.UpdateTabRequest) => json<void>(f, 'PUT', `/api/document/tab/${tabId}`, { request }),
+  updateTab: (ctx: T.RequestContext, tabId: string, request: T.UpdateTabRequest) => json<void>(f, 'PUT', `/api/document/tab/${tabId}`, { ctx, request }),
   /** Delete a tab. */
-  deleteTab: (tabId: string) => json<void>(f, 'DELETE', `/api/document/tab/${tabId}`),
+  deleteTab: (ctx: T.RequestContext, tabId: string) => json<void>(f, 'DELETE', `/api/document/tab/${tabId}`, { ctx }),
 });
 
 // McpApi
 export const mcpApi = (f: Fetch = fetch) => ({
   /** List all configured MCP servers with their status. */
-  listMcpServers: () => json<T.McpServerInfo[]>(f, 'GET', '/api/mcp'),
+  listMcpServers: (ctx: T.RequestContext) => json<T.McpServerInfo[]>(f, 'GET', '/api/mcp', ctx),
   /** Add a new MCP server configuration. If `auth_type` is "auto" or empty, probes `.well-known` to detect OAuth. */
-  addMcpServer: (request: T.AddMcpServerRequest) => json<void>(f, 'POST', '/api/mcp', request),
+  addMcpServer: (ctx: T.RequestContext, request: T.AddMcpServerRequest) => json<void>(f, 'POST', '/api/mcp', { ctx, request }),
   /** Remove an MCP server configuration. */
-  removeMcpServer: (serverId: string) => json<void>(f, 'DELETE', `/api/mcp/${serverId}`),
+  removeMcpServer: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'DELETE', `/api/mcp/${serverId}`, { ctx }),
   /** Connect to an MCP server. Returns tool count. */
-  connectMcpServer: (serverId: string) => json<number>(f, 'POST', `/api/mcp/${serverId}/connect`),
+  connectMcpServer: (ctx: T.RequestContext, serverId: string) => json<number>(f, 'POST', `/api/mcp/${serverId}/connect`, { ctx }),
   /** Disconnect from an MCP server. */
-  disconnectMcpServer: (serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/disconnect`),
+  disconnectMcpServer: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/disconnect`, { ctx }),
   /** Get tools provided by a specific MCP server. */
-  getMcpServerTools: (serverId: string) => json<T.McpTool[]>(f, 'GET', `/api/mcp/${serverId}/tools`),
+  getMcpServerTools: (ctx: T.RequestContext, serverId: string) => json<T.McpTool[]>(f, 'GET', `/api/mcp/${serverId}/tools`, { ctx }),
   /** Test connection to an MCP server. Returns tool count. */
-  testMcpServer: (serverId: string) => json<number>(f, 'POST', `/api/mcp/${serverId}/test`),
+  testMcpServer: (ctx: T.RequestContext, serverId: string) => json<number>(f, 'POST', `/api/mcp/${serverId}/test`, { ctx }),
   /** Update settings for an MCP server. */
-  updateMcpServerSettings: (serverId: string, request: T.UpdateMcpServerRequest) => json<void>(f, 'PUT', `/api/mcp/${serverId}`, { request }),
+  updateMcpServerSettings: (ctx: T.RequestContext, serverId: string, request: T.UpdateMcpServerRequest) => json<void>(f, 'PUT', `/api/mcp/${serverId}`, { ctx, request }),
   /** Stop retry attempts for an MCP server. */
-  stopMcpRetry: (serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/stop-retry`),
+  stopMcpRetry: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/stop-retry`, { ctx }),
   /** Start retry attempts for an MCP server. */
-  startMcpRetry: (serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/retry`),
-  /** Register an ephemeral MCP server and connect to it. Used by external services (e.g. Lumina) to expose tools to the daemon at runtime. Returns the number of tools discovered. */
-  registerEphemeralMcp: (request: T.RegisterEphemeralRequest) => json<number>(f, 'POST', '/api/mcp/ephemeral', request),
+  startMcpRetry: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'POST', `/api/mcp/${serverId}/retry`, { ctx }),
+  /** Register an ephemeral MCP server and connect to it. */
+  registerEphemeralMcp: (ctx: T.RequestContext, request: T.RegisterEphemeralRequest) => json<number>(f, 'POST', '/api/mcp/ephemeral', { ctx, request }),
   /** Unregister an ephemeral MCP server and disconnect. */
-  unregisterEphemeralMcp: (serverId: string) => json<void>(f, 'DELETE', `/api/mcp/ephemeral/${serverId}`),
+  unregisterEphemeralMcp: (ctx: T.RequestContext, serverId: string) => json<void>(f, 'DELETE', `/api/mcp/ephemeral/${serverId}`, { ctx }),
   /** List all tools across all connected servers (includes schemas). */
-  listAllTools: () => json<T.McpTool[]>(f, 'GET', '/api/mcp/tools'),
+  listAllTools: (ctx: T.RequestContext) => json<T.McpTool[]>(f, 'GET', '/api/mcp/tools', ctx),
   /** Call a tool by name (routed via ToolService to the providing server). */
-  callToolDirect: (request: T.CallToolRequestParam) => json<T.CallToolResult>(f, 'POST', '/api/mcp/tools/call', request),
+  callToolDirect: (ctx: T.RequestContext, request: T.CallToolRequestParam) => json<T.CallToolResult>(f, 'POST', '/api/mcp/tools/call', { ctx, request }),
 });
 
 // ModelApi
 export const modelApi = (f: Fetch = fetch) => ({
   /** List available models from all providers. */
-  listModels: () => json<T.ModelInfo[]>(f, 'GET', '/api/model'),
+  listModels: (ctx: T.RequestContext) => json<T.ModelInfo[]>(f, 'GET', '/api/model', ctx),
   /** List available providers and their configuration. */
-  listProviders: () => json<T.ProviderInfo[]>(f, 'GET', '/api/model/provider'),
+  listProviders: (ctx: T.RequestContext) => json<T.ProviderInfo[]>(f, 'GET', '/api/model/provider', ctx),
   /** Get the current default model ID. */
-  defaultModelId: () => json<string>(f, 'GET', '/api/model/default'),
+  defaultModelId: (ctx: T.RequestContext) => json<string>(f, 'GET', '/api/model/default', ctx),
   /** Set the default model for new sessions. */
-  setDefaultModel: (modelId: string) => json<void>(f, 'PUT', '/api/model/default', modelId),
+  setDefaultModel: (ctx: T.RequestContext, modelId: string) => json<void>(f, 'PUT', '/api/model/default', { ctx, modelId }),
 });
 
 // OAuthApi
 export const oAuthApi = (f: Fetch = fetch) => ({
   /** Start an OAuth flow for an MCP server. Starts a local callback server, builds the authorization URL, and returns the URL + state. The caller should open the URL in a browser. */
-  startOauth: (serverId: string) => json<T.OAuthFlowInfo>(f, 'POST', `/api/oauth/${serverId}`),
+  startOauth: (ctx: T.RequestContext, serverId: string) => json<T.OAuthFlowInfo>(f, 'POST', `/api/oauth/${serverId}`, { ctx }),
   /** Complete an OAuth flow by exchanging an authorization code for tokens. Verifies the state parameter, saves tokens, and reconnects. */
-  completeOauth: (serverId: string, code: string, state: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/complete`, { code, state }),
+  completeOauth: (ctx: T.RequestContext, serverId: string, code: string, state: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/complete`, { ctx, code, state }),
   /** Complete an OAuth flow using just a code (manual entry, no state verification). */
-  completeOauthWithCode: (serverId: string, code: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/code`, { code }),
+  completeOauthWithCode: (ctx: T.RequestContext, serverId: string, code: string) => json<void>(f, 'POST', `/api/oauth/${serverId}/code`, { ctx, code }),
   /** Look up which server ID a pending OAuth state parameter belongs to. Returns `None` if the state is unknown or already consumed. */
-  resolveOauthState: (state: string) => json<string | null>(f, 'GET', `/api/oauth/${state}`),
+  resolveOauthState: (ctx: T.RequestContext, state: string) => json<string | null>(f, 'GET', `/api/oauth/${state}`, { ctx }),
 });
 
 // SearchApi
 export const searchApi = (f: Fetch = fetch) => ({
   /** Semantic search over embedded documents. */
-  search: (request: T.SearchRequest) => json<T.SearchHit[]>(f, 'POST', '/api/search', request),
+  search: (ctx: T.RequestContext, request: T.SearchRequest) => json<T.SearchHit[]>(f, 'POST', '/api/search', { ctx, request }),
   /** Re-embed all documents. Runs in the background; returns immediately. */
-  reindex: () => json<T.ReindexStatus>(f, 'POST', '/api/search/reindex'),
+  reindex: (ctx: T.RequestContext) => json<T.ReindexStatus>(f, 'POST', '/api/search/reindex', ctx),
   /** Get embedding queue status. */
-  queueStatus: () => json<T.EmbeddingQueueStatus>(f, 'GET', '/api/search/status'),
+  queueStatus: (ctx: T.RequestContext) => json<T.EmbeddingQueueStatus>(f, 'GET', '/api/search/status', ctx),
 });
 
 // SessionApi
 export const sessionApi = (f: Fetch = fetch) => ({
-  listSessions: () => json<T.SessionInfo[]>(f, 'GET', '/api/session'),
-  sendMessage: (sessionId: T.SessionId, message: T.UserMessage) => json<void>(f, 'POST', `/api/session/${sessionId}/message`, { message }),
-  setModel: (sessionId: T.SessionId, modelId: string) => json<void>(f, 'PUT', `/api/session/${sessionId}/model`, { modelId }),
-  closeSession: (sessionId: T.SessionId) => json<void>(f, 'DELETE', `/api/session/${sessionId}`),
-  closeAllSessions: () => json<void>(f, 'DELETE', '/api/session'),
-  pushEvent: (event: T.InboundEvent) => json<void>(f, 'POST', '/api/session/event', event),
+  listSessions: (ctx: T.RequestContext) => json<T.SessionInfo[]>(f, 'GET', '/api/session', ctx),
+  sendMessage: (ctx: T.RequestContext, sessionId: T.SessionId, message: T.UserMessage) => json<void>(f, 'POST', `/api/session/${sessionId}/message`, { ctx, message }),
+  setModel: (ctx: T.RequestContext, sessionId: T.SessionId, modelId: string) => json<void>(f, 'PUT', `/api/session/${sessionId}/model`, { ctx, modelId }),
+  closeSession: (ctx: T.RequestContext, sessionId: T.SessionId) => json<void>(f, 'DELETE', `/api/session/${sessionId}`, { ctx }),
+  closeAllSessions: (ctx: T.RequestContext) => json<void>(f, 'DELETE', '/api/session', ctx),
+  pushEvent: (ctx: T.RequestContext, event: T.InboundEvent) => json<void>(f, 'POST', '/api/session/event', { ctx, event }),
 });
 
 // UserApi
 export const userApi = (f: Fetch = fetch) => ({
-  /** Resolve an external identity to a daemon user. Creates a new user if one doesn't exist for this identity. The external_id is an opaque string (e.g. "discord:123456789"). */
-  resolveOrCreateUser: (externalId: string) => json<T.UserIdentity>(f, 'POST', `/api/user/resolve/${externalId}`),
+  /** Look up an external identity. Returns the user's Scope if mapped, None if unknown. Does NOT create a user — use `resolve_or_create_user` for that. */
+  resolveUser: (ctx: T.RequestContext, externalId: string) => json<T.Scope | null>(f, 'GET', `/api/user/resolve/${externalId}`, { ctx }),
+  /** Resolve an external identity to a daemon user. Creates a new user if one doesn't exist for this identity. The external_id is an opaque string (e.g. "discord:123456789"). Returns a Scope that can be used for subsequent requests. */
+  resolveOrCreateUser: (ctx: T.RequestContext, externalId: string) => json<T.Scope>(f, 'POST', `/api/user/resolve/${externalId}`, { ctx }),
 });
 
 // VoiceApi
 export const voiceApi = (f: Fetch = fetch) => ({
   /** List available voice providers. */
-  listVoiceProviders: () => json<T.VoiceProviderInfo[]>(f, 'GET', '/api/voice/provider'),
+  listVoiceProviders: (ctx: T.RequestContext) => json<T.VoiceProviderInfo[]>(f, 'GET', '/api/voice/provider', ctx),
   /** Synthesize text to speech. Returns audio data. */
-  synthesize: (text: string, providerId: string, voice: string) => json<T.Audio>(f, 'POST', '/api/voice/tts', { text, providerId, voice }),
+  synthesize: (ctx: T.RequestContext, text: string, providerId: string, voice: string) => json<T.Audio>(f, 'POST', '/api/voice/tts', { ctx, text, providerId, voice }),
   /** List available TTS voices for a provider. */
-  listVoices: (providerId: string) => json<T.Voice[]>(f, 'GET', `/api/voice/tts/voices/${providerId}`),
+  listVoices: (ctx: T.RequestContext, providerId: string) => json<T.Voice[]>(f, 'GET', `/api/voice/tts/voices/${providerId}`, { ctx }),
   /** Disconnect a voice stream. */
-  voiceDisconnect: (sessionId: string) => json<void>(f, 'DELETE', `/api/voice/${sessionId}`),
+  voiceDisconnect: (ctx: T.RequestContext, sessionId: string) => json<void>(f, 'DELETE', `/api/voice/${sessionId}`, { ctx }),
 });
 

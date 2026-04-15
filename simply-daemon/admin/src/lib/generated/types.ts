@@ -152,7 +152,6 @@ export interface CreateSessionOptions {
   systemPrompt: string | null;
   modelId: string | null;
   seed: T.SeedMessage[];
-  userId: T.UserId | null;
 }
 
 /** Information about a session. */
@@ -186,12 +185,6 @@ export interface ConversationInfo {
   name: string | null;
   messageCount: number;
   createdAt: number;
-}
-
-/** Resolved user identity. */
-export interface UserIdentity {
-  userId: string;
-  email: string | null;
 }
 
 /** Info about an available voice provider. */

@@ -27,6 +27,7 @@ pub trait RpcService: Send + Sync {
     async fn dispatch(
         &self,
         method: &str,
+        ctx: &crate::RequestContext,
         params: Value,
     ) -> Option<DispatchResult<Self::Stream>>;
 }
@@ -52,7 +53,7 @@ pub trait RestService: Send + Sync {
     async fn rest_dispatch_by_name(
         &self,
         method_name: &str,
-        ctx: crate::RequestContext,
+        ctx: &crate::RequestContext,
         params: Value,
     ) -> Option<RpcResult>;
 
@@ -62,7 +63,7 @@ pub trait RestService: Send + Sync {
     async fn ws_dispatch_by_name(
         &self,
         method_name: &str,
-        ctx: crate::RequestContext,
+        ctx: &crate::RequestContext,
         params: Value,
         write_tx: tokio::sync::mpsc::Sender<String>,
     ) -> Option<WsDispatchResult> {
@@ -143,7 +144,7 @@ impl ServiceRouter {
         &self,
         http_method: crate::HttpMethod,
         path: &str,
-        ctx: crate::RequestContext,
+        ctx: &crate::RequestContext,
         body: Value,
     ) -> Option<RestResult> {
         let router = self.routers.get(&http_method)?;
@@ -160,7 +161,7 @@ impl ServiceRouter {
     pub async fn ws_dispatch(
         &self,
         path: &str,
-        ctx: crate::RequestContext,
+        ctx: &crate::RequestContext,
         body: Value,
         write_tx: tokio::sync::mpsc::Sender<String>,
     ) -> Option<WsDispatchResult> {
@@ -195,7 +196,7 @@ impl ServiceRouter {
     pub async fn dispatch_by_method(
         &self,
         method_name: &str,
-        ctx: crate::RequestContext,
+        ctx: &crate::RequestContext,
         params: Value,
     ) -> Option<RpcResult> {
         for svc in &self.services {
@@ -211,7 +212,7 @@ impl ServiceRouter {
     pub async fn ws_dispatch_by_method(
         &self,
         method_name: &str,
-        ctx: crate::RequestContext,
+        ctx: &crate::RequestContext,
         params: Value,
         write_tx: tokio::sync::mpsc::Sender<String>,
     ) -> Option<WsDispatchResult> {

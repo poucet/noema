@@ -114,17 +114,19 @@ impl super::SlashCommand for Google {
     }
 }
 
-/// Resolve a Discord user to a daemon UCM user_id.
-/// Creates the user in the daemon if they don't exist yet.
-async fn resolve_user(lx: &LuminaContext, discord_user_id: u64) -> anyhow::Result<String> {
-    let external_id = format!("discord:{discord_user_id}");
-    let identity = lx.daemon.user().resolve_or_create_user(external_id).await?;
-    Ok(identity.user_id)
-}
-
 async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
-    let base_url = lx.daemon.core().public_url().await?;
-    let user_id = resolve_user(lx, cmd.user.id.get()).await?;
+    let discord_id = cmd.user.id.get();
+
+    // Create/resolve the daemon user for this Discord user
+    let external_id = format!("discord:{discord_id}");
+    let ctx = lx.ctx_for(discord_id).await;
+    let scope = lx.daemon.user().resolve_or_create_user(&ctx, external_id).await?;
+    let user_id = scope.user_id.clone().unwrap_or_default();
+
+    // Cache the scope so all subsequent commands use it
+    lx.register_user_scope(discord_id, scope).await;
+
+    let base_url = lx.daemon.core().public_url(&ctx).await?;
 
     let auth_url = format!("{base_url}/auth/mcp/{GOOGLE_DOCS_SERVER_ID}?user_id={user_id}");
 
@@ -143,6 +145,7 @@ async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
 async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &str) -> anyhow::Result<()> {
     // Extract doc_id — could be a raw ID from autocomplete, or a URL
     let doc_id = extract_doc_id(doc_input);
+    let ctx = lx.ctx_for(cmd.user.id.get()).await;
 
     lx.defer(cmd).await?;
 
@@ -172,7 +175,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
                         content: Some(text.clone()),
                     };
 
-                    match lx.daemon.document().create_document(doc_request).await {
+                    match lx.daemon.document().create_document(&ctx, doc_request).await {
                         Ok(doc_info) => {
                             let embed = CreateEmbed::new()
                                 .title(format!("Imported: {}", doc_info.title))
@@ -199,7 +202,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
                         document_type: Some("knowledge".to_string()),
                         content: Some(text.to_string()),
                     };
-                    lx.daemon.document().create_document(doc_request).await?;
+                    lx.daemon.document().create_document(&ctx, doc_request).await?;
 
                     cmd.edit_response(&lx.http,
                         serenity::builder::EditInteractionResponse::new()
@@ -229,7 +232,8 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
 
 async fn cmd_status(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     // Check if the google-docs MCP server is connected and the user has tools
-    let servers = lx.daemon.mcp().list_mcp_servers().await?;
+    let ctx = lx.ctx_for(cmd.user.id.get()).await;
+    let servers = lx.daemon.mcp().list_mcp_servers(&ctx).await?;
     let google = servers.iter().find(|s| s.id == GOOGLE_DOCS_SERVER_ID);
 
     let (status_text, color) = match google {
