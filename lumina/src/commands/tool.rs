@@ -195,7 +195,7 @@ async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
         text.push_str(&format!("**`{}`** — {desc} ({param_count} params)\n", tool.name));
     }
 
-    let pages = crate::paginator::paginate_text(&text, 3800);
+    let pages = crate::paginator::paginate_text(&text, 1800);
 
     if pages.len() <= 1 {
         let embed = CreateEmbed::new()
