@@ -12,20 +12,21 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 ### Stage 1 — Document Type + Foundation
 
-- 🔄 1.1 `DocumentType` constants module in `simply-core`
-- ⬜ 1.2 `document_type` column on documents table + migration
-- ⬜ 1.3 `document_type` in `DocumentInfo`/`DocumentDetail`/`CreateDocumentRequest` + type-filtered `list_documents`
+- ✅ 1.1 `DocumentType` constants module in `simply-core`
+- ✅ 1.2 `document_type` column on documents table + migration
+- ✅ 1.3 `document_type` in `DocumentInfo`/`DocumentDetail`/`CreateDocumentRequest`
 
 ### Stage 2 — Embedding Providers + Traits
 
 **Design:** [EMBEDDING_AND_RAG.md](../designs/EMBEDDING_AND_RAG.md)
 
-- ⬜ 2.1 `EmbeddingProvider` trait + `Embedding` struct in `simply-core`
-- ⬜ 2.2 `Chunker` trait + `RecursiveCharacterChunker` impl in `simply-core`
-- ⬜ 2.3 `VectorStore` trait + types (`VectorChunk`, `SearchQuery`, `SearchResult`, `SearchFilter`) in `simply-core`
-- ⬜ 2.4 Embedding config in `settings.toml` (`[embedding]` section: provider, model, chunk_size, chunk_overlap)
-- ⬜ 2.5 Mistral embedding provider (`mistral-embed`)
-- ⬜ 2.6 OpenAI, Gemini, Claude/Voyage, Ollama embedding providers
+- ✅ 2.1 `EmbeddingProvider` trait + `Embedding` struct in `llm` crate
+- ✅ 2.2 `Chunker` trait + `RecursiveCharacterChunker` impl in `simply-core`
+- ✅ 2.3 `VectorStore` trait + types (`VectorChunk`, `SearchQuery`, `SearchResult`, `SearchFilter`) in `simply-core`
+- ✅ 2.4 Embedding config in `settings.toml` (`[embedding]` section: provider, model, chunk_size, chunk_overlap)
+- ✅ 2.5 Local embedding provider (`fastembed`/ONNX, `bge-small-en-v1.5` — default, zero config)
+- ✅ 2.6 Ollama + Mistral embedding providers
+- ⬜ 2.7 OpenAI, Gemini, Claude/Voyage embedding providers
 
 ### Stage 3 — Storage + Indexing
 

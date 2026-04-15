@@ -56,6 +56,9 @@ impl SqliteStores {
         }
         std::fs::create_dir_all(&blob_dir)?;
 
+        // Register sqlite-vec extension before opening the connection
+        simply_core::storage::register_sqlite_vec();
+
         let sqlite = Arc::new(SqliteStore::open(&db_path)?);
         let blob = Arc::new(FsBlobStore::new(blob_dir));
         Ok(Self { sqlite, blob })

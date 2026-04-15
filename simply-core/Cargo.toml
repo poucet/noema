@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 default = []
-sqlite = ["rusqlite"]
+sqlite = ["rusqlite", "dep:sqlite-vec"]
 rusqlite = ["dep:rusqlite"]
 
 [dependencies]
@@ -33,6 +33,7 @@ base64 = { workspace = true }
 
 # Optional SQLite support
 rusqlite = { version = "0.34", features = ["bundled"], optional = true }
+sqlite-vec = { version = "0.1", optional = true }
 
 # UUID for ID generation (always required)
 uuid = { workspace = true }

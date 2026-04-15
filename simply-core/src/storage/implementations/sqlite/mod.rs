@@ -27,6 +27,7 @@ mod temporal;
 mod text;
 mod turn;
 mod user;
+mod vector;
 
 // Re-export init_schema functions for use in SqliteStore::init_schema
 pub(crate) use asset::init_schema as init_asset_schema;
@@ -38,6 +39,8 @@ pub(crate) use temporal::init_schema as init_temporal_schema;
 pub(crate) use text::init_schema as init_text_schema;
 pub(crate) use turn::init_schema as init_turn_schema;
 pub(crate) use user::init_schema as init_user_schema;
+pub(crate) use vector::init_schema as init_vector_schema;
+pub use vector::register_sqlite_vec;
 
 /// Shared SQLite connection pool
 ///
@@ -92,6 +95,7 @@ impl SqliteStore {
         init_reference_schema(&conn)?;
         init_collection_schema(&conn)?;
         init_temporal_schema(&conn)?;
+        init_vector_schema(&conn)?;
         Ok(())
     }
 }
