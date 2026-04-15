@@ -152,11 +152,33 @@ where
 pub struct DocumentService<S: StorageTypes> {
     stores: Arc<dyn Stores<S>>,
     user_id: simply_core::storage::ids::UserId,
+    embedding_queue: Option<Arc<dyn crate::embedding_queue::EmbeddingQueue>>,
 }
 
 impl<S: StorageTypes> DocumentService<S> {
     pub fn new(stores: Arc<dyn Stores<S>>, user_id: simply_core::storage::ids::UserId) -> Self {
-        Self { stores, user_id }
+        Self { stores, user_id, embedding_queue: None }
+    }
+
+    /// Attach an embedding queue for automatic indexing on tab writes.
+    pub fn with_embedding_queue(mut self, queue: Arc<dyn crate::embedding_queue::EmbeddingQueue>) -> Self {
+        self.embedding_queue = Some(queue);
+        self
+    }
+
+    /// Enqueue a tab for embedding if a queue is configured.
+    async fn enqueue_embedding(&self, tab_id: &simply_core::storage::ids::TabId, document_id: &simply_core::storage::ids::DocumentId, document_type: &str, text: &str) {
+        if let Some(ref queue) = self.embedding_queue {
+            if !text.is_empty() {
+                queue.enqueue(crate::embedding_queue::EmbedJob {
+                    tab_id: tab_id.clone(),
+                    document_id: document_id.clone(),
+                    document_type: document_type.to_string(),
+                    user_id: self.user_id.clone(),
+                    text: text.to_string(),
+                }).await;
+            }
+        }
     }
 
     /// Verify the current user can access a tab's parent document.
@@ -272,7 +294,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
 
         // Create initial tab if content provided
         if let Some(ref content) = request.content {
-            self.stores.document().create_document_tab(
+            let tab_id = self.stores.document().create_document_tab(
                 &doc_id,
                 None, // no parent
                 0,    // first tab
@@ -282,6 +304,9 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
                 &[],  // no assets
                 None, // no source tab
             ).await?;
+
+            let doc_type = request.document_type.as_deref().unwrap_or(simply_core::storage::types::DocumentType::DOCUMENT);
+            self.enqueue_embedding(&tab_id, &doc_id, doc_type, content).await;
         }
 
         let doc = self.stores.document().get_document(&doc_id).await?
@@ -335,6 +360,13 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
             None,
         ).await?;
 
+        // Enqueue for embedding
+        if let Some(ref content) = request.content {
+            let doc = self.stores.document().get_document(&doc_id).await?;
+            let doc_type = doc.as_ref().map(|d| d.document_type.as_str()).unwrap_or("document");
+            self.enqueue_embedding(&tab_id, &doc_id, doc_type, content).await;
+        }
+
         let tab = self.stores.document().get_document_tab(&tab_id).await?
             .ok_or_else(|| anyhow::anyhow!("tab not found after create"))?;
 
@@ -376,7 +408,17 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         use simply_core::storage::traits::DocumentStore;
         let tid = TabId::from_string(tab_id);
         self.verify_tab_access(&tid, true).await?;
-        self.stores.document().update_document_tab_content(&tid, &request.content, &[]).await
+        self.stores.document().update_document_tab_content(&tid, &request.content, &[]).await?;
+
+        // Re-embed updated content
+        let tab = self.stores.document().get_document_tab(&tid).await?;
+        if let Some(tab) = tab {
+            let doc = self.stores.document().get_document(&tab.document_id).await?;
+            let doc_type = doc.as_ref().map(|d| d.document_type.as_str()).unwrap_or("document");
+            self.enqueue_embedding(&tid, &tab.document_id, doc_type, &request.content).await;
+        }
+
+        Ok(())
     }
 
     async fn delete_tab(&self, tab_id: &str) -> anyhow::Result<()> {

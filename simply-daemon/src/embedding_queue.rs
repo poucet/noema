@@ -4,6 +4,7 @@
 //! embedding provider, stores vectors. Debounces rapid edits to the same tab.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -24,6 +25,19 @@ pub struct EmbedJob {
     pub text: String,
 }
 
+/// Status of the embedding queue.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EmbeddingQueueStatus {
+    /// Number of jobs waiting to be processed.
+    pub pending: usize,
+    /// Number of jobs currently being processed.
+    pub processing: usize,
+    /// Total jobs completed since startup.
+    pub completed: u64,
+    /// Total jobs failed since startup.
+    pub failed: u64,
+}
+
 /// Trait for submitting embedding jobs.
 ///
 /// The default implementation uses an in-memory channel. Future implementations
@@ -32,19 +46,62 @@ pub struct EmbedJob {
 pub trait EmbeddingQueue: Send + Sync {
     /// Enqueue a tab for embedding.
     async fn enqueue(&self, job: EmbedJob);
+
+    /// Get the current queue status.
+    async fn status(&self) -> EmbeddingQueueStatus;
+}
+
+/// Shared counters between the queue handle and the background worker.
+struct QueueStats {
+    pending: AtomicUsize,
+    processing: AtomicUsize,
+    completed: AtomicU64,
+    failed: AtomicU64,
 }
 
 /// In-memory embedding queue backed by a tokio channel.
+/// Spawns a background worker on creation.
 #[derive(Clone)]
 pub struct ChannelEmbeddingQueue {
     tx: mpsc::UnboundedSender<EmbedJob>,
+    stats: Arc<QueueStats>,
+}
+
+impl ChannelEmbeddingQueue {
+    /// Create a new embedding queue. Spawns the background worker immediately.
+    pub fn new(
+        provider: Arc<dyn EmbeddingProvider>,
+        chunker: Arc<dyn Chunker>,
+        vector_store: Arc<dyn VectorStore>,
+    ) -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let stats = Arc::new(QueueStats {
+            pending: AtomicUsize::new(0),
+            processing: AtomicUsize::new(0),
+            completed: AtomicU64::new(0),
+            failed: AtomicU64::new(0),
+        });
+        tokio::spawn(embedding_worker(rx, provider, chunker, vector_store, Arc::clone(&stats)));
+        Self { tx, stats }
+    }
 }
 
 #[async_trait]
 impl EmbeddingQueue for ChannelEmbeddingQueue {
     async fn enqueue(&self, job: EmbedJob) {
+        self.stats.pending.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = self.tx.send(job) {
+            self.stats.pending.fetch_sub(1, Ordering::Relaxed);
             tracing::warn!(error = %e, "embedding queue closed, job dropped");
+        }
+    }
+
+    async fn status(&self) -> EmbeddingQueueStatus {
+        EmbeddingQueueStatus {
+            pending: self.stats.pending.load(Ordering::Relaxed),
+            processing: self.stats.processing.load(Ordering::Relaxed),
+            completed: self.stats.completed.load(Ordering::Relaxed),
+            failed: self.stats.failed.load(Ordering::Relaxed),
         }
     }
 }
@@ -53,24 +110,12 @@ impl EmbeddingQueue for ChannelEmbeddingQueue {
 /// the previous job is replaced (only the latest content gets embedded).
 const DEBOUNCE_MS: u64 = 500;
 
-/// Start the background embedding queue. Returns a handle for submitting jobs.
-pub fn spawn_embedding_queue(
-    provider: Arc<dyn EmbeddingProvider>,
-    chunker: Arc<dyn Chunker>,
-    vector_store: Arc<dyn VectorStore>,
-) -> ChannelEmbeddingQueue {
-    let (tx, rx) = mpsc::unbounded_channel();
-
-    tokio::spawn(embedding_worker(rx, provider, chunker, vector_store));
-
-    ChannelEmbeddingQueue { tx }
-}
-
 async fn embedding_worker(
     mut rx: mpsc::UnboundedReceiver<EmbedJob>,
     provider: Arc<dyn EmbeddingProvider>,
     chunker: Arc<dyn Chunker>,
     vector_store: Arc<dyn VectorStore>,
+    stats: Arc<QueueStats>,
 ) {
     // Debounce buffer: tab_id -> (job, received_at)
     let mut pending: HashMap<String, (EmbedJob, Instant)> = HashMap::new();
@@ -114,14 +159,22 @@ async fn embedding_worker(
         }
 
         for job in ready {
+            stats.pending.fetch_sub(1, Ordering::Relaxed);
+            stats.processing.fetch_add(1, Ordering::Relaxed);
+
             if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store).await {
+                stats.failed.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(
                     tab_id = %job.tab_id,
                     document_id = %job.document_id,
                     error = %e,
                     "embedding failed"
                 );
+            } else {
+                stats.completed.fetch_add(1, Ordering::Relaxed);
             }
+
+            stats.processing.fetch_sub(1, Ordering::Relaxed);
         }
     }
 }
