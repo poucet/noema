@@ -104,9 +104,10 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             let binary_response = is_binary_response_type(&m.return_kind);
             let binary_upload = has_binary_upload_param(m);
 
-            // Generate tool_schema function
+            // Generate tool_schema function (exclude RequestContext and BinaryUpload)
             let tool_params: Vec<_> = m.params.iter()
                 .filter(|p| {
+                    if p.is_context { return false; }
                     let ty = &p.owned_type;
                     let ty_str = quote! { #ty }.to_string().replace(' ', "");
                     ty_str != "BinaryUpload" && !ty_str.ends_with("::BinaryUpload")
@@ -202,6 +203,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             async fn rest_dispatch_by_name(
                 &self,
                 method_name: &str,
+                ctx: ::simply_rpc::RequestContext,
                 params: ::serde_json::Value,
             ) -> Option<::simply_rpc::RpcResult> {
                 #rest_dispatch_arms
@@ -210,6 +212,7 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
             async fn ws_dispatch_by_name(
                 &self,
                 method_name: &str,
+                ctx: ::simply_rpc::RequestContext,
                 params: ::serde_json::Value,
                 write_tx: ::tokio::sync::mpsc::Sender<String>,
             ) -> Option<::simply_rpc::WsDispatchResult> {
@@ -309,18 +312,24 @@ fn generate_dispatch_arm(method: &ParsedMethod) -> syn::Result<TokenStream> {
 }
 
 /// Generate deserialization code and the arguments to pass to the trait method.
+/// Used by the generic `dispatch` method (not REST/WS — those handle ctx separately).
 fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStream>) {
-    let params = &method.params;
+    let wire_params = method.wire_params();
+    let mut call_args = Vec::new();
 
-    if params.is_empty() {
-        return (quote! {}, vec![]);
+    // Inject RequestContext::default() for context params (generic dispatch has no ctx)
+    if method.has_context() {
+        call_args.push(quote! { ::simply_rpc::RequestContext::default() });
     }
 
-    if params.len() == 1 {
-        let p = &params[0];
+    if wire_params.is_empty() {
+        return (quote! {}, call_args);
+    }
+
+    if wire_params.len() == 1 {
+        let p = &wire_params[0];
         let name = &p.name;
         let owned_type = &p.owned_type;
-        let name_str = name.to_string();
 
         let deser = quote! {
             let #name: #owned_type = match ::serde_json::from_value(params) {
@@ -336,13 +345,14 @@ fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStre
         } else {
             quote! { #name }
         };
+        call_args.push(arg);
 
-        return (deser, vec![arg]);
+        return (deser, call_args);
     }
 
     // Multi-param: generate a Params struct
     let struct_name = format_ident!("__RpcParams_{}", method.name);
-    let fields: Vec<TokenStream> = params
+    let fields: Vec<TokenStream> = wire_params
         .iter()
         .map(|p| {
             let name = &p.name;
@@ -364,17 +374,14 @@ fn generate_deser_and_args(method: &ParsedMethod) -> (TokenStream, Vec<TokenStre
         };
     };
 
-    let args: Vec<TokenStream> = params
-        .iter()
-        .map(|p| {
-            let name = &p.name;
-            if p.is_ref || p.is_str_ref {
-                quote! { &__p.#name }
-            } else {
-                quote! { __p.#name }
-            }
-        })
-        .collect();
+    for p in &wire_params {
+        let name = &p.name;
+        if p.is_ref || p.is_str_ref {
+            call_args.push(quote! { &__p.#name });
+        } else {
+            call_args.push(quote! { __p.#name });
+        }
+    }
 
     (deser, args)
 }
@@ -403,20 +410,23 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
             let method_name = &m.method_name;
             let fn_name = &m.name;
 
-            // All params come from the merged JSON object.
-            // For methods with no params or a single non-path param with no path params,
-            // the body may be the raw value. Otherwise it's a JSON object.
+            // Separate context params (injected) from wire params (deserialized)
+            let wire_params = m.wire_params();
             let has_path_params = !endpoint.path_params.is_empty();
-            let all_params = &m.params;
 
             let mut param_bindings = Vec::new();
             let mut call_args = Vec::new();
 
-            if all_params.is_empty() {
-                // No params — nothing to deserialize
-            } else if all_params.len() == 1 && !has_path_params {
+            // If method has a RequestContext param, inject it from `ctx`
+            if m.has_context() {
+                call_args.push(quote! { ctx.clone() });
+            }
+
+            if wire_params.is_empty() {
+                // No wire params — nothing to deserialize
+            } else if wire_params.len() == 1 && !has_path_params {
                 // Single param, no path params — params IS the value directly
-                let p = &all_params[0];
+                let p = &wire_params[0];
                 let name = &p.name;
                 let owned_type = &p.owned_type;
                 param_bindings.push(quote! {
@@ -432,13 +442,12 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                 }
             } else {
                 // Multiple params or has path params — extract each from JSON object
-                for p in all_params {
+                for p in &wire_params {
                     let name = &p.name;
                     let name_str = name.to_string();
                     let owned_type = &p.owned_type;
 
                     if p.is_str_ref {
-                        // &str: extract as string from JSON, borrow it
                         param_bindings.push(quote! {
                             let #name: String = match params.get(#name_str) {
                                 Some(v) => match ::serde_json::from_value(v.clone()) {
@@ -521,18 +530,22 @@ fn generate_ws_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                 return None;
             }
 
-            let has_path_params = !endpoint.path_params.is_empty();
-            let all_params = &m.params;
+            let wire_params = m.wire_params();
 
-            // Generate param bindings (same as REST dispatch)
+            // Generate param bindings (same as REST dispatch but for WS)
             let mut param_bindings = Vec::new();
             let mut call_args = Vec::new();
 
-            if all_params.is_empty() {
+            // Inject context if method needs it
+            if m.has_context() {
+                call_args.push(quote! { ctx.clone() });
+            }
+
+            if wire_params.is_empty() {
                 // nothing
-            } else if all_params.len() == 1 {
+            } else if wire_params.len() == 1 {
                 // Single param — try direct deserialization first, then object field lookup
-                let p = &all_params[0];
+                let p = &wire_params[0];
                 let name = &p.name;
                 let name_str = name.to_string();
                 let owned_type = &p.owned_type;
@@ -554,7 +567,7 @@ fn generate_ws_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                     call_args.push(quote! { #name });
                 }
             } else {
-                for p in all_params {
+                for p in &wire_params {
                     let name = &p.name;
                     let name_str = name.to_string();
                     let owned_type = &p.owned_type;

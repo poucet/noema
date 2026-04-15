@@ -12,7 +12,9 @@ mod context;
 mod helpers;
 pub mod meta;
 pub mod protocol;
+mod request_context;
 mod response;
+mod scope;
 mod service;
 mod stream;
 pub mod ws_client;
@@ -24,6 +26,8 @@ pub use stream::StreamHandle;
 pub use helpers::{base64_bytes, call_raw, call_unit, call_val, decode_base64, encode_base64};
 pub use meta::{check_compat, HttpMethod, MethodMeta, RouteKind, RouteMeta, ServiceMeta, ServiceMetaWire};
 pub use response::{BinaryResponse, BinaryUpload};
+pub use request_context::RequestContext;
+pub use scope::Scope;
 pub use service::{ServiceRouter, RestResult, RestService, RpcService, WsDispatchResult};
 
 /// Result type for RPC dispatch — `Ok(Value)` or error.

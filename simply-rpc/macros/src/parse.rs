@@ -59,6 +59,8 @@ pub struct ParsedParam {
     pub is_ref: bool,
     /// Whether the param is `&str` specifically.
     pub is_str_ref: bool,
+    /// Whether this is a `RequestContext` param (injected by dispatch, not deserialized from user input).
+    pub is_context: bool,
     /// The owned type for deserialization (e.g. `String` for `&str`, `T` for `&T`).
     pub owned_type: Type,
 }
@@ -84,6 +86,15 @@ pub struct ParsedMethod {
 }
 
 impl ParsedMethod {
+    /// Whether this method takes a `RequestContext` parameter.
+    pub fn has_context(&self) -> bool {
+        self.params.iter().any(|p| p.is_context)
+    }
+
+    /// Parameters that are deserialized from the request (excludes RequestContext).
+    pub fn wire_params(&self) -> Vec<&ParsedParam> {
+        self.params.iter().filter(|p| !p.is_context).collect()
+    }
 }
 
 /// A fully parsed trait.
@@ -296,17 +307,26 @@ fn parse_params(sig: &syn::Signature) -> syn::Result<Vec<ParsedParam>> {
         let name = pat_ident.ident.clone();
         let ty = *pat_type.ty.clone();
         let (is_ref, is_str_ref, owned_type) = analyze_type(&ty);
+        let is_context = is_request_context_type(&ty);
 
         params.push(ParsedParam {
             name,
             ty,
             is_ref,
             is_str_ref,
+            is_context,
             owned_type,
         });
     }
 
     Ok(params)
+}
+
+/// Check if a type is `RequestContext` or `simply_rpc::RequestContext`.
+fn is_request_context_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    let last = path.path.segments.last();
+    last.map(|s| s.ident == "RequestContext").unwrap_or(false)
 }
 
 /// Determine if a type is a reference and compute its owned form.
