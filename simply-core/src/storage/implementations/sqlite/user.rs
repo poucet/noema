@@ -19,7 +19,7 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
         -- Users
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE,
             encrypted_anthropic_key TEXT,
             encrypted_openai_key TEXT,
             encrypted_gemini_key TEXT,
