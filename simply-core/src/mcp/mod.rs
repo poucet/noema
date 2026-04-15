@@ -5,6 +5,6 @@ mod registry;
 
 pub use config::{AuthMethod, McpConfig, ServerConfig};
 pub use registry::{
-    spawn_retry_task, start_auto_connect, ConnectedServer, McpRegistry, McpToolRegistry,
-    ServerStatus,
+    spawn_retry_task, start_auto_connect, ConnectedServer, McpRegistry, McpToolCaller,
+    McpToolRegistry, ServerStatus,
 };
