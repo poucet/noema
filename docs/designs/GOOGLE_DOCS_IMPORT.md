@@ -1,4 +1,4 @@
-# Google Docs Import
+# Per-User MCP OAuth + Google Docs Import
 
 **Status:** planned
 **Version:** 1.0
@@ -9,107 +9,150 @@
 
 ## Problem
 
-Google Docs import only works from Noema via hand-wired Tauri commands that bypass the daemon. Lumina users can't import docs at all. The import logic uses hardcoded OAuth that doesn't work for multiple users or cloud hosting.
+MCP servers that access user data (Google Docs, Notion, GitHub) need the *user's* OAuth token, not a daemon-level credential. Today there's no mechanism for per-user, per-MCP-server OAuth. Without it, every new service requires custom daemon code instead of being a standard MCP server.
 
-We need Google Docs import as a daemon-level capability that any client (Lumina, Noema, admin UI) can use, with per-user transient OAuth that doesn't persist tokens to disk (GDPR-safe).
+Google Docs import is the first concrete use case, but the solution must be generic — user A might have Google tokens for a docs server AND Notion tokens for a Notion server.
 
 ## Goals
 
-- Import Google Docs from Discord via `/google import` with autocomplete
-- Import from admin UI
-- Transient OAuth — tokens in-memory only, daemon restart = re-auth
-- Google OAuth credentials configured via admin UI (like API keys)
-- Cloud-hosting friendly — configurable public URL for OAuth callbacks
-- Imported docs stored as UCM documents (`type: knowledge`) with auto-embedding
+- Generic per-user, per-MCP-server transient OAuth token management
+- Token injection: daemon adds user's token when calling MCP servers
+- `auth_required` error flow when no token exists
+- Google Docs import as the first consumer
+- Tokens in-memory only — no persistence, GDPR-safe
+- OAuth flows run on the daemon HTTP port (configurable for cloud hosting)
+- Admin UI config for OAuth credentials and public URL
+- Lumina commands for auth + import with autocomplete
 
 ## Non-Goals
 
-- Persistent token storage (GDPR concern)
+- Persistent token storage
+- Automatic token refresh (re-auth on expiry)
 - Agent-initiated imports (user action only, for now)
 - Google Docs write access
-- Syncing/updating previously imported docs (re-import = new version)
 
 ---
 
 ## Architecture
 
 ```
-  Discord                     Admin UI
-  /google auth ──┐            Settings page
-  /google import ─┤            ├─ client_id/secret config
-                  │            ├─ /google/import button
-                  ▼            ▼
-            ┌─────────────────────────┐
-            │    simply-daemon        │
-            │                         │
-            │  /auth/google           │ ← OAuth callback (on daemon port)
-            │  /google/docs           │ ← List user's docs
-            │  /google/import         │ ← Extract + store + embed
-            │                         │
-            │  In-memory token map:   │
-            │  user_id → GoogleToken  │
-            └─────────────────────────┘
+  Discord / Noema / Admin UI
+        │
+        ▼
+  ┌─────────────────────────────────────────────┐
+  │              simply-daemon                    │
+  │                                               │
+  │  TransientTokenStore                          │
+  │    (user_id, server_id) → access_token        │
+  │                                               │
+  │  /auth/mcp/{server_id}?user_id=...            │
+  │    → OAuth provider (Google, Notion, etc.)     │
+  │    → callback → store token in-memory          │
+  │                                               │
+  │  MCP tool call with user context:              │
+  │    1. Look up token for (user_id, server_id)   │
+  │    2. Has token → inject Authorization header  │
+  │    3. No token → return auth_required + URL    │
+  └──────────┬────────────────────────────────────┘
+             │ Authorization: Bearer {user_token}
+             ▼
+  ┌──────────────────────┐  ┌──────────────────────┐
+  │  noema-mcp-gdocs     │  │  notion-mcp (future) │
+  │  Google Docs tools   │  │  Notion tools        │
+  └──────────────────────┘  └──────────────────────┘
 ```
 
 ---
 
 ## Components
 
-### 1. Admin Configuration
+### 1. MCP Server OAuth Config
 
-Google OAuth credentials added to `settings.toml`, configured via admin UI using the same pattern as API keys:
+MCP servers declare their OAuth requirements in their config (already partially exists):
 
 ```toml
-# Google OAuth (for Google Docs import)
-google_client_id = "xxxx.apps.googleusercontent.com"
-google_client_secret = "GOCSPX-..."
+[mcp_servers.google-docs]
+url = "http://localhost:9877/mcp"
+auth = "oauth"
+client_id = "xxxx.apps.googleusercontent.com"
+client_secret = "GOCSPX-..."
+authorization_url = "https://accounts.google.com/o/oauth2/v2/auth"
+token_url = "https://oauth2.googleapis.com/token"
+scopes = ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/documents.readonly"]
+```
 
+The `client_id` and `client_secret` are configured per MCP server via the admin UI, same pattern as API keys. The daemon reads these when initiating OAuth flows.
+
+### 2. Transient Token Store
+
+In-memory map on the daemon, generic across all MCP servers:
+
+```rust
+struct TransientTokenStore {
+    // (user_id, server_id) → token
+    tokens: Mutex<HashMap<(UserId, String), McpUserToken>>,
+}
+
+struct McpUserToken {
+    access_token: String,
+    expires_at: Option<Instant>,
+    // email or display name from the OAuth provider (for status display)
+    identity: Option<String>,
+}
+```
+
+- Tokens never written to disk
+- Daemon restart = all tokens gone, users re-auth
+- Tokens expire naturally
+- No refresh tokens — user re-auths when expired
+
+### 3. OAuth Flow
+
+**Endpoint:** `GET /auth/mcp/{server_id}?user_id={user_id}`
+
+1. Daemon looks up the MCP server's OAuth config
+2. Builds OAuth authorization URL with:
+   - `client_id` and `scopes` from server config
+   - `redirect_uri` = `{public_url}/auth/mcp/callback`
+   - `state` = encoded `{user_id, server_id}`
+3. Redirects user's browser to the OAuth provider
+4. User consents
+5. Provider redirects to `/auth/mcp/callback?code=...&state=...`
+6. Daemon exchanges code for access token using `token_url` from config
+7. Stores token in `TransientTokenStore` keyed by `(user_id, server_id)`
+8. Shows "Connected!" page
+
+### 4. Token Injection
+
+When the daemon calls an MCP server on behalf of a user:
+
+1. Check `TransientTokenStore` for `(user_id, server_id)`
+2. **Has valid token** → add `Authorization: Bearer {access_token}` to the MCP request
+3. **No token or expired** → return structured error to the client:
+   ```json
+   {"error": "auth_required", "server_id": "google-docs", "auth_url": "https://daemon:9800/auth/mcp/google-docs?user_id=xxx"}
+   ```
+
+The MCP server receives the token as a standard HTTP Authorization header and uses it for its API calls.
+
+### 5. Admin Configuration
+
+Settings in `settings.toml`:
+
+```toml
 # Cloud hosting — used for OAuth callback URLs
 # Defaults to http://localhost:{daemon_port}
 public_url = "https://my-server.example.com"
 ```
 
-Admin UI shows these in the Settings card alongside API keys. No code changes to the key management pattern — just new fields.
+Per-MCP-server OAuth credentials configured via admin UI:
+- Admin page shows each MCP server's OAuth config (client_id, client_secret)
+- Same input pattern as API keys — password field + save button
+- Stored in the MCP server config in `settings.toml`
 
-### 2. Transient OAuth Token Store
+### 6. Google Docs Import (first consumer)
 
-In-memory map on the daemon:
-
-```rust
-struct GoogleTokenStore {
-    tokens: HashMap<UserId, GoogleToken>,
-}
-
-struct GoogleToken {
-    access_token: String,
-    expires_at: Instant,
-}
-```
-
-- Tokens are never written to disk or database
-- Daemon restart = all tokens gone, users re-auth
-- Tokens expire naturally (Google access tokens are ~1 hour)
-- No refresh tokens stored — user re-auths when token expires
-
-### 3. OAuth Flow
-
-**Endpoint:** `GET /auth/google?user_id={user_id}`
-
-1. Daemon builds Google OAuth URL with:
-   - `client_id` from settings
-   - `redirect_uri` = `{public_url}/auth/google/callback`
-   - `scope` = `https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/documents.readonly`
-   - `state` = encoded `{user_id}`
-2. Redirects user's browser to Google
-3. User consents
-4. Google redirects to `/auth/google/callback?code=...&state=...`
-5. Daemon exchanges code for access token
-6. Stores token in-memory keyed by user_id
-7. Shows "Connected!" page (or redirects back to Discord/admin)
-
-### 4. Google Docs API (daemon REST)
-
-New `GoogleApi` trait on the daemon:
+**Import endpoint on daemon:**
 
 ```rust
 #[rpc_service("google")]
@@ -118,76 +161,58 @@ pub trait GoogleApi: Send + Sync {
     #[rpc(get = "/google/status")]
     async fn google_status(&self) -> Result<GoogleAuthStatus>;
 
-    /// List the user's Google Docs.
+    /// List the user's Google Docs (requires Google token).
     #[rpc(get = "/google/docs")]
     async fn list_google_docs(&self) -> Result<Vec<GoogleDocInfo>>;
 
     /// Import a Google Doc into UCM storage.
-    /// Extracts content + images, stores as document with type "knowledge",
-    /// triggers embedding automatically.
     #[rpc(post = "/google/import")]
     async fn import_google_doc(&self, request: ImportGoogleDocRequest) -> Result<DocumentInfo>;
 }
-
-struct GoogleAuthStatus {
-    authenticated: bool,
-    email: Option<String>,   // from token info
-    expires_in: Option<u64>, // seconds until re-auth needed
-}
-
-struct GoogleDocInfo {
-    id: String,
-    title: String,
-    modified_time: String,
-}
-
-struct ImportGoogleDocRequest {
-    doc_id: String,
-}
 ```
 
-The import endpoint:
-1. Checks user has a valid Google token (returns `auth_required` error if not)
-2. Uses `GoogleDocsClient` (from `noema-mcp-gdocs/src/google_api.rs`) to extract the doc
-3. Creates UCM document with `type: knowledge`, `source: google_drive`, `source_id: {doc_id}`
-4. Stores images as assets
-5. Creates tabs with markdown content
-6. Embedding queue picks up the new tabs automatically
-7. Returns the created `DocumentInfo`
+The `GoogleService` implementation:
+1. Gets user's Google token from `TransientTokenStore`
+2. Uses `GoogleDocsClient` (from `noema-mcp-gdocs` crate, used as library) with the token
+3. Extracts doc content + images
+4. Stores as UCM document with `type: knowledge`, `source: google_drive`
+5. Re-import: matches by `source_id`, updates existing document (delete old tabs, create new)
+6. Embedding queue picks up new tabs automatically
 
-### 5. Lumina Discord Commands
+**Note:** The `GoogleApi` is a daemon REST endpoint, not an MCP tool. It calls the Google API directly using the user's token from the transient store. This is separate from the `noema-mcp-gdocs` MCP server — which is for generic MCP clients that want Google Docs tools.
+
+### 7. Lumina Discord Commands
 
 **`/google auth`**
-- Generates URL: `{public_url}/auth/google?user_id={ucm_user_id}`
+- Generates URL: `{public_url}/auth/mcp/google-docs?user_id={ucm_user_id}`
 - Posts ephemeral message with clickable link
-- If user has no UCM user_id yet, prompts them to `/auth` first
+- If user has no UCM user_id → prompts `/auth` first
 
 **`/google import`**
 - If user not authed with Google → tells them to `/google auth` first
-- Subcommand options:
-  - `doc_id` with autocomplete — calls `list_google_docs()`, shows user's docs as choices
-  - `url` — paste a Google Docs URL, extracts the doc_id from it
+- Options:
+  - `doc_id` with autocomplete — calls `list_google_docs()`, shows user's docs
+  - `url` — paste a Google Docs URL, extracts doc_id
 - Calls `import_google_doc(doc_id)`
-- Shows result embed with document title, tab count, "now searchable via RAG"
+- Shows result embed: title, tab count, "now searchable via RAG"
 
 **`/google status`**
 - Shows whether Google is connected, email, time until re-auth
 
-### 6. Admin UI
+### 8. Admin UI
 
-- Settings page: fields for `google_client_id`, `google_client_secret`, `public_url`
-- Documents page: "Import Google Doc" button that triggers the same flow
-- Google auth status indicator in the header/sidebar
+- Settings page: `public_url` field
+- MCP server config: per-server OAuth credentials (client_id, client_secret)
+- Documents page: "Import Google Doc" button
+- User status: which MCP servers each user is connected to
 
 ---
 
 ## Decisions
 
 1. **Transient tokens only** — no database storage, GDPR-safe. Re-auth on daemon restart or token expiry.
-2. **Import is a user action** — REST endpoint, not MCP tool. Can be promoted to MCP tool later.
-3. **Reuse `GoogleDocsClient`** — the extraction logic in `noema-mcp-gdocs/src/google_api.rs` is used directly from the daemon, no MCP hop.
-4. **Public URL config** — defaults to `http://localhost:{daemon_port}`, configurable for cloud hosting via admin UI.
-
-## Resolved
-
-1. **Re-import behavior** — re-importing the same Google Doc updates the existing document (matched by `source_id`). Old tabs are deleted, new tabs created from the latest content. Embeddings re-queued automatically.
+2. **Generic per-MCP-server OAuth** — not Google-specific. Same mechanism works for Notion, GitHub, etc.
+3. **Token injection via Authorization header** — MCP servers receive user tokens as standard HTTP auth.
+4. **Google import is a daemon endpoint, not MCP tool** — user action, not agent action. Can be promoted later.
+5. **Re-import = update** — matched by `source_id`, old tabs deleted, new tabs created, re-embedded.
+6. **`public_url` in settings** — defaults to `http://localhost:{daemon_port}`, configurable for cloud hosting.
