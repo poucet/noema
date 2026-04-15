@@ -12,6 +12,7 @@
 #[macro_use] pub mod api;
 pub mod auth;
 pub mod embedded;
+pub mod embedding_queue;
 pub mod mcp;
 pub mod oauth;
 pub mod remote;
