@@ -40,7 +40,6 @@ pub(crate) use text::init_schema as init_text_schema;
 pub(crate) use turn::init_schema as init_turn_schema;
 pub(crate) use user::init_schema as init_user_schema;
 pub(crate) use vector::init_schema as init_vector_schema;
-pub use vector::register_sqlite_vec;
 
 /// Shared SQLite connection pool
 ///
@@ -61,6 +60,7 @@ pub struct SqliteStore {
 impl SqliteStore {
     /// Open or create a SQLite database at the given path
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        vector::register_sqlite_vec();
         let conn = Connection::open(&path)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -71,6 +71,7 @@ impl SqliteStore {
 
     /// Create an in-memory SQLite database (useful for testing)
     pub fn in_memory() -> Result<Self> {
+        vector::register_sqlite_vec();
         let conn = Connection::open_in_memory()?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),

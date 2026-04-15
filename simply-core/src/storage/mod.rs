@@ -90,8 +90,6 @@ pub use content::InputContent;
 #[cfg(feature = "sqlite")]
 pub use implementations::sqlite::SqliteStore;
 
-#[cfg(feature = "sqlite")]
-pub use implementations::sqlite::register_sqlite_vec;
 
 pub use implementations::fs::FsBlobStore;
 
