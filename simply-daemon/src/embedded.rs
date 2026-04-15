@@ -92,7 +92,8 @@ where
         let asset = Arc::new(AssetService::new(Arc::clone(&coordinator), Arc::clone(&stores)));
         let mut voice_service = VoiceService::new();
 
-        // Register Whisper (local STT)
+        // Register Whisper (local STT) — only if compiled with whisper feature
+        #[cfg(feature = "whisper")]
         if let Some(path) = config::PathManager::whisper_model_path() {
             if path.exists() {
                 match simply_voice::WhisperProvider::new(&path) {
