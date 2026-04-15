@@ -146,7 +146,7 @@ async fn list_documents(&self, scope: Scope) -> Result<Vec<DocumentInfo>> {
 
 For MCP tool calls:
 ```rust
-async fn call_tool_direct(&self, scope: Scope, request: CallToolRequestParam) -> Result<CallToolResult> {
+async fn call_tool_direct(&self, scope: Scope, request: CallToolRequestParams) -> Result<CallToolResult> {
     // scope.user_id determines which MCP connections to use
     let tools = match &scope.user_id {
         Some(uid) => self.user_tools.get(uid).await?,

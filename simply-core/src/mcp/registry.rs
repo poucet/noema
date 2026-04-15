@@ -3,7 +3,7 @@ use crate::traffic_log;
 use anyhow::Result;
 use llm::{ToolDefinition, ToolResultContent};
 use rmcp::{
-    model::{CallToolRequestParam, RawContent, Tool},
+    model::{CallToolRequestParams, RawContent, Tool},
     service::{Peer, RunningService},
     transport::streamable_http_client::{
         StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
@@ -36,7 +36,7 @@ impl McpToolCaller {
         let result = self
             .peer
             .call_tool({
-                let mut req = CallToolRequestParam::new(name);
+                let mut req = CallToolRequestParams::new(name);
                 if let Some(args) = arguments { req = req.with_arguments(args); }
                 req
             })
@@ -71,7 +71,7 @@ impl ConnectedServer {
         let result = self
             .service
             .call_tool({
-                let mut req = CallToolRequestParam::new(name);
+                let mut req = CallToolRequestParams::new(name);
                 if let Some(args) = arguments { req = req.with_arguments(args); }
                 req
             })

@@ -279,7 +279,7 @@ impl McpApi for McpService {
         Ok(tools)
     }
 
-    async fn call_tool_direct(&self, _ctx: &RequestContext, request: CallToolRequestParam) -> anyhow::Result<CallToolResult> {
+    async fn call_tool_direct(&self, _ctx: &RequestContext, request: CallToolRequestParams) -> anyhow::Result<CallToolResult> {
         let registry = self.registry.lock().await;
 
         let (tool_caller, arguments) = {

@@ -6,7 +6,7 @@ use simply_rpc::RequestContext;
 
 // Re-export rmcp types used in the API.
 pub use rmcp::model::{
-    CallToolRequestParam, CallToolRequestParams, CallToolResult, Tool as McpTool,
+    CallToolRequestParams, CallToolResult, Tool as McpTool,
 };
 
 /// Information about a configured MCP server.
@@ -110,5 +110,5 @@ pub trait McpApi: Send + Sync {
 
     /// Call a tool by name (routed via ToolService to the providing server).
     #[rpc(post = "/mcp/tools/call", no_tool)]
-    async fn call_tool_direct(&self, ctx: &RequestContext, request: CallToolRequestParam) -> anyhow::Result<CallToolResult>;
+    async fn call_tool_direct(&self, ctx: &RequestContext, request: CallToolRequestParams) -> anyhow::Result<CallToolResult>;
 }

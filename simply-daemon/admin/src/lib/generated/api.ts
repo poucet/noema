@@ -95,7 +95,7 @@ export const mcpApi = (f: Fetch = fetch) => ({
   /** List all tools across all connected servers (includes schemas). */
   listAllTools: (ctx: T.RequestContext) => json<T.McpTool[]>(f, 'GET', '/api/mcp/tools', ctx),
   /** Call a tool by name (routed via ToolService to the providing server). */
-  callToolDirect: (ctx: T.RequestContext, request: T.CallToolRequestParam) => json<T.CallToolResult>(f, 'POST', '/api/mcp/tools/call', { ctx, request }),
+  callToolDirect: (ctx: T.RequestContext, request: T.CallToolRequestParams) => json<T.CallToolResult>(f, 'POST', '/api/mcp/tools/call', { ctx, request }),
 });
 
 // ModelApi
@@ -138,7 +138,7 @@ export const sessionApi = (f: Fetch = fetch) => ({
   sendMessage: (ctx: T.RequestContext, sessionId: T.SessionId, message: T.UserMessage) => json<void>(f, 'POST', `/api/session/${sessionId}/message`, { ctx, message }),
   setModel: (ctx: T.RequestContext, sessionId: T.SessionId, modelId: string) => json<void>(f, 'PUT', `/api/session/${sessionId}/model`, { ctx, modelId }),
   closeSession: (ctx: T.RequestContext, sessionId: T.SessionId) => json<void>(f, 'DELETE', `/api/session/${sessionId}`, { ctx }),
-  closeAllSessions: (ctx: T.RequestContext) => json<void>(f, 'DELETE', '/api/session', ctx),
+  closeAllSessions: () => json<void>(f, 'DELETE', '/api/session'),
   pushEvent: (ctx: T.RequestContext, event: T.InboundEvent) => json<void>(f, 'POST', '/api/session/event', { ctx, event }),
 });
 
