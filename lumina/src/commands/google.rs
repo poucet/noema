@@ -114,12 +114,14 @@ impl super::SlashCommand for Google {
 
 async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let discord_id = cmd.user.id.get();
+    tracing::info!(discord_id, "google auth: resolving user");
 
     // Create/resolve the daemon user for this Discord user
     let external_id = format!("discord:{discord_id}");
     let ctx = lx.ctx_for(discord_id).await;
     let scope = lx.daemon.user().resolve_or_create_user(&ctx, external_id).await?;
     let user_id = scope.user_id.clone().unwrap_or_default();
+    tracing::info!(discord_id, %user_id, "google auth: user resolved");
 
     // Cache the scope so all subsequent commands use it
     lx.register_user_scope(discord_id, scope).await;
@@ -127,6 +129,7 @@ async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
     let base_url = lx.daemon.core().public_url().await?;
 
     let auth_url = format!("{base_url}/auth/mcp/{GOOGLE_DOCS_SERVER_ID}?user_id={user_id}");
+    tracing::info!(%auth_url, "google auth: generated URL");
 
     let response = CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
@@ -141,15 +144,23 @@ async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
 }
 
 async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &str) -> anyhow::Result<()> {
-    // Extract doc_id — could be a raw ID from autocomplete, or a URL
+    let discord_id = cmd.user.id.get();
     let doc_id = extract_doc_id(doc_input);
-    let ctx = lx.ctx_for(cmd.user.id.get()).await;
+    tracing::info!(discord_id, %doc_id, "google import: starting");
+
+    let ctx = lx.ctx_for(discord_id).await;
+    tracing::info!(
+        discord_id,
+        user_id = ?ctx.scope.user_id,
+        "google import: resolved user context"
+    );
 
     lx.defer(cmd).await?;
 
     // Call the gdocs_extract MCP tool with user's context (for per-user OAuth token)
     let tool_request = simply_daemon::api::CallToolRequestParams::new("gdocs_extract".to_string())
         .with_arguments(serde_json::json!({ "doc_id": doc_id }).as_object().cloned().unwrap_or_default());
+    tracing::info!(discord_id, "google import: calling gdocs_extract via call_tool_direct");
     let result = lx.daemon.mcp().call_tool_direct(&ctx, tool_request).await;
 
     match result {

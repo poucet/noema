@@ -54,6 +54,11 @@ impl UserToolServiceCache {
     /// Get or build the tool service for a user.
     pub async fn get(&self, user_id: &UserId) -> Result<Arc<UserToolService>> {
         let accessible = self.resolve_accessible_servers(user_id).await;
+        tracing::debug!(
+            user_id = %user_id,
+            servers = ?accessible,
+            "UserToolServiceCache: resolving tool service"
+        );
 
         // Check cache
         {
@@ -107,8 +112,14 @@ impl UserToolServiceCache {
             }).unwrap_or(false);
 
             let include = if needs_oauth {
-                // OAuth server: only if user has a token
-                self.token_store.has_token(user_id, id)
+                let has_token = self.token_store.has_token(user_id, id);
+                tracing::debug!(
+                    server_id = id,
+                    user_id = %user_id,
+                    has_token,
+                    "resolve_accessible: OAuth server"
+                );
+                has_token
             } else {
                 // No auth / static token: everyone gets it (role filtering is future)
                 true

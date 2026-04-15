@@ -29,6 +29,8 @@ impl GoogleDocsServer {
     }
 
     async fn get_client(&self) -> Option<GoogleDocsClient> {
+        let has_token = self.access_token.read().await.is_some();
+        tracing::debug!(has_token, "get_client: checking access token");
         self.access_token
             .read()
             .await
@@ -37,7 +39,7 @@ impl GoogleDocsServer {
     }
 
     pub async fn set_access_token(&self, token: String) {
-        debug!("Setting access token");
+        tracing::info!(token_len = token.len(), "setting access token");
         // Remove "Bearer " prefix if present
         let token = token.strip_prefix("Bearer ").unwrap_or(&token).to_string();
         *self.access_token.write().await = Some(token);
@@ -217,8 +219,12 @@ impl ServerHandler for GoogleDocsServer {
             }
 
             let client = match self.get_client().await {
-                Some(c) => c,
+                Some(c) => {
+                    tracing::info!(tool = %name, "tool call: authenticated, proceeding");
+                    c
+                }
                 None => {
+                    tracing::warn!(tool = %name, "tool call: NOT authenticated, no access token set");
                     return Ok(CallToolResult::error(vec![Content::text(
                         "Error: Not authenticated. Please complete OAuth flow first.",
                     )]));

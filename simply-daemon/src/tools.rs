@@ -183,11 +183,19 @@ impl McpApi for CompositeToolService {
             .map(serde_json::Value::Object)
             .unwrap_or_default();
 
+        tracing::info!(
+            tool = name,
+            user_id = ?ctx.scope.user_id,
+            "call_tool_direct: dispatching"
+        );
+
         // Use per-user tool service if authenticated, global otherwise
         let content = if let Some(ref user_id) = ctx.scope.user_id {
             let uid = simply_core::storage::ids::UserId::from_string(user_id);
+            tracing::info!(tool = name, %user_id, "call_tool_direct: using per-user tool service");
             self.user_tools.get(&uid).await?.call_tool(name, args).await?
         } else {
+            tracing::info!(tool = name, "call_tool_direct: using global tool service (anonymous)");
             self.call_tool(name, args).await?
         };
 
