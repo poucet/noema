@@ -1,6 +1,7 @@
 //! Core traits and implementations for the noema agent framework
 
 pub mod agent;
+pub mod embedding;
 pub mod mcp;
 pub mod session_manager;
 pub mod storage;

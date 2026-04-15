@@ -26,6 +26,33 @@ pub struct Settings {
     pub daemon_port: Option<u16>,
     /// Shared secret for client authentication (auto-generated on first run)
     pub daemon_secret: Option<String>,
+    /// Embedding provider configuration
+    #[serde(default)]
+    pub embedding: EmbeddingConfig,
+}
+
+/// Embedding provider configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    /// Provider name (e.g. "mistral", "openai", "gemini", "claude", "ollama", "local")
+    pub provider: String,
+    /// Model name (e.g. "mistral-embed", "text-embedding-3-small")
+    pub model: String,
+    /// Maximum chunk size in characters (~4 chars per token)
+    pub chunk_size: usize,
+    /// Overlap between consecutive chunks in characters
+    pub chunk_overlap: usize,
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            provider: "local".to_string(),
+            model: "bge-small-en-v1.5".to_string(),
+            chunk_size: 16000,   // ~4096 tokens
+            chunk_overlap: 512,  // ~128 tokens
+        }
+    }
 }
 
 /// Default port for the daemon server.

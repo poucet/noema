@@ -12,7 +12,7 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 ### Stage 1 — Document Type + Foundation
 
-- ⬜ 1.1 `DocumentType` constants module in `simply-core`
+- 🔄 1.1 `DocumentType` constants module in `simply-core`
 - ⬜ 1.2 `document_type` column on documents table + migration
 - ⬜ 1.3 `document_type` in `DocumentInfo`/`DocumentDetail`/`CreateDocumentRequest` + type-filtered `list_documents`
 

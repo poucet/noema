@@ -107,8 +107,8 @@ The embedding provider is a **server-side configuration**, set once in `settings
 
 ```toml
 [embedding]
-provider = "mistral"         # or "openai", "claude", "gemini", "ollama", "local"
-model = "mistral-embed"
+provider = "local"           # or "mistral", "openai", "claude", "gemini", "ollama"
+model = "bge-small-en-v1.5"
 chunk_size = 4096            # tokens (~16k chars)
 chunk_overlap = 128          # tokens
 # api_key pulled from api_keys.{provider}
@@ -315,19 +315,14 @@ New daemon API trait for retrieval.
 #[rpc_service]
 pub trait SearchApi {
     /// Semantic search over embedded documents.
+    /// Flat parameters for MCP tool compatibility — LLMs can call this directly.
     #[rest(POST, "/search")]
-    async fn search(&self, request: SearchRequest) -> Result<Vec<SearchHit>>;
+    async fn search(&self, query: &str, document_type: Option<&str>, top_k: Option<usize>) -> Result<Vec<SearchHit>>;
 
     /// Re-embed all documents. Deletes existing vectors and re-indexes everything.
     /// Runs in the background; returns immediately.
     #[rest(POST, "/search/reindex")]
     async fn reindex(&self) -> Result<ReindexStatus>;
-}
-
-pub struct SearchRequest {
-    pub query: String,                        // natural language query
-    pub top_k: Option<usize>,                 // default: 5
-    pub document_type: Option<String>,        // fast type filter
 }
 
 pub struct SearchHit {
@@ -345,6 +340,11 @@ The `SearchApi` implementation:
 1. Embeds the query text via `EmbeddingProvider`
 2. Calls `VectorStore::search()` with the query vector + filters
 3. Returns hits with document metadata for context injection
+
+The flat parameter style means this also works as an MCP tool out of the box:
+```json
+{"name": "search", "parameters": {"query": "voice architecture", "document_type": "knowledge"}}
+```
 
 ### 7. Lumina Integration (Auto-RAG)
 

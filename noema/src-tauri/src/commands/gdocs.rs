@@ -80,6 +80,7 @@ pub struct DocumentInfoResponse {
     #[ts(type = "string")]
     pub user_id: UserId,
     pub title: String,
+    pub document_type: String,
     pub source: String,
     pub source_id: Option<String>,
     pub created_at: i64,
@@ -92,6 +93,7 @@ impl From<StoredEditable<DocumentId, Document>> for DocumentInfoResponse {
             id: info.id.clone(),
             user_id: info.user_id.clone(),
             title: info.title.clone(),
+            document_type: info.document_type.clone(),
             source: info.source.to_string(),
             source_id: info.source_id.clone(),
             created_at: info.created_at(),
@@ -265,7 +267,7 @@ pub async fn create_document(
 
     let doc_id = stores
         .document()
-        .create_document(&user_id, &title, DocumentSource::UserCreated, None)
+        .create_document(&user_id, &title, simply_core::storage::types::DocumentType::DOCUMENT, DocumentSource::UserCreated, None)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -521,6 +523,7 @@ pub async fn import_google_doc(
         .create_document(
             &user.id,
             &extracted.title,
+            simply_core::storage::types::DocumentType::KNOWLEDGE,
             DocumentSource::GoogleDrive,
             Some(&google_doc_id),
         )

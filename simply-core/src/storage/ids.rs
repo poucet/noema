@@ -112,6 +112,9 @@ define_id!(DocumentId, "Unique identifier for a document");
 define_id!(TabId, "Unique identifier for a document tab");
 define_id!(RevisionId, "Unique identifier for a tab revision");
 
+// Vector chunks (embedding/RAG)
+define_id!(ChunkId, "Unique identifier for an embedding vector chunk");
+
 // Collections
 define_id!(CollectionId, "Unique identifier for a collection");
 define_id!(CollectionItemId, "Unique identifier for a collection item");

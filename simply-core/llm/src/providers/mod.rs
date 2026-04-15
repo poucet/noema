@@ -1,13 +1,16 @@
 pub(crate) mod claude;
 pub(crate) mod gemini;
+pub mod local;
 pub(crate) mod mistral;
 pub(crate) mod ollama;
 pub(crate) mod openai;
 
 pub use claude::{ClaudeChatModel, ClaudeProvider};
 pub use gemini::{GeminiChatModel, GeminiProvider};
-pub use mistral::{MistralChatModel, MistralProvider};
-pub use ollama::{OllamaChatModel, OllamaProvider};
+pub use mistral::{MistralChatModel, MistralEmbeddingProvider, MistralProvider};
+#[cfg(feature = "local-embedding")]
+pub use local::LocalEmbeddingProvider;
+pub use ollama::{OllamaChatModel, OllamaEmbeddingProvider, OllamaProvider};
 pub use openai::{OpenAIChatModel, OpenAIProvider};
 
 use llm_macros::delegate_provider_enum;

@@ -1,5 +1,6 @@
 use super::chat::api::ListModelsResponse;
 use super::chat::model::OllamaChatModel;
+use super::embedding::OllamaEmbeddingProvider;
 use crate::{ChatModel, ModelProvider};
 use crate::client::Client;
 use async_trait::async_trait;

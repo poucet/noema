@@ -9,19 +9,20 @@ use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{AssetId, ContentBlockId, DocumentId, MessageId, RevisionId, TabId, UserId};
 use crate::storage::traits::DocumentStore;
-use crate::storage::types::{stored, stored_editable, Document, DocumentRevision, DocumentSource, DocumentTab, Stored, StoredEditable};
+use crate::storage::types::{stored, stored_editable, Document, DocumentRevision, DocumentSource, DocumentTab, DocumentType, Stored, StoredEditable};
 
 /// Parse a document from a database row
 fn parse_document(row: &Row<'_>) -> rusqlite::Result<StoredEditable<DocumentId, Document>> {
     let source_str: String = row.get(3)?;
     let id: DocumentId = row.get(0)?;
-    let is_public: bool = row.get(5)?;
-    let created_at: i64 = row.get(6)?;
-    let updated_at: i64 = row.get(7)?;
+    let is_public: bool = row.get(6)?;
+    let created_at: i64 = row.get(7)?;
+    let updated_at: i64 = row.get(8)?;
 
     let doc = Document {
         user_id: row.get(1)?,
         title: row.get(2)?,
+        document_type: row.get::<_, String>(5).unwrap_or_else(|_| DocumentType::DOCUMENT.to_string()),
         source: source_str.parse().unwrap_or(DocumentSource::UserCreated),
         source_id: row.get(4)?,
         is_public,
@@ -84,6 +85,8 @@ fn parse_document_revision(row: &Row<'_>) -> rusqlite::Result<Stored<RevisionId,
 pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
     // Migration: add is_public column to existing databases
     let _ = conn.execute("ALTER TABLE documents ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0", []);
+    // Migration: add document_type column to existing databases
+    let _ = conn.execute("ALTER TABLE documents ADD COLUMN document_type TEXT NOT NULL DEFAULT 'document'", []);
 
     conn.execute_batch(
         r#"
@@ -94,6 +97,7 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
             title TEXT NOT NULL,
             source TEXT NOT NULL,
             source_id TEXT,
+            document_type TEXT NOT NULL DEFAULT 'document',
             is_public INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
@@ -134,6 +138,7 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
         -- Indexes for documents
         CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
         CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source);
+        CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type);
         CREATE INDEX IF NOT EXISTS idx_documents_user_source_id ON documents(user_id, source, source_id);
         CREATE INDEX IF NOT EXISTS idx_document_tabs_document ON document_tabs(document_id);
         CREATE INDEX IF NOT EXISTS idx_document_tabs_parent ON document_tabs(parent_tab_id);
@@ -152,6 +157,7 @@ impl DocumentStore for SqliteStore {
         &self,
         user_id: &UserId,
         title: &str,
+        document_type: &str,
         source: DocumentSource,
         source_id: Option<&str>,
     ) -> Result<DocumentId> {
@@ -160,9 +166,9 @@ impl DocumentStore for SqliteStore {
         let now = unix_timestamp();
 
         conn.execute(
-            "INSERT INTO documents (id, user_id, title, source, source_id, is_public, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
-            params![id.as_str(), user_id.as_str(), title, source.as_str(), source_id, now, now],
+            "INSERT INTO documents (id, user_id, title, source, source_id, document_type, is_public, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
+            params![id.as_str(), user_id.as_str(), title, source.as_str(), source_id, document_type, now, now],
         )?;
 
         Ok(id)
@@ -172,7 +178,7 @@ impl DocumentStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let doc = conn
             .query_row(
-                "SELECT id, user_id, title, source, source_id, is_public, created_at, updated_at
+                "SELECT id, user_id, title, source, source_id, document_type, is_public, created_at, updated_at
                  FROM documents WHERE id = ?1",
                 params![id.as_str()],
                 parse_document,
@@ -190,7 +196,7 @@ impl DocumentStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let doc = conn
             .query_row(
-                "SELECT id, user_id, title, source, source_id, is_public, created_at, updated_at
+                "SELECT id, user_id, title, source, source_id, document_type, is_public, created_at, updated_at
                  FROM documents WHERE user_id = ?1 AND source = ?2 AND source_id = ?3",
                 params![user_id.as_str(), source.as_str(), source_id],
                 parse_document,
@@ -202,7 +208,7 @@ impl DocumentStore for SqliteStore {
     async fn list_documents(&self, user_id: &UserId) -> Result<Vec<StoredEditable<DocumentId, Document>>> {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, user_id, title, source, source_id, is_public, created_at, updated_at
+            "SELECT id, user_id, title, source, source_id, document_type, is_public, created_at, updated_at
              FROM documents WHERE user_id = ?1 ORDER BY updated_at DESC",
         )?;
 
@@ -223,7 +229,7 @@ impl DocumentStore for SqliteStore {
         let conn = self.conn().lock().unwrap();
         let pattern = format!("%{}%", query);
         let mut stmt = conn.prepare(
-            "SELECT id, user_id, title, source, source_id, is_public, created_at, updated_at
+            "SELECT id, user_id, title, source, source_id, document_type, is_public, created_at, updated_at
              FROM documents
              WHERE user_id = ?1 AND title LIKE ?2 COLLATE NOCASE
              ORDER BY updated_at DESC
@@ -497,14 +503,15 @@ impl DocumentStore for SqliteStore {
         // 4. Create document
         let doc_id = DocumentId::new();
         conn.execute(
-            "INSERT INTO documents (id, user_id, title, source, source_id, is_public, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
+            "INSERT INTO documents (id, user_id, title, source, source_id, document_type, is_public, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
             params![
                 doc_id.as_str(),
                 user_id.as_str(),
                 &doc_title,
                 DocumentSource::AiGenerated.as_str(),
                 message_id.as_str(), // Store message_id as source_id for provenance
+                DocumentType::DOCUMENT,
                 now,
                 now
             ],

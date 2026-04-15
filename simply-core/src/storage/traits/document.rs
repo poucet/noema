@@ -25,6 +25,7 @@ pub trait DocumentStore: Send + Sync {
         &self,
         user_id: &UserId,
         title: &str,
+        document_type: &str,
         source: DocumentSource,
         source_id: Option<&str>,
     ) -> Result<DocumentId>;

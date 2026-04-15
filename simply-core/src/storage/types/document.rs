@@ -9,6 +9,26 @@ use std::str::FromStr;
 
 use crate::storage::ids::{AssetId, DocumentId, RevisionId, TabId, UserId};
 
+// ============================================================================
+// Document type constants
+// ============================================================================
+
+/// Well-known document types.
+///
+/// The DB column accepts any string, so new types can be added without schema
+/// changes. These constants give compile-time safety for the common cases.
+pub mod DocumentType {
+    pub const DOCUMENT: &str = "document";
+    pub const NOTE: &str = "note";
+    pub const TODO: &str = "todo";
+    pub const KNOWLEDGE: &str = "knowledge";
+    pub const CONTEXT: &str = "context";
+    pub const INTENT: &str = "intent";
+    pub const SYSTEM_PROMPT: &str = "system_prompt";
+    pub const MCP_SERVER: &str = "mcp_server";
+    pub const ACCESS_RULE: &str = "access_rule";
+}
+
 /// Document source type (matches episteme)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentSource {
@@ -54,17 +74,19 @@ impl FromStr for DocumentSource {
 pub struct Document {
     pub user_id: UserId,
     pub title: String,
+    pub document_type: String,
     pub source: DocumentSource,
     pub source_id: Option<String>,
     pub is_public: bool,
 }
 
 impl Document {
-    /// Create a new document
+    /// Create a new document (defaults to type "document")
     pub fn new(user_id: UserId, title: impl Into<String>, source: DocumentSource) -> Self {
         Self {
             user_id,
             title: title.into(),
+            document_type: DocumentType::DOCUMENT.to_string(),
             source,
             source_id: None,
             is_public: false,
@@ -74,6 +96,12 @@ impl Document {
     /// Set the source ID
     pub fn with_source_id(mut self, source_id: impl Into<String>) -> Self {
         self.source_id = Some(source_id.into());
+        self
+    }
+
+    /// Set the document type
+    pub fn with_type(mut self, document_type: impl Into<String>) -> Self {
+        self.document_type = document_type.into();
         self
     }
 }

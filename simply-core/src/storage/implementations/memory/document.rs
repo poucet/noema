@@ -9,7 +9,7 @@ use crate::storage::ids::{AssetId, DocumentId, MessageId, RevisionId, TabId, Use
 use crate::storage::traits::DocumentStore;
 use crate::storage::types::{
     stored, stored_editable, Document, DocumentRevision, DocumentSource, DocumentTab,
-    Stored, StoredEditable,
+    DocumentType, Stored, StoredEditable,
 };
 
 fn now() -> i64 {
@@ -41,6 +41,7 @@ impl DocumentStore for MemoryDocumentStore {
         &self,
         user_id: &UserId,
         title: &str,
+        document_type: &str,
         source: DocumentSource,
         source_id: Option<&str>,
     ) -> Result<DocumentId> {
@@ -50,6 +51,7 @@ impl DocumentStore for MemoryDocumentStore {
         let doc = Document {
             user_id: user_id.clone(),
             title: title.to_string(),
+            document_type: document_type.to_string(),
             source,
             source_id: source_id.map(|s| s.to_string()),
             is_public: false,
@@ -329,7 +331,7 @@ mod tests {
 
         // Create document
         let doc_id = store
-            .create_document(&user_id, "Test Doc", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Test Doc", DocumentType::DOCUMENT, DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
@@ -358,7 +360,7 @@ mod tests {
 
         // Create document
         let doc_id = store
-            .create_document(&user_id, "Test Doc", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Test Doc", DocumentType::DOCUMENT, DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
@@ -403,7 +405,7 @@ mod tests {
 
         // Create document and tab
         let doc_id = store
-            .create_document(&user_id, "Test Doc", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Test Doc", DocumentType::DOCUMENT, DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
@@ -445,15 +447,15 @@ mod tests {
 
         // Create documents
         store
-            .create_document(&user_id, "Meeting Notes", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Meeting Notes", DocumentType::NOTE, DocumentSource::UserCreated, None)
             .await
             .unwrap();
         store
-            .create_document(&user_id, "Project Plan", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Project Plan", DocumentType::DOCUMENT, DocumentSource::UserCreated, None)
             .await
             .unwrap();
         store
-            .create_document(&user_id, "Meeting Summary", DocumentSource::UserCreated, None)
+            .create_document(&user_id, "Meeting Summary", DocumentType::NOTE, DocumentSource::UserCreated, None)
             .await
             .unwrap();
 
@@ -475,6 +477,7 @@ mod tests {
             .create_document(
                 &user_id,
                 "Google Doc",
+                DocumentType::KNOWLEDGE,
                 DocumentSource::GoogleDrive,
                 Some("gdoc123"),
             )

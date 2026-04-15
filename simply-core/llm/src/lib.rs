@@ -17,6 +17,9 @@ pub use registry::{
 };
 pub use tools::ToolRegistry;
 
+pub mod embedding;
+pub use embedding::{Embedding, EmbeddingProvider};
+
 pub type ChatStream = Pin<Box<dyn Stream<Item = ChatChunk> + Send>>;
 
 /// Capabilities and characteristics of a model.

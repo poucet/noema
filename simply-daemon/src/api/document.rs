@@ -10,6 +10,7 @@ use ts_rs::TS;
 pub struct DocumentInfo {
     pub id: String,
     pub title: String,
+    pub document_type: String,
     pub source: String,
     pub source_id: Option<String>,
     pub tab_count: usize,
@@ -23,6 +24,7 @@ pub struct DocumentInfo {
 pub struct DocumentDetail {
     pub id: String,
     pub title: String,
+    pub document_type: String,
     pub source: String,
     pub source_id: Option<String>,
     pub tabs: Vec<TabInfo>,
@@ -49,6 +51,8 @@ pub struct TabInfo {
 #[ts(export, export_to = "admin/src/lib/generated/")]
 pub struct CreateDocumentRequest {
     pub title: String,
+    /// Document type (e.g. "note", "todo", "knowledge"). Defaults to "document".
+    pub document_type: Option<String>,
     /// Content for the initial tab (markdown).
     pub content: Option<String>,
 }

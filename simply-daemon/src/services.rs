@@ -194,6 +194,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
             result.push(DocumentInfo {
                 id: doc.id.to_string(),
                 title: doc.title.clone(),
+                document_type: doc.document_type.clone(),
                 source: format!("{:?}", doc.source),
                 source_id: doc.source_id.clone(),
                 tab_count: tabs.len(),
@@ -213,6 +214,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
             result.push(DocumentInfo {
                 id: doc.id.to_string(),
                 title: doc.title.clone(),
+                document_type: doc.document_type.clone(),
                 source: format!("{:?}", doc.source),
                 source_id: doc.source_id.clone(),
                 tab_count: tabs.len(),
@@ -247,6 +249,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         Ok(DocumentDetail {
             id: doc.id.to_string(),
             title: doc.title.clone(),
+            document_type: doc.document_type.clone(),
             source: format!("{:?}", doc.source),
             source_id: doc.source_id.clone(),
             tabs: tab_infos,
@@ -262,6 +265,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         let doc_id = self.stores.document().create_document(
             &self.user_id,
             &request.title,
+            request.document_type.as_deref().unwrap_or(simply_core::storage::types::DocumentType::DOCUMENT),
             DocumentSource::UserCreated,
             None,
         ).await?;

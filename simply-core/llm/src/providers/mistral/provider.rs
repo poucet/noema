@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::chat::MistralChatModel;
+use super::embedding::MistralEmbeddingProvider;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ModelInfo {
@@ -66,6 +67,11 @@ impl MistralProvider {
 
     fn models_url(&self) -> String {
         format!("{}/models", self.base_url)
+    }
+
+    /// Create an embedding provider using this provider's client and base URL.
+    pub fn create_embedding_provider(&self, model: &str) -> MistralEmbeddingProvider {
+        MistralEmbeddingProvider::new(self.client.clone(), self.base_url.clone(), model.to_string())
     }
 }
 

@@ -19,7 +19,7 @@ pub use asset::Asset;
 pub use blob::BlobHash;
 pub use content_block::{ContentBlock, ContentOrigin, ContentType, OriginKind};
 pub use conversation::{Message, MessageWithContent, Span, Turn, TurnWithContent};
-pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab};
+pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab, DocumentType};
 pub use entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 pub use collection::{
     Collection, CollectionItem, CollectionView, FieldDefinition, FieldType,

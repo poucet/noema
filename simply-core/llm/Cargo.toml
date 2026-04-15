@@ -17,6 +17,11 @@ llm_macros = { workspace = true }
 schemars = { workspace = true }
 config = { workspace = true }
 chrono = { workspace = true }
+fastembed = { version = "4", optional = true }
+
+[features]
+default = ["local-embedding"]
+local-embedding = ["dep:fastembed"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

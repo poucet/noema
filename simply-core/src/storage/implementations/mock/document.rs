@@ -16,6 +16,7 @@ impl DocumentStore for MockDocumentStore {
         &self,
         _: &UserId,
         _: &str,
+        _: &str,
         _: DocumentSource,
         _: Option<&str>,
     ) -> Result<DocumentId> {

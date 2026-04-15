@@ -24,6 +24,7 @@ export interface DaemonHealth {
 export interface DocumentInfo {
   id: string;
   title: string;
+  documentType: string;
   source: string;
   sourceId: string | null;
   tabCount: number;
@@ -35,6 +36,7 @@ export interface DocumentInfo {
 export interface DocumentDetail {
   id: string;
   title: string;
+  documentType: string;
   source: string;
   sourceId: string | null;
   tabs: T.TabInfo[];
@@ -57,6 +59,7 @@ export interface TabInfo {
 /** Request to create a document. */
 export interface CreateDocumentRequest {
   title: string;
+  documentType: string | null;
   content: string | null;
 }
 
