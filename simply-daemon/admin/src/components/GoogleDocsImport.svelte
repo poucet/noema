@@ -159,11 +159,18 @@
       const extracted = JSON.parse(content[0].text) as {
         doc_id: string;
         title: string;
-        tabs: { title: string; content_markdown: string; tab_index: number }[];
+        tabs: {
+          source_tab_id: string;
+          title: string;
+          icon?: string;
+          content_markdown: string;
+          parent_tab_id?: string;
+          tab_index: number;
+        }[];
         images: { object_id: string; data_base64: string; mime_type: string }[];
       };
 
-      console.log('[gdocs] extracted:', extracted.title, extracted.tabs.length, 'tabs');
+      console.log('[gdocs] extracted:', extracted.title, extracted.tabs.length, 'tabs,', extracted.images.length, 'images');
 
       const doc = await docs.createDocument({
         title: extracted.title,
@@ -172,13 +179,31 @@
         sourceId: docId,
       });
 
-      for (const tab of extracted.tabs) {
-        await docs.createTab(doc.id, {
-          title: tab.title,
-          content: tab.content_markdown,
-          parentTabId: null,
-          tabIndex: tab.tab_index,
-        });
+      // Topological sort: create parent tabs before children
+      const idMap = new Map<string, string>(); // source_tab_id → created tab id
+      const pending = [...extracted.tabs];
+      let maxPasses = pending.length + 1;
+
+      while (pending.length > 0 && maxPasses-- > 0) {
+        const deferred: typeof pending = [];
+        for (const tab of pending) {
+          // If tab has a parent, wait until parent is created
+          if (tab.parent_tab_id && !idMap.has(tab.parent_tab_id)) {
+            deferred.push(tab);
+            continue;
+          }
+          const parentId = tab.parent_tab_id ? (idMap.get(tab.parent_tab_id) ?? null) : null;
+          const title = tab.icon ? `${tab.icon} ${tab.title}` : tab.title;
+          const created = await docs.createTab(doc.id, {
+            title,
+            content: tab.content_markdown,
+            parentTabId: parentId,
+            tabIndex: tab.tab_index,
+          });
+          idMap.set(tab.source_tab_id, created.id);
+        }
+        pending.length = 0;
+        pending.push(...deferred);
       }
 
       success = `Imported "${extracted.title}" with ${extracted.tabs.length} tab(s)`;
