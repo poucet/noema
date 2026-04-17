@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["commands", "config", "simply-core", "simply-core/llm", "simply-audio", "simply-voice", "simply-daemon", "simply-rpc", "simply-rpc/macros", "noema-ext", "noema/src-tauri", "mcp-gdocs", "lumina", "lumina/macros"]
-default-members = ["noema/src-tauri"]
+default-members = ["simply-daemon"]
 
 [workspace.package]
 version = "0.3.0"

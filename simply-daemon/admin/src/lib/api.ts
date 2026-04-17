@@ -12,6 +12,16 @@ import type {
   EmbeddingQueueStatus,
 } from './generated/types';
 
+import {
+  type Transport,
+  createTransport,
+  getCurrentUser,
+  setCurrentUser,
+} from './transport';
+
+// Re-export user context functions for existing consumers
+export { getCurrentUser, setCurrentUser };
+
 // --- Admin-only types (no Rust struct, returned as inline JSON) ---
 
 export interface SetupStatus {
@@ -46,120 +56,80 @@ export interface SessionListItem {
   created_at: string;
 }
 
-// --- User context scoping ---
+// --- Shared transport instance ---
 
-const USER_KEY = 'simply-admin-user-id';
-
-export function setCurrentUser(userId: string | null) {
-  if (userId) localStorage.setItem(USER_KEY, userId);
-  else localStorage.removeItem(USER_KEY);
-}
-
-export function getCurrentUser(): string | null {
-  return localStorage.getItem(USER_KEY);
-}
-
-function contextHeaders(): Record<string, string> {
-  const userId = getCurrentUser();
-  if (!userId) return {};
-  return {
-    'X-Request-Context': JSON.stringify({ scope: { user_id: userId } }),
-  };
-}
-
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
-  const headers = { ...contextHeaders(), ...(init?.headers ?? {}) };
-  const res = await fetch(url, { ...init, headers });
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-  return res.json();
+let _transport: Transport | null = null;
+export function getTransport(): Transport {
+  if (!_transport) _transport = createTransport();
+  return _transport;
 }
 
 // --- Admin API (hand-written endpoints, not part of RPC services) ---
 
+const t = () => getTransport();
+
 export const api = {
-  getSetupStatus: () => json<SetupStatus>('/admin/api/setup-status'),
-  getSettings: () => json<Settings>('/admin/api/settings'),
+  getSetupStatus: () =>
+    t().rpc<SetupStatus>('admin.setup_status', 'GET', '/admin/api/setup-status'),
+  getSettings: () =>
+    t().rpc<Settings>('admin.settings', 'GET', '/admin/api/settings'),
 
   updateSettings: (data: Record<string, string>) =>
-    json('/admin/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }),
+    t().rpc('admin.update_settings', 'PUT', '/admin/api/settings', data),
 
   setApiKey: (provider: string, apiKey: string) =>
-    json('/admin/api/api-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, api_key: apiKey }),
-    }),
+    t().rpc('admin.set_api_key', 'POST', '/admin/api/api-key', { provider, api_key: apiKey }),
 
   removeApiKey: (provider: string) =>
-    fetch(`/admin/api/api-key/${provider}`, { method: 'DELETE' }),
+    t().rpc('admin.remove_api_key', 'DELETE', `/admin/api/api-key/${provider}`),
 
-  getUsers: () => json<UserInfo[]>('/admin/api/users'),
+  getUsers: () =>
+    t().rpc<UserInfo[]>('admin.list_users', 'GET', '/admin/api/users'),
   deleteUser: (id: string) =>
-    fetch(`/admin/api/users/${id}`, { method: 'DELETE' }),
+    t().rpc('admin.delete_user', 'DELETE', `/admin/api/users/${id}`),
   createUser: (email: string) =>
-    json<UserInfo>('/admin/api/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    }),
+    t().rpc<UserInfo>('admin.create_user', 'POST', '/admin/api/users', { email }),
 
-  getConnections: () => json<ConnectionInfo[]>('/admin/api/connections'),
+  getConnections: () =>
+    t().rpc<ConnectionInfo[]>('admin.connections', 'GET', '/admin/api/connections'),
 
   getSessions: async (): Promise<SessionListItem[]> => {
-    try { return await json<SessionListItem[]>('/api/session'); }
+    try { return await t().rpc<SessionListItem[]>('session.list_sessions', 'GET', '/api/session'); }
     catch { return []; }
   },
 
-  killDaemon: () => fetch('/api/daemon/kill', { method: 'POST' }),
+  killDaemon: () =>
+    t().rpc('daemon.kill', 'POST', '/api/daemon/kill'),
 
   // Documents (via /api prefix for RPC routes)
-  listDocuments: () => json<DocumentInfo[]>('/api/document/all'),
-  searchDocuments: (query: string) => json<DocumentInfo[]>(`/api/document/search?q=${encodeURIComponent(query)}`),
-  getDocument: (id: string) => json<DocumentDetail>(`/api/document/${id}`),
+  listDocuments: () =>
+    t().rpc<DocumentInfo[]>('document.list_all_documents', 'GET', '/api/document/all'),
+  searchDocuments: (query: string) =>
+    t().rpc<DocumentInfo[]>('document.search_documents', 'GET', `/api/document/search?q=${encodeURIComponent(query)}`),
+  getDocument: (id: string) =>
+    t().rpc<DocumentDetail>('document.get_document', 'GET', `/api/document/${id}`),
   createDocument: (title: string, content?: string) =>
-    json<DocumentInfo>('/api/document', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, content }),
-    }),
+    t().rpc<DocumentInfo>('document.create_document', 'POST', '/api/document', { title, content }),
   renameDocument: (id: string, title: string) =>
-    json(`/api/document/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
-    }),
+    t().rpc('document.rename_document', 'PUT', `/api/document/${id}`, { title }),
   deleteDocument: (id: string) =>
-    fetch(`/api/document/${id}`, { method: 'DELETE', headers: contextHeaders() }),
-  getTab: (id: string) => json<TabInfo>(`/api/document/tab/${id}`),
+    t().rpc('document.delete_document', 'DELETE', `/api/document/${id}`),
+  getTab: (id: string) =>
+    t().rpc<TabInfo>('document.get_tab', 'GET', `/api/document/tab/${id}`),
   updateTab: (id: string, content: string) =>
-    json(`/api/document/tab/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request: { content } }),
-    }),
+    t().rpc('document.update_tab', 'PUT', `/api/document/tab/${id}`, { request: { content } }),
   createTab: (documentId: string, title: string, content?: string) =>
-    json<TabInfo>(`/api/document/${documentId}/tab`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request: { title, content } }),
-    }),
+    t().rpc<TabInfo>('document.create_tab', 'POST', `/api/document/${documentId}/tab`, { request: { title, content } }),
   deleteTab: (id: string) =>
-    fetch(`/api/document/tab/${id}`, { method: 'DELETE', headers: contextHeaders() }),
+    t().rpc('document.delete_tab', 'DELETE', `/api/document/tab/${id}`),
 
   // Search / RAG
   search: (query: string, documentType?: string, topK?: number) =>
-    json<SearchHit[]>('/api/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, document_type: documentType, top_k: topK }),
-    }),
+    t().rpc<SearchHit[]>('search.search', 'POST', '/api/search', { query, document_type: documentType, top_k: topK }),
   reindex: () =>
-    json<ReindexStatus>('/api/search/reindex', { method: 'POST' }),
-  getQueueStatus: () => json<EmbeddingQueueStatus>('/api/search/status'),
+    t().rpc<ReindexStatus>('search.reindex', 'POST', '/api/search/reindex'),
+  getQueueStatus: () =>
+    t().rpc<EmbeddingQueueStatus>('search.queue_status', 'GET', '/api/search/status'),
 };
 
 export const PROVIDERS = [
