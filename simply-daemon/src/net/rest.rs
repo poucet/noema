@@ -13,6 +13,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -117,7 +118,19 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         app = app.fallback_service(serve);
     }
 
+    // CORS: allow cross-origin requests from localhost dev servers only
+    let cors = CorsLayer::new()
+        .allow_origin([
+            "http://localhost:4321".parse().unwrap(),  // Astro dev
+            "http://127.0.0.1:4321".parse().unwrap(),
+            "http://localhost:9800".parse().unwrap(),  // same-origin
+            "http://127.0.0.1:9800".parse().unwrap(),
+        ])
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = app
+        .layer(cors)
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state);
 

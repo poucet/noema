@@ -2,48 +2,69 @@
 
 export type Unsubscribe = () => void;
 
+// ---------------------------------------------------------------------------
+// Base URL configuration
+// ---------------------------------------------------------------------------
+
 /**
- * Transport abstraction for daemon communication.
+ * Daemon base URL. In production (served by daemon), this is empty (same origin).
+ * In dev (Astro on 4321, daemon on 9800), set to 'http://localhost:9800'.
  *
- * Two implementations:
- * - HttpTransport: fetch + WebSocket (browser / admin UI)
- * - TauriTransport: invoke + listen (Tauri desktop app)
+ * Auto-detected: if the page is NOT served by the daemon (port != 9800),
+ * assume dev mode and point to localhost:9800.
  */
+function detectBaseUrl(): string {
+  if (typeof location === 'undefined') return '';
+  // If served by the daemon, use same origin (relative URLs)
+  if (location.port === '9800') return '';
+  // Dev mode: Astro dev server, proxy to daemon
+  return 'http://localhost:9800';
+}
+
+let _baseUrl: string | null = null;
+
+export function getBaseUrl(): string {
+  if (_baseUrl === null) _baseUrl = detectBaseUrl();
+  return _baseUrl;
+}
+
+export function setBaseUrl(url: string) {
+  _baseUrl = url;
+}
+
+// ---------------------------------------------------------------------------
+// Transport interface
+// ---------------------------------------------------------------------------
+
 export interface Transport {
-  /**
-   * Call an RPC method.
-   * @param method  - RPC method name (e.g. "session.list_sessions")
-   * @param httpMethod - HTTP method for the REST fallback ("GET", "POST", etc.)
-   * @param path    - REST path (e.g. "/api/session")
-   * @param body    - Optional JSON body
-   */
   rpc<T>(method: string, httpMethod: string, path: string, body?: unknown): Promise<T>;
-
-  /**
-   * Subscribe to server-pushed events.
-   * Returns an unsubscribe function.
-   */
+  wsCall<T>(method: string, params?: unknown): Promise<T>;
   subscribe<T>(event: string, callback: (payload: T) => void): Unsubscribe;
-
-  /** Clean up connections (WebSocket, listeners, etc.) */
   destroy(): void;
 }
 
-/** Detect environment and create the appropriate transport. */
+// ---------------------------------------------------------------------------
+// Singleton
+// ---------------------------------------------------------------------------
+
+let _instance: Transport | null = null;
+
+export function getTransport(): Transport {
+  if (!_instance) _instance = createTransport();
+  return _instance;
+}
+
 export function createTransport(): Transport {
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-    // Lazy import to avoid bundling Tauri deps in web builds
     throw new Error('TauriTransport not yet implemented — use HttpTransport');
   }
-  // Inline import to keep this file dependency-free
   return new HttpTransportImpl();
 }
 
 // ---------------------------------------------------------------------------
-// HttpTransport (inline to avoid circular deps in barrel)
+// User context
 // ---------------------------------------------------------------------------
 
-/** User context for scoped API calls. */
 const USER_KEY = 'simply-admin-user-id';
 
 export function setCurrentUser(userId: string | null) {
@@ -63,6 +84,10 @@ function contextHeaders(): Record<string, string> {
   };
 }
 
+// ---------------------------------------------------------------------------
+// HttpTransport
+// ---------------------------------------------------------------------------
+
 class HttpTransportImpl implements Transport {
   private ws: WebSocket | null = null;
   private listeners = new Map<string, Set<(payload: any) => void>>();
@@ -75,15 +100,17 @@ class HttpTransportImpl implements Transport {
     path: string,
     body?: unknown,
   ): Promise<T> {
+    const url = getBaseUrl() + path;
     const init: RequestInit = {
       method: httpMethod,
       headers: { ...contextHeaders() },
     };
-    if (body !== undefined) {
+    // Only send body for methods that support it
+    if (body !== undefined && !['GET', 'HEAD', 'DELETE'].includes(httpMethod)) {
       (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
-    const res = await fetch(path, init);
+    const res = await fetch(url, init);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`${res.status}: ${text}`);
@@ -91,6 +118,28 @@ class HttpTransportImpl implements Transport {
     const text = await res.text();
     if (!text) return undefined as T;
     return JSON.parse(text) as T;
+  }
+
+  async wsCall<T>(method: string, params: unknown = {}): Promise<T> {
+    this.ensureWs();
+    await this.wsReady;
+    if (!this.ws) throw new Error('WebSocket not connected');
+
+    const id = Math.floor(Math.random() * 1_000_000);
+    return new Promise((resolve, reject) => {
+      const handler = (ev: MessageEvent) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.id === id) {
+            this.ws?.removeEventListener('message', handler);
+            if (msg.error) reject(new Error(msg.error.message));
+            else resolve(msg.result);
+          }
+        } catch { /* ignore */ }
+      };
+      this.ws!.addEventListener('message', handler);
+      this.ws!.send(JSON.stringify({ id, method, params }));
+    });
   }
 
   subscribe<T>(event: string, callback: (payload: T) => void): Unsubscribe {
@@ -115,21 +164,18 @@ class HttpTransportImpl implements Transport {
     this.listeners.clear();
   }
 
-  // -------------------------------------------------------------------------
-  // WebSocket management
-  // -------------------------------------------------------------------------
+  // -- WebSocket management --
 
   private ensureWs(): void {
     if (this.ws) return;
 
     this.wsReady = new Promise((resolve) => { this.wsResolve = resolve; });
 
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/ws`;
-    this.ws = new WebSocket(url);
+    const base = getBaseUrl() || location.origin;
+    const wsBase = base.replace(/^http/, 'ws');
+    this.ws = new WebSocket(`${wsBase}/ws`);
 
     this.ws.onopen = () => {
-      // Identify ourselves
       this.ws!.send(JSON.stringify({
         id: 1,
         method: 'client.identify',
@@ -141,58 +187,28 @@ class HttpTransportImpl implements Transport {
     this.ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        // WsNotification: { method, params } (no id)
         if (msg.method && msg.id === undefined) {
           this.dispatch(msg.method, msg.params);
         }
-      } catch {
-        // ignore malformed messages
-      }
+      } catch { /* ignore */ }
     };
 
     this.ws.onclose = () => {
       this.ws = null;
       this.wsReady = null;
-      // Auto-reconnect after 2s if there are active listeners
       if (this.listeners.size > 0) {
         setTimeout(() => this.ensureWs(), 2000);
       }
     };
 
-    this.ws.onerror = () => {
-      // onclose will fire after onerror
-    };
+    this.ws.onerror = () => {};
   }
 
   private dispatch(method: string, params: unknown): void {
-    // Route "session.event" notifications by extracting the DaemonEvent
-    // The daemon sends: { method: "session.event", params: { session_id, event } }
     const cbs = this.listeners.get(method);
     if (cbs) {
       for (const cb of cbs) cb(params);
     }
-  }
-
-  /** Send a WS request and wait for the response (for stream subscriptions). */
-  async wsCall(method: string, params: unknown = {}): Promise<unknown> {
-    await this.wsReady;
-    if (!this.ws) throw new Error('WebSocket not connected');
-
-    const id = Math.floor(Math.random() * 1_000_000);
-    return new Promise((resolve, reject) => {
-      const handler = (ev: MessageEvent) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.id === id) {
-            this.ws?.removeEventListener('message', handler);
-            if (msg.error) reject(new Error(msg.error.message));
-            else resolve(msg.result);
-          }
-        } catch { /* ignore */ }
-      };
-      this.ws!.addEventListener('message', handler);
-      this.ws!.send(JSON.stringify({ id, method, params }));
-    });
   }
 }
 

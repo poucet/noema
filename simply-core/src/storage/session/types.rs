@@ -42,6 +42,7 @@ impl ResolvedMessage {
 /// - LLM: Uses cached `resolved` ContentBlock, populates on first access
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResolvedContent {
     /// Text content - already resolved, no caching needed
     Text { text: String },

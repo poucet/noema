@@ -79,8 +79,8 @@ export interface ResolvedMessage {
 
 export type ResolvedContent =
   | { type: "text"; text: string }
-  | { type: "asset_ref"; asset_id: string; blob_hash: string; mime_type: string; resolved: ContentBlock | null }
-  | { type: "document_ref"; document_id: string; resolved: ContentBlock | null }
+  | { type: "asset"; asset_id: string; blob_hash: string; mime_type: string; resolved: ContentBlock | null }
+  | { type: "document"; document_id: string; resolved: ContentBlock | null }
   | { type: "tool_call"; id: string; name: string; arguments: unknown; extra?: unknown }
   | { type: "tool_result"; tool_call_id: string; content: ToolResultContent[] };
 
