@@ -19,6 +19,8 @@
   let addName = $state('');
   let addUrl = $state('');
   let addAuthType = $state('none');
+  let addClientId = $state('');
+  let addClientSecret = $state('');
 
   onMount(() => refresh());
 
@@ -36,19 +38,23 @@
   async function addServer() {
     if (!addName.trim() || !addUrl.trim()) return;
     try {
+      const clientId = addClientId.trim() || null;
+      const clientSecret = addClientSecret.trim() || null;
       await mcp.addMcpServer({
         id: addName.toLowerCase().replace(/\s+/g, '-'),
         name: addName,
         url: addUrl,
         authType: addAuthType,
         authToken: null,
-        clientId: null,
-        clientSecret: null,
+        clientId,
+        clientSecret,
         scopes: null,
       });
       addName = '';
       addUrl = '';
       addAuthType = 'none';
+      addClientId = '';
+      addClientSecret = '';
       showAdd = false;
       await refresh();
     } catch (e) {
@@ -58,6 +64,7 @@
   }
 
   async function removeServer(id: string) {
+    if (!confirm(`Remove server "${servers.find(s => s.id === id)?.name || id}"?`)) return;
     try {
       await mcp.removeMcpServer(id);
       if (selectedServerId === id) { selectedServerId = null; selectedTools = []; }
@@ -67,6 +74,8 @@
       error = `Remove failed: ${e}`;
     }
   }
+
+  // No prefill needed — daemon stores OAuth credentials by URL in config
 
   async function connectServer(id: string) {
     try {
@@ -157,20 +166,31 @@
         placeholder="URL (e.g. https://mcp.example.com)"
         bind:value={addUrl}
       />
-      <div class="flex gap-2 items-center">
-        <select
-          class="bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
-          bind:value={addAuthType}
-        >
-          <option value="none">No Auth</option>
-          <option value="oauth">OAuth</option>
-          <option value="bearer">Bearer Token</option>
-        </select>
-        <button
-          class="px-4 py-2 bg-accent text-bg text-sm font-medium rounded hover:bg-accent/80"
-          onclick={addServer}
-        >Add</button>
-      </div>
+      <select
+        class="w-full bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
+        bind:value={addAuthType}
+      >
+        <option value="none">No Auth</option>
+        <option value="oauth">OAuth</option>
+        <option value="bearer">Bearer Token</option>
+      </select>
+      {#if addAuthType === 'oauth'}
+        <input
+          class="w-full bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
+          placeholder="OAuth Client ID"
+          bind:value={addClientId}
+        />
+        <input
+          class="w-full bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
+          type="password"
+          placeholder="OAuth Client Secret (optional)"
+          bind:value={addClientSecret}
+        />
+      {/if}
+      <button
+        class="w-full px-4 py-2 bg-accent text-bg text-sm font-medium rounded hover:bg-accent/80"
+        onclick={addServer}
+      >Add Server</button>
     </div>
   {/if}
 
@@ -198,6 +218,12 @@
                 class="text-xs px-2 py-1 rounded bg-white/5 text-muted hover:text-fg"
                 onclick={() => showTools(srv.id)}
               >{selectedServerId === srv.id ? 'Hide' : 'Tools'}</button>
+              {#if srv.authType === 'oauth'}
+                <button
+                  class="text-xs px-2 py-1 rounded bg-white/5 text-muted hover:text-fg"
+                  onclick={() => startOauth(srv.id)}
+                >Re-auth</button>
+              {/if}
               <button
                 class="text-xs px-2 py-1 rounded bg-white/5 text-muted hover:text-fg"
                 onclick={() => disconnectServer(srv.id)}

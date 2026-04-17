@@ -178,6 +178,7 @@ impl McpApi for CompositeToolService {
     }
 
     async fn call_tool_direct(&self, ctx: &simply_rpc::RequestContext, request: CallToolRequestParams) -> anyhow::Result<CallToolResult> {
+        let request_clone = request.clone();
         let name = request.name.as_ref();
         let args = request.arguments
             .map(serde_json::Value::Object)
@@ -189,14 +190,30 @@ impl McpApi for CompositeToolService {
             "call_tool_direct: dispatching"
         );
 
-        // Use per-user tool service if authenticated, global otherwise
+        // Try per-user tool service first, then fall back to global MCP registry
         let content = if let Some(ref user_id) = ctx.scope.user_id {
             let uid = simply_core::storage::ids::UserId::from_string(user_id);
-            tracing::info!(tool = name, %user_id, "call_tool_direct: using per-user tool service");
-            self.user_tools.get(&uid).await?.call_tool(name, args).await?
+            tracing::info!(tool = name, %user_id, "call_tool_direct: trying per-user tool service");
+            match self.user_tools.get(&uid).await?.call_tool(name, args.clone()).await {
+                Ok(content) => content,
+                Err(e) => {
+                    tracing::info!(tool = name, error = %e, "call_tool_direct: per-user failed, trying global MCP registry");
+                    // Fall back to global MCP registry (has globally-authed servers)
+                    match self.mcp.call_tool_direct(ctx, request_clone.clone()).await {
+                        Ok(result) => return Ok(result),
+                        Err(_) => {
+                            // Fall back to composite tool service
+                            self.call_tool(name, args).await?
+                        }
+                    }
+                }
+            }
         } else {
             tracing::info!(tool = name, "call_tool_direct: using global tool service (anonymous)");
-            self.call_tool(name, args).await?
+            match self.mcp.call_tool_direct(ctx, request_clone.clone()).await {
+                Ok(result) => return Ok(result),
+                Err(_) => self.call_tool(name, args).await?,
+            }
         };
 
         let mcp_content: Vec<rmcp::model::Content> = content.into_iter().map(|c| {

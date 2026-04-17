@@ -12,6 +12,7 @@ pub use rmcp::model::{
 
 /// Information about a configured MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct McpServerInfo {
     pub id: String,
@@ -28,6 +29,7 @@ pub struct McpServerInfo {
 
 /// Request to add a new MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct AddMcpServerRequest {
     pub id: String,
@@ -50,6 +52,7 @@ pub struct RegisterEphemeralRequest {
 
 /// Request to update MCP server settings.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct UpdateMcpServerRequest {
     pub name: Option<String>,

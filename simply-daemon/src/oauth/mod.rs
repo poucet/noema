@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use simply_core::McpRegistry;
 
 use crate::api::OAuthFlowInfo;
-use callback::CallbackServer;
+use callback::CallbackTracker;
 
 // ---------------------------------------------------------------------------
 // OAuthService
@@ -22,36 +22,40 @@ use callback::CallbackServer;
 
 /// Manages OAuth flows for MCP servers.
 ///
-/// Owns a long-lived [`CallbackServer`] on a stable port and multiplexes
-/// concurrent flows by `state` parameter. Both `EmbeddedDaemon` and the
-/// future standalone daemon can share this.
+/// Uses the daemon's main HTTP server for OAuth callbacks (no separate port).
+/// Concurrent flows are multiplexed by `state` parameter.
 pub struct OAuthService {
     mcp_registry: Arc<Mutex<McpRegistry>>,
-    callback_server: CallbackServer,
+    tracker: Arc<CallbackTracker>,
     /// state -> server_id for flows initiated via deep link (not callback server)
     pending_states: Mutex<HashMap<String, String>>,
 }
 
 impl OAuthService {
-    /// Create an OAuthService with a long-lived callback server on the given port.
-    pub async fn start(
+    /// Create an OAuthService. `public_url` is the daemon's externally-reachable
+    /// base URL (from settings or auto-derived from port).
+    pub fn new(
         mcp_registry: Arc<Mutex<McpRegistry>>,
-        port: Option<u16>,
-    ) -> anyhow::Result<Self> {
-        let callback_server = CallbackServer::start(port).await?;
-        Ok(Self {
+        public_url: String,
+    ) -> Self {
+        Self {
             mcp_registry,
-            callback_server,
+            tracker: Arc::new(CallbackTracker::new(public_url)),
             pending_states: Mutex::new(HashMap::new()),
-        })
+        }
     }
 
-    /// The stable redirect URI for this daemon's callback server.
+    /// The callback tracker — share with the axum route handler.
+    pub fn tracker(&self) -> Arc<CallbackTracker> {
+        Arc::clone(&self.tracker)
+    }
+
+    /// The stable redirect URI (on the daemon's main port).
     pub fn redirect_uri(&self) -> String {
-        self.callback_server.redirect_uri()
+        self.tracker.redirect_uri()
     }
 
-    /// Start an OAuth flow: register on the callback server, build the
+    /// Start an OAuth flow: register on the tracker, build the
     /// authorization URL, spawn a background task to complete on callback.
     pub async fn start_flow(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo> {
         let config = {
@@ -77,7 +81,7 @@ impl OAuthService {
             anyhow::bail!("Please configure your OAuth Client ID in the server settings first.");
         }
 
-        let redirect_uri = self.callback_server.redirect_uri();
+        let redirect_uri = self.tracker.redirect_uri();
 
         // Fetch .well-known if needed
         let well_known = if config.use_well_known {
@@ -100,16 +104,23 @@ impl OAuthService {
 
         // Generate state, register with callback server, and track server_id
         let state_param = uuid::Uuid::new_v4().to_string();
-        let callback_rx = self.callback_server.register(&state_param).await;
+        let callback_rx = self.tracker.register(&state_param).await;
         self.pending_states
             .lock()
             .await
             .insert(state_param.clone(), server_id.to_string());
 
-        let scope_str = if scopes.is_empty() {
-            "openid".to_string()
-        } else {
+        // Resolve scopes: server config > .well-known > fallback to openid
+        let scope_str = if !scopes.is_empty() {
             scopes.join(" ")
+        } else if let Some(ref wk) = well_known {
+            wk["scopes_supported"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(" "))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "openid".to_string())
+        } else {
+            "openid".to_string()
         };
 
         let mut url = url::Url::parse(&auth_url)?;
@@ -186,7 +197,7 @@ impl OAuthService {
         }
 
         // Cancel the callback server registration since we're completing directly
-        self.callback_server.cancel(state).await;
+        self.tracker.cancel(state).await;
 
         let (server_url, use_well_known) = self.get_server_url(server_id).await?;
 
@@ -194,7 +205,7 @@ impl OAuthService {
             &self.mcp_registry,
             server_id,
             code,
-            &self.callback_server.redirect_uri(),
+            &self.tracker.redirect_uri(),
             &server_url,
             use_well_known,
         )
@@ -213,7 +224,7 @@ impl OAuthService {
             &self.mcp_registry,
             server_id,
             code,
-            &self.callback_server.redirect_uri(),
+            &self.tracker.redirect_uri(),
             &server_url,
             use_well_known,
         )

@@ -9,6 +9,7 @@ use super::types::{AssetId, BlobHash};
 /// Asset metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[serde(rename_all = "camelCase")]
 pub struct AssetInfo {
     pub id: AssetId,
     pub blob_hash: BlobHash,

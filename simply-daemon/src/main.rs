@@ -69,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
 
     let tracker = net::server::ConnectionTracker::new();
 
+    let oauth_tracker = daemon.oauth_tracker();
     let server = net::rest::start(net::rest::ServerConfig {
         rest_dispatcher,
         port,
@@ -76,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
         daemon_secret,
         user_store: stores.sqlite(),
         token_store,
+        oauth_tracker: Some(oauth_tracker),
     }).await?;
 
     let actual_port = server.port();

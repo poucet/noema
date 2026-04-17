@@ -15,7 +15,8 @@ use crate::oauth::OAuthService;
 
 /// Configuration for starting the MCP service.
 pub struct McpServiceConfig {
-    pub oauth_callback_port: Option<u16>,
+    /// The daemon's public URL — used for OAuth redirect callbacks.
+    pub public_url: String,
 }
 
 /// Encapsulates all MCP concerns: registry, OAuth, auto-connect.
@@ -37,8 +38,8 @@ impl McpService {
         let mcp_config = crate::mcp_config::load_mcp_config();
         let registry = Arc::new(Mutex::new(McpRegistry::new(mcp_config)));
 
-        // Start OAuth callback server
-        let oauth = OAuthService::start(Arc::clone(&registry), config.oauth_callback_port).await?;
+        // OAuth uses the daemon's public URL for callbacks
+        let oauth = OAuthService::new(Arc::clone(&registry), config.public_url);
 
         // Auto-connect configured servers in background
         simply_core::mcp::start_auto_connect(Arc::clone(&registry), None).await;
@@ -59,6 +60,10 @@ impl McpService {
         self.oauth.redirect_uri()
     }
 
+    /// The OAuth callback tracker — share with the axum route handler.
+    pub fn oauth_tracker(&self) -> Arc<crate::oauth::callback::CallbackTracker> {
+        self.oauth.tracker()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,13 +113,22 @@ impl McpApi for McpService {
     }
 
     async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()> {
+        let mut registry = self.registry.lock().await;
+
+        // Resolve OAuth credentials: explicit > stored > default
+        let stored_creds = registry.config().oauth_credentials.get(&request.url).cloned();
+        let client_id = request.client_id.clone()
+            .or_else(|| stored_creds.as_ref().map(|c| c.client_id.clone()));
+        let client_secret = request.client_secret.clone()
+            .or_else(|| stored_creds.as_ref().and_then(|c| c.client_secret.clone()));
+
         let auth = match request.auth_type.as_str() {
             "token" => simply_core::AuthMethod::Token {
                 token: request.auth_token.unwrap_or_default(),
             },
             "oauth" => simply_core::AuthMethod::OAuth {
-                client_id: request.client_id.clone().unwrap_or_else(|| "simply".to_string()),
-                client_secret: request.client_secret.clone(),
+                client_id: client_id.clone().unwrap_or_else(|| "simply".to_string()),
+                client_secret: client_secret.clone(),
                 authorization_url: None,
                 token_url: None,
                 scopes: request.scopes.unwrap_or_default(),
@@ -129,8 +143,8 @@ impl McpApi for McpService {
                     if well_known.get("authorization_endpoint").is_some() {
                         tracing::info!("OAuth detected via .well-known");
                         simply_core::AuthMethod::OAuth {
-                            client_id: "simply".to_string(),
-                            client_secret: None,
+                            client_id: client_id.clone().unwrap_or_else(|| "simply".to_string()),
+                            client_secret: client_secret.clone(),
                             authorization_url: None,
                             token_url: None,
                             scopes: vec![],
@@ -150,18 +164,31 @@ impl McpApi for McpService {
         let use_well_known = matches!(auth, simply_core::AuthMethod::OAuth { .. });
         let config = simply_core::ServerConfig {
             name: request.name,
-            url: request.url,
+            url: request.url.clone(),
             auth,
             oauth_provider: None,
-            client_id: request.client_id,
-            client_secret: request.client_secret,
+            client_id: client_id.clone(),
+            client_secret: client_secret.clone(),
             auth_token: None,
             auto_connect: true,
             auto_retry: true,
             use_well_known,
         };
-        let mut registry = self.registry.lock().await;
         registry.add_server(request.id.clone(), config);
+
+        // Persist OAuth credentials by URL (survives server remove/re-add)
+        if let Some(cid) = &client_id {
+            if !cid.is_empty() {
+                registry.config_mut().oauth_credentials.insert(
+                    request.url,
+                    simply_core::OAuthCredentials {
+                        client_id: cid.clone(),
+                        client_secret,
+                    },
+                );
+            }
+        }
+
         crate::mcp_config::save_mcp_config(registry.config())?;
         Ok(())
     }

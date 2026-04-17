@@ -13,6 +13,7 @@ pub use simply_core::Persistence;
 /// Options when creating a new session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema, TS)]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[serde(rename_all = "camelCase")]
 pub struct CreateSessionOptions {
     pub persistence: Option<Persistence>,
     pub system_prompt: Option<String>,
@@ -24,6 +25,7 @@ pub struct CreateSessionOptions {
 /// Information about a session.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: SessionId,
     pub persistence: Persistence,

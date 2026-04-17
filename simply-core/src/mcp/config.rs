@@ -108,12 +108,24 @@ fn default_true() -> bool {
     true
 }
 
+/// Stored OAuth client credentials, keyed by server URL.
+/// Persists independently from server entries so credentials survive remove/re-add.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OAuthCredentials {
+    pub client_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+}
+
 /// In-memory collection of MCP server configurations.
 /// No file I/O — loading and saving is the daemon's responsibility.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpConfig {
     #[serde(default)]
     pub servers: HashMap<String, ServerConfig>,
+    /// OAuth client credentials keyed by server URL — survives server remove/re-add.
+    #[serde(default)]
+    pub oauth_credentials: HashMap<String, OAuthCredentials>,
 }
 
 impl McpConfig {

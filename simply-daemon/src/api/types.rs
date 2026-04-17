@@ -101,6 +101,7 @@ pub enum DaemonEvent {
 /// An event pushed into the daemon (trigger interface).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[serde(rename_all = "camelCase")]
 pub struct InboundEvent {
     pub event_type: String,
     pub payload: serde_json::Value,
@@ -109,6 +110,7 @@ pub struct InboundEvent {
 /// Information about a stored conversation.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[serde(rename_all = "camelCase")]
 pub struct ConversationInfo {
     pub id: ConversationId,
     pub name: Option<String>,

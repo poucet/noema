@@ -39,6 +39,7 @@ pub struct ServerConfig {
     pub daemon_secret: String,
     pub user_store: Arc<dyn UserStore>,
     pub token_store: Arc<TransientTokenStore>,
+    pub oauth_tracker: Option<Arc<crate::oauth::callback::CallbackTracker>>,
 }
 
 /// Shared state for axum handlers.
@@ -82,6 +83,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         token_store: Arc::clone(&config.token_store),
         user_store: Arc::clone(&config.user_store),
         public_url,
+        oauth_tracker: config.oauth_tracker,
     };
 
     let auth_routes = Router::new()

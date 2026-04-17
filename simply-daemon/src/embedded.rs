@@ -80,9 +80,12 @@ where
             .unwrap_or_else(|| FALLBACK_MODEL_ID.to_string());
 
         let document_resolver: Arc<dyn DocumentResolver> = stores.document();
+        let daemon_port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
+        let public_url = settings.public_url.clone()
+            .unwrap_or_else(|| format!("http://localhost:{}", daemon_port));
         let mcp = Arc::new(McpService::start(
             McpServiceConfig {
-                oauth_callback_port: settings.oauth_callback_port,
+                public_url,
             },
         )
         .await?);
@@ -254,6 +257,7 @@ where
     pub fn user_service(&self) -> Arc<UserService<S>> { Arc::clone(&self.user_svc) }
 
     pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
+    pub fn oauth_tracker(&self) -> Arc<crate::oauth::callback::CallbackTracker> { self.mcp.oauth_tracker() }
     pub fn stores(&self) -> &Arc<dyn Stores<S>> { &self.stores }
     pub fn coordinator(&self) -> &Arc<StorageCoordinator<S>> { &self.coordinator }
 

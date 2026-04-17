@@ -14,6 +14,7 @@ use serde::Deserialize;
 use simply_core::storage::ids::UserId;
 use simply_core::storage::traits::UserStore;
 
+use crate::oauth::callback::CallbackTracker;
 use crate::oauth::providers::resolve_server_auth;
 use crate::token_store::{McpUserToken, TransientTokenStore};
 
@@ -23,6 +24,8 @@ pub struct McpAuthState {
     pub token_store: Arc<TransientTokenStore>,
     pub user_store: Arc<dyn UserStore>,
     pub public_url: String,
+    /// OAuth callback tracker — bridges OAuthService.start_flow() to this route.
+    pub oauth_tracker: Option<Arc<CallbackTracker>>,
 }
 
 #[derive(Deserialize)]
@@ -95,20 +98,33 @@ pub async fn auth_initiate(
 
 /// `GET /auth/mcp/callback?code=...&state=...`
 ///
-/// OAuth callback — exchanges code for token, stores in TransientTokenStore.
+/// OAuth callback — first tries the OAuthService tracker (for flows started
+/// via the RPC API), then falls back to per-user token exchange.
 pub async fn auth_callback(
     State(state): State<McpAuthState>,
     Query(query): Query<AuthCallbackQuery>,
 ) -> Response {
-    if let Some(error) = query.error {
+    if let Some(ref error) = query.error {
+        // Try dispatching error to tracker
+        if let (Some(ref tracker), Some(ref s)) = (&state.oauth_tracker, &query.state) {
+            tracker.dispatch_error(s, error).await;
+        }
         return auth_error_page(&format!("OAuth error: {error}"));
     }
 
-    let (code, state_json) = match (query.code, query.state) {
-        (Some(c), Some(s)) => (c, s),
+    let (code, state_json) = match (&query.code, &query.state) {
+        (Some(c), Some(s)) => (c.clone(), s.clone()),
         _ => return auth_error_page("Missing code or state parameter"),
     };
 
+    // Try the OAuthService tracker first (for flows started via oAuthApi.startOauth)
+    if let Some(ref tracker) = state.oauth_tracker {
+        if tracker.dispatch(&state_json, &code).await {
+            return auth_success_page("MCP Server");
+        }
+    }
+
+    // Fall back to per-user token exchange (for flows started via /auth/mcp/{server_id})
     let state_decoded = match urlencoding::decode(&state_json) {
         Ok(s) => s.to_string(),
         Err(_) => state_json,

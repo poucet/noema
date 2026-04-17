@@ -6,6 +6,7 @@ use ts_rs::TS;
 
 /// Information returned when starting an OAuth flow.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "admin/src/lib/generated/types/")]
 pub struct OAuthFlowInfo {
     /// The authorization URL the user should open in their browser.
