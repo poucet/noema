@@ -261,8 +261,10 @@ fn auth_success_page(server_id: &str) -> Response {
         <body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a1a;color:#fff">
         <div style="text-align:center">
         <h1 style="color:#14b8a6">Connected to {server_id}</h1>
-        <p>You can close this window and return to Discord.</p>
-        </div></body></html>"#
+        <p>This window will close automatically…</p>
+        </div>
+        <script>setTimeout(function(){{ window.close(); }}, 1500);</script>
+        </body></html>"#
     ))
     .into_response()
 }
