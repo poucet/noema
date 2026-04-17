@@ -1,0 +1,14 @@
+---
+import Base from '../layouts/Base.astro';
+import GeneralSettings from '../components/GeneralSettings.svelte';
+import ApiKeySettings from '../components/ApiKeySettings.svelte';
+import McpSettings from '../components/McpSettings.svelte';
+---
+
+<Base title="Settings — simply-daemon">
+  <div class="space-y-10">
+    <GeneralSettings client:load />
+    <ApiKeySettings client:load />
+    <McpSettings client:load />
+  </div>
+</Base>
