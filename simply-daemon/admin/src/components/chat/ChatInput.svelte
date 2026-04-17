@@ -1,5 +1,6 @@
 <script lang="ts">
   import { chatStore } from '../../lib/stores/chat.svelte';
+  import VoiceControls from './VoiceControls.svelte';
 
   let text = $state('');
   let textarea: HTMLTextAreaElement;
@@ -8,7 +9,6 @@
     const msg = text.trim();
     if (!msg) return;
     text = '';
-    // Reset height
     if (textarea) textarea.style.height = 'auto';
     await chatStore.sendMessage(msg);
   }
@@ -25,10 +25,16 @@
     textarea.style.height = 'auto';
     textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
   }
+
+  async function handleTranscription(transcribed: string) {
+    // Auto-send voice transcriptions directly
+    await chatStore.sendMessage(transcribed);
+  }
 </script>
 
 <div class="border-t border-border px-4 py-3">
   <div class="flex gap-2 items-end">
+    <VoiceControls onTranscription={handleTranscription} />
     <textarea
       bind:this={textarea}
       bind:value={text}

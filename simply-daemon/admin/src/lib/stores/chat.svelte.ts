@@ -160,6 +160,7 @@ class ChatStore {
   async sendMessage(text: string) {
     if (!this.currentSessionId || !text.trim()) return;
 
+    console.log('[chat] sendMessage, session:', this.currentSessionId);
     this.isLoading = true;
     this.error = null;
     this.streamingMessage = null;
@@ -174,6 +175,7 @@ class ChatStore {
       await this.sess.sendMessage(this.currentSessionId, {
         content: [{ type: 'text', text }],
       });
+      console.log('[chat] sendMessage succeeded, waiting for events...');
     } catch (e) {
       setError(this, 'Failed to send', e);
       this.isLoading = false;
@@ -204,11 +206,13 @@ class ChatStore {
   // --- Event subscription ---
 
   private subscribeEvents() {
-    const unsub = this.transport.subscribe<{ session_id: string; event: DaemonEvent }>(
-      'session.event',
-      (payload) => {
+    // Session stream events are sent as "session.create_session.event" notifications
+    const unsub = this.transport.subscribe<DaemonEvent>(
+      'session.create_session.event',
+      (event) => {
+        console.log('[chat] daemon event:', event);
         if (!this.currentConversationId) return;
-        this.handleDaemonEvent(payload.event);
+        this.handleDaemonEvent(event);
       },
     );
     this.unsubs.push(unsub);
@@ -233,6 +237,9 @@ class ChatStore {
 
     if ('AssistantContent' in event) {
       const block = event.AssistantContent as ContentBlock;
+      // Skip text blocks — those are already handled incrementally via TextDelta.
+      // Only handle non-text content blocks (tool calls, images, etc.)
+      if (block.type === 'text') return;
       const content = block as unknown as ResolvedContent;
       if (this.streamingMessage) {
         this.streamingMessage = {
@@ -271,8 +278,19 @@ class ChatStore {
 
   // --- Cleanup ---
 
-  destroy() {
+  /** Close session and unsubscribe. Safe to call from beforeunload (fire-and-forget). */
+  cleanup() {
     this.unsubscribeEvents();
+    if (this.currentSessionId) {
+      // keepalive: true survives page navigation, unlike regular fetch
+      const base = (typeof location !== 'undefined' && location.port !== '9800')
+        ? 'http://localhost:9800' : '';
+      fetch(`${base}/api/session/${this.currentSessionId}`, {
+        method: 'DELETE',
+        keepalive: true,
+      }).catch(() => {});
+      this.currentSessionId = null;
+    }
   }
 }
 

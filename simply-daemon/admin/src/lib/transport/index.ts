@@ -187,6 +187,7 @@ class HttpTransportImpl implements Transport {
     this.ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
+        console.log('[ws] message:', msg);
         if (msg.method && msg.id === undefined) {
           this.dispatch(msg.method, msg.params);
         }
@@ -207,7 +208,10 @@ class HttpTransportImpl implements Transport {
   private dispatch(method: string, params: unknown): void {
     const cbs = this.listeners.get(method);
     if (cbs) {
+      console.log(`[ws] dispatch "${method}" → ${cbs.size} listener(s)`);
       for (const cb of cbs) cb(params);
+    } else {
+      console.log(`[ws] dispatch "${method}" → no listeners (registered: ${[...this.listeners.keys()].join(', ') || 'none'})`);
     }
   }
 }

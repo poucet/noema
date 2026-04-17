@@ -52,7 +52,7 @@ export interface ConnectionInfo {
 export interface SessionListItem {
   id: string;
   model_id: string;
-  persistence: string;
+  persistence: string | { Persistent: { conversation_id: string } };
   created_at: string;
 }
 

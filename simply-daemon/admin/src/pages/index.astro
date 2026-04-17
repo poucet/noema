@@ -78,9 +78,6 @@ import Base from '../layouts/Base.astro';
       <div class="form-row"><label>Failed</label><span id="eq-failed" class="mono">0</span></div>
     </div>
 
-    <h2>API Keys</h2>
-    <div class="provider-grid" id="dash-providers"></div>
-
     <h2>Users</h2>
     <table>
       <thead><tr><th>ID</th><th>Email</th><th></th></tr></thead>
@@ -206,7 +203,6 @@ import Base from '../layouts/Base.astro';
     document.getElementById('dashboard')!.classList.remove('hidden');
     const settings = await api.getSettings();
     document.getElementById('admin-greeting')!.textContent = `Admin: ${settings.user_email || 'localhost'}`;
-    renderProviders('dash-providers');
     refresh();
     setInterval(refresh, 5000);
   }
@@ -225,7 +221,11 @@ import Base from '../layouts/Base.astro';
       document.getElementById('sess-count')!.textContent = String(sess.length);
       document.getElementById('sess-body')!.innerHTML = sess.length === 0
         ? '<tr><td colspan="4" class="empty">No active sessions</td></tr>'
-        : sess.map(s => `<tr><td class="mono">${s.id}</td><td>${s.model_id}</td><td>${s.persistence}</td><td>${s.created_at}</td></tr>`).join('');
+        : sess.map(s => {
+          const pType = typeof s.persistence === 'string' ? s.persistence
+            : s.persistence?.Persistent ? 'Persistent' : 'Ephemeral';
+          return `<tr><td class="mono">${s.id}</td><td>${s.model_id}</td><td>${pType}</td><td>${s.created_at}</td></tr>`;
+        }).join('');
     } catch {}
 
     try {

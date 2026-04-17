@@ -1,15 +1,28 @@
 <script lang="ts">
-  import { chatStore } from '../../lib/stores/chat.svelte';
-  import type { ModelInfo } from '../../lib/generated/types';
+  import { onMount } from 'svelte';
+  import { getTransport } from '../lib/transport';
+  import { modelApi } from '../lib/generated/api';
+  import type { ModelInfo } from '../lib/generated/types';
 
+  let models = $state<ModelInfo[]>([]);
+  let currentModelId = $state('');
   let open = $state(false);
   let search = $state('');
 
-  // Group models by provider, filter to text-capable only
+  onMount(async () => {
+    try {
+      const t = getTransport();
+      const api = modelApi(t);
+      models = await api.listModels();
+      currentModelId = await api.defaultModelId();
+    } catch (e) {
+      console.error('[model-selector] load failed:', e);
+    }
+  });
+
+  const textModels = $derived(models.filter(m => m.definition.capabilities.includes('Text')));
+
   const grouped = $derived(() => {
-    const textModels = chatStore.models.filter(m =>
-      m.definition.capabilities.includes('Text')
-    );
     const q = search.toLowerCase();
     const filtered = q
       ? textModels.filter(m => {
@@ -32,15 +45,20 @@
   }
 
   function currentDisplayName(): string {
-    const id = chatStore.currentModelId;
-    if (!id) return 'Select model';
-    const model = chatStore.models.find(m => `${m.id.provider}/${m.id.model}` === id);
+    if (!currentModelId) return 'No model';
+    const model = models.find(m => `${m.id.provider}/${m.id.model}` === currentModelId);
     if (model) return displayName(model);
-    return id.split('/').pop() || id;
+    return currentModelId.split('/').pop() || currentModelId;
   }
 
-  function select(modelId: string) {
-    chatStore.setModel(modelId);
+  async function select(modelId: string) {
+    try {
+      const t = getTransport();
+      await modelApi(t).setDefaultModel(modelId);
+      currentModelId = modelId;
+    } catch (e) {
+      console.error('[model-selector] set failed:', e);
+    }
     open = false;
     search = '';
   }
@@ -48,21 +66,21 @@
   function badges(model: ModelInfo): string[] {
     const caps = model.definition.capabilities;
     const b: string[] = [];
-    if (caps.includes('Vision')) b.push('vision');
-    if (caps.includes('Tools')) b.push('tools');
-    if (caps.includes('Thinking')) b.push('thinking');
+    if (caps.includes('Vision')) b.push('👁');
+    if (caps.includes('Tools')) b.push('🔧');
+    if (caps.includes('Thinking')) b.push('💭');
     return b;
   }
 </script>
 
 <div class="relative">
   <button
-    class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 border border-border
-           text-sm text-muted hover:text-fg hover:border-accent/50 transition-colors"
+    class="flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 border border-border
+           text-xs text-muted hover:text-fg hover:border-accent/50 transition-colors"
     onclick={() => open = !open}
   >
-    <span class="truncate max-w-52">{currentDisplayName()}</span>
-    <svg class="w-3 h-3 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <span class="truncate max-w-36">{currentDisplayName()}</span>
+    <svg class="w-2.5 h-2.5 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
     </svg>
   </button>
@@ -78,13 +96,13 @@
         autofocus
       />
       <div class="max-h-80 overflow-y-auto">
-        {#each [...grouped().entries()] as [provider, models]}
+        {#each [...grouped().entries()] as [provider, providerModels]}
           <div class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted/40 font-medium">
             {provider}
           </div>
-          {#each models as model}
+          {#each providerModels as model}
             {@const fullId = `${model.id.provider}/${model.id.model}`}
-            {@const isActive = fullId === chatStore.currentModelId}
+            {@const isActive = fullId === currentModelId}
             <button
               class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 flex items-center gap-2
                      {isActive ? 'text-accent bg-accent/5' : 'text-fg/80'}"
@@ -97,7 +115,7 @@
               {/if}
               <span class="truncate flex-1">{displayName(model)}</span>
               {#each badges(model) as badge}
-                <span class="text-[9px] px-1 py-0.5 rounded bg-white/5 text-muted/50">{badge}</span>
+                <span class="text-[9px]">{badge}</span>
               {/each}
             </button>
           {/each}

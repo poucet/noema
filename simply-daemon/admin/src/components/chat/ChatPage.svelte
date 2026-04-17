@@ -4,10 +4,21 @@
   import ConversationList from './ConversationList.svelte';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
-  import ModelSelector from './ModelSelector.svelte';
 
-  onMount(() => chatStore.init());
-  onDestroy(() => chatStore.destroy());
+  let handleUnload: (() => void) | null = null;
+
+  onMount(() => {
+    chatStore.init();
+    handleUnload = () => chatStore.cleanup();
+    window.addEventListener('beforeunload', handleUnload);
+  });
+
+  onDestroy(() => {
+    if (typeof window !== 'undefined' && handleUnload) {
+      window.removeEventListener('beforeunload', handleUnload);
+    }
+    chatStore.cleanup();
+  });
 </script>
 
 <div class="flex h-[calc(100vh-3rem)] overflow-hidden">
@@ -31,7 +42,6 @@
         <span class="text-muted truncate">
           {chatStore.currentConversation?.name || 'Untitled'}
         </span>
-        <ModelSelector />
       </div>
 
       <!-- Messages -->
