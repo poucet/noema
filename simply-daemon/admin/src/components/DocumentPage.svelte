@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { api, type DocumentInfo, type DocumentDetail, type TabInfo } from '../lib/api';
+  import { api } from '../lib/api';
+  import type { DocumentInfo, DocumentDetail, TabInfo } from '../lib/generated/types';
   import DocumentEditor from './DocumentEditor.svelte';
 
   function autofocus(node: HTMLElement) {
@@ -53,7 +54,6 @@
   async function createDocument() {
     if (!newDocTitle.trim()) return;
     try {
-      // Pass empty string as content so backend creates an initial tab
       const doc = await api.createDocument(newDocTitle.trim(), '');
       newDocTitle = '';
       creatingDoc = false;
@@ -94,7 +94,6 @@
       newTabTitle = '';
       creatingTab = false;
       await reloadDocument();
-      // Select the newly created tab
       selectedTab = selectedDoc!.tabs.find(t => t.id === tab.id) ?? selectedTab;
     } catch (e) {
       console.error('Failed to create tab:', e);
@@ -124,6 +123,52 @@
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(loadDocuments, 300);
   }
+
+  // Build tree structure from flat tab list
+  interface TabNode {
+    tab: TabInfo;
+    children: TabNode[];
+    depth: number;
+  }
+
+  function buildTabTree(tabs: TabInfo[]): TabNode[] {
+    const byId = new Map<string, TabNode>();
+    const roots: TabNode[] = [];
+
+    // Create nodes
+    for (const tab of tabs) {
+      byId.set(tab.id, { tab, children: [], depth: 0 });
+    }
+
+    // Build tree
+    for (const tab of tabs) {
+      const node = byId.get(tab.id)!;
+      const parentId = (tab as any).parent_tab_id ?? (tab as any).parentTabId;
+      if (parentId && byId.has(parentId)) {
+        const parent = byId.get(parentId)!;
+        node.depth = parent.depth + 1;
+        parent.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+
+    return roots;
+  }
+
+  function flattenTree(nodes: TabNode[]): TabNode[] {
+    const result: TabNode[] = [];
+    function walk(list: TabNode[]) {
+      for (const node of list) {
+        result.push(node);
+        walk(node.children);
+      }
+    }
+    walk(nodes);
+    return result;
+  }
+
+  const tabTree = $derived(selectedDoc ? flattenTree(buildTabTree(selectedDoc.tabs)) : []);
 </script>
 
 <div class="flex h-[calc(100vh-3rem)]">
@@ -156,10 +201,9 @@
           >
             <div class="font-medium text-fg truncate pr-5">{doc.title}</div>
             <div class="text-xs text-muted flex justify-between">
-              <span>{doc.tab_count} tab{doc.tab_count !== 1 ? 's' : ''}</span>
-              <span>{formatDate(doc.updated_at)}</span>
+              <span>{doc.tabCount} tab{doc.tabCount !== 1 ? 's' : ''}</span>
+              <span>{formatDate(doc.updatedAt)}</span>
             </div>
-            <div class="text-xs text-muted truncate opacity-60">{doc.user_id}</div>
             <button
               class="absolute right-2 top-2 text-xs text-muted hover:text-danger opacity-0 group-hover:opacity-100"
               onclick={(e) => { e.stopPropagation(); deleteDocument(doc.id); }}
@@ -174,7 +218,6 @@
     <div class="p-3 border-t border-border">
       {#if creatingDoc}
         <form onsubmit={(e) => { e.preventDefault(); createDocument(); }}>
-          <!-- svelte-ignore binding_property_non_reactive -->
           <input
             type="text"
             bind:value={newDocTitle}
@@ -195,70 +238,67 @@
     </div>
   </div>
 
-  <!-- Main: tabs + editor -->
-  <div class="flex-1 flex flex-col min-w-0">
-    {#if selectedDoc}
-      <!-- Tab bar -->
-      <div class="flex items-center border-b border-border bg-surface px-2 gap-0.5 shrink-0">
-        {#each selectedDoc.tabs as tab (tab.id)}
-          <button
-            class="px-3 py-1.5 text-sm border-b-2 transition-colors group relative"
-            class:border-accent={selectedTab?.id === tab.id}
-            class:text-fg={selectedTab?.id === tab.id}
-            class:border-transparent={selectedTab?.id !== tab.id}
-            class:text-muted={selectedTab?.id !== tab.id}
-            class:hover:text-fg={selectedTab?.id !== tab.id}
-            onclick={() => { selectedTab = tab; }}
-          >
-            {tab.title}
-            {#if selectedDoc.tabs.length > 1}
-              <span
-                class="ml-1.5 text-xs text-muted hover:text-danger opacity-0 group-hover:opacity-100"
-                onclick={(e) => { e.stopPropagation(); deleteTab(tab.id); }}
-              >&times;</span>
-            {/if}
-          </button>
-        {/each}
-
+  {#if selectedDoc}
+    <!-- Tab sidebar (left of editor) -->
+    <div class="w-56 shrink-0 border-r border-border flex flex-col bg-surface">
+      <div class="p-2 border-b border-border flex items-center justify-between">
+        <span class="text-xs font-medium text-muted truncate">{selectedDoc.title}</span>
         {#if creatingTab}
-          <form class="flex items-center" onsubmit={(e) => { e.preventDefault(); createTab(); }}>
-            <!-- svelte-ignore binding_property_non_reactive -->
+          <form class="flex-1 ml-2" onsubmit={(e) => { e.preventDefault(); createTab(); }}>
             <input
               type="text"
               bind:value={newTabTitle}
               placeholder="Tab name"
               use:autofocus
               onkeydown={(e) => { if (e.key === 'Escape') creatingTab = false; }}
-              class="px-2 py-1 text-sm bg-bg border border-border rounded text-fg placeholder:text-muted focus:outline-none focus:border-accent w-32"
+              class="w-full px-1.5 py-0.5 text-xs bg-bg border border-border rounded text-fg placeholder:text-muted focus:outline-none focus:border-accent"
             />
           </form>
         {:else}
           <button
-            class="px-2 py-1.5 text-sm text-muted hover:text-accent"
+            class="text-xs text-muted hover:text-accent px-1"
             onclick={() => creatingTab = true}
           >+</button>
         {/if}
-
-        <div class="flex-1"></div>
-        <span class="text-xs text-muted pr-2">{selectedDoc.title}</span>
       </div>
 
-      <!-- Editor -->
-      <div class="flex-1 min-h-0">
-        {#if selectedTab}
-          {#key selectedTab.id}
-            <DocumentEditor content={selectedTab.content_markdown ?? ''} onsave={saveTab} />
-          {/key}
-        {:else}
-          <div class="flex items-center justify-center h-full text-muted text-sm">
-            No tabs yet — click + to create one
-          </div>
-        {/if}
+      <div class="flex-1 overflow-y-auto">
+        {#each tabTree as node}
+          {@const isActive = selectedTab?.id === node.tab.id}
+          <button
+            class="w-full text-left py-1.5 pr-2 text-xs hover:bg-elevated transition-colors group flex items-center gap-1
+                   {isActive ? 'bg-elevated text-fg' : 'text-muted'}"
+            style="padding-left: {8 + node.depth * 16}px"
+            onclick={() => { selectedTab = node.tab; }}
+          >
+            <span class="shrink-0">{node.tab.icon || (node.children.length > 0 ? '📁' : '📄')}</span>
+            <span class="truncate flex-1">{node.tab.title}</span>
+            {#if selectedDoc!.tabs.length > 1}
+              <span
+                class="text-muted hover:text-danger opacity-0 group-hover:opacity-100 shrink-0"
+                onclick={(e) => { e.stopPropagation(); deleteTab(node.tab.id); }}
+              >&times;</span>
+            {/if}
+          </button>
+        {/each}
       </div>
-    {:else}
-      <div class="flex items-center justify-center h-full text-muted text-sm">
-        Select a document or create a new one
-      </div>
-    {/if}
-  </div>
+    </div>
+
+    <!-- Editor -->
+    <div class="flex-1 flex flex-col min-w-0">
+      {#if selectedTab}
+        {#key selectedTab.id}
+          <DocumentEditor content={(selectedTab as any).contentMarkdown ?? (selectedTab as any).content_markdown ?? ''} onsave={saveTab} />
+        {/key}
+      {:else}
+        <div class="flex items-center justify-center h-full text-muted text-sm">
+          No tabs yet — click + to create one
+        </div>
+      {/if}
+    </div>
+  {:else}
+    <div class="flex-1 flex items-center justify-center text-muted text-sm">
+      Select a document or create a new one
+    </div>
+  {/if}
 </div>
