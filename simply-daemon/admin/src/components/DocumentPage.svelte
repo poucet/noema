@@ -111,8 +111,17 @@
     }
   }
 
+  function getTabCount(doc: any): number {
+    return doc.tabCount ?? doc.tab_count ?? 0;
+  }
+
+  function getUpdatedAt(doc: any): number {
+    return doc.updatedAt ?? doc.updated_at ?? 0;
+  }
+
   function formatDate(ts: number): string {
-    return new Date(ts * 1000).toLocaleDateString(undefined, {
+    // Timestamps are already in milliseconds
+    return new Date(ts).toLocaleDateString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
     });
   }
@@ -201,8 +210,8 @@
           >
             <div class="font-medium text-fg truncate pr-5">{doc.title}</div>
             <div class="text-xs text-muted flex justify-between">
-              <span>{doc.tabCount} tab{doc.tabCount !== 1 ? 's' : ''}</span>
-              <span>{formatDate(doc.updatedAt)}</span>
+              <span>{getTabCount(doc)} tab{getTabCount(doc) !== 1 ? 's' : ''}</span>
+              <span>{formatDate(getUpdatedAt(doc))}</span>
             </div>
             <button
               class="absolute right-2 top-2 text-xs text-muted hover:text-danger opacity-0 group-hover:opacity-100"
@@ -271,7 +280,11 @@
             style="padding-left: {8 + node.depth * 16}px"
             onclick={() => { selectedTab = node.tab; }}
           >
-            <span class="shrink-0">{node.tab.icon || (node.children.length > 0 ? '📁' : '📄')}</span>
+            {#if node.tab.icon}
+              <span class="shrink-0">{node.tab.icon}</span>
+            {:else if !/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(node.tab.title)}
+              <span class="shrink-0">{node.children.length > 0 ? '📁' : '📄'}</span>
+            {/if}
             <span class="truncate flex-1">{node.tab.title}</span>
             {#if selectedDoc!.tabs.length > 1}
               <span
