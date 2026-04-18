@@ -3,12 +3,14 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use simply_rpc::{BinaryResponse, BinaryUpload, RequestContext};
+#[cfg(feature = "ts")]
 use ts_rs::TS;
-use super::types::{AssetId, BlobHash};
+use crate::types::{AssetId, BlobHash};
 
 /// Asset metadata.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct AssetInfo {
     pub id: AssetId,

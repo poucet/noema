@@ -1,115 +1,54 @@
-//! DaemonApi — the core traits that all daemon consumers depend on.
+//! Re-export the daemon API from the `simply-daemon-api` crate.
 //!
-//! Split into focused traits:
-//! - [`SessionApi`] — session lifecycle and event streaming
-//! - [`ConversationApi`] — persistent conversation entity CRUD
-//! - [`AssetApi`] — binary content upload
-//! - [`McpApi`] — MCP service registration and tool discovery
-//! - [`OAuthApi`] — OAuth flow management
-//! - [`ModelApi`] — model listing and management
-//! - [`VoiceApi`] — voice pipeline
-//! - [`SearchApi`] — semantic search over embedded documents
+//! All trait definitions and types now live in `simply-daemon-api`.
+//! This module re-exports everything for backward compatibility.
 
-#[macro_use] mod session;
-#[macro_use] mod conversation;
-#[macro_use] mod asset;
-#[macro_use] mod document;
-#[macro_use] mod mcp;
-#[macro_use] mod oauth;
-#[macro_use] mod model;
-#[macro_use] mod voice;
-#[macro_use] mod core;
-#[macro_use] mod search;
-#[macro_use] mod user;
-pub mod types;
+pub use simply_daemon_api::*;
 
-pub use session::*;
-pub use conversation::*;
-pub use asset::*;
-pub use document::*;
-pub use mcp::*;
-pub use oauth::*;
-pub use model::*;
-pub use voice::*;
-pub use self::core::*;
-pub use search::*;
-pub use user::*;
-pub use types::*;
-pub use simply_rpc::{BinaryResponse, BinaryUpload};
-
-/// Trait providing access to all daemon API services.
-///
-/// Implemented by `EmbeddedDaemon` (returns inner services directly)
-/// and `RemoteDaemon` (returns `self` for each, since it implements all traits via RPC).
-///
-/// Consumers call `daemon.model().list_models()`, `daemon.session().create_session()`, etc.
-pub trait Daemon: Send + Sync {
-    fn session(&self) -> &dyn SessionApi;
-    fn conversation(&self) -> &dyn ConversationApi;
-    fn document(&self) -> &dyn DocumentApi;
-    fn mcp(&self) -> &dyn McpApi;
-    fn oauth(&self) -> &dyn OAuthApi;
-    fn model(&self) -> &dyn ModelApi;
-    fn asset(&self) -> &dyn AssetApi;
-    fn voice(&self) -> &dyn VoiceApi;
-    fn core(&self) -> &dyn CoreApi;
-    fn search(&self) -> &dyn SearchApi;
-    fn user(&self) -> &dyn UserApi;
-    /// Composite tool service — includes daemon REST tools + MCP tools (global, no user context).
-    fn tools(&self) -> &dyn simply_core::ToolService;
-}
+// Re-export implementation-specific types that consumers in this crate need
+// but that don't belong in the API crate.
+pub use simply_core::storage::{
+    Entity, EntityType,
+    Document, DocumentSource, DocumentTab, StoredEditable,
+    DocumentStore, Stores, UserStore,
+    FsBlobStore, SqliteStore,
+};
+pub use simply_core::storage::coordinator::StorageCoordinator;
+pub use simply_core::storage::traits::StorageTypes;
+pub use simply_core::mcp::{ServerStatus, spawn_retry_task, start_auto_connect};
 
 #[cfg(test)]
 mod ts_export {
     use ts_rs::TS;
 
-    /// Export all API types to TypeScript via ts-rs.
-    ///
-    /// Run with: cargo test -p simply-daemon ts_export
-    /// Output goes to: admin/src/lib/generated/types/
     #[test]
     fn export_all_types() {
-        // Daemon-owned types
-        super::types::SessionId::export_all().expect("SessionId");
-        super::types::DaemonEvent::export_all().expect("DaemonEvent");
-        super::types::InboundEvent::export_all().expect("InboundEvent");
-        super::types::ConversationInfo::export_all().expect("ConversationInfo");
+        use simply_daemon_api::*;
 
-        // Session types
-        super::session::SessionInfo::export_all().expect("SessionInfo");
-        super::session::CreateSessionOptions::export_all().expect("CreateSessionOptions");
-        super::session::UserMessage::export_all().expect("UserMessage");
-        super::session::SeedMessage::export_all().expect("SeedMessage");
-
-        // Document types
-        super::document::DocumentInfo::export_all().expect("DocumentInfo");
-        super::document::DocumentDetail::export_all().expect("DocumentDetail");
-        super::document::TabInfo::export_all().expect("TabInfo");
-        super::document::CreateDocumentRequest::export_all().expect("CreateDocumentRequest");
-        super::document::CreateTabRequest::export_all().expect("CreateTabRequest");
-        super::document::UpdateTabRequest::export_all().expect("UpdateTabRequest");
-
-        // MCP types
-        super::mcp::McpServerInfo::export_all().expect("McpServerInfo");
-        super::mcp::AddMcpServerRequest::export_all().expect("AddMcpServerRequest");
-        super::mcp::RegisterEphemeralRequest::export_all().expect("RegisterEphemeralRequest");
-        super::mcp::UpdateMcpServerRequest::export_all().expect("UpdateMcpServerRequest");
-
-        // OAuth types
-        super::oauth::OAuthFlowInfo::export_all().expect("OAuthFlowInfo");
-
-        // Asset types
-        super::asset::AssetInfo::export_all().expect("AssetInfo");
-
-        // Voice types
-        super::voice::VoiceProviderInfo::export_all().expect("VoiceProviderInfo");
-
-        // Search types
-        super::search::SearchHit::export_all().expect("SearchHit");
-        super::search::SearchRequest::export_all().expect("SearchRequest");
-        super::search::ReindexStatus::export_all().expect("ReindexStatus");
-
-        // Embedding queue
-        crate::embedding_queue::EmbeddingQueueStatus::export_all().expect("EmbeddingQueueStatus");
+        SessionId::export_all().expect("SessionId");
+        DaemonEvent::export_all().expect("DaemonEvent");
+        InboundEvent::export_all().expect("InboundEvent");
+        ConversationInfo::export_all().expect("ConversationInfo");
+        EmbeddingQueueStatus::export_all().expect("EmbeddingQueueStatus");
+        SessionInfo::export_all().expect("SessionInfo");
+        CreateSessionOptions::export_all().expect("CreateSessionOptions");
+        UserMessage::export_all().expect("UserMessage");
+        SeedMessage::export_all().expect("SeedMessage");
+        DocumentInfo::export_all().expect("DocumentInfo");
+        DocumentDetail::export_all().expect("DocumentDetail");
+        TabInfo::export_all().expect("TabInfo");
+        CreateDocumentRequest::export_all().expect("CreateDocumentRequest");
+        CreateTabRequest::export_all().expect("CreateTabRequest");
+        UpdateTabRequest::export_all().expect("UpdateTabRequest");
+        McpServerInfo::export_all().expect("McpServerInfo");
+        AddMcpServerRequest::export_all().expect("AddMcpServerRequest");
+        RegisterEphemeralRequest::export_all().expect("RegisterEphemeralRequest");
+        UpdateMcpServerRequest::export_all().expect("UpdateMcpServerRequest");
+        OAuthFlowInfo::export_all().expect("OAuthFlowInfo");
+        AssetInfo::export_all().expect("AssetInfo");
+        VoiceProviderInfo::export_all().expect("VoiceProviderInfo");
+        SearchHit::export_all().expect("SearchHit");
+        SearchRequest::export_all().expect("SearchRequest");
+        ReindexStatus::export_all().expect("ReindexStatus");
     }
 }

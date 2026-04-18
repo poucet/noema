@@ -75,41 +75,4 @@ impl Daemon for RemoteDaemon {
     fn tools(&self) -> &dyn simply_core::ToolService { &self.mcp }
 }
 
-/// Remote tool service — delegates to the MCP remote client.
-#[async_trait]
-impl simply_core::ToolService for RemoteMcpApi {
-    async fn get_definitions(&self) -> Vec<llm::ToolDefinition> {
-        let anon = simply_rpc::RequestContext::anonymous();
-        McpApi::list_all_tools(self, &anon).await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|t| llm::ToolDefinition {
-                name: t.name.to_string(),
-                description: t.description.map(|d| d.to_string()),
-                input_schema: serde_json::from_value(
-                    serde_json::to_value(&*t.input_schema).unwrap_or_default()
-                ).unwrap_or_default(),
-            })
-            .collect()
-    }
-
-    async fn call_tool(
-        &self,
-        name: &str,
-        arguments: serde_json::Value,
-    ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
-        let anon = simply_rpc::RequestContext::anonymous();
-        let result = McpApi::call_tool_direct(
-            self,
-            &anon,
-            CallToolRequestParams::new(name.to_string())
-                .with_arguments(arguments.as_object().cloned().unwrap_or_default()),
-        ).await?;
-        Ok(result.content.into_iter().filter_map(|c| {
-            match c.raw {
-                rmcp::model::RawContent::Text(t) => Some(llm::ToolResultContent::text(t.text)),
-                _ => None,
-            }
-        }).collect())
-    }
-}
+// ToolService impl for RemoteMcpApi is in simply-daemon-api crate.

@@ -14,14 +14,14 @@ use std::fs;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=src/api/");
+    println!("cargo:rerun-if-changed=api/src/");
 
     if std::env::var("SKIP_ADMIN_BUILD").is_ok() {
         return;
     }
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let api_dir = manifest_dir.join("src/api");
+    let api_dir = manifest_dir.join("api/src");
     let admin_dir = manifest_dir.join("admin");
     let generated_dir = admin_dir.join("src/lib/generated");
 

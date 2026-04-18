@@ -3,13 +3,15 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use simply_rpc::RequestContext;
+#[cfg(feature = "ts")]
 use ts_rs::TS;
 
-use crate::embedding_queue::EmbeddingQueueStatus;
+use crate::types::EmbeddingQueueStatus;
 
 /// A search result with document context.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct SearchHit {
     pub document_id: String,
     pub document_title: String,
@@ -21,8 +23,9 @@ pub struct SearchHit {
 }
 
 /// Search request.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct SearchRequest {
     pub query: String,
     pub document_type: Option<String>,
@@ -30,8 +33,9 @@ pub struct SearchRequest {
 }
 
 /// Status of a reindex operation.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct ReindexStatus {
     pub message: String,
     pub tabs_queued: usize,

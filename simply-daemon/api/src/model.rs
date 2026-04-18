@@ -1,7 +1,7 @@
 //! Model listing and management.
 
 use async_trait::async_trait;
-use super::types::{ModelInfo, ProviderInfo};
+use crate::types::{ModelInfo, ProviderInfo};
 
 #[simply_rpc::rpc_service("model")]
 #[async_trait]

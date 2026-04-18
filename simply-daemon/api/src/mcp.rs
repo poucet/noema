@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use simply_rpc::RequestContext;
+#[cfg(feature = "ts")]
 use ts_rs::TS;
 
 // Re-export rmcp types used in the API.
@@ -11,9 +12,10 @@ pub use rmcp::model::{
 };
 
 /// Information about a configured MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct McpServerInfo {
     pub id: String,
     pub name: String,
@@ -28,9 +30,10 @@ pub struct McpServerInfo {
 }
 
 /// Request to add a new MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct AddMcpServerRequest {
     pub id: String,
     pub name: String,
@@ -43,17 +46,19 @@ pub struct AddMcpServerRequest {
 }
 
 /// Request to register an ephemeral MCP server at runtime.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct RegisterEphemeralRequest {
     pub id: String,
     pub url: String,
 }
 
 /// Request to update MCP server settings.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct UpdateMcpServerRequest {
     pub name: Option<String>,
     pub url: Option<String>,
@@ -119,4 +124,47 @@ pub trait McpApi: Send + Sync {
     /// Call a tool by name (routed via ToolService to the providing server).
     #[rpc(post = "/mcp/tools/call", no_tool)]
     async fn call_tool_direct(&self, ctx: &RequestContext, request: CallToolRequestParams) -> anyhow::Result<CallToolResult>;
+}
+
+/// Implement ToolService for the remote MCP client so it can be used as a tool provider.
+#[async_trait]
+impl simply_core::ToolService for RemoteMcpApi {
+    async fn get_definitions(&self) -> Vec<llm::ToolDefinition> {
+        let anon = simply_rpc::RequestContext::anonymous();
+        McpApi::list_all_tools(self, &anon).await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| llm::ToolDefinition {
+                name: t.name.to_string(),
+                description: t.description.map(|d| d.to_string()),
+                input_schema: serde_json::from_value(
+                    serde_json::to_value(&*t.input_schema).unwrap_or_default()
+                ).unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
+        let anon = simply_rpc::RequestContext::anonymous();
+        let result = McpApi::call_tool_direct(
+            self,
+            &anon,
+            CallToolRequestParams::new(name.to_string())
+                .with_arguments(arguments.as_object().cloned().unwrap_or_default()),
+        ).await?;
+
+        let content: Vec<llm::ToolResultContent> = result.content.into_iter().map(|c| {
+            match c.raw {
+                rmcp::model::RawContent::Text(t) => llm::ToolResultContent::text(t.text),
+                rmcp::model::RawContent::Image(img) => llm::ToolResultContent::image(img.data, img.mime_type),
+                _ => llm::ToolResultContent::text("[unsupported content type]"),
+            }
+        }).collect();
+
+        Ok(content)
+    }
 }

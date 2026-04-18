@@ -7642,6 +7642,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simply-core",
+ "simply-daemon-api",
  "simply-rpc",
  "simply-voice",
  "syn 2.0.117",
@@ -7655,6 +7656,26 @@ dependencies = [
  "ts-rs",
  "url",
  "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "simply-daemon-api"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "llm",
+ "rmcp",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "simply-core",
+ "simply-rpc",
+ "simply-voice",
+ "tokio",
+ "tracing",
+ "ts-rs",
  "uuid",
 ]
 

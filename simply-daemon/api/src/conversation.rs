@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use simply_rpc::RequestContext;
-use super::types::{ConversationId, ConversationInfo, ResolvedMessage};
+use crate::types::{ConversationId, ConversationInfo, ResolvedMessage};
 
 /// CRUD on stored conversations.
 ///

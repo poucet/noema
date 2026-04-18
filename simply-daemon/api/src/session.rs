@@ -3,16 +3,18 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use simply_rpc::RequestContext;
+#[cfg(feature = "ts")]
 use ts_rs::TS;
 use tokio::sync::broadcast;
 
-use super::types::{DaemonEvent, InboundEvent, InputContent, SessionId};
+use crate::types::{DaemonEvent, InboundEvent, InputContent, SessionId};
 
 pub use simply_core::Persistence;
 
 /// Options when creating a new session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionOptions {
     pub persistence: Option<Persistence>,
@@ -23,8 +25,9 @@ pub struct CreateSessionOptions {
 }
 
 /// Information about a session.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: SessionId,
@@ -34,15 +37,17 @@ pub struct SessionInfo {
 }
 
 /// A user message sent to a session.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct UserMessage {
     pub content: Vec<InputContent>,
 }
 
 /// A seed message.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct SeedMessage {
     pub role: llm::Role,
     pub content: Vec<InputContent>,

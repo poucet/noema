@@ -2,12 +2,14 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ts")]
 use ts_rs::TS;
 
 /// Information returned when starting an OAuth flow.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct OAuthFlowInfo {
     /// The authorization URL the user should open in their browser.
     pub auth_url: String,

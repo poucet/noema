@@ -1,9 +1,9 @@
-//! Shared types — both daemon API types and re-exported simply-core/llm types.
+//! API types — re-exported simply-core/llm types + daemon-specific types.
 //!
-//! Clients (Noema, Lumina) should import from here or `simply_daemon::types`,
-//! not from simply-core or llm directly.
+//! This is the canonical import point for consumers of the daemon API.
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ts")]
 use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
@@ -15,19 +15,14 @@ pub use simply_core::storage::ids::{
 };
 
 // ---------------------------------------------------------------------------
-// Re-exported storage types
+// Re-exported storage types (API-facing only)
 // ---------------------------------------------------------------------------
 
 pub use simply_core::storage::{
     InputContent, ResolvedContent, ResolvedMessage,
-    Entity, EntityType,
-    Document, DocumentSource, DocumentTab, StoredEditable,
-    DocumentStore, Stores, UserStore,
-    FsBlobStore, SqliteStore,
+    DocumentSource,
 };
 pub use simply_core::storage::types::BlobHash;
-pub use simply_core::storage::coordinator::StorageCoordinator;
-pub use simply_core::storage::traits::StorageTypes;
 
 // ---------------------------------------------------------------------------
 // Re-exported LLM types
@@ -43,24 +38,22 @@ pub use llm::{
 // ---------------------------------------------------------------------------
 
 pub use simply_core::{AuthMethod, McpRegistry, ServerConfig};
-pub use simply_core::mcp::{ServerStatus, spawn_retry_task, start_auto_connect};
 
 // ---------------------------------------------------------------------------
 // Daemon-specific types
 // ---------------------------------------------------------------------------
 
 /// Opaque session identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub struct SessionId(String);
 
 impl SessionId {
-    /// Generate a new unique session ID.
     pub fn generate() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
 
-    /// Create from an existing string (for deserialization / WS protocol).
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
@@ -77,8 +70,9 @@ impl std::fmt::Display for SessionId {
 }
 
 /// Events streamed from the daemon to session subscribers.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 pub enum DaemonEvent {
     SessionReady { session_id: SessionId },
     UserMessage(ChatMessage),
@@ -99,8 +93,9 @@ pub enum DaemonEvent {
 }
 
 /// An event pushed into the daemon (trigger interface).
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct InboundEvent {
     pub event_type: String,
@@ -108,12 +103,24 @@ pub struct InboundEvent {
 }
 
 /// Information about a stored conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationInfo {
     pub id: ConversationId,
     pub name: Option<String>,
     pub message_count: usize,
     pub created_at: i64,
+}
+
+/// Status of the embedding queue.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+pub struct EmbeddingQueueStatus {
+    pub pending: usize,
+    pub processing: usize,
+    pub completed: u64,
+    pub failed: u64,
 }

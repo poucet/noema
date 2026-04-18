@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["commands", "config", "simply-core", "simply-core/llm", "simply-audio", "simply-voice", "simply-daemon", "simply-rpc", "simply-rpc/macros", "noema-ext", "noema/src-tauri", "mcp-gdocs", "lumina", "lumina/macros"]
+members = ["commands", "config", "simply-core", "simply-core/llm", "simply-audio", "simply-voice", "simply-daemon", "simply-daemon/api", "simply-rpc", "simply-rpc/macros", "noema-ext", "noema/src-tauri", "mcp-gdocs", "lumina", "lumina/macros"]
 default-members = ["simply-daemon"]
 
 [workspace.package]
@@ -14,6 +14,7 @@ config = { path = "config" }
 simply-core = { path = "simply-core" }
 simply-rpc = { path = "simply-rpc" }
 simply-daemon = { path = "simply-daemon" }
+simply-daemon-api = { path = "simply-daemon/api" }
 llm = { path = "simply-core/llm" }
 lumina-macros = { path = "lumina/macros" }
 noema-ext = { path = "noema-ext" }

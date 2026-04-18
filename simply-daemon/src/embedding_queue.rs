@@ -25,19 +25,7 @@ pub struct EmbedJob {
     pub text: String,
 }
 
-/// Status of the embedding queue.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, ts_rs::TS)]
-#[ts(export, export_to = "admin/src/lib/generated/types/")]
-pub struct EmbeddingQueueStatus {
-    /// Number of jobs waiting to be processed.
-    pub pending: usize,
-    /// Number of jobs currently being processed.
-    pub processing: usize,
-    /// Total jobs completed since startup.
-    pub completed: u64,
-    /// Total jobs failed since startup.
-    pub failed: u64,
-}
+pub use simply_daemon_api::EmbeddingQueueStatus;
 
 /// Trait for submitting embedding jobs.
 ///

@@ -1,0 +1,25 @@
+[package]
+name = "simply-daemon-api"
+version.workspace = true
+edition.workspace = true
+description = "API trait definitions for simply-daemon — shared by daemon, skills, and clients"
+
+[features]
+default = []
+ts = ["dep:ts-rs"]
+
+[dependencies]
+simply-core = { workspace = true }
+simply-rpc = { workspace = true }
+simply-voice = { workspace = true }
+llm = { workspace = true }
+rmcp = { workspace = true, features = ["client"] }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+ts-rs = { version = "10", features = ["serde-compat", "serde-json-impl"], optional = true }
