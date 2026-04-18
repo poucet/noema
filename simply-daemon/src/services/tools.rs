@@ -122,8 +122,8 @@ pub struct CompositeToolService {
     daemon_tools: Arc<DaemonToolService>,
     mcp_tools: McpToolRegistry,
     mcp: Arc<McpService>,
-    user_tools: Arc<crate::user_tools::UserToolServiceCache>,
-    token_store: Arc<crate::token_store::TransientTokenStore>,
+    user_tools: Arc<crate::services::user_tools::UserToolServiceCache>,
+    token_store: Arc<crate::services::token_store::TransientTokenStore>,
     skills: tokio::sync::RwLock<Vec<Arc<dyn simply_daemon_api::Skill>>>,
 }
 
@@ -132,8 +132,8 @@ impl CompositeToolService {
         daemon_tools: Arc<DaemonToolService>,
         mcp_tools: McpToolRegistry,
         mcp: Arc<McpService>,
-        user_tools: Arc<crate::user_tools::UserToolServiceCache>,
-        token_store: Arc<crate::token_store::TransientTokenStore>,
+        user_tools: Arc<crate::services::user_tools::UserToolServiceCache>,
+        token_store: Arc<crate::services::token_store::TransientTokenStore>,
     ) -> Self {
         Self { daemon_tools, mcp_tools, mcp, user_tools, token_store, skills: tokio::sync::RwLock::new(Vec::new()) }
     }
@@ -206,7 +206,7 @@ impl CompositeToolService {
 /// per-user MCP connections, skills with user tokens.
 struct UserScopedToolService {
     daemon_tools: Arc<DaemonToolService>,
-    mcp_callers: Vec<crate::user_tools::McpCaller>,
+    mcp_callers: Vec<crate::services::user_tools::McpCaller>,
     skills: Vec<Arc<dyn simply_daemon_api::Skill>>,
     skill_ctx: simply_daemon_api::SkillCallContext,
     mcp_fallback: Arc<McpService>,
