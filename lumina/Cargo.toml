@@ -19,6 +19,7 @@ lumina-macros = { workspace = true }
 simply-daemon-api = { workspace = true }
 simply-daemon = { workspace = true, optional = true }
 simply-rpc = { workspace = true }
+mcp-gdocs = { workspace = true, features = ["skill"] }
 
 # Discord
 serenity = { workspace = true }

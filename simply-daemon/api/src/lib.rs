@@ -40,11 +40,22 @@ pub use skill::{Skill, SkillCallContext, SkillFactory};
 pub use remote::RemoteDaemon;
 pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Context passed to tool call handlers (from __ctx in WS reverse calls).
+#[derive(Debug, Clone, Default)]
+pub struct ToolCallContext {
+    /// The calling user's ID (from the daemon's user resolution).
+    pub user_id: Option<String>,
+    /// OAuth tokens keyed by server/provider ID.
+    pub tokens: HashMap<String, String>,
+}
+
 /// Handler for tool calls from the daemon.
+/// Receives (name, arguments, ctx) where ctx contains user tokens from __ctx.
 pub type ToolCallHandler = Arc<
-    dyn Fn(String, serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+    dyn Fn(String, serde_json::Value, ToolCallContext) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>
     + Send + Sync
 >;
 
@@ -66,12 +77,29 @@ pub trait Daemon: Send + Sync {
     fn user(&self) -> &dyn UserApi;
     fn tools(&self) -> &dyn simply_core::ToolService;
 
-    /// Register tools that this client provides to the daemon.
+    /// Register a skill with the daemon. Convenience wrapper around `register_client_tools`.
+    async fn register_skill(&self, skill: Arc<dyn Skill>) -> anyhow::Result<()> {
+        let tools = skill.tools();
+        let handler: ToolCallHandler = Arc::new(move |name, args, ctx| {
+            let skill = Arc::clone(&skill);
+            Box::pin(async move {
+                let skill_ctx = skill::SkillCallContext {
+                    user_id: types::UserId::from_string(ctx.user_id.as_deref().unwrap_or("anonymous")),
+                    tokens: ctx.tokens,
+                };
+                let result = skill.call_tool(&name, args, &skill_ctx).await?;
+                Ok(serde_json::to_value(&result)?)
+            })
+        });
+        self.register_client_tools(tools, handler).await
+    }
+
+    /// Register tools that this client provides to the daemon (low-level).
     ///
     /// - **Embedded**: registers directly with the tool service (no network)
     /// - **Remote**: sends `tools.register` over WS, sets up reverse call handler
     ///
-    /// The `handler` is called when the daemon needs to invoke one of these tools.
+    /// Prefer `register_skill()` for a higher-level API.
     async fn register_client_tools(
         &self,
         tools: Vec<llm::ToolDefinition>,

@@ -271,8 +271,9 @@ impl ToolService for UserScopedToolService {
         }
 
         // 4. Try WS-registered tools (from connected clients like Lumina)
+        //    Pass user's tokens so the remote skill can access OAuth services
         if self.ws_tools.has_tool(name).await {
-            return self.ws_tools.call_tool(name, arguments).await;
+            return self.ws_tools.call_tool(name, arguments, Some(&self.skill_ctx.tokens), Some(self.skill_ctx.user_id.as_str())).await;
         }
 
         // 5. Fall back to global MCP registry
@@ -322,9 +323,9 @@ impl ToolService for CompositeToolService {
                 return skill.call_tool(name, arguments, &ctx).await;
             }
         }
-        // Try WS-registered tools
+        // Try WS-registered tools (no tokens in global context)
         if self.ws_tools.has_tool(name).await {
-            return self.ws_tools.call_tool(name, arguments).await;
+            return self.ws_tools.call_tool(name, arguments, None, None).await;
         }
         // Fall back to MCP
         self.mcp_tools.call_tool(name, arguments).await

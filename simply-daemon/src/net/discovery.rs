@@ -7,12 +7,8 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use simply_rpc::{ServiceRouter, RpcService};
-
 use crate::api::*;
-use crate::embedded::EmbeddedDaemon;
 use simply_daemon_api::RemoteDaemon;
-use crate::services::CoreService;
 use crate::storage::SqliteStores;
 
 use simply_rpc::ws_client::ConnectionState;
@@ -123,7 +119,6 @@ pub async fn connect_or_host(
         vector_store,
         token_store: Arc::clone(&token_store),
         voice: crate::builder::create_voice_service(),
-        skill_factories: vec![],
     }.build().await?;
 
     let daemon = Arc::clone(&handle.daemon);

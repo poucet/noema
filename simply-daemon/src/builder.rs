@@ -28,8 +28,6 @@ pub struct DaemonBuilder<S: StorageTypes> {
     pub vector_store: Arc<dyn simply_core::embedding::VectorStore>,
     pub token_store: Arc<crate::services::token_store::TransientTokenStore>,
     pub voice: VoiceService,
-    /// Skill factories — called with `Arc<dyn Daemon>` after daemon construction.
-    pub skill_factories: Vec<simply_daemon_api::SkillFactory>,
 }
 
 /// A running daemon — call `serve()` to block until shutdown.
@@ -210,13 +208,6 @@ where
             user_svc,
             tools.clone(),
         )?;
-
-        // Construct skills with the daemon handle, register with tool service
-        let daemon_ref: Arc<dyn simply_daemon_api::Daemon> = daemon.clone();
-        for factory in self.skill_factories {
-            let skill = factory(Arc::clone(&daemon_ref));
-            tools.register_skill_runtime(skill).await;
-        }
 
         let ws_tools = Arc::new(crate::services::WsToolRegistry::new());
         Ok(DaemonHandle { daemon, kill_rx, token_store, ws_tools })

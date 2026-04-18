@@ -16,7 +16,7 @@ use serenity::prelude::*;
 use songbird::SerenityInit;
 use songbird::Config as SongbirdConfig;
 use songbird::driver::{DecodeMode, DecodeConfig, Channels, SampleRate};
-use simply_daemon_api::{Daemon, McpApi, RegisterEphemeralRequest};
+use simply_daemon_api::{Daemon, McpApi, RegisterEphemeralRequest, Skill};
 
 pub struct McpServerKey;
 impl TypeMapKey for McpServerKey { type Value = mcp::LuminaMcpServer; }
@@ -41,6 +41,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Connect to daemon — embedded (host or connect) or remote-only
     let daemon = connect_daemon(&settings).await?;
+
+    // Register skills with daemon (works over WS for both embedded and remote)
+    register_skills(&daemon).await?;
 
     // Start Lumina's MCP server and register tools with daemon
     let http = Arc::new(serenity::http::Http::new(&token));
@@ -105,6 +108,17 @@ async fn connect_daemon(settings: &config::Settings) -> anyhow::Result<Arc<dyn D
         let remote = simply_daemon_api::RemoteDaemon::connect_as(&url, "lumina", &secret, None).await?;
         Ok(remote)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Skills — registered with daemon via register_client_tools (works embedded + remote)
+// ---------------------------------------------------------------------------
+
+async fn register_skills(daemon: &Arc<dyn Daemon>) -> anyhow::Result<()> {
+    let gdocs = Arc::new(mcp_gdocs::GDocsSkill::new(Arc::clone(daemon)));
+    daemon.register_skill(gdocs).await?;
+    tracing::info!("GDocs skill registered with daemon");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

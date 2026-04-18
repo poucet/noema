@@ -39,10 +39,7 @@ async fn main() -> anyhow::Result<()> {
         coordinator,
         vector_store,
         token_store,
-        voice: simply_daemon::builder::create_voice_service(),
-        skill_factories: vec![
-            Box::new(|daemon| Box::new(mcp_gdocs::GDocsSkill::new(daemon))),
-        ],
+        voice: simply_daemon::builder::create_voice_service()
     }.build().await?;
 
     handle.serve(port, daemon_secret).await

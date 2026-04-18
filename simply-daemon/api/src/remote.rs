@@ -51,51 +51,6 @@ impl RemoteDaemon {
         }))
     }
 
-    /// Register tools with the daemon over the existing WS connection.
-    ///
-    /// The daemon can call these tools back over the same WS connection
-    /// (reverse RPC). The `handler` is called for each tool invocation.
-    pub async fn register_tools<F>(&self, tools: Vec<llm::ToolDefinition>, handler: F) -> anyhow::Result<()>
-    where
-        F: Fn(String, serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-           + Send + Sync + 'static,
-    {
-        // Set up the reverse call handler
-        let handler = Arc::new(handler);
-        self.conn.ws().set_reverse_handler(Arc::new(move |id, method, params, write_tx| {
-            let handler = handler.clone();
-            Box::pin(async move {
-                // Only handle tools.call
-                if method != "tools.call" {
-                    let resp = serde_json::json!({ "id": id, "error": { "message": format!("unknown reverse method: {method}") } });
-                    let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
-                    return;
-                }
-
-                let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let arguments = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
-
-                let result = handler(name, arguments).await;
-
-                let resp = match result {
-                    Ok(value) => serde_json::json!({ "id": id, "result": value }),
-                    Err(e) => serde_json::json!({ "id": id, "error": { "message": e.to_string() } }),
-                };
-                let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
-            })
-        })).await;
-
-        // Send tools.register to daemon
-        let result = self.conn.rpc_call(
-            "tools.register",
-            serde_json::json!({ "tools": tools }),
-            &simply_rpc::RequestContext::anonymous(),
-        ).await?;
-
-        tracing::info!(result = %result, "tools registered with daemon over WS");
-        Ok(())
-    }
-
     pub fn connection_state(&self) -> ConnectionState {
         self.conn.connection_state()
     }
@@ -125,10 +80,48 @@ impl Daemon for RemoteDaemon {
         tools: Vec<llm::ToolDefinition>,
         handler: crate::ToolCallHandler,
     ) -> anyhow::Result<()> {
-        self.register_tools(tools, move |name, args| {
+        // Set up reverse call handler that extracts __ctx and passes ToolCallContext
+        let handler = handler.clone();
+        self.conn.ws().set_reverse_handler(Arc::new(move |id, method, params, write_tx| {
             let handler = handler.clone();
-            Box::pin(async move { handler(name, args).await })
-        }).await
+            Box::pin(async move {
+                if method != "tools.call" {
+                    let resp = serde_json::json!({ "id": id, "error": { "message": format!("unknown reverse method: {method}") } });
+                    let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
+                    return;
+                }
+
+                let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let arguments = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
+                let ctx = params.get("__ctx")
+                    .and_then(|v| {
+                        let tokens = v.get("tokens")
+                            .and_then(|t| serde_json::from_value(t.clone()).ok())
+                            .unwrap_or_default();
+                        let user_id = v.get("user_id")
+                            .and_then(|u| u.as_str())
+                            .map(|s| s.to_string());
+                        Some(crate::ToolCallContext { user_id, tokens })
+                    })
+                    .unwrap_or_default();
+
+                let result = handler(name, arguments, ctx).await;
+                let resp = match result {
+                    Ok(value) => serde_json::json!({ "id": id, "result": value }),
+                    Err(e) => serde_json::json!({ "id": id, "error": { "message": e.to_string() } }),
+                };
+                let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
+            })
+        })).await;
+
+        // Send tools.register to daemon
+        let result = self.conn.rpc_call(
+            "tools.register",
+            serde_json::json!({ "tools": tools }),
+            &simply_rpc::RequestContext::anonymous(),
+        ).await?;
+        tracing::info!(result = %result, "client tools registered with daemon over WS");
+        Ok(())
     }
 }
 

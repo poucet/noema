@@ -49,7 +49,11 @@ impl simply_daemon_api::Skill for ClientToolSkill {
         arguments: serde_json::Value,
         _ctx: &simply_daemon_api::SkillCallContext,
     ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
-        let result = (self.handler)(name.to_string(), arguments).await?;
+        let tool_ctx = simply_daemon_api::ToolCallContext {
+            user_id: Some(_ctx.user_id.as_str().to_string()),
+            tokens: _ctx.tokens.clone(),
+        };
+        let result = (self.handler)(name.to_string(), arguments, tool_ctx).await?;
         // Parse result as tool content
         if let Some(arr) = result.get("content").and_then(|v| v.as_array()) {
             Ok(arr.iter().map(|c| {
