@@ -14,23 +14,32 @@ use crate::Scope;
 pub struct RequestContext {
     /// User identity and authorization scope.
     pub scope: Scope,
-    // future: trace_id, request_id, locale, etc.
+    /// OAuth tokens for this user, keyed by provider ID.
+    /// Populated by the daemon from its token store before tool dispatch.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub tokens: std::collections::HashMap<String, String>,
 }
 
 impl RequestContext {
     pub fn anonymous() -> Self {
         Self {
             scope: Scope::anonymous(),
+            tokens: Default::default(),
         }
     }
 
     pub fn with_scope(scope: Scope) -> Self {
-        Self { scope }
+        Self { scope, tokens: Default::default() }
+    }
+
+    pub fn with_token(mut self, provider_id: impl Into<String>, token: impl Into<String>) -> Self {
+        self.tokens.insert(provider_id.into(), token.into());
+        self
     }
 }
 
 impl From<Scope> for RequestContext {
     fn from(scope: Scope) -> Self {
-        Self { scope }
+        Self { scope, tokens: Default::default() }
     }
 }

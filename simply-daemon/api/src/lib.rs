@@ -20,6 +20,7 @@
 #[macro_use] mod search;
 #[macro_use] mod user;
 pub mod client;
+pub mod provider;
 pub mod remote;
 pub mod skill;
 pub mod types;
@@ -36,7 +37,8 @@ pub use self::core::*;
 pub use search::*;
 pub use user::*;
 pub use types::*;
-pub use skill::{Skill, SkillCallContext, SkillFactory};
+pub use skill::{Skill, SkillCallContext, SkillFactory, OAuthRequirement};
+pub use provider::ToolProvider;
 pub use remote::RemoteDaemon;
 pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
