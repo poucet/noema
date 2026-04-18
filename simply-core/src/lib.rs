@@ -4,7 +4,6 @@ pub mod agent;
 pub mod embedding;
 pub mod mcp;
 pub mod session_manager;
-pub mod skill;
 pub mod storage;
 pub mod traffic_log;
 
@@ -18,4 +17,3 @@ pub use session_manager::{
 };
 
 pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, OAuthCredentials, ServerConfig};
-pub use skill::{Skill, SkillContext};

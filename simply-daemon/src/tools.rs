@@ -118,7 +118,7 @@ pub struct CompositeToolService {
     mcp_tools: McpToolRegistry,
     mcp: Arc<McpService>,
     user_tools: Arc<crate::user_tools::UserToolServiceCache>,
-    skills: Vec<Arc<dyn simply_core::Skill>>,
+    skills: Vec<Arc<dyn simply_daemon_api::Skill>>,
 }
 
 impl CompositeToolService {
@@ -133,7 +133,7 @@ impl CompositeToolService {
 
     /// Register a skill. Skills provide additional tools alongside
     /// daemon REST tools and MCP tools.
-    pub fn register_skill(mut self, skill: Arc<dyn simply_core::Skill>) -> Self {
+    pub fn register_skill(mut self, skill: Arc<dyn simply_daemon_api::Skill>) -> Self {
         tracing::info!(skill = skill.name(), tools = skill.tools().len(), "registered skill");
         self.skills.push(skill);
         self

@@ -1,6 +1,7 @@
 //! Google Docs skill — provides import tools to the daemon.
 //!
 //! Uses GoogleDocsClient directly (no MCP server needed).
+//! Accesses daemon via trait objects — no dependency on daemon internals.
 //! Requires the `skill` feature flag.
 
 use std::sync::Arc;
@@ -11,82 +12,71 @@ use base64::Engine;
 use serde::Deserialize;
 use tracing::info;
 
-use simply_core::skill::{Skill, SkillContext};
-use simply_core::storage::coordinator::StorageCoordinator;
-use simply_core::storage::ids::UserId;
-use simply_core::storage::traits::{DocumentStore, Stores, StorageTypes};
-use simply_core::storage::types::DocumentType;
-use simply_core::storage::DocumentSource;
-
+use simply_daemon_api::skill::Skill;
+use simply_daemon_api::types::UserId;
 use llm::{ToolDefinition, ToolResultContent};
 
 use crate::GoogleDocsClient;
 
-/// Google Docs skill — import documents from Google Drive into the daemon.
-pub struct GDocsSkill<S: StorageTypes> {
-    ctx: SkillContext<S>,
+// ---------------------------------------------------------------------------
+// Trait objects the skill needs — daemon provides adapters
+// ---------------------------------------------------------------------------
+
+/// Document operations the skill needs.
+#[async_trait]
+pub trait SkillDocumentApi: Send + Sync {
+    async fn create_document(&self, user_id: &UserId, title: &str, source_id: Option<&str>) -> Result<String>;
+    async fn create_tab(&self, doc_id: &str, title: &str, content: &str, parent_tab_id: Option<&str>, tab_index: i32) -> Result<String>;
+    async fn find_by_source(&self, user_id: &UserId, source_id: &str) -> Result<Option<String>>;
 }
 
-impl<S: StorageTypes> GDocsSkill<S> {
-    pub fn new(ctx: SkillContext<S>) -> Self {
-        Self { ctx }
+/// Asset storage the skill needs.
+#[async_trait]
+pub trait SkillAssetApi: Send + Sync {
+    async fn store_asset(&self, base64_data: &str, mime_type: &str) -> Result<String>;
+}
+
+// ---------------------------------------------------------------------------
+// GDocsSkill
+// ---------------------------------------------------------------------------
+
+pub struct GDocsSkill {
+    documents: Arc<dyn SkillDocumentApi>,
+    assets: Arc<dyn SkillAssetApi>,
+}
+
+impl GDocsSkill {
+    pub fn new(documents: Arc<dyn SkillDocumentApi>, assets: Arc<dyn SkillAssetApi>) -> Self {
+        Self { documents, assets }
     }
 
-    /// Get a Google Docs client using the stored OAuth token for a user.
-    /// Falls back to the global MCP server's token if available.
-    fn get_client(&self, access_token: &str) -> GoogleDocsClient {
-        GoogleDocsClient::new(access_token.to_string())
-    }
-
-    async fn handle_import(
-        &self,
-        args: ImportArgs,
-        user_id: &UserId,
-    ) -> Result<Vec<ToolResultContent>> {
+    async fn handle_import(&self, args: ImportArgs, user_id: &UserId) -> Result<Vec<ToolResultContent>> {
         let access_token = args.access_token
             .ok_or_else(|| anyhow::anyhow!("access_token required for Google Docs import"))?;
-        let client = self.get_client(&access_token);
+        let client = GoogleDocsClient::new(access_token);
 
         info!(doc_id = %args.doc_id, "importing Google Doc");
 
-        // Extract from Google
-        let extracted = client.extract_document(&args.doc_id).await?;
-        info!(
-            title = %extracted.title,
-            tabs = extracted.tabs.len(),
-            images = extracted.images.len(),
-            "extracted Google Doc"
-        );
-
-        let doc_store = self.ctx.stores.document();
-
-        // Check if already imported
-        if let Some(existing) = doc_store
-            .get_document_by_source(user_id, DocumentSource::GoogleDrive, &args.doc_id)
-            .await?
-        {
+        if let Some(existing_id) = self.documents.find_by_source(user_id, &args.doc_id).await? {
             return Ok(vec![ToolResultContent::text(format!(
-                "Document '{}' already imported (id: {}). Use gdocs_sync to update.",
-                extracted.title, existing.id
+                "Document already imported (id: {existing_id}). Use gdocs_sync to update.",
             ))]);
         }
 
-        // Create document
-        let doc_id = doc_store
-            .create_document(user_id, &extracted.title, DocumentType::KNOWLEDGE, DocumentSource::GoogleDrive, Some(&args.doc_id))
-            .await?;
+        let extracted = client.extract_document(&args.doc_id).await?;
+        info!(title = %extracted.title, tabs = extracted.tabs.len(), images = extracted.images.len(), "extracted");
 
-        // Store images as assets
-        let mut image_id_map = std::collections::HashMap::new();
+        let doc_id = self.documents.create_document(user_id, &extracted.title, Some(&args.doc_id)).await?;
+
+        // Store images
+        let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         for image in &extracted.images {
-            let data_base64 = base64::engine::general_purpose::STANDARD.encode(&image.data);
-            let asset_id = self.ctx.coordinator
-                .store_asset(&data_base64, &image.mime_type)
-                .await?;
-            image_id_map.insert(image.object_id.clone(), asset_id.into_string());
+            let data_b64 = base64::engine::general_purpose::STANDARD.encode(&image.data);
+            let blob_hash = self.assets.store_asset(&data_b64, &image.mime_type).await?;
+            image_id_map.insert(image.object_id.clone(), blob_hash);
         }
 
-        // Topological sort: create parent tabs before children
+        // Topological sort: parents first
         let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut pending: Vec<_> = extracted.tabs.into_iter().collect();
         let mut max_passes = pending.len() + 1;
@@ -96,100 +86,50 @@ impl<S: StorageTypes> GDocsSkill<S> {
             let mut deferred = Vec::new();
             for tab in pending.drain(..) {
                 if let Some(ref parent) = tab.parent_tab_id {
-                    if !id_map.contains_key(parent) {
-                        deferred.push(tab);
-                        continue;
-                    }
+                    if !id_map.contains_key(parent) { deferred.push(tab); continue; }
                 }
-
-                let parent_tab_id = tab.parent_tab_id.as_ref()
-                    .and_then(|pid| id_map.get(pid))
-                    .cloned();
-
-                // Replace image object references with asset URLs
+                let parent_tab_id = tab.parent_tab_id.as_ref().and_then(|pid| id_map.get(pid)).map(|s| s.as_str());
                 let mut content = tab.content_markdown.clone();
-                for (object_id, blob_hash) in &image_id_map {
-                    let object_ref = format!("object:{}", object_id);
-                    let asset_url = format!("/api/blob/{}", blob_hash);
-                    content = content.replace(&object_ref, &asset_url);
+                for (oid, hash) in &image_id_map {
+                    content = content.replace(&format!("object:{oid}"), &format!("/api/blob/{hash}"));
                 }
-
                 let title = match &tab.icon {
-                    Some(icon) => format!("{} {}", icon, tab.title),
+                    Some(icon) => format!("{icon} {}", tab.title),
                     None => tab.title.clone(),
                 };
-
-                let tab_id = doc_store
-                    .create_document_tab(
-                        &doc_id,
-                        parent_tab_id.as_ref().map(|id| simply_core::storage::ids::TabId::from_string(id.clone())).as_ref(),
-                        tab.tab_index,
-                        &title,
-                        tab.icon.as_deref(),
-                        Some(&content),
-                        &[], // referenced_assets
-                        Some(&simply_core::storage::ids::TabId::from_string(tab.source_tab_id.clone())),
-                    )
-                    .await?;
-
-                id_map.insert(tab.source_tab_id.clone(), tab_id.as_str().to_string());
+                let tab_id = self.documents.create_tab(&doc_id, &title, &content, parent_tab_id, tab.tab_index).await?;
+                id_map.insert(tab.source_tab_id.clone(), tab_id);
             }
             pending = deferred;
         }
 
         Ok(vec![ToolResultContent::text(format!(
-            "Imported '{}' with {} tabs and {} images (doc_id: {})",
-            extracted.title,
-            id_map.len(),
-            image_id_map.len(),
-            doc_id,
+            "Imported '{}' with {} tabs and {} images (doc_id: {doc_id})",
+            extracted.title, id_map.len(), image_id_map.len(),
         ))])
     }
 
-    async fn handle_list(
-        &self,
-        args: ListArgs,
-    ) -> Result<Vec<ToolResultContent>> {
+    async fn handle_list(&self, args: ListArgs) -> Result<Vec<ToolResultContent>> {
         let access_token = args.access_token
-            .ok_or_else(|| anyhow::anyhow!("access_token required for Google Docs listing"))?;
-        let client = self.get_client(&access_token);
-
-        let files = client
-            .list_documents(args.query.as_deref(), args.limit.unwrap_or(20))
-            .await?;
-
+            .ok_or_else(|| anyhow::anyhow!("access_token required"))?;
+        let client = GoogleDocsClient::new(access_token);
+        let files = client.list_documents(args.query.as_deref(), args.limit.unwrap_or(20)).await?;
         let result: Vec<serde_json::Value> = files.into_iter().map(|f| {
-            serde_json::json!({
-                "id": f.id,
-                "name": f.name,
-                "modified_time": f.modified_time,
-            })
+            serde_json::json!({ "id": f.id, "name": f.name, "modified_time": f.modified_time })
         }).collect();
-
-        Ok(vec![ToolResultContent::text(
-            serde_json::to_string_pretty(&result)?
-        )])
+        Ok(vec![ToolResultContent::text(serde_json::to_string_pretty(&result)?)])
     }
 }
 
 #[derive(Deserialize)]
-struct ImportArgs {
-    doc_id: String,
-    access_token: Option<String>,
-}
+struct ImportArgs { doc_id: String, access_token: Option<String> }
 
 #[derive(Deserialize)]
-struct ListArgs {
-    query: Option<String>,
-    limit: Option<usize>,
-    access_token: Option<String>,
-}
+struct ListArgs { query: Option<String>, limit: Option<usize>, access_token: Option<String> }
 
 #[async_trait]
-impl<S: StorageTypes> Skill for GDocsSkill<S> {
-    fn name(&self) -> &str {
-        "gdocs"
-    }
+impl Skill for GDocsSkill {
+    fn name(&self) -> &str { "gdocs" }
 
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
@@ -206,27 +146,15 @@ impl<S: StorageTypes> Skill for GDocsSkill<S> {
         ]
     }
 
-    async fn call_tool(
-        &self,
-        name: &str,
-        arguments: serde_json::Value,
-        user_id: &UserId,
-    ) -> Result<Vec<ToolResultContent>> {
+    async fn call_tool(&self, name: &str, arguments: serde_json::Value, user_id: &UserId) -> Result<Vec<ToolResultContent>> {
         match name {
-            "gdocs_import" => {
-                let args: ImportArgs = serde_json::from_value(arguments)?;
-                self.handle_import(args, user_id).await
-            }
-            "gdocs_list" => {
-                let args: ListArgs = serde_json::from_value(arguments)?;
-                self.handle_list(args).await
-            }
+            "gdocs_import" => self.handle_import(serde_json::from_value(arguments)?, user_id).await,
+            "gdocs_list" => self.handle_list(serde_json::from_value(arguments)?).await,
             _ => anyhow::bail!("unknown tool: {name}"),
         }
     }
 }
 
-// Schema types for tool definitions (separate from runtime args to include descriptions)
 #[derive(schemars::JsonSchema)]
 struct ImportToolInput {
     /// The Google Doc ID to import.
