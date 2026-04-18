@@ -98,6 +98,12 @@ impl UserToolServiceCache {
         self.cache.lock().await.remove(user_id.as_str());
     }
 
+    /// Build per-user MCP callers (used by CompositeToolService::for_user).
+    pub async fn build_mcp_callers_for(&self, user_id: &UserId) -> Result<Vec<McpCaller>> {
+        let accessible = self.resolve_accessible_servers(user_id).await;
+        self.build_mcp_callers(user_id, &accessible).await
+    }
+
     /// Which MCP servers can this user access?
     async fn resolve_accessible_servers(&self, user_id: &UserId) -> Vec<String> {
         let registry = self.mcp_registry.lock().await;
@@ -199,8 +205,8 @@ enum CallerKind {
 }
 
 /// A single MCP server's tool definitions + connection strategy.
-struct McpCaller {
-    tools: Vec<ToolDefinition>,
+pub struct McpCaller {
+    pub tools: Vec<ToolDefinition>,
     kind: CallerKind,
 }
 
@@ -219,7 +225,7 @@ impl McpCaller {
     }
 
     /// Call a tool, connecting on demand for per-user servers.
-    async fn call_tool(
+    pub async fn call_tool(
         &self,
         name: String,
         arguments: Option<serde_json::Map<String, serde_json::Value>>,

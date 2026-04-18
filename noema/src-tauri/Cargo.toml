@@ -38,7 +38,6 @@ regex = "1"
 config = { workspace = true }
 simply-audio = { workspace = true, features = ["browser", "backend-cpal"] }
 simply-voice = { workspace = true }
-noema-ext = { workspace = true }
 simply-daemon = { workspace = true }
 simply-rpc = { workspace = true }
 mcp-gdocs = { workspace = true }

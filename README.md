@@ -33,7 +33,6 @@ export GEMINI_API_KEY="..."
 | `simply-daemon` | Daemon — storage, sessions, MCP server, DaemonApi trait |
 | `simply-audio` | Audio — Whisper STT, CPAL backend, voice coordination |
 | `noema` | Tauri 2 desktop app (Rust backend + React/TypeScript frontend) |
-| `noema-ext` | Extension utilities (PDF extraction) |
 | `noema-mcp-gdocs` | Standalone MCP server for Google Docs |
 | `commands` | Command framework with proc-macro support |
 | `config` | Configuration, path management, API key encryption |

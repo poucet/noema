@@ -53,7 +53,6 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     search: Arc<SearchService<S>>,
     user_svc: Arc<UserService<S>>,
     tools: Arc<CompositeToolService>,
-    user_tools: Arc<crate::user_tools::UserToolServiceCache>,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -73,7 +72,6 @@ where
         search: Arc<SearchService<S>>,
         user_svc: Arc<UserService<S>>,
         tools: Arc<CompositeToolService>,
-        user_tools: Arc<crate::user_tools::UserToolServiceCache>,
     ) -> anyhow::Result<Arc<Self>> {
         let daemon = Arc::new(Self {
             coordinator,
@@ -88,7 +86,6 @@ where
             search,
             user_svc,
             tools,
-            user_tools,
         });
         Self::spawn_session_reaper(Arc::clone(&daemon));
         Ok(daemon)
@@ -261,7 +258,7 @@ where
         let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
         let tools: Arc<dyn ToolService> = match &ctx.scope.user_id {
-            Some(uid) => match self.user_tools.get(&simply_core::storage::ids::UserId::from_string(uid)).await {
+            Some(uid) => match self.tools.for_user(&simply_core::storage::ids::UserId::from_string(uid)).await {
                 Ok(user_tools) => user_tools,
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to build user tools, falling back to global");

@@ -109,7 +109,6 @@ simply-{name}/                     # Renamed from noema
 │   ├── src-tauri/                 # Rust backend — Tauri IPC for OS-level (slash cmds, file access)
 │   ├── src/                       # React frontend — WebSocket to simply-daemon for chat
 │   └── Cargo.toml
-├── noema-ext/                     # Extensions (PDF, attachments)
 ├── commands/                      # Command framework
 ├── config/                        # Configuration
 └── docs/

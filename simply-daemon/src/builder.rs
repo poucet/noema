@@ -138,7 +138,6 @@ where
             search,
             user_svc,
             tools.clone(),
-            user_tools,
         )?;
 
         // Construct skills with the daemon handle, register with tool service

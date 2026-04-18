@@ -171,6 +171,110 @@ impl CompositeToolService {
         self.daemon_tools.services().to_vec()
     }
 
+    /// Get a user-scoped tool service for a session.
+    ///
+    /// Returns a `dyn ToolService` that:
+    /// - Daemon tools: scoped with user's RequestContext
+    /// - MCP tools: per-user connections with user's OAuth tokens
+    /// - Skills: SkillCallContext with user's tokens
+    /// - Global MCP: fallback for non-OAuth servers
+    pub async fn for_user(
+        self: &Arc<Self>,
+        user_id: &simply_core::storage::ids::UserId,
+    ) -> anyhow::Result<Arc<dyn ToolService>> {
+        let scoped_daemon = Arc::new(self.daemon_tools.with_context(
+            simply_rpc::RequestContext::with_scope(
+                simply_rpc::Scope::user(user_id.as_str()),
+            ),
+        ));
+        let mcp_callers = self.user_tools.build_mcp_callers_for(user_id).await?;
+        let skill_ctx = self.skill_context_for(user_id).await;
+        let skills = self.skills.read().await.clone();
+
+        Ok(Arc::new(UserScopedToolService {
+            daemon_tools: scoped_daemon,
+            mcp_callers,
+            skills,
+            skill_ctx,
+            mcp_fallback: Arc::clone(&self.mcp),
+        }))
+    }
+}
+
+/// A user-scoped tool service — daemon tools scoped with user context,
+/// per-user MCP connections, skills with user tokens.
+struct UserScopedToolService {
+    daemon_tools: Arc<DaemonToolService>,
+    mcp_callers: Vec<crate::user_tools::McpCaller>,
+    skills: Vec<Arc<dyn simply_daemon_api::Skill>>,
+    skill_ctx: simply_daemon_api::SkillCallContext,
+    mcp_fallback: Arc<McpService>,
+}
+
+#[async_trait]
+impl ToolService for UserScopedToolService {
+    async fn get_definitions(&self) -> Vec<ToolDefinition> {
+        let mut defs = self.daemon_tools.get_definitions().await;
+        for caller in &self.mcp_callers {
+            defs.extend(caller.tools.iter().cloned());
+        }
+        for skill in &self.skills {
+            defs.extend(skill.tools());
+        }
+        defs
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<Vec<ToolResultContent>> {
+        // 1. Try daemon REST tools (user-scoped)
+        if self.daemon_tools.get_definitions().await.iter().any(|d| d.name == name) {
+            return self.daemon_tools.call_tool(name, arguments).await;
+        }
+
+        // 2. Try skills (with user's token context)
+        for skill in &self.skills {
+            if skill.tools().iter().any(|t| t.name == name) {
+                return skill.call_tool(name, arguments, &self.skill_ctx).await;
+            }
+        }
+
+        // 3. Try per-user MCP callers
+        let args_map = match &arguments {
+            serde_json::Value::Object(map) => Some(map.clone()),
+            _ => None,
+        };
+        for caller in &self.mcp_callers {
+            if caller.tools.iter().any(|t| t.name == name) {
+                let result = caller.call_tool(name.to_string(), args_map).await?;
+                let content: Vec<ToolResultContent> = result.content.into_iter().map(|c| {
+                    match c.raw {
+                        rmcp::model::RawContent::Text(t) => ToolResultContent::text(t.text),
+                        rmcp::model::RawContent::Image(img) => ToolResultContent::image(img.data, img.mime_type),
+                        _ => ToolResultContent::text("[unsupported content type]"),
+                    }
+                }).collect();
+                return Ok(content);
+            }
+        }
+
+        // 4. Fall back to global MCP registry
+        let anon = simply_rpc::RequestContext::anonymous();
+        let request = rmcp::model::CallToolRequestParams::new(name.to_string())
+            .with_arguments(arguments.as_object().cloned().unwrap_or_default());
+        match self.mcp_fallback.call_tool_direct(&anon, request).await {
+            Ok(result) => {
+                Ok(result.content.into_iter().map(|c| match c.raw {
+                    rmcp::model::RawContent::Text(t) => ToolResultContent::text(t.text),
+                    rmcp::model::RawContent::Image(img) => ToolResultContent::image(img.data, img.mime_type),
+                    _ => ToolResultContent::text("[unsupported content type]"),
+                }).collect())
+            }
+            Err(_) => anyhow::bail!("tool not found: {name}"),
+        }
+    }
 }
 
 #[async_trait]
