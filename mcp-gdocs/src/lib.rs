@@ -13,8 +13,14 @@ pub mod google_api;
 pub mod tools;
 mod well_known;
 
+#[cfg(feature = "skill")]
+pub mod skill;
+
 pub use google_api::{ExtractedDocument, ExtractedImage, ExtractedTab, GoogleDocsClient};
 pub use tools::GoogleDocsServer;
+
+#[cfg(feature = "skill")]
+pub use skill::GDocsSkill;
 
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;

@@ -23,6 +23,7 @@ simply-core = { workspace = true, features = ["sqlite", "ts"] }
 simply-rpc = { workspace = true, features = ["ts"] }
 simply-voice = { workspace = true, features = ["voxtral", "gemini", "elevenlabs"] }
 llm = { workspace = true, features = ["local-embedding"] }
+mcp-gdocs = { workspace = true, features = ["skill"] }
 
 # Async runtime
 tokio = { workspace = true, features = ["full"] }
