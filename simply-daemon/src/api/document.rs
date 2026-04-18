@@ -125,4 +125,9 @@ pub trait DocumentApi: Send + Sync {
     /// Delete a tab.
     #[rpc(delete = "/document/tab/{tab_id}")]
     async fn delete_tab(&self, ctx: &RequestContext, tab_id: &str) -> anyhow::Result<()>;
+
+    /// Flush pending embedding for a tab (process immediately, bypass debounce).
+    /// Called on tab switch / page unload to ensure edits are embedded promptly.
+    #[rpc(post = "/document/tab/{tab_id}/flush", no_tool)]
+    async fn flush_tab_embedding(&self, ctx: &RequestContext, tab_id: &str) -> anyhow::Result<()>;
 }

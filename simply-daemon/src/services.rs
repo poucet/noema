@@ -467,6 +467,13 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         self.stores.document().delete_document_tab(&tid).await?;
         Ok(())
     }
+
+    async fn flush_tab_embedding(&self, _ctx: &RequestContext, tab_id: &str) -> anyhow::Result<()> {
+        if let Some(ref queue) = self.embedding_queue {
+            queue.flush(tab_id).await;
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

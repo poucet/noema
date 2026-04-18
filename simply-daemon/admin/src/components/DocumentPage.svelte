@@ -1,8 +1,11 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { api } from '../lib/api';
+  import { getTransport } from '../lib/transport';
   import type { DocumentInfo, DocumentDetail, TabInfo } from '../lib/generated/types';
   import DocumentEditor from './DocumentEditor.svelte';
+
+  const transport = getTransport();
 
   function autofocus(node: HTMLElement) {
     tick().then(() => node.focus());
@@ -19,7 +22,26 @@
   let newDocTitle = $state('');
   let newTabTitle = $state('');
 
-  onMount(() => loadDocuments());
+  function flushCurrentTab() {
+    if (selectedTab) {
+      transport.rpc('document.flush_tab_embedding', 'POST', `/api/document/tab/${selectedTab.id}/flush`).catch(() => {});
+    }
+  }
+
+  let handleUnload: (() => void) | null = null;
+
+  onMount(() => {
+    loadDocuments();
+    handleUnload = () => flushCurrentTab();
+    window.addEventListener('beforeunload', handleUnload);
+  });
+
+  onDestroy(() => {
+    if (typeof window !== 'undefined' && handleUnload) {
+      window.removeEventListener('beforeunload', handleUnload);
+    }
+    flushCurrentTab();
+  });
 
   async function loadDocuments() {
     loading = true;
@@ -34,6 +56,7 @@
   }
 
   async function selectDocument(id: string) {
+    flushCurrentTab();
     try {
       const doc = await api.getDocument(id);
       selectedDoc = doc;
@@ -278,7 +301,7 @@
             class="w-full text-left py-1.5 pr-2 text-xs hover:bg-elevated transition-colors group flex items-center gap-1
                    {isActive ? 'bg-elevated text-fg' : 'text-muted'}"
             style="padding-left: {8 + node.depth * 16}px"
-            onclick={() => { selectedTab = node.tab; }}
+            onclick={() => { flushCurrentTab(); selectedTab = node.tab; }}
           >
             {#if node.tab.icon}
               <span class="shrink-0">{node.tab.icon}</span>

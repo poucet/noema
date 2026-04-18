@@ -45,8 +45,12 @@ pub struct EmbeddingQueueStatus {
 /// could back this with persistent storage (e.g. a SQLite queue table).
 #[async_trait]
 pub trait EmbeddingQueue: Send + Sync {
-    /// Enqueue a tab for embedding.
+    /// Enqueue a tab for embedding (debounced).
     async fn enqueue(&self, job: EmbedJob);
+
+    /// Flush a specific tab — process its pending embedding immediately,
+    /// bypassing the debounce. Called on tab switch / page unload.
+    async fn flush(&self, tab_id: &str);
 
     /// Get the current queue status.
     async fn status(&self) -> EmbeddingQueueStatus;
@@ -65,6 +69,7 @@ struct QueueStats {
 #[derive(Clone)]
 pub struct ChannelEmbeddingQueue {
     tx: mpsc::UnboundedSender<EmbedJob>,
+    flush_tx: mpsc::UnboundedSender<String>,
     stats: Arc<QueueStats>,
 }
 
@@ -76,14 +81,15 @@ impl ChannelEmbeddingQueue {
         vector_store: Arc<dyn VectorStore>,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
+        let (flush_tx, flush_rx) = mpsc::unbounded_channel();
         let stats = Arc::new(QueueStats {
             pending: AtomicUsize::new(0),
             processing: AtomicUsize::new(0),
             completed: AtomicU64::new(0),
             failed: AtomicU64::new(0),
         });
-        tokio::spawn(embedding_worker(rx, provider, chunker, vector_store, Arc::clone(&stats)));
-        Self { tx, stats }
+        tokio::spawn(embedding_worker(rx, flush_rx, provider, chunker, vector_store, Arc::clone(&stats)));
+        Self { tx, flush_tx, stats }
     }
 }
 
@@ -95,6 +101,10 @@ impl EmbeddingQueue for ChannelEmbeddingQueue {
             self.stats.pending.fetch_sub(1, Ordering::Relaxed);
             tracing::warn!(error = %e, "embedding queue closed, job dropped");
         }
+    }
+
+    async fn flush(&self, tab_id: &str) {
+        let _ = self.flush_tx.send(tab_id.to_string());
     }
 
     async fn status(&self) -> EmbeddingQueueStatus {
@@ -114,6 +124,7 @@ const DEBOUNCE_MS: u64 = 15_000; // 15 seconds of idle before embedding
 
 async fn embedding_worker(
     mut rx: mpsc::UnboundedReceiver<EmbedJob>,
+    mut flush_rx: mpsc::UnboundedReceiver<String>,
     provider: Arc<dyn EmbeddingProvider>,
     chunker: Arc<dyn Chunker>,
     vector_store: Arc<dyn VectorStore>,
@@ -125,17 +136,41 @@ async fn embedding_worker(
     let content_hashes: tokio::sync::Mutex<HashMap<String, u64>> = tokio::sync::Mutex::new(HashMap::new());
 
     loop {
-        // Drain all available jobs into the debounce buffer
+        // Drain all available jobs and flush signals
         let job = if pending.is_empty() {
             // Nothing pending — block until a job arrives
-            match rx.recv().await {
-                Some(job) => Some(job),
-                None => break, // channel closed
-            }
-        } else {
-            // Jobs pending — check for new ones but don't block long
             tokio::select! {
                 job = rx.recv() => job,
+                flush_id = flush_rx.recv() => {
+                    // Flush with nothing pending — ignore
+                    if let Some(id) = flush_id {
+                        tracing::debug!(tab_id = %id, "flush signal with nothing pending");
+                    }
+                    continue;
+                }
+            }
+        } else {
+            // Jobs pending — check for new ones or flush signals
+            tokio::select! {
+                job = rx.recv() => job,
+                flush_id = flush_rx.recv() => {
+                    // Flush: immediately process the named tab if pending
+                    if let Some(id) = flush_id {
+                        if let Some((job, _)) = pending.remove(&id) {
+                            tracing::info!(tab_id = %id, "flush: processing immediately");
+                            stats.pending.fetch_sub(1, Ordering::Relaxed);
+                            stats.processing.fetch_add(1, Ordering::Relaxed);
+                            if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store, &content_hashes).await {
+                                stats.failed.fetch_add(1, Ordering::Relaxed);
+                                tracing::error!(tab_id = %id, error = %e, "flush embedding failed");
+                            } else {
+                                stats.completed.fetch_add(1, Ordering::Relaxed);
+                            }
+                            stats.processing.fetch_sub(1, Ordering::Relaxed);
+                        }
+                    }
+                    continue;
+                }
                 _ = tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)) => None,
             }
         };
@@ -150,7 +185,21 @@ async fn embedding_worker(
             }
         }
 
-        // Process jobs that have been stable long enough
+        // Also drain any flush signals
+        while let Ok(id) = flush_rx.try_recv() {
+            if let Some((job, _)) = pending.remove(&id) {
+                stats.pending.fetch_sub(1, Ordering::Relaxed);
+                stats.processing.fetch_add(1, Ordering::Relaxed);
+                if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store, &content_hashes).await {
+                    stats.failed.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    stats.completed.fetch_add(1, Ordering::Relaxed);
+                }
+                stats.processing.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+
+        // Process jobs that have been stable long enough (debounce expired)
         let cutoff = Instant::now() - Duration::from_millis(DEBOUNCE_MS);
         let ready: Vec<EmbedJob> = pending
             .iter()
