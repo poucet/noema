@@ -11,7 +11,7 @@ use simply_voice::{Audio, VoiceEvent, VoiceInput};
 /// Info about an available voice provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceProviderInfo {
     /// Unique identifier (e.g. "whisper", "voxtral", "gemini").

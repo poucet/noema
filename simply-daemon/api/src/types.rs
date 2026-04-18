@@ -46,7 +46,7 @@ pub use simply_core::{AuthMethod, McpRegistry, ServerConfig};
 /// Opaque session identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct SessionId(String);
 
 impl SessionId {
@@ -72,7 +72,7 @@ impl std::fmt::Display for SessionId {
 /// Events streamed from the daemon to session subscribers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub enum DaemonEvent {
     SessionReady { session_id: SessionId },
     UserMessage(ChatMessage),
@@ -95,7 +95,7 @@ pub enum DaemonEvent {
 /// An event pushed into the daemon (trigger interface).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct InboundEvent {
     pub event_type: String,
@@ -105,7 +105,7 @@ pub struct InboundEvent {
 /// Information about a stored conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationInfo {
     pub id: ConversationId,
@@ -117,7 +117,7 @@ pub struct ConversationInfo {
 /// Status of the embedding queue.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct EmbeddingQueueStatus {
     pub pending: usize,
     pub processing: usize,

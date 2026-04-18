@@ -15,7 +15,7 @@ pub use rmcp::model::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct McpServerInfo {
     pub id: String,
     pub name: String,
@@ -33,7 +33,7 @@ pub struct McpServerInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct AddMcpServerRequest {
     pub id: String,
     pub name: String,
@@ -48,7 +48,7 @@ pub struct AddMcpServerRequest {
 /// Request to register an ephemeral MCP server at runtime.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct RegisterEphemeralRequest {
     pub id: String,
     pub url: String,
@@ -58,7 +58,7 @@ pub struct RegisterEphemeralRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct UpdateMcpServerRequest {
     pub name: Option<String>,
     pub url: Option<String>,
