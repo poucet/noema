@@ -109,7 +109,8 @@ impl EmbeddingQueue for ChannelEmbeddingQueue {
 
 /// Debounce delay — if another edit to the same tab arrives within this window,
 /// the previous job is replaced (only the latest content gets embedded).
-const DEBOUNCE_MS: u64 = 500;
+/// Set high enough that active typing doesn't trigger re-embedding.
+const DEBOUNCE_MS: u64 = 15_000; // 15 seconds of idle before embedding
 
 async fn embedding_worker(
     mut rx: mpsc::UnboundedReceiver<EmbedJob>,
@@ -120,6 +121,8 @@ async fn embedding_worker(
 ) {
     // Debounce buffer: tab_id -> (job, received_at)
     let mut pending: HashMap<String, (EmbedJob, Instant)> = HashMap::new();
+    // Content hash cache: tab_id -> hash of last embedded chunks (skip if unchanged)
+    let content_hashes: tokio::sync::Mutex<HashMap<String, u64>> = tokio::sync::Mutex::new(HashMap::new());
 
     loop {
         // Drain all available jobs into the debounce buffer
@@ -163,7 +166,7 @@ async fn embedding_worker(
             stats.pending.fetch_sub(1, Ordering::Relaxed);
             stats.processing.fetch_add(1, Ordering::Relaxed);
 
-            if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store).await {
+            if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store, &content_hashes).await {
                 stats.failed.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(
                     tab_id = %job.tab_id,
@@ -180,33 +183,63 @@ async fn embedding_worker(
     }
 }
 
+/// Compute a fast hash of chunk texts to detect if content meaningfully changed.
+fn chunk_content_hash(chunks: &[simply_core::embedding::Chunk]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for chunk in chunks {
+        chunk.text.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 async fn process_job(
     job: &EmbedJob,
     provider: &dyn EmbeddingProvider,
     chunker: &dyn Chunker,
     vector_store: &dyn VectorStore,
+    content_hashes: &tokio::sync::Mutex<HashMap<String, u64>>,
 ) -> anyhow::Result<()> {
+    // 1. Chunk the text
+    let chunks = chunker.chunk(&job.text).await?;
+    if chunks.is_empty() {
+        // Content is empty — delete existing chunks
+        vector_store.delete_by_tab(&job.tab_id).await?;
+        content_hashes.lock().await.remove(job.tab_id.as_str());
+        return Ok(());
+    }
+
+    // 2. Check if chunks changed since last embedding
+    let new_hash = chunk_content_hash(&chunks);
+    {
+        let hashes = content_hashes.lock().await;
+        if let Some(&old_hash) = hashes.get(job.tab_id.as_str()) {
+            if old_hash == new_hash {
+                tracing::debug!(
+                    tab_id = %job.tab_id,
+                    "skipping embedding — content unchanged"
+                );
+                return Ok(());
+            }
+        }
+    }
+
     tracing::info!(
         tab_id = %job.tab_id,
         document_id = %job.document_id,
         text_len = job.text.len(),
+        chunks = chunks.len(),
         "embedding tab"
     );
 
-    // 1. Delete existing chunks for this tab
+    // 3. Delete existing chunks for this tab
     vector_store.delete_by_tab(&job.tab_id).await?;
 
-    // 2. Chunk the text
-    let chunks = chunker.chunk(&job.text).await?;
-    if chunks.is_empty() {
-        return Ok(());
-    }
-
-    // 3. Embed all chunks in one batch
+    // 4. Embed all chunks in one batch
     let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
     let embeddings = provider.embed(&texts).await?;
 
-    // 4. Build VectorChunks and store
+    // 5. Build VectorChunks and store
     let vector_chunks: Vec<VectorChunk> = chunks
         .iter()
         .zip(embeddings.into_iter())
@@ -223,6 +256,12 @@ async fn process_job(
         .collect();
 
     vector_store.upsert(&vector_chunks).await?;
+
+    // 6. Remember the hash for next time
+    content_hashes.lock().await.insert(
+        job.tab_id.as_str().to_string(),
+        new_hash,
+    );
 
     tracing::info!(
         tab_id = %job.tab_id,
