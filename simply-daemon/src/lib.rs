@@ -30,6 +30,6 @@ pub use services::embedding_queue;
 /// Re-exported types for clients.
 pub use api::types as types;
 pub use simply_core::ToolService;
-pub use remote::RemoteDaemon;
+pub use simply_daemon_api::RemoteDaemon;
 pub use session::DaemonSession;
 pub use net::ConnectionState;

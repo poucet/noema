@@ -26,7 +26,6 @@ pub enum DaemonHandle {
     Host {
         daemon: Arc<dyn Daemon>,
         _server: rest::ServerHandle,
-        kill_rx: tokio::sync::mpsc::Receiver<()>,
     },
     /// Connected to a remote daemon. Reconnects automatically on disconnect.
     Remote {
@@ -47,13 +46,10 @@ impl DaemonHandle {
         matches!(self, DaemonHandle::Host { .. })
     }
 
-    /// Wait for a kill signal. Only fires for hosted daemons (via `/daemon/kill`).
-    /// For remote daemons, this future never resolves.
+    /// Wait for a kill signal. For both host and remote, this never resolves —
+    /// kill is handled internally by the daemon's CoreService.
     pub async fn wait_for_kill(&mut self) {
-        match self {
-            DaemonHandle::Host { kill_rx, .. } => { kill_rx.recv().await; }
-            DaemonHandle::Remote { .. } => std::future::pending().await,
-        }
+        std::future::pending().await
     }
 
     /// Current connection state. Host is always connected.
@@ -121,17 +117,16 @@ pub async fn connect_or_host(
     let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
     let token_store = Arc::new(crate::token_store::TransientTokenStore::new());
     let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
-    let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
-    let daemon = crate::builder::DaemonBuilder {
+    let handle = crate::builder::DaemonBuilder {
         stores: Arc::clone(&stores) as _,
         coordinator,
         vector_store,
         token_store: Arc::clone(&token_store),
         voice: crate::builder::create_voice_service(),
-        kill_tx,
         skill_factories: vec![],
     }.build().await?;
 
+    let daemon = Arc::clone(&handle.daemon);
     let rest_dispatcher = crate::builder::build_service_router(&daemon);
 
     let tracker = server::ConnectionTracker::new();
@@ -149,6 +144,5 @@ pub async fn connect_or_host(
     Ok(DaemonHandle::Host {
         daemon,
         _server: server,
-        kill_rx,
     })
 }

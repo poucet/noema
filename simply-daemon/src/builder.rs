@@ -28,10 +28,77 @@ pub struct DaemonBuilder<S: StorageTypes> {
     pub vector_store: Arc<dyn simply_core::embedding::VectorStore>,
     pub token_store: Arc<crate::services::token_store::TransientTokenStore>,
     pub voice: VoiceService,
-    /// Kill channel sender — CoreService uses this to shut down the daemon.
-    pub kill_tx: tokio::sync::mpsc::Sender<()>,
     /// Skill factories — called with `Arc<dyn Daemon>` after daemon construction.
     pub skill_factories: Vec<simply_daemon_api::SkillFactory>,
+}
+
+/// A running daemon — call `serve()` to block until shutdown.
+pub struct DaemonHandle<S: StorageTypes> {
+    pub daemon: Arc<EmbeddedDaemon<S>>,
+    kill_rx: tokio::sync::mpsc::Receiver<()>,
+    token_store: Arc<crate::services::token_store::TransientTokenStore>,
+}
+
+impl<S: StorageTypes> DaemonHandle<S>
+where
+    S::Document: DocumentResolver,
+    S::User: simply_core::storage::traits::UserStore,
+{
+    /// Start the HTTP/WS server and block until shutdown (Ctrl+C, SIGTERM, or /daemon/kill).
+    pub async fn serve(mut self, port: u16, daemon_secret: String) -> anyhow::Result<()>
+    where
+        S::User: simply_core::storage::traits::UserStore,
+    {
+        let rest_dispatcher = build_service_router(&self.daemon);
+        let tracker = crate::net::server::ConnectionTracker::new();
+        let oauth_tracker = self.daemon.oauth_tracker();
+        let user_store: Arc<dyn simply_core::storage::traits::UserStore> = self.daemon.stores().user();
+
+        let server = crate::net::rest::start(crate::net::rest::ServerConfig {
+            rest_dispatcher,
+            port,
+            tracker,
+            daemon_secret,
+            user_store,
+            token_store: self.token_store,
+            oauth_tracker: Some(oauth_tracker),
+        }).await?;
+
+        let actual_port = server.port();
+        tracing::info!(port = actual_port, "daemon ready");
+        println!("{actual_port}");
+
+        // Wait for shutdown
+        tokio::select! {
+            _ = shutdown_signal() => {}
+            _ = self.kill_rx.recv() => { tracing::info!("kill received via REST"); }
+        }
+
+        tracing::info!("shutting down");
+        self.daemon.session().close_all_sessions().await?;
+        tracing::info!("shutdown complete");
+        Ok(())
+    }
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await.ok();
+    }
 }
 
 impl<S: StorageTypes> DaemonBuilder<S>
@@ -39,8 +106,10 @@ where
     S::Document: DocumentResolver,
     S::User: simply_core::storage::traits::UserStore,
 {
-    /// Build and return a fully wired EmbeddedDaemon.
-    pub async fn build(self) -> anyhow::Result<Arc<EmbeddedDaemon<S>>> {
+    /// Build the daemon and return a handle for serving.
+    pub async fn build(self) -> anyhow::Result<DaemonHandle<S>> {
+        let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
+        let token_store = Arc::clone(&self.token_store);
         let settings = config::Settings::load();
 
         const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
@@ -89,7 +158,7 @@ where
                     Arc::clone(&self.vector_store),
                 )
         );
-        let core = Arc::new(CoreService::embedded());
+        let core = Arc::new(CoreService::new(kill_tx));
         let user_svc = Arc::new(UserService::new(Arc::clone(&self.stores)));
         let search = Arc::new(SearchService::new(
             embedding_provider,
@@ -97,9 +166,6 @@ where
             embedding_queue,
             Arc::clone(&self.stores),
         ));
-
-        // Tool service — built once, shared between user_tools and composite
-        let core = Arc::new(CoreService::new(self.kill_tx));
 
         let daemon_tools = Arc::new(
             DaemonToolService::new()
@@ -114,7 +180,6 @@ where
                 .register(<dyn UserApi>::service(user_svc.clone())),
         );
 
-        let token_store = self.token_store;
         let user_tools = Arc::new(crate::user_tools::UserToolServiceCache::new(
             Arc::clone(&daemon_tools),
             Arc::clone(&token_store),
@@ -126,7 +191,7 @@ where
             McpToolRegistry::new(Arc::clone(mcp.registry())),
             Arc::clone(&mcp),
             Arc::clone(&user_tools),
-            token_store,
+            Arc::clone(&token_store),
         );
         let tools = Arc::new(composite);
 
@@ -151,7 +216,7 @@ where
             tools.register_skill_runtime(skill).await;
         }
 
-        Ok(daemon)
+        Ok(DaemonHandle { daemon, kill_rx, token_store })
     }
 }
 
