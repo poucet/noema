@@ -77,9 +77,13 @@ pub trait Daemon: Send + Sync {
     fn user(&self) -> &dyn UserApi;
     fn tools(&self) -> &dyn simply_core::ToolService;
 
-    /// Register a skill with the daemon. Convenience wrapper around `register_client_tools`.
+    /// Register a skill with the daemon.
+    ///
+    /// Registers tools + OAuth requirements. The daemon creates auth routes
+    /// for each OAuth provider so users can authenticate.
     async fn register_skill(&self, skill: Arc<dyn Skill>) -> anyhow::Result<()> {
         let tools = skill.tools();
+        let oauth_reqs = skill.oauth_requirements();
         let handler: ToolCallHandler = Arc::new(move |name, args, ctx| {
             let skill = Arc::clone(&skill);
             Box::pin(async move {
@@ -91,7 +95,52 @@ pub trait Daemon: Send + Sync {
                 Ok(serde_json::to_value(&result)?)
             })
         });
+        self.register_client_tools_with_oauth(tools, oauth_reqs, handler).await
+    }
+
+    /// Register tools + OAuth requirements with the daemon (low-level).
+    async fn register_client_tools_with_oauth(
+        &self,
+        tools: Vec<llm::ToolDefinition>,
+        oauth_requirements: Vec<skill::OAuthRequirement>,
+        handler: ToolCallHandler,
+    ) -> anyhow::Result<()> {
+        // Register OAuth providers first (so auth routes exist before tools are callable)
+        for req in &oauth_requirements {
+            self.register_oauth_provider(req).await?;
+        }
         self.register_client_tools(tools, handler).await
+    }
+
+    /// Register an OAuth provider so users can authenticate for a skill.
+    /// Uses the existing MCP server infrastructure for auth routing + token storage.
+    async fn register_oauth_provider(
+        &self,
+        req: &skill::OAuthRequirement,
+    ) -> anyhow::Result<()> {
+        // Check if this OAuth provider is already registered
+        let servers = self.mcp().list_mcp_servers().await?;
+        if servers.iter().any(|s| s.id == req.id) {
+            tracing::debug!(id = %req.id, "OAuth provider already registered");
+            return Ok(());
+        }
+
+        // Register as MCP server config for OAuth token management.
+        // The server won't be "connected" (no real MCP endpoint) but the
+        // auth routes and token store will work.
+        self.mcp().add_mcp_server(AddMcpServerRequest {
+            id: req.id.clone(),
+            name: req.display_name.clone(),
+            url: format!("skill://{}", req.id), // Not a real URL — marks this as a skill auth entry
+            auth_type: "oauth".to_string(),
+            auth_token: None,
+            client_id: None, // Uses stored oauth_credentials by URL
+            client_secret: None,
+            scopes: Some(req.scopes.clone()),
+        }).await?;
+
+        tracing::info!(id = %req.id, name = %req.display_name, "registered OAuth provider for skill");
+        Ok(())
     }
 
     /// Register tools that this client provides to the daemon (low-level).

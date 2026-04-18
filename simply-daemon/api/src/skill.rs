@@ -62,6 +62,23 @@ impl SkillCallContext {
 /// Auth tokens for the calling user are passed via `SkillCallContext`.
 /// The daemon populates this from its token store before dispatch.
 /// The LLM never sees tokens — it just calls `gdocs_import(doc_id: "...")`.
+/// OAuth requirement for a skill — the daemon handles the auth flow.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OAuthRequirement {
+    /// Unique ID for this auth provider (used as key in token store).
+    pub id: String,
+    /// Human-readable name (e.g., "Google Docs").
+    pub display_name: String,
+    /// Authorization endpoint URL.
+    pub authorization_url: String,
+    /// Token endpoint URL.
+    pub token_url: String,
+    /// Required scopes.
+    pub scopes: Vec<String>,
+    /// Userinfo endpoint (for resolving user email after auth).
+    pub userinfo_url: Option<String>,
+}
+
 #[async_trait]
 pub trait Skill: Send + Sync {
     /// Unique name for this skill (e.g., "gdocs", "github").
@@ -69,6 +86,11 @@ pub trait Skill: Send + Sync {
 
     /// Tool definitions provided by this skill.
     fn tools(&self) -> Vec<ToolDefinition>;
+
+    /// OAuth providers this skill needs. The daemon registers auth routes
+    /// for each and populates tokens in SkillCallContext.
+    /// Default: no OAuth needed.
+    fn oauth_requirements(&self) -> Vec<OAuthRequirement> { vec![] }
 
     /// Execute a tool by name.
     ///

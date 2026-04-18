@@ -149,6 +149,20 @@ struct ListArgs { query: Option<String>, limit: Option<usize> }
 impl Skill for GDocsSkill {
     fn name(&self) -> &str { "gdocs" }
 
+    fn oauth_requirements(&self) -> Vec<simply_daemon_api::skill::OAuthRequirement> {
+        vec![simply_daemon_api::skill::OAuthRequirement {
+            id: GOOGLE_SERVER_ID.to_string(),
+            display_name: "Google Docs".to_string(),
+            authorization_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+            token_url: "https://oauth2.googleapis.com/token".to_string(),
+            scopes: vec![
+                "https://www.googleapis.com/auth/documents.readonly".to_string(),
+                "https://www.googleapis.com/auth/drive.readonly".to_string(),
+            ],
+            userinfo_url: Some("https://www.googleapis.com/oauth2/v2/userinfo".to_string()),
+        }]
+    }
+
     fn tools(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition {
