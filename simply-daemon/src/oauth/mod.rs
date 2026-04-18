@@ -343,7 +343,7 @@ async fn complete_token_exchange(
 
     let mut registry = mcp_registry.lock().await;
     registry.add_server(server_id.to_string(), updated_config);
-    crate::mcp_config::save_mcp_config(registry.config())?;
+    crate::mcp::config_io::save_mcp_config(registry.config())?;
 
     // Reconnect with new token
     if registry.is_connected(server_id) {

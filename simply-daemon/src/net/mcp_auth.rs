@@ -58,7 +58,7 @@ pub async fn auth_initiate(
     Path(server_id): Path<String>,
     Query(query): Query<AuthInitQuery>,
 ) -> Response {
-    let mcp_config = crate::mcp_config::load_mcp_config();
+    let mcp_config = crate::mcp::config_io::load_mcp_config();
     let server = match mcp_config.get_server(&server_id) {
         Some(s) => s,
         None => return Html(format!("Unknown MCP server: {server_id}")).into_response(),
@@ -136,7 +136,7 @@ pub async fn auth_callback(
     };
 
     // Look up OAuth config for token exchange
-    let mcp_config = crate::mcp_config::load_mcp_config();
+    let mcp_config = crate::mcp::config_io::load_mcp_config();
     let server = match mcp_config.get_server(&oauth_state.server_id) {
         Some(s) => s,
         None => return auth_error_page(&format!("Unknown server: {}", oauth_state.server_id)),

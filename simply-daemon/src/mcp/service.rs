@@ -35,7 +35,7 @@ impl McpService {
         config: McpServiceConfig,
     ) -> anyhow::Result<Self> {
         // Load registry from config file
-        let mcp_config = crate::mcp_config::load_mcp_config();
+        let mcp_config = crate::mcp::config_io::load_mcp_config();
         let registry = Arc::new(Mutex::new(McpRegistry::new(mcp_config)));
 
         // OAuth uses the daemon's public URL for callbacks
@@ -189,7 +189,7 @@ impl McpApi for McpService {
             }
         }
 
-        crate::mcp_config::save_mcp_config(registry.config())?;
+        crate::mcp::config_io::save_mcp_config(registry.config())?;
         Ok(())
     }
 
@@ -199,7 +199,7 @@ impl McpApi for McpService {
             anyhow::bail!("cannot remove ephemeral server '{server_id}' — it is managed by its host process");
         }
         registry.remove_server(server_id).await?;
-        crate::mcp_config::save_mcp_config(registry.config())?;
+        crate::mcp::config_io::save_mcp_config(registry.config())?;
         Ok(())
     }
 
@@ -249,7 +249,7 @@ impl McpApi for McpService {
                 config.auto_retry = auto_retry;
             }
         }
-        crate::mcp_config::save_mcp_config(registry.config())?;
+        crate::mcp::config_io::save_mcp_config(registry.config())?;
         Ok(())
     }
 
