@@ -1,6 +1,6 @@
 //! Lumina — Discord bot for the Simply platform.
 //!
-//! Connects to Discord via serenity and to simply-daemon via WebSocket.
+//! Connects to Discord via serenity and to simply-daemon for AI capabilities.
 
 mod chat;
 mod commands;
@@ -17,48 +17,19 @@ use songbird::SerenityInit;
 use songbird::Config as SongbirdConfig;
 use songbird::driver::{DecodeMode, DecodeConfig, Channels, SampleRate};
 use simply_daemon_api::{Daemon, McpApi, RegisterEphemeralRequest};
-#[cfg(feature = "embedded")]
-use simply_daemon::net;
 
-/// Key for storing the MCP server in serenity's TypeMap (to inject cache on ready).
 pub struct McpServerKey;
+impl TypeMapKey for McpServerKey { type Value = mcp::LuminaMcpServer; }
 
-impl TypeMapKey for McpServerKey {
-    type Value = mcp::LuminaMcpServer;
-}
-
-/// Key for storing the daemon connection in serenity's TypeMap.
 pub struct DaemonKey;
+impl TypeMapKey for DaemonKey { type Value = Arc<dyn Daemon>; }
 
-impl TypeMapKey for DaemonKey {
-    type Value = Arc<dyn Daemon>;
-}
-
-/// Key for storing the Lumina config in serenity's TypeMap.
 pub struct ConfigKey;
-
-impl TypeMapKey for ConfigKey {
-    type Value = config::LuminaConfig;
-}
+impl TypeMapKey for ConfigKey { type Value = config::LuminaConfig; }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "lumina=info,simply_daemon=info".into());
-
-    if let Ok(log_path) = std::env::var("LUMINA_LOG_FILE") {
-        let file = std::fs::File::create(&log_path)?;
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_writer(file)
-            .with_ansi(false)
-            .init();
-        eprintln!("Logging to {log_path}");
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .init();
-    };
+    setup_logging();
 
     config::load_env_file();
     let lumina_cfg = config::LuminaConfig::load();
@@ -68,42 +39,15 @@ async fn main() -> anyhow::Result<()> {
         .bot_token()
         .expect("DISCORD_BOT_TOKEN env var or discord.bot_token in lumina.toml is required");
 
-    // Connect to daemon
-    #[cfg(feature = "embedded")]
-    let (_daemon_handle, daemon) = {
-        let handle = net::connect_or_host(settings.daemon_port, "lumina", None).await?;
-        tracing::info!(host = handle.is_host(), "daemon ready");
-        let d = handle.daemon();
-        (handle, d)
-    };
-    #[cfg(not(feature = "embedded"))]
-    let daemon: Arc<dyn Daemon> = {
-        compile_error!("Remote-only Lumina build not yet supported. Use default features (embedded).");
-    };
+    // Connect to daemon — embedded (host or connect) or remote-only
+    let daemon = connect_daemon(&settings).await?;
 
-    // Start Lumina's MCP server and register with daemon
+    // Start Lumina's MCP server and register tools with daemon
     let http = Arc::new(serenity::http::Http::new(&token));
     let mcp_server = mcp::LuminaMcpServer::new(http);
-    #[cfg(feature = "embedded")]
-    let _mcp_handle = simply_daemon::mcp::start_server(mcp_server.clone()).await?;
-    #[cfg(not(feature = "embedded"))]
-    let _mcp_handle = {
-        // For remote mode, use the mcp-gdocs crate's start_server as a generic MCP server host
-        // TODO: extract generic MCP server hosting into simply-daemon-api or a shared crate
-        anyhow::bail!("Remote MCP server hosting not yet implemented. Use embedded mode.")
-    };
-    let mcp_url = _mcp_handle.url();
-    tracing::info!(url = %mcp_url, "lumina MCP server started");
+    register_mcp_tools(&daemon, &mcp_server).await?;
 
-    let tool_count = daemon
-        .mcp().register_ephemeral_mcp(RegisterEphemeralRequest {
-            id: "discord".to_string(),
-            url: mcp_url,
-        })
-        .await?;
-    tracing::info!(tool_count, "registered lumina MCP service with daemon");
-
-    // Collect all auto-registered commands
+    // Discord client
     let registry = CommandRegistry::collect();
     tracing::info!(count = registry.len(), "commands registered");
 
@@ -136,6 +80,92 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Daemon connection
+// ---------------------------------------------------------------------------
+
+/// Connect to daemon — embedded mode hosts/connects, remote mode only connects.
+async fn connect_daemon(settings: &config::Settings) -> anyhow::Result<Arc<dyn Daemon>> {
+    #[cfg(feature = "embedded")]
+    {
+        // _handle is kept alive to prevent the daemon from shutting down
+        static HANDLE: tokio::sync::OnceCell<simply_daemon::net::DaemonHandle> = tokio::sync::OnceCell::const_new();
+        let handle = simply_daemon::net::connect_or_host(settings.daemon_port, "lumina", None).await?;
+        tracing::info!(host = handle.is_host(), "daemon ready");
+        let daemon = handle.daemon();
+        let _ = HANDLE.set(handle);
+        Ok(daemon)
+    }
+    #[cfg(not(feature = "embedded"))]
+    {
+        let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
+        let secret = settings.daemon_secret.clone().unwrap_or_default();
+        let url = format!("127.0.0.1:{port}");
+        tracing::info!(%url, "connecting to remote daemon");
+        let remote = simply_daemon_api::RemoteDaemon::connect_as(&url, "lumina", &secret, None).await?;
+        Ok(remote)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MCP server registration (works for both embedded and remote)
+// ---------------------------------------------------------------------------
+
+/// Start Lumina's MCP server and register its tools with the daemon.
+async fn register_mcp_tools(
+    daemon: &Arc<dyn Daemon>,
+    mcp_server: &mcp::LuminaMcpServer,
+) -> anyhow::Result<()> {
+    // Host Lumina's MCP server
+    #[cfg(feature = "embedded")]
+    let mcp_handle = simply_daemon::mcp::start_server(mcp_server.clone()).await?;
+    #[cfg(not(feature = "embedded"))]
+    let mcp_handle = {
+        // TODO: move generic MCP hosting to simply-daemon-api or simply-rpc
+        tracing::warn!("MCP tool registration skipped in remote mode");
+        return Ok(());
+    };
+
+    let mcp_url = mcp_handle.url();
+    tracing::info!(url = %mcp_url, "lumina MCP server started");
+
+    let tool_count = daemon
+        .mcp().register_ephemeral_mcp(RegisterEphemeralRequest {
+            id: "discord".to_string(),
+            url: mcp_url,
+        })
+        .await?;
+    tracing::info!(tool_count, "registered lumina MCP service with daemon");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
+fn setup_logging() {
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "lumina=info,simply_daemon=info".into());
+
+    if let Ok(log_path) = std::env::var("LUMINA_LOG_FILE") {
+        let file = std::fs::File::create(&log_path).expect("failed to create log file");
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_writer(file)
+            .with_ansi(false)
+            .init();
+        eprintln!("Logging to {log_path}");
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .init();
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Discord event handler
+// ---------------------------------------------------------------------------
+
 struct Handler {
     guild_ids: Vec<GuildId>,
     status_channel_id: Option<ChannelId>,
@@ -146,7 +176,6 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
         tracing::info!(user = %ready.user.name, "connected to Discord — use .sync to register commands");
 
-        // Inject the gateway cache into the MCP server so cache-dependent tools work
         {
             let data = ctx.data.read().await;
             if let Some(mcp) = data.get::<McpServerKey>() {
@@ -156,21 +185,14 @@ impl EventHandler for Handler {
         }
 
         if let Some(channel_id) = self.status_channel_id {
-            // Purge last message, then post status — mirrors Python Lumina behavior
             if let Ok(messages) = channel_id.messages(&ctx.http, serenity::builder::GetMessages::new().limit(1)).await {
-                for msg in messages {
-                    let _ = msg.delete(&ctx.http).await;
-                }
+                for msg in messages { let _ = msg.delete(&ctx.http).await; }
             }
-            let _ = channel_id.say(
-                &ctx.http,
-                format!("\u{1f7e2} Bot connected as <@{}>", ready.user.id),
-            ).await;
+            let _ = channel_id.say(&ctx.http, format!("\u{1f7e2} Bot connected as <@{}>", ready.user.id)).await;
         }
     }
 
     async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
-        // Cache is fully populated — refresh channel map in MCP instructions
         let data = ctx.data.read().await;
         if let Some(mcp) = data.get::<McpServerKey>() {
             mcp.refresh_instructions();
@@ -194,11 +216,8 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, msg: serenity::model::channel::Message) {
-        if msg.author.bot {
-            return;
-        }
+        if msg.author.bot { return; }
 
-        // Owner-only prefix commands
         if msg.content.starts_with('.') {
             let data = ctx.data.read().await;
             let cfg = data.get::<ConfigKey>().expect("ConfigKey missing");
@@ -209,16 +228,12 @@ impl EventHandler for Handler {
                         let registry = data.get::<CommandRegistry>().expect("CommandRegistry missing");
                         let definitions = registry.definitions();
                         drop(data);
-
                         let mut ok = 0usize;
                         let mut fail = 0usize;
                         for &guild_id in &self.guild_ids {
                             match guild_id.set_commands(&ctx.http, definitions.clone()).await {
                                 Ok(_) => ok += 1,
-                                Err(e) => {
-                                    tracing::error!(guild_id = %guild_id, error = %e, "sync failed");
-                                    fail += 1;
-                                }
+                                Err(e) => { tracing::error!(guild_id = %guild_id, error = %e, "sync failed"); fail += 1; }
                             }
                         }
                         let _ = msg.reply(&ctx.http, format!("Synced commands to {ok} guild(s), {fail} failed.")).await;
@@ -229,7 +244,6 @@ impl EventHandler for Handler {
             }
         }
 
-        // AI chat: delegate to chat module for detection + response
         let lx = commands::LuminaContext::from_serenity(&ctx).await;
         chat::handle_message(&lx, &msg).await;
     }
