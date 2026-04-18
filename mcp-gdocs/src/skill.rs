@@ -87,7 +87,7 @@ impl<S: StorageTypes> GDocsSkill<S> {
         }
 
         // Topological sort: create parent tabs before children
-        let mut id_map = std::collections::HashMap::new();
+        let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut pending: Vec<_> = extracted.tabs.into_iter().collect();
         let mut max_passes = pending.len() + 1;
 
