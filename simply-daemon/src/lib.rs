@@ -20,10 +20,9 @@ pub mod services;
 pub mod session;
 pub mod storage;
 
-// Backward-compat re-exports (callers use crate::token_store, crate::tools, etc.)
+// Backward-compat re-exports
 pub use services::token_store;
 pub use services::tools;
-pub use services::user_tools;
 pub use services::embedding_queue;
 
 /// Re-exported types for clients.

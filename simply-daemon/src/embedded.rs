@@ -24,50 +24,6 @@ use simply_core::{
 use crate::api::*;
 use crate::mcp::McpService;
 use crate::services::*;
-use crate::tools::CompositeToolService;
-
-// ---------------------------------------------------------------------------
-// ClientToolSkill — wraps a ToolCallHandler as a Skill for embedded registration
-// ---------------------------------------------------------------------------
-
-struct ClientToolSkill {
-    tools: Vec<llm::ToolDefinition>,
-    handler: simply_daemon_api::ToolCallHandler,
-}
-
-#[async_trait]
-impl simply_daemon_api::Skill for ClientToolSkill {
-    fn name(&self) -> &str { "client" }
-
-    fn tools(&self) -> Vec<llm::ToolDefinition> {
-        self.tools.clone()
-    }
-
-    async fn call_tool(
-        &self,
-        name: &str,
-        arguments: serde_json::Value,
-        _ctx: &simply_daemon_api::SkillCallContext,
-    ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
-        let tool_ctx = simply_daemon_api::ToolCallContext {
-            user_id: Some(_ctx.user_id.as_str().to_string()),
-            tokens: _ctx.tokens.clone(),
-        };
-        let result = (self.handler)(name.to_string(), arguments, tool_ctx).await?;
-        // Parse result as tool content
-        if let Some(arr) = result.get("content").and_then(|v| v.as_array()) {
-            Ok(arr.iter().map(|c| {
-                if let Some(text) = c.get("text").and_then(|v| v.as_str()) {
-                    llm::ToolResultContent::text(text)
-                } else {
-                    llm::ToolResultContent::text(serde_json::to_string(c).unwrap_or_default())
-                }
-            }).collect())
-        } else {
-            Ok(vec![llm::ToolResultContent::text(serde_json::to_string(&result)?)])
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Session bookkeeping
@@ -95,7 +51,7 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     core: Arc<CoreService>,
     search: Arc<SearchService<S>>,
     user_svc: Arc<UserService<S>>,
-    tools: Arc<CompositeToolService>,
+    tools: Arc<ToolRegistry>,
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
@@ -114,7 +70,7 @@ where
         core: Arc<CoreService>,
         search: Arc<SearchService<S>>,
         user_svc: Arc<UserService<S>>,
-        tools: Arc<CompositeToolService>,
+        tools: Arc<ToolRegistry>,
     ) -> anyhow::Result<Arc<Self>> {
         let daemon = Arc::new(Self {
             coordinator,
@@ -146,10 +102,12 @@ where
     pub fn search_service(&self) -> Arc<SearchService<S>> { Arc::clone(&self.search) }
     pub fn user_service(&self) -> Arc<UserService<S>> { Arc::clone(&self.user_svc) }
 
+    /// Get the ToolRegistry (for DaemonHandle to pass to the server).
+    pub fn tool_registry(&self) -> &Arc<ToolRegistry> { &self.tools }
+
     /// Get the daemon tool services (for ServiceRouter registration).
-    /// These are the same services registered in the CompositeToolService.
     pub fn daemon_tool_services(&self) -> Vec<Arc<dyn simply_rpc::RestService>> {
-        self.tools.daemon_tool_services()
+        self.tools.daemon_tool_services().to_vec()
     }
 
     pub fn oauth_redirect_uri(&self) -> String { self.mcp.oauth_redirect_uri() }
@@ -301,12 +259,9 @@ where
         let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
         let tools: Arc<dyn ToolService> = match &ctx.scope.user_id {
-            Some(uid) => match self.tools.for_user(&simply_core::storage::ids::UserId::from_string(uid)).await {
-                Ok(user_tools) => user_tools,
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to build user tools, falling back to global");
-                    self.tools.clone()
-                }
+            Some(uid) => {
+                let user_id = simply_core::storage::ids::UserId::from_string(uid);
+                self.tools.for_user(&user_id).await
             },
             None => self.tools.clone(),
         };
@@ -469,18 +424,33 @@ where S::Document: DocumentResolver,
     fn user(&self) -> &dyn UserApi { &*self.user_svc }
     fn tools(&self) -> &dyn ToolService { &*self.tools }
 
+    async fn register_skill(&self, skill: Arc<dyn simply_daemon_api::Skill>) -> anyhow::Result<()> {
+        // Handle OAuth requirements
+        let oauth_reqs = skill.oauth_requirements();
+        for req in &oauth_reqs {
+            self.register_oauth_provider(req).await?;
+        }
+
+        // Wrap as EmbeddedToolProvider and register directly — no handler conversion
+        let count = skill.tools().len();
+        let provider = Arc::new(crate::services::providers::EmbeddedToolProvider::new(skill));
+        self.tools.register(provider).await;
+        tracing::info!(count, "skill registered (embedded, direct)");
+        Ok(())
+    }
+
     async fn register_client_tools(
         &self,
         tools: Vec<llm::ToolDefinition>,
         handler: simply_daemon_api::ToolCallHandler,
     ) -> anyhow::Result<()> {
-        // Embedded: wrap the handler as a Skill and register directly — no protocol overhead
+        // Embedded: wrap as a ClientToolProvider and register with ToolRegistry
         let count = tools.len();
-        let skill: Box<dyn simply_daemon_api::Skill> = Box::new(ClientToolSkill {
-            tools,
-            handler,
-        });
-        self.tools.register_skill_runtime(skill).await;
+        let id = format!("client-{}", count);
+        let provider = Arc::new(crate::services::providers::ClientToolProvider::from_definitions(
+            id, tools, handler,
+        ));
+        self.tools.register(provider).await;
         tracing::info!(count, "client tools registered (embedded, direct)");
         Ok(())
     }

@@ -11,7 +11,6 @@ use std::sync::Arc;
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::DocumentResolver;
-use simply_core::McpToolRegistry;
 use simply_rpc::{ServiceRouter, RpcService};
 
 use crate::api::*;
@@ -19,7 +18,6 @@ use crate::embedded::EmbeddedDaemon;
 use crate::embedding_queue::{ChannelEmbeddingQueue, EmbeddingQueue};
 use crate::mcp::{McpService, McpServiceConfig};
 use crate::services::*;
-use crate::tools::{CompositeToolService, DaemonToolService};
 
 /// Configuration for building an EmbeddedDaemon.
 pub struct DaemonBuilder<S: StorageTypes> {
@@ -35,7 +33,6 @@ pub struct DaemonHandle<S: StorageTypes> {
     pub daemon: Arc<EmbeddedDaemon<S>>,
     kill_rx: tokio::sync::mpsc::Receiver<()>,
     token_store: Arc<crate::services::token_store::TransientTokenStore>,
-    ws_tools: Arc<crate::services::WsToolRegistry>,
 }
 
 impl<S: StorageTypes> DaemonHandle<S>
@@ -52,6 +49,7 @@ where
         let tracker = crate::net::server::ConnectionTracker::new();
         let oauth_tracker = self.daemon.oauth_tracker();
         let user_store: Arc<dyn simply_core::storage::traits::UserStore> = self.daemon.stores().user();
+        let tools = Arc::clone(self.daemon.tool_registry());
 
         let server = crate::net::rest::start(crate::net::rest::ServerConfig {
             rest_dispatcher,
@@ -61,7 +59,7 @@ where
             user_store,
             token_store: self.token_store,
             oauth_tracker: Some(oauth_tracker),
-            ws_tools: Arc::clone(&self.ws_tools),
+            tools,
         }).await?;
 
         let actual_port = server.port();
@@ -167,33 +165,40 @@ where
             Arc::clone(&self.stores),
         ));
 
+        // Note: McpApi is NOT registered here — it's added to the ServiceRouter
+        // separately, pointing at ToolRegistry (which delegates management to
+        // McpService but handles list_all_tools/call_tool_direct across all providers).
         let daemon_tools = Arc::new(
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
                 .register(<dyn DocumentApi>::service(document.clone()))
                 .register(<dyn ModelApi>::service(model.clone()))
                 .register(<dyn CoreApi>::service(core.clone()))
-                .register(<dyn McpApi>::service(mcp.clone()))
                 .register(<dyn OAuthApi>::service(mcp.clone()))
                 .register(<dyn VoiceApi>::service(voice.clone()))
                 .register(<dyn SearchApi>::service(search.clone()))
                 .register(<dyn UserApi>::service(user_svc.clone())),
         );
 
-        let user_tools = Arc::new(crate::user_tools::UserToolServiceCache::new(
-            Arc::clone(&daemon_tools),
+        let tools = Arc::new(ToolRegistry::new(
+            daemon_tools,
             Arc::clone(&token_store),
-            Arc::clone(mcp.registry()),
+            Arc::clone(&mcp),
         ));
 
-        let composite = CompositeToolService::new(
-            daemon_tools,
-            McpToolRegistry::new(Arc::clone(mcp.registry())),
-            Arc::clone(&mcp),
-            Arc::clone(&user_tools),
-            Arc::clone(&token_store),
-        );
-        let tools = Arc::new(composite);
+        // Register MCP servers as ToolProviders
+        {
+            let registry = mcp.registry().lock().await;
+            for (id, connected) in registry.connected_servers() {
+                let provider = Arc::new(crate::services::providers::McpToolProvider::shared(
+                    id.to_string(),
+                    connected.config.name.clone(),
+                    connected.tools.clone(),
+                    connected.tool_caller(),
+                ));
+                tools.register(provider).await;
+            }
+        }
 
         let daemon = EmbeddedDaemon::assemble(
             self.coordinator,
@@ -209,8 +214,7 @@ where
             tools.clone(),
         )?;
 
-        let ws_tools = Arc::new(crate::services::WsToolRegistry::new());
-        Ok(DaemonHandle { daemon, kill_rx, token_store, ws_tools })
+        Ok(DaemonHandle { daemon, kill_rx, token_store })
     }
 }
 
@@ -226,10 +230,12 @@ where
 {
     let session_svc: Arc<dyn SessionApi> = daemon.clone();
     let conversation_svc: Arc<dyn ConversationApi> = daemon.clone();
+    let mcp_svc: Arc<dyn McpApi> = daemon.tool_registry().clone();
 
     let mut router = ServiceRouter::new()
         .register(<dyn SessionApi>::service(session_svc))
-        .register(<dyn ConversationApi>::service(conversation_svc));
+        .register(<dyn ConversationApi>::service(conversation_svc))
+        .register(<dyn McpApi>::service(mcp_svc));
 
     for svc in daemon.daemon_tool_services() {
         router = router.register(svc);
