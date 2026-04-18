@@ -2,7 +2,7 @@
 
 use lumina_macros::command_group;
 use serenity::all::{CommandInteraction, CreateInteractionResponse, CreateInteractionResponseMessage};
-use simply_daemon::api::McpApi;
+use simply_daemon_api::McpApi;
 
 use super::LuminaContext;
 
@@ -46,7 +46,7 @@ mod mcp {
     ) -> anyhow::Result<()> {
         let auth = auth_type.unwrap_or_else(|| "none".to_string());
 
-        lx.daemon.mcp().add_mcp_server(simply_daemon::api::AddMcpServerRequest {
+        lx.daemon.mcp().add_mcp_server(simply_daemon_api::AddMcpServerRequest {
             id: id.clone(),
             name: name.clone(),
             url,

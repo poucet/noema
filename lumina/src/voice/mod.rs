@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serenity::model::id::{ChannelId, GuildId};
-use simply_daemon::api::{Daemon, VoiceApi};
+use simply_daemon_api::{Daemon, VoiceApi};
 use songbird::Call;
 use tokio::sync::Mutex;
 

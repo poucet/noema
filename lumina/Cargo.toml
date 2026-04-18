@@ -8,11 +8,16 @@ description = "Lumina — Discord bot for the Simply platform"
 name = "lumina"
 path = "src/main.rs"
 
+[features]
+default = ["embedded"]
+embedded = ["dep:simply-daemon"]
+
 [dependencies]
 # Internal crates
 config = { workspace = true }
 lumina-macros = { workspace = true }
-simply-daemon = { workspace = true }
+simply-daemon-api = { workspace = true }
+simply-daemon = { workspace = true, optional = true }
 simply-rpc = { workspace = true }
 
 # Discord

@@ -6,7 +6,7 @@
 use serenity::builder::{CreateEmbed, GetMessages};
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
-use simply_daemon::api::*;
+use simply_daemon_api::*;
 
 use crate::commands::LuminaContext;
 

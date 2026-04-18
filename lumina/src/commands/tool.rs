@@ -14,7 +14,7 @@ use serenity::builder::{
     CreateActionRow, CreateCommand, CreateCommandOption, CreateEmbed, CreateInputText,
     CreateMessage, CreateModal,
 };
-use simply_daemon::ToolService;
+use simply_daemon_api::Daemon; // ToolService is accessed via daemon.tools()
 use std::time::Duration;
 
 use super::LuminaContext;
@@ -317,7 +317,7 @@ async fn send_tool_result(
     lx: &LuminaContext,
     channel_id: serenity::model::id::ChannelId,
     tool_name: &str,
-    result: anyhow::Result<simply_daemon::api::CallToolResult>,
+    result: anyhow::Result<simply_daemon_api::CallToolResult>,
 ) -> anyhow::Result<()> {
     match result {
         Ok(r) => {
@@ -507,7 +507,7 @@ async fn send_tool_result_from_service(
     lx: &LuminaContext,
     target: impl Into<SendTarget<'_>>,
     tool_name: &str,
-    result: anyhow::Result<Vec<simply_daemon::types::ToolResultContent>>,
+    result: anyhow::Result<Vec<simply_daemon_api::ToolResultContent>>,
 ) -> anyhow::Result<()> {
     let target = target.into();
 
@@ -524,7 +524,7 @@ async fn send_tool_result_from_service(
 
     match result {
         Ok(content) => {
-            use simply_daemon::types::ToolResultContent;
+            use simply_daemon_api::ToolResultContent;
             use base64::Engine;
 
             let mut text_parts = Vec::new();
@@ -609,7 +609,7 @@ async fn send_result(
     lx: &LuminaContext,
     cmd: &CommandInteraction,
     tool_name: &str,
-    result: anyhow::Result<simply_daemon::api::CallToolResult>,
+    result: anyhow::Result<simply_daemon_api::CallToolResult>,
 ) -> anyhow::Result<()> {
     // Acknowledge first, then send result to the channel
     cmd.create_response(&lx.http, CreateInteractionResponse::Defer(

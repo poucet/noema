@@ -2,7 +2,7 @@
 
 use lumina_macros::command_group;
 use serenity::all::{CommandInteraction, CreateInteractionResponse, CreateInteractionResponseMessage};
-use simply_daemon::api::ModelApi;
+use simply_daemon_api::ModelApi;
 
 use super::LuminaContext;
 

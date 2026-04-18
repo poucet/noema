@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use serenity::all::CommandInteraction;
 use serenity::builder::CreateCommand;
 use serenity::prelude::*;
-use simply_daemon::api::Daemon;
+use simply_daemon_api::Daemon;
 use simply_rpc::RequestContext;
 
 // ---------------------------------------------------------------------------

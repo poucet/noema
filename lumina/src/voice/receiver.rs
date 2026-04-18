@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serenity::model::id::{ChannelId, GuildId};
-use simply_daemon::api::Daemon;
+use simply_daemon_api::Daemon;
 use simply_voice::{AudioChunk, VoiceEvent, VoiceInput};
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler};
 use tokio::sync::{mpsc, Mutex};
@@ -95,8 +95,8 @@ pub fn spawn_event_handler(
                                 if let Some(session) = sessions.get_mut(&guild_id) {
                                     if let Some(ref mut daemon_session) = session.daemon_session {
                                         // Send user transcript to session
-                                        let send_result = daemon_session.send(simply_daemon::api::UserMessage {
-                                            content: vec![simply_daemon::api::InputContent::Text {
+                                        let send_result = daemon_session.send(simply_daemon_api::UserMessage {
+                                            content: vec![simply_daemon_api::InputContent::Text {
                                                 text: text.clone(),
                                             }],
                                         }).await;
@@ -109,11 +109,11 @@ pub fn spawn_event_handler(
                                             let mut response_text = String::new();
                                             loop {
                                                 match daemon_session.recv().await {
-                                                    Ok(simply_daemon::api::DaemonEvent::TextDelta(delta)) => {
+                                                    Ok(simply_daemon_api::DaemonEvent::TextDelta(delta)) => {
                                                         response_text.push_str(&delta);
                                                     }
-                                                    Ok(simply_daemon::api::DaemonEvent::TurnComplete) => break,
-                                                    Ok(simply_daemon::api::DaemonEvent::Error(e)) => {
+                                                    Ok(simply_daemon_api::DaemonEvent::TurnComplete) => break,
+                                                    Ok(simply_daemon_api::DaemonEvent::Error(e)) => {
                                                         tracing::error!(error = %e, "session error");
                                                         break;
                                                     }

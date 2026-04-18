@@ -8,7 +8,7 @@ use serenity::all::{
     CreateInteractionResponse, CreateInteractionResponseMessage, ResolvedOption, ResolvedValue,
 };
 use serenity::builder::GetMessages;
-use simply_daemon::api::*;
+use simply_daemon_api::*;
 use simply_rpc::RequestContext;
 
 use super::LuminaContext;

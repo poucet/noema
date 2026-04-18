@@ -9,7 +9,7 @@ use serenity::all::{
 };
 use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::model::channel::ChannelType;
-use simply_daemon::api::ModelApi;
+use simply_daemon_api::ModelApi;
 
 use super::LuminaContext;
 use crate::register_command;
@@ -93,7 +93,7 @@ impl super::SlashCommand for Chat {
         let models = lx.daemon.model().list_models().await.unwrap_or_default();
         let choices: Vec<AutocompleteChoice> = models
             .into_iter()
-            .filter(|m| m.definition.capabilities.contains(&simply_daemon::api::ModelCapability::Text))
+            .filter(|m| m.definition.capabilities.contains(&simply_daemon_api::ModelCapability::Text))
             .filter(|m| {
                 if partial_lower.is_empty() { return true; }
                 let full_id = m.id.to_string().to_lowercase();
@@ -245,7 +245,7 @@ async fn cmd_model(
                 None => {
                     return reply_ephemeral(lx, cmd, &format!("Unknown model: `{id}`")).await;
                 }
-                Some(m) if !m.definition.capabilities.contains(&simply_daemon::api::ModelCapability::Text) => {
+                Some(m) if !m.definition.capabilities.contains(&simply_daemon_api::ModelCapability::Text) => {
                     return reply_ephemeral(lx, cmd, &format!("`{id}` does not support chat (capabilities: {:?})", m.definition.capabilities)).await;
                 }
                 _ => {}

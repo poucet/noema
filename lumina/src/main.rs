@@ -16,7 +16,7 @@ use serenity::prelude::*;
 use songbird::SerenityInit;
 use songbird::Config as SongbirdConfig;
 use songbird::driver::{DecodeMode, DecodeConfig, Channels, SampleRate};
-use simply_daemon::api::{Daemon, McpApi, RegisterEphemeralRequest};
+use simply_daemon_api::{Daemon, McpApi, RegisterEphemeralRequest};
 use simply_daemon::net;
 
 /// Key for storing the MCP server in serenity's TypeMap (to inject cache on ready).

@@ -3,7 +3,7 @@
 use lumina_macros::slash_command;
 use serenity::all::CommandInteraction;
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
-use simply_daemon::api::Daemon;
+use simply_daemon_api::Daemon;
 
 use super::LuminaContext;
 

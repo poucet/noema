@@ -12,7 +12,7 @@ use serenity::all::{
     ResolvedOption, ResolvedValue,
 };
 use serenity::builder::{CreateCommand, CreateCommandOption, CreateEmbed};
-use simply_daemon::api::Daemon;
+use simply_daemon_api::Daemon;
 
 use super::LuminaContext;
 use crate::register_command;
@@ -158,7 +158,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
     lx.defer(cmd).await?;
 
     // Call the gdocs_extract MCP tool with user's context (for per-user OAuth token)
-    let tool_request = simply_daemon::api::CallToolRequestParams::new("gdocs_extract".to_string())
+    let tool_request = simply_daemon_api::CallToolRequestParams::new("gdocs_extract".to_string())
         .with_arguments(serde_json::json!({ "doc_id": doc_id }).as_object().cloned().unwrap_or_default());
     tracing::info!(discord_id, "google import: calling gdocs_extract via call_tool_direct");
     let result = lx.daemon.mcp().call_tool_direct(&ctx, tool_request).await;
@@ -192,7 +192,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
                     // Assemble markdown from tabs (matching Python processDocument)
                     let content = assemble_document_markdown(&extracted);
 
-                    let doc_request = simply_daemon::api::CreateDocumentRequest {
+                    let doc_request = simply_daemon_api::CreateDocumentRequest {
                         title: title.to_string(),
                         document_type: Some("knowledge".to_string()),
                         content: Some(content),
@@ -221,7 +221,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
                 }
                 Err(_) => {
                     // Raw text result — store as-is
-                    let doc_request = simply_daemon::api::CreateDocumentRequest {
+                    let doc_request = simply_daemon_api::CreateDocumentRequest {
                         title: format!("Google Doc {}", &doc_id[..8.min(doc_id.len())]),
                         document_type: Some("knowledge".to_string()),
                         content: Some(text.to_string()),
@@ -289,7 +289,7 @@ async fn list_user_docs(lx: &LuminaContext, discord_user_id: u64, query: Option<
     }
     args.insert("limit".to_string(), serde_json::Value::Number(25.into()));
 
-    let tool_request = simply_daemon::api::CallToolRequestParams::new("gdocs_list".to_string())
+    let tool_request = simply_daemon_api::CallToolRequestParams::new("gdocs_list".to_string())
         .with_arguments(args);
     let result = lx.daemon.mcp().call_tool_direct(&ctx, tool_request).await?;
 
