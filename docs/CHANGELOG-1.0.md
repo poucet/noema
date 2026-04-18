@@ -11,10 +11,41 @@ Version 1.0 unifies Noema (Rust desktop) and Lumina (Python Discord bot) into a 
 ## What's Next
 
 See [v1.0/ROADMAP.md](v1.0/ROADMAP.md) and [v1.0/TASKS.md](v1.0/TASKS.md):
-1. Content & RAG — document CRUD, embeddings, semantic search
-2. Events & Intents — event bus, action AST, LLM-compiled intents
-3. RTC — WebRTC voice, Google Meet integration
-4. Multi-user & OAuth — identity, permissions, admin UI
+1. Events & Intents — event bus, action AST, LLM-compiled intents
+2. Multi-user polish — persistent tokens, role-based access, admin user management
+3. Web Extension & RTC (paused)
+
+---
+
+## Unified Frontend & Tool Architecture (2026-04-18)
+
+Major architecture overhaul consolidating on a single frontend and unified tool dispatch.
+
+- **Admin UI** — Astro + Svelte 5 web UI served by daemon: chat with streaming, settings, MCP management, Google Docs import
+- **Transport layer** — `HttpTransport` with REST for RPC + WebSocket for events, auto-detects base URL
+- **`simply-daemon-api` subcrate** — extracted API traits, `ToolProvider`, `Skill`, `RemoteDaemon`, `SkillCallContext` into lightweight shared crate
+- **`ToolProvider` trait** — unified abstraction for MCP servers, WS-connected clients, and embedded skills (all speak rmcp types)
+- **`ToolRegistry`** — replaces `CompositeToolService`; holds `Vec<Arc<dyn ToolProvider>>`, dispatches with `RequestContext` carrying user identity + OAuth tokens
+- **Concrete providers** — `McpToolProvider` (shared/on-demand), `WsToolProvider` (reverse RPC), `EmbeddedToolProvider` (wraps Skill), `ClientToolProvider` (wraps ToolCallHandler)
+- **Skill system** — skills take `Arc<dyn Daemon>`, declare `OAuthRequirement`s, daemon handles auth and injects tokens
+- **`RequestContext.tokens`** — OAuth tokens flow through the RPC context, no explicit params
+- **GDocsSkill** — Google Docs as a skill registered by Lumina (not hardcoded in daemon)
+- **Chat store** — Svelte 5 runes with WS event subscription, streaming message assembly
+- **CORS** — CorsLayer for cross-origin dev (Astro dev server → daemon)
+
+---
+
+## Content & RAG (2026-04-15)
+
+Embedding pipeline, vector search, and Google Docs import.
+
+- **Embedding providers** — local ONNX (bge-small-en-v1.5), Ollama, Mistral, Gemini, Voyage
+- **sqlite-vec VectorStore** — chunks table + vec virtual table
+- **Embedding queue** — background worker with debounce, content hash dedup, flush signals
+- **SearchApi** — embed query → vector search → return hits with doc metadata
+- **Lumina auto-RAG** — query from last N messages, inject relevant chunks into system prompt
+- **Google Docs import** — `mcp-gdocs` skill with per-user OAuth, tab tree with topological sort, image assets
+- **Per-user MCP OAuth** — `TransientTokenStore`, OAuth flow on daemon's main port, token injection
 
 ---
 
@@ -25,7 +56,7 @@ Consolidated and cleaned up v1.0 documentation after completing Foundation, Lumi
 - Retired `TODO.md` (manual test checklist) and `JOURNAL.md` (testing notes)
 - Removed `phases/` directory — all 11 files across 6 subdirectories (foundation, lumina, voice, content, events, rtc)
 - Consolidated into single [TASKS.md](v1.0/TASKS.md) with next phase tasks across 4 workstreams
-- Rewrote [GOAL.md](v1.0/GOAL.md), [FEATURES.md](v1.0/FEATURES.md), and [ROADMAP.md](v1.0/ROADMAP.md) to reflect current state
+- Rewrote [GOAL.md](v1.0/GOAL.md) and [ROADMAP.md](v1.0/ROADMAP.md) to reflect current state
 - Moved [VOICE.md](designs/VOICE.md) from proposals to designs (implemented)
 - Moved [AGENTIC.md](designs/proposals/AGENTIC.md) and [ACTIONS.md](designs/proposals/ACTIONS.md) into proposals (not yet built)
 - Folded [TOOL_APPROVAL.md](designs/proposals/TOOL_APPROVAL.md) and [UCM_SERVICE.md](designs/proposals/UCM_SERVICE.md) into task plan
@@ -157,7 +188,7 @@ Built `simply-daemon` as the central hub that all clients connect to.
 - **Auto-reconnect** — WS client with exponential backoff (100ms-30s)
 - **Decoupled Noema** — all Noema Rust code imports from `simply-daemon` only, no `simply-core` dependency
 - **`SessionManager`** — pluggable storage hooks, ephemeral and persistent sessions
-- **`ToolService` trait** — `DaemonToolService` (REST methods as tools) + `CompositeToolService` (merged tool sources)
+- **`ToolService` trait** — `DaemonToolService` (REST methods as tools), later unified via `ToolRegistry` + `ToolProvider`
 
 ### Stage 3 — REST-First Transport
 
@@ -245,5 +276,4 @@ Before the v1.0 restructure, significant work was done on Noema 0.2:
 - [designs/CORE_SERVICE.md](designs/CORE_SERVICE.md) — daemon protocol (WS, REST, MCP)
 - [designs/VOICE.md](designs/VOICE.md) — voice pipeline architecture
 - [designs/UNIFIED_CONTENT_MODEL.md](designs/UNIFIED_CONTENT_MODEL.md) — UCM storage spec
-- [designs/STORAGE.md](designs/STORAGE.md) — database schema
-- [designs/proposals/](designs/proposals/) — proposals for events, actions, tool approval, UCM service
+- [designs/proposals/](designs/proposals/) — proposals for events, actions, tool approval

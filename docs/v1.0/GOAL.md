@@ -1,9 +1,8 @@
-# Design 1: Simply Platform — Rust Unification
+# Simply Platform v1.0
 
-**Status**: in progress
-**Features:** [FEATURES.md](FEATURES.md)
-**Roadmap:** [ROADMAP.md](ROADMAP.md)
 **Architecture:** [designs/ARCHITECTURE.md](../designs/ARCHITECTURE.md)
+**Roadmap:** [ROADMAP.md](ROADMAP.md)
+**Tasks:** [TASKS.md](TASKS.md)
 
 ---
 
@@ -15,37 +14,22 @@ Lumina (Python Discord bot) and Noema (Rust desktop AI assistant) were convergin
 
 Unified Rust workspace: `simply-daemon` hub with `simply-core` internal library. Lumina is a Discord crate (serenity + songbird), Noema is a Tauri desktop client. Both connect to the daemon.
 
-Three interfaces: WebSocket + JSON for rich clients, REST for triggers/management, MCP outbound for action services.
-
-## Non-goals (v1)
-
-- Telegram, WhatsApp, or other messaging platform integrations
-- Full feature parity with Python Lumina
-
----
-
 ## What's Built
 
-- **Workspace restructured** — `simply-core`, `simply-daemon`, `simply-rpc`, `simply-voice`, `noema`, `lumina`, `config`
-- **Daemon hub** — 8 API traits, axum REST + WS server, service extraction
-- **RPC framework** — `#[rpc_service]` proc macro, REST dispatch, binary transfer, `ServiceRouter`
-- **Typed content** — `IntoContent`/`FromContent` traits, `rest_dispatch_as_content` macro
-- **Discord bot** — serenity-based, chat (channel management, streaming, model selection), 15 MCP tools via rmcp, `/tool call` + `/tool list`
-- **Voice pipeline** — `simply-voice` crate with STT/TTS providers (Voxtral, Whisper, ElevenLabs, Gemini), VAD, daemon integration
-- **Desktop voice** — mic capture via CPAL, daemon STT/TTS, provider/voice selection UI
-- **Discord voice** — songbird with DAVE encryption, `/voice` commands (transcribe, listen, say, leave, list, status, provider, set-voice), config persistence, TTS fallback, transcript routing
+- **Daemon hub** — `simply-daemon` with API traits, axum REST + WS server, admin UI (Astro + Svelte 5)
+- **API extraction** — `simply-daemon-api` subcrate: traits, types, `ToolProvider`, `Skill`, `RemoteDaemon`
+- **Unified tool dispatch** — `ToolRegistry` with `ToolProvider` abstraction: MCP servers, WS clients, embedded skills all treated identically
+- **RPC framework** — `simply-rpc` with `#[rpc_service]` proc macro, REST + WS dispatch, binary transfer
+- **Discord bot** — serenity + songbird, chat, 15 MCP tools via rmcp, voice with DAVE encryption
+- **Voice pipeline** — `simply-voice` with STT/TTS providers (Voxtral, Whisper, ElevenLabs, Gemini)
+- **Content & RAG** — embedding pipeline (local/Ollama/Mistral/Gemini/Voyage), sqlite-vec, SearchApi, auto-RAG in Lumina
+- **Google Docs** — `mcp-gdocs` skill with per-user OAuth, import with tabs + images
+- **Multi-user auth** — daemon_secret, user scoping, admin OAuth, per-user MCP tokens (TransientTokenStore)
+- **Transport layer** — HttpTransport for admin UI (REST + WS events)
+- **Chat UI** — full conversation interface in admin UI with streaming, model selection
 
 ## What's Next
 
-See [ROADMAP.md](ROADMAP.md) and [TASKS.md](TASKS.md) for the next phase:
-1. **Content & RAG** — document CRUD, embedding providers, semantic search
-2. **Events** — event bus, intents, scheduled actions
-3. **RTC** — WebRTC voice service, Google Meet integration
-4. **Multi-user & OAuth** — per-user identity, Google account linking, permission model, admin UI
-
----
-
-## Related
-
-- Architecture: [designs/ARCHITECTURE.md](../designs/ARCHITECTURE.md)
-- Post-v1 Roadmap: [FUTURE_ROADMAP.md](../FUTURE_ROADMAP.md)
+1. **Events & Intents** — event bus, action AST, LLM-compiled scheduled actions
+2. **Web Extension** — Chrome extension as daemon client, Google Meet caption capture
+3. **Multi-user polish** — persistent tokens, Discord role-based access, admin user management

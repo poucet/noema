@@ -2,63 +2,11 @@
 
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 
-Four parallel workstreams. Tasks within each are roughly sequential.
+Three workstreams. Tasks within each are roughly sequential.
 
 ---
 
-## 1. Content & RAG
-
-UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/proposals/UCM_SERVICE.md)). RAG is core to agent quality, not an add-on.
-
-### Stage 1 — Document Type + Foundation
-
-- ✅ 1.1 `DocumentType` constants module in `simply-core`
-- ✅ 1.2 `document_type` column on documents table + migration
-- ✅ 1.3 `document_type` in `DocumentInfo`/`DocumentDetail`/`CreateDocumentRequest`
-
-### Stage 2 — Embedding Providers + Traits
-
-**Design:** [EMBEDDING_AND_RAG.md](../designs/EMBEDDING_AND_RAG.md)
-
-- ✅ 2.1 `EmbeddingProvider` trait + `Embedding` struct in `llm` crate
-- ✅ 2.2 `Chunker` trait + `RecursiveCharacterChunker` impl in `simply-core`
-- ✅ 2.3 `VectorStore` trait + types (`VectorChunk`, `SearchQuery`, `SearchResult`, `SearchFilter`) in `simply-core`
-- ✅ 2.4 Embedding config in `settings.toml` (`[embedding]` section: provider, model, chunk_size, chunk_overlap)
-- ✅ 2.5 Local embedding provider (`fastembed`/ONNX, `bge-small-en-v1.5` — default, zero config)
-- ✅ 2.6 Ollama + Mistral embedding providers
-- ✅ 2.7 Gemini + Claude/Voyage embedding providers (OpenAI deferred)
-
-### Stage 3 — Storage + Indexing
-
-- ✅ 3.1 sqlite-vec `VectorStore` implementation (chunks table + vec virtual table)
-- ✅ 3.2 Embedding queue — background worker, debounce, status tracking
-- ✅ 3.3 Hook document tab writes to enqueue embedding jobs
-
-### Stage 4 — Retrieval API
-
-- ✅ 4.1 `SearchApi` trait (`search` + `reindex` + `queue_status` endpoints)
-- ✅ 4.2 `SearchService` implementation — embed query, vector search, return hits with doc metadata
-
-### Stage 5 — Client Integration
-
-- ✅ 5.1 Lumina auto-RAG — query from last N messages, inject relevant chunks into system prompt
-- ✅ 5.2 Local ONNX embedding provider (`bge-small-en-v1.5` via fastembed/ort) — default, zero config
-- ⬜ 5.3 Noema search panel + document refs (deferred — depends on UI work)
-
-### Stage 6 — Per-User MCP OAuth + Google Docs Import
-
-**Design:** [GOOGLE_DOCS_IMPORT.md](../designs/GOOGLE_DOCS_IMPORT.md)
-
-- ✅ 6.1 `TransientTokenStore`: in-memory `(user_id, server_id) → token` map
-- ✅ 6.2 OAuth flow: `/auth/mcp/{server_id}?user_id=...` → provider → callback → store token
-- ✅ 6.3 Per-user MCP connections: `UserToolServiceCache` with token-based connection per user
-- ✅ 6.4 `CoreApi::public_url()` — daemon exposes its public URL for clients
-- ✅ 6.5 Lumina `/google auth` + `/google import` (autocomplete + URL) + `/google status`
-- ⬜ 6.6 Admin UI: MCP OAuth config in settings page
-
----
-
-## 2. Events & Intents
+## 1. Events & Intents
 
 ### Stage 1 — Event Bus + Timer Source
 
@@ -104,21 +52,16 @@ UCM storage stays in the daemon (decided — see [UCM_SERVICE.md](../designs/pro
 
 ---
 
-## 3. Web Extension & RTC ⏸️
+## 2. Web Extension & RTC (paused)
 
-**Status:** Future — deprioritized in favor of Content, Events, and Multi-user.
+**Status:** Future — deprioritized in favor of Events and Multi-user.
 
-A Chrome extension (`simply-web`) as a new daemon client, like Noema and Lumina. Connects to the daemon via WS+REST, provides browser-context capabilities.
+A Chrome extension (`simply-web`) as a new daemon client, like Lumina. Connects to the daemon via WS+REST.
 
 **Why a Chrome extension (not a headless bot):**
-- Google Meet has no production API for bots joining calls (Media API is developer preview only, not GA)
-- The entire meeting bot industry uses headless browser automation (Puppeteer + Docker + virtual audio) — extremely fragile, high maintenance
-- A Chrome extension avoids all of that: runs in the user's own browser, uses `chrome.tabCapture` or DOM scraping, no infrastructure
-- Platform-agnostic: works with Meet, Zoom web, Teams web, any browser-based call
-
-**Approach for meeting transcription:**
-- Scrape Google Meet's live captions from the DOM (speaker-diarized, Google does the STT) rather than capturing mixed audio and doing our own STT
-- Mixed-audio STT from `tabCapture` is a hard problem; caption scraping sidesteps it entirely
+- Google Meet has no production API for bots joining calls
+- A Chrome extension runs in the user's own browser, uses `chrome.tabCapture` or DOM scraping
+- Platform-agnostic: works with Meet, Zoom web, Teams web
 
 ### Stage 1 — Extension Shell
 
@@ -137,42 +80,27 @@ A Chrome extension (`simply-web`) as a new daemon client, like Noema and Lumina.
 
 ### Stage 3 — Audio Streaming (future)
 
-- ⬜ 3.1 `chrome.tabCapture` audio capture -> common format -> daemon voice API
+- ⬜ 3.1 `chrome.tabCapture` audio capture -> daemon voice API
 - ⬜ 3.2 TTS playback into tab (Web Audio API)
-- ⬜ 3.3 Or: Google Meet Media API integration when it goes GA (per-participant audio, no extension needed)
+- ⬜ 3.3 Or: Google Meet Media API integration when it goes GA
 
 ---
 
-## 4. Multi-user & OAuth
+## 3. Multi-user Polish
 
 **Design:** [AUTH_AND_IDENTITY.md](../designs/AUTH_AND_IDENTITY.md)
 
-### Stage 1 — Connection Auth & User Identity
-
-- ✅ 1.1 Auto-generate `daemon_secret` on first run, store in `settings.toml`
-- ✅ 1.2 Auth middleware: validate `Authorization: Bearer {daemon_secret}` on all routes except `/auth/*`
-- ✅ 1.3 `X-User-Id` header support — daemon resolves to UCM user, scopes operations
-- ✅ 1.4 Noema sends admin user_id on all requests
-- ✅ 1.5 Lumina sends Discord-mapped user_id (or omits for anonymous)
-- ✅ 1.6 User tiers: admin (full access), authenticated (own data), anonymous (public only)
-- ✅ 1.7 Document ownership — documents scoped to creating user, ownership checks on mutate
-
-### Stage 2 — Single-Port OAuth & Admin Page
-
-- ✅ 2.1 Merge OAuth callback server into main port (`/auth/callback` route)
-- ✅ 2.2 Admin page Google OAuth login (`/auth/login` → Google → verify `admin_email`)
-- ✅ 2.3 User self-service auth page (`/auth/login` → Google → create/link UCM user)
-- ✅ 2.4 Discord user mapping table: `discord_user_id → ucm_user_id`
-- ✅ 2.5 Lumina `/auth` command — generates link to daemon auth page, maps Discord user after OAuth
+Stages 1-2 (connection auth, single-port OAuth, admin page) are complete.
 
 ### Stage 3 — Per-User MCP OAuth
 
-- ⬜ 3.1 Per-user per-MCP-server token storage: `(user_id, server_id) → tokens`
-- ⬜ 3.2 MCP OAuth initiation: `/auth/mcp/{server_id}?user_id={user_id}` → provider OAuth → store tokens
-- ⬜ 3.3 Token injection: daemon adds user's token to MCP requests as `Authorization` header
+- ✅ 3.1 Per-user per-MCP-server token storage: TransientTokenStore `(user_id, server_id) → tokens`
+- ✅ 3.2 MCP OAuth initiation + callback + token storage
+- ✅ 3.3 Token injection via `RequestContext.tokens` into ToolProvider calls
 - ⬜ 3.4 `auth_required` error response when user has no token for a service
 - ⬜ 3.5 Automatic token refresh using stored refresh tokens
 - ⬜ 3.6 Token revocation (admin or self-service)
+- ⬜ 3.7 Persist tokens across daemon restarts (encrypt-at-rest in SQLite)
 
 ### Stage 4 — Discord Role-Based Access Control
 
@@ -181,35 +109,20 @@ A Chrome extension (`simply-web`) as a new daemon client, like Noema and Lumina.
 - ⬜ 4.3 Graceful denial: "You need the `developers` role to use GitHub tools"
 - ⬜ 4.4 Tool call approval flow (see [TOOL_APPROVAL.md](../designs/proposals/TOOL_APPROVAL.md))
 
-### Stage 5 — Admin UI
+### Stage 5 — Admin UI User Management
 
-- ⬜ 5.1 Admin page protected by Google OAuth (`admin_email` in config)
-- ⬜ 5.2 User management: list users, view linked accounts, revoke access
-- ⬜ 5.3 MCP service management: connect/disconnect, view tools, per-service OAuth status
-- ⬜ 5.4 Connection browser: view connected clients, active sessions
-- ⬜ 5.5 Settings page: API keys, voice providers, model config
+- ⬜ 5.1 User management: list users, view linked accounts, revoke access
+- ⬜ 5.2 Connection browser: view connected clients, active sessions
+- ⬜ 5.3 Per-service OAuth status display
 
 ---
 
 ## Dependencies
 
 ```
-Content Stage 1 (DocumentApi) ──► Events Stage 1 (intent documents in UCM)
-Content Stage 2 (Embeddings) ──► Content Stage 3 (RAG)
 Events Stage 2 (Service Registry) ──► Events Stage 3 + 4 (parallel)
 Events Stage 3 + 4 ──► Events Stage 5 (Conditions + Workflow)
-Multi-user Stage 1 (Connection Auth) ──► Multi-user Stage 2 (OAuth)
-Multi-user Stage 2 (OAuth) ──► Multi-user Stage 3 (Per-User MCP OAuth)
-Multi-user Stage 3 ──► Multi-user Stage 4 (Role-Based Access)
+Multi-user Stage 3 (Per-User MCP OAuth) ──► Multi-user Stage 4 (Role-Based Access)
 Multi-user Stage 4 ──► Multi-user Stage 5 (Admin UI)
 Web Extension ──► blocked on nothing, but deprioritized
 ```
-
-Recommended start order:
-1. **Content Stage 1** (DocumentApi) — unblocks Events and RAG
-2. **Multi-user Stage 1** (Identity) — unblocks OAuth
-3. **Events Stage 1** (Event bus) — can start once Content Stage 1 lands
-4. **Content Stage 2-3** (Embeddings + RAG) — independent of Events/Auth
-5. **Multi-user Stage 2-3** (OAuth + Permissions) — independent of Content/Events
-6. **Admin UI** — last, once the APIs it surfaces are built
-7. **Web Extension & RTC** — when the active workstreams are done, or Meet Media API goes GA

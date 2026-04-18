@@ -4,14 +4,15 @@ Features beyond the v1.0 scope. For v1.0 goals, see [v1.0/GOAL.md](v1.0/GOAL.md)
 
 ---
 
-## Search & Knowledge
+## Search & Knowledge (extensions)
+
+Basic embedding + semantic search is built. These are extensions:
 
 | Feature | Complexity | Description |
 |---------|------------|-------------|
-| Embedding infrastructure + semantic search | High | Vector storage, hybrid search over all UCM content |
-| Full RAG pipeline | High | Query → embed → search → inject context → LLM |
 | Wiki-style cross-linking | Medium | `[[doc:Title]]` syntax, backlinks panel |
 | Hierarchical tags | High | Multi-tagging, tag hierarchy for documents and conversations |
+| Frontmatter-aware search | Medium | Filter by arbitrary key-value conditions (`tags contains "urgent"`) |
 
 ---
 
@@ -30,8 +31,6 @@ These build on the Events phase (event bus + intent engine) once it's delivered.
 
 ## Multimodal
 
-The `IntoContent`/`FromContent` trait system and MCP content blocks handle transport. These are the generation/extraction features that build on that.
-
 | Feature | Complexity | Description |
 |---------|------------|-------------|
 | Image generation | Medium | Stable Diffusion, DALL-E, Flux — exposed as MCP tools |
@@ -42,11 +41,11 @@ The `IntoContent`/`FromContent` trait system and MCP content blocks handle trans
 
 ## External Integrations
 
-Implemented as MCP tool servers that register with simply-daemon. Each integration is an independent binary that connects via `register_ephemeral_mcp` (same pattern as Lumina).
+Implemented as MCP tool servers or Skills that register with the daemon.
 
-| Integration | Tools (MCP) | Events (future) |
-|-------------|-------------|------------------|
-| GitHub | `create_issue`, `comment_pr`, `list_prs` | `github.pr_opened`, `github.issue_created` |
+| Integration | Tools | Events (future) |
+|-------------|-------|------------------|
+| GitHub | `create_issue`, `comment_pr`, `list_prs` | `github.pr_opened` |
 | Notion | `update_page`, `create_page`, `search` | `notion.page_updated` |
 | Google Calendar | `create_event`, `list_events` | `calendar.event_starting` |
 | Email | `send_email`, `search_inbox` | `email.received` |
@@ -56,12 +55,11 @@ Implemented as MCP tool servers that register with simply-daemon. Each integrati
 
 ## Future Platforms
 
-New presentation layer crates that connect to simply-daemon via `RemoteDaemon`.
+New crates that connect to `simply-daemon` via `RemoteDaemon` or embed it.
 
 | Platform | Notes |
 |----------|-------|
-| Telegram | New crate, same `DaemonApi` + `RemoteDaemon` pattern as Lumina |
-| WhatsApp | New crate, same pattern |
-| WebRTC / simply-chris.ai/meet | New crate, voice + video via daemon's `VoiceApi` |
-| Noema Web (browser) | The daemon already exposes REST + WS — needs a web frontend |
-| Cloud sync / multi-device | Requires auth layer on daemon (currently localhost-only) |
+| Telegram | Same `Daemon` trait + `RemoteDaemon` pattern as Lumina |
+| WhatsApp | Same pattern |
+| WebRTC / simply-chris.ai/meet | Voice + video via daemon's `VoiceApi` |
+| Cloud sync / multi-device | Requires persistent auth layer |
