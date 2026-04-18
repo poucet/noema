@@ -44,13 +44,19 @@ async fn main() -> anyhow::Result<()> {
     let token_store = Arc::new(simply_daemon::token_store::TransientTokenStore::new());
     let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
 
+    // Register skills
+    let gdocs_skill: Arc<dyn simply_daemon_api::Skill> = Arc::new(mcp_gdocs::GDocsSkill::new(
+        Arc::new(simply_daemon::skill_adapters::DocumentApiAdapter::new(Arc::clone(&stores) as _)),
+        Arc::new(simply_daemon::skill_adapters::AssetApiAdapter::new(Arc::clone(&coordinator))),
+    ));
+
     let daemon = simply_daemon::builder::DaemonBuilder {
         stores: Arc::clone(&stores) as _,
         coordinator,
         vector_store,
         token_store: Arc::clone(&token_store),
         voice: simply_daemon::builder::create_voice_service(),
-        skills: vec![],  // TODO: register GDocsSkill here
+        skills: vec![gdocs_skill],
     }.build().await?;
 
     // Kill channel — CoreApi is special (not in daemon_tools, needs kill_tx from here)
