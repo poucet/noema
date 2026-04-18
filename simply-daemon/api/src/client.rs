@@ -47,6 +47,11 @@ impl DaemonRpcConnection {
         })
     }
 
+    /// Access the underlying WsConnection (for reverse call setup, etc.)
+    pub fn ws(&self) -> &WsConnection {
+        &self.conn
+    }
+
     pub fn connection_state(&self) -> ConnectionState {
         self.conn.connection_state()
     }

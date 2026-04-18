@@ -35,12 +35,21 @@ struct LiveConnection {
     _writer: JoinHandle<()>,
 }
 
-/// WebSocket RPC client. Handles request/response and notification routing.
+/// Handler for reverse RPC calls from the server.
+pub type ReverseCallHandler = Arc<
+    dyn Fn(u64, String, serde_json::Value, mpsc::Sender<String>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+    + Send + Sync
+>;
+
+/// WebSocket RPC client. Handles request/response, notification routing,
+/// and reverse RPC calls (server → client).
 pub struct WsConnection {
     live: Arc<Mutex<Option<LiveConnection>>>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
     /// Notification sinks keyed by method name.
     sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
+    /// Handler for reverse RPC calls (server sends request, client responds).
+    reverse_handler: Arc<Mutex<Option<ReverseCallHandler>>>,
     next_id: AtomicU64,
     state_rx: watch::Receiver<ConnectionState>,
     _reconnect_task: JoinHandle<()>,
@@ -58,11 +67,14 @@ impl WsConnection {
             Arc::new(Mutex::new(HashMap::new()));
         let sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let reverse_handler: Arc<Mutex<Option<ReverseCallHandler>>> =
+            Arc::new(Mutex::new(None));
         let live: Arc<Mutex<Option<LiveConnection>>> = Arc::new(Mutex::new(None));
 
         let (state_tx, state_rx) = watch::channel(ConnectionState::Connected);
         let initial = establish_connection(
             addr, &headers, Arc::clone(&pending), Arc::clone(&sinks),
+            Arc::clone(&reverse_handler),
             Arc::clone(&live), state_tx.clone(),
         ).await?;
         *live.lock().await = Some(initial);
@@ -73,6 +85,7 @@ impl WsConnection {
             let live = Arc::clone(&live);
             let pending = Arc::clone(&pending);
             let sinks = Arc::clone(&sinks);
+            let reverse_handler = Arc::clone(&reverse_handler);
             let state_tx = state_tx.clone();
             let mut state_rx = state_rx.clone();
 
@@ -96,6 +109,7 @@ impl WsConnection {
 
                         match establish_connection(
                             &addr, &headers, Arc::clone(&pending), Arc::clone(&sinks),
+                            Arc::clone(&reverse_handler),
                             Arc::clone(&live), state_tx.clone(),
                         ).await {
                             Ok(conn) => {
@@ -118,6 +132,7 @@ impl WsConnection {
             live,
             pending,
             sinks,
+            reverse_handler,
             next_id: AtomicU64::new(1),
             state_rx,
             _reconnect_task: reconnect_task,
@@ -190,6 +205,14 @@ impl WsConnection {
     pub async fn unregister_sink(&self, method: &str) {
         self.sinks.lock().await.remove(method);
     }
+
+    /// Set a handler for reverse RPC calls (server → client).
+    ///
+    /// The handler receives (id, method, params, write_tx) and is responsible for
+    /// sending a response back via write_tx. Runs as a spawned task.
+    pub async fn set_reverse_handler(&self, handler: ReverseCallHandler) {
+        *self.reverse_handler.lock().await = Some(handler);
+    }
 }
 
 async fn establish_connection(
@@ -197,6 +220,7 @@ async fn establish_connection(
     headers: &[(String, String)],
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<WsResponse>>>>,
     sinks: Arc<Mutex<HashMap<String, mpsc::Sender<serde_json::Value>>>>,
+    reverse_handler: Arc<Mutex<Option<ReverseCallHandler>>>,
     live: Arc<Mutex<Option<LiveConnection>>>,
     state_tx: watch::Sender<ConnectionState>,
 ) -> anyhow::Result<LiveConnection> {
@@ -222,6 +246,7 @@ async fn establish_connection(
         }
     });
 
+    let reverse_write_tx = write_tx.clone();
     let reader = tokio::spawn(async move {
         let mut source = ws_source;
         while let Some(msg) = source.next().await {
@@ -237,6 +262,7 @@ async fn establish_connection(
                 Err(_) => continue,
             };
 
+            // Response to our request (id + result/error, no method)
             if incoming.is_response() {
                 let id = incoming.id.unwrap();
                 let response = WsResponse {
@@ -247,7 +273,30 @@ async fn establish_connection(
                 if let Some(tx) = pending.lock().await.remove(&id) {
                     let _ = tx.send(response);
                 }
-            } else if incoming.is_notification() {
+            }
+            // Reverse call from server (id + method — server requesting us)
+            else if incoming.is_request() {
+                let id = incoming.id.unwrap();
+                let method = incoming.method.unwrap();
+                let params = incoming.params;
+
+                let handler = reverse_handler.lock().await.clone();
+                if let Some(handler) = handler {
+                    let write_tx = reverse_write_tx.clone();
+                    tokio::spawn(async move {
+                        handler(id, method, params, write_tx).await;
+                    });
+                } else {
+                    // No handler — send error response
+                    let response = serde_json::json!({
+                        "id": id,
+                        "error": { "code": -1, "message": "no reverse call handler registered" }
+                    });
+                    let _ = reverse_write_tx.send(serde_json::to_string(&response).unwrap_or_default()).await;
+                }
+            }
+            // Notification (method, no id)
+            else if incoming.is_notification() {
                 let method = incoming.method.as_deref().unwrap();
                 let sinks = sinks.lock().await;
                 if let Some(tx) = sinks.get(method) {
