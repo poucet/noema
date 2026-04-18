@@ -209,6 +209,12 @@ where
             Arc::clone(mcp.registry()),
         ));
 
+        // Build skill context for plugins
+        let skill_ctx = simply_core::SkillContext {
+            stores: Arc::clone(&stores),
+            coordinator: Arc::clone(&coordinator),
+        };
+
         let tools = Arc::new(CompositeToolService::new(
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
@@ -221,7 +227,9 @@ where
             McpToolRegistry::new(Arc::clone(mcp.registry())),
             Arc::clone(&mcp),
             Arc::clone(&user_tools),
-        ));
+        )
+        // Register skills
+        .register_skill(Arc::new(mcp_gdocs::GDocsSkill::new(skill_ctx))));
 
         let daemon = Arc::new(Self {
             coordinator,

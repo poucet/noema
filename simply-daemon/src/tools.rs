@@ -111,13 +111,14 @@ impl Default for DaemonToolService {
 // CompositeToolService — daemon REST tools + MCP tools, implements McpApi
 // ---------------------------------------------------------------------------
 
-/// Combines daemon REST tools and MCP tools into a single service.
+/// Combines daemon REST tools, MCP tools, and skills into a single service.
 /// Implements both `ToolService` (for in-process use) and `McpApi` (for REST).
 pub struct CompositeToolService {
     daemon_tools: DaemonToolService,
     mcp_tools: McpToolRegistry,
     mcp: Arc<McpService>,
     user_tools: Arc<crate::user_tools::UserToolServiceCache>,
+    skills: Vec<Arc<dyn simply_core::Skill>>,
 }
 
 impl CompositeToolService {
@@ -127,7 +128,15 @@ impl CompositeToolService {
         mcp: Arc<McpService>,
         user_tools: Arc<crate::user_tools::UserToolServiceCache>,
     ) -> Self {
-        Self { daemon_tools, mcp_tools, mcp, user_tools }
+        Self { daemon_tools, mcp_tools, mcp, user_tools, skills: Vec::new() }
+    }
+
+    /// Register a skill. Skills provide additional tools alongside
+    /// daemon REST tools and MCP tools.
+    pub fn register_skill(mut self, skill: Arc<dyn simply_core::Skill>) -> Self {
+        tracing::info!(skill = skill.name(), tools = skill.tools().len(), "registered skill");
+        self.skills.push(skill);
+        self
     }
 }
 
@@ -136,6 +145,9 @@ impl ToolService for CompositeToolService {
     async fn get_definitions(&self) -> Vec<ToolDefinition> {
         let mut defs = self.daemon_tools.get_definitions().await;
         defs.extend(self.mcp_tools.get_definitions().await);
+        for skill in &self.skills {
+            defs.extend(skill.tools());
+        }
         defs
     }
 
@@ -144,10 +156,20 @@ impl ToolService for CompositeToolService {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<Vec<ToolResultContent>> {
-        // Try daemon tools first, then MCP
+        // Try daemon tools first
         if self.daemon_tools.get_definitions().await.iter().any(|d| d.name == name) {
             return self.daemon_tools.call_tool(name, arguments).await;
         }
+        // Try skills
+        for skill in &self.skills {
+            if skill.tools().iter().any(|t| t.name == name) {
+                // Skills need a user_id — use anonymous for now
+                // (the per-user tool service in call_tool_direct handles user context)
+                let anon = simply_core::storage::ids::UserId::from_string("anonymous");
+                return skill.call_tool(name, arguments, &anon).await;
+            }
+        }
+        // Fall back to MCP
         self.mcp_tools.call_tool(name, arguments).await
     }
 }
