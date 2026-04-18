@@ -125,7 +125,7 @@ pub struct CompositeToolService {
     user_tools: Arc<crate::services::user_tools::UserToolServiceCache>,
     token_store: Arc<crate::services::token_store::TransientTokenStore>,
     skills: tokio::sync::RwLock<Vec<Arc<dyn simply_daemon_api::Skill>>>,
-    ws_tools: Arc<crate::services::ws_tools::WsToolRegistry>,
+    pub ws_tools: Arc<crate::services::ws_tools::WsToolRegistry>,
 }
 
 impl CompositeToolService {

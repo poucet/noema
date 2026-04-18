@@ -6,7 +6,6 @@ pub mod mcp_auth;
 pub mod protocol;
 pub mod server;
 pub mod rest;
-pub(crate) mod client;
 pub mod discovery;
 
 pub use simply_rpc::ws_client::ConnectionState;

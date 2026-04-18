@@ -51,7 +51,7 @@ daemon_start() {
 
   # Generate TypeScript types from Rust (ts-rs)
   log "Generating TypeScript types..."
-  cd "$REPO_ROOT" && cargo test -p simply-daemon ts_export -- --quiet 2>/dev/null || true
+  cd "$REPO_ROOT" && cargo test -p simply-daemon-api --features ts ts_export -- --quiet 2>/dev/null || true
 
   # Build daemon (SKIP_ADMIN_BUILD — Astro dev server handles UI)
   log "Building daemon..."

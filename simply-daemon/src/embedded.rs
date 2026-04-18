@@ -27,6 +27,45 @@ use crate::services::*;
 use crate::tools::CompositeToolService;
 
 // ---------------------------------------------------------------------------
+// ClientToolSkill — wraps a ToolCallHandler as a Skill for embedded registration
+// ---------------------------------------------------------------------------
+
+struct ClientToolSkill {
+    tools: Vec<llm::ToolDefinition>,
+    handler: simply_daemon_api::ToolCallHandler,
+}
+
+#[async_trait]
+impl simply_daemon_api::Skill for ClientToolSkill {
+    fn name(&self) -> &str { "client" }
+
+    fn tools(&self) -> Vec<llm::ToolDefinition> {
+        self.tools.clone()
+    }
+
+    async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+        _ctx: &simply_daemon_api::SkillCallContext,
+    ) -> anyhow::Result<Vec<llm::ToolResultContent>> {
+        let result = (self.handler)(name.to_string(), arguments).await?;
+        // Parse result as tool content
+        if let Some(arr) = result.get("content").and_then(|v| v.as_array()) {
+            Ok(arr.iter().map(|c| {
+                if let Some(text) = c.get("text").and_then(|v| v.as_str()) {
+                    llm::ToolResultContent::text(text)
+                } else {
+                    llm::ToolResultContent::text(serde_json::to_string(c).unwrap_or_default())
+                }
+            }).collect())
+        } else {
+            Ok(vec![llm::ToolResultContent::text(serde_json::to_string(&result)?)])
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Session bookkeeping
 // ---------------------------------------------------------------------------
 
@@ -409,6 +448,7 @@ where
 // Daemon trait
 // ---------------------------------------------------------------------------
 
+#[async_trait]
 impl<S: StorageTypes> Daemon for EmbeddedDaemon<S>
 where S::Document: DocumentResolver,
 {
@@ -424,4 +464,20 @@ where S::Document: DocumentResolver,
     fn search(&self) -> &dyn SearchApi { &*self.search }
     fn user(&self) -> &dyn UserApi { &*self.user_svc }
     fn tools(&self) -> &dyn ToolService { &*self.tools }
+
+    async fn register_client_tools(
+        &self,
+        tools: Vec<llm::ToolDefinition>,
+        handler: simply_daemon_api::ToolCallHandler,
+    ) -> anyhow::Result<()> {
+        // Embedded: wrap the handler as a Skill and register directly — no protocol overhead
+        let count = tools.len();
+        let skill: Box<dyn simply_daemon_api::Skill> = Box::new(ClientToolSkill {
+            tools,
+            handler,
+        });
+        self.tools.register_skill_runtime(skill).await;
+        tracing::info!(count, "client tools registered (embedded, direct)");
+        Ok(())
+    }
 }

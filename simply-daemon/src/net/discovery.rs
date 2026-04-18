@@ -11,7 +11,7 @@ use simply_rpc::{ServiceRouter, RpcService};
 
 use crate::api::*;
 use crate::embedded::EmbeddedDaemon;
-use crate::remote::RemoteDaemon;
+use simply_daemon_api::RemoteDaemon;
 use crate::services::CoreService;
 use crate::storage::SqliteStores;
 

@@ -105,6 +105,7 @@ impl RemoteDaemon {
     }
 }
 
+#[async_trait]
 impl Daemon for RemoteDaemon {
     fn session(&self) -> &dyn SessionApi { &self.session }
     fn conversation(&self) -> &dyn ConversationApi { &self.conversation }
@@ -118,6 +119,17 @@ impl Daemon for RemoteDaemon {
     fn search(&self) -> &dyn SearchApi { &self.search }
     fn user(&self) -> &dyn UserApi { &self.user }
     fn tools(&self) -> &dyn simply_core::ToolService { &self.mcp }
+
+    async fn register_client_tools(
+        &self,
+        tools: Vec<llm::ToolDefinition>,
+        handler: crate::ToolCallHandler,
+    ) -> anyhow::Result<()> {
+        self.register_tools(tools, move |name, args| {
+            let handler = handler.clone();
+            Box::pin(async move { handler(name, args).await })
+        }).await
+    }
 }
 
 // ToolService impl for RemoteMcpApi is in simply-daemon-api crate.

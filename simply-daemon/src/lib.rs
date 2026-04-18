@@ -16,7 +16,6 @@ pub mod embedded;
 pub mod mcp;
 pub mod net;
 pub mod oauth;
-pub mod remote;
 pub mod services;
 pub mod session;
 pub mod storage;
