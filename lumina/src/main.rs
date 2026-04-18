@@ -17,6 +17,7 @@ use songbird::SerenityInit;
 use songbird::Config as SongbirdConfig;
 use songbird::driver::{DecodeMode, DecodeConfig, Channels, SampleRate};
 use simply_daemon_api::{Daemon, McpApi, RegisterEphemeralRequest};
+#[cfg(feature = "embedded")]
 use simply_daemon::net;
 
 /// Key for storing the MCP server in serenity's TypeMap (to inject cache on ready).
@@ -67,20 +68,30 @@ async fn main() -> anyhow::Result<()> {
         .bot_token()
         .expect("DISCORD_BOT_TOKEN env var or discord.bot_token in lumina.toml is required");
 
-    // Connect to existing daemon or start embedded
-    let _daemon_handle = net::connect_or_host(
-        settings.daemon_port,
-        "lumina",
-        None,
-    ).await?;
-    tracing::info!(host = _daemon_handle.is_host(), "daemon ready");
-
-    let daemon = _daemon_handle.daemon();
+    // Connect to daemon
+    #[cfg(feature = "embedded")]
+    let (_daemon_handle, daemon) = {
+        let handle = net::connect_or_host(settings.daemon_port, "lumina", None).await?;
+        tracing::info!(host = handle.is_host(), "daemon ready");
+        let d = handle.daemon();
+        (handle, d)
+    };
+    #[cfg(not(feature = "embedded"))]
+    let daemon: Arc<dyn Daemon> = {
+        compile_error!("Remote-only Lumina build not yet supported. Use default features (embedded).");
+    };
 
     // Start Lumina's MCP server and register with daemon
     let http = Arc::new(serenity::http::Http::new(&token));
     let mcp_server = mcp::LuminaMcpServer::new(http);
+    #[cfg(feature = "embedded")]
     let _mcp_handle = simply_daemon::mcp::start_server(mcp_server.clone()).await?;
+    #[cfg(not(feature = "embedded"))]
+    let _mcp_handle = {
+        // For remote mode, use the mcp-gdocs crate's start_server as a generic MCP server host
+        // TODO: extract generic MCP server hosting into simply-daemon-api or a shared crate
+        anyhow::bail!("Remote MCP server hosting not yet implemented. Use embedded mode.")
+    };
     let mcp_url = _mcp_handle.url();
     tracing::info!(url = %mcp_url, "lumina MCP server started");
 
