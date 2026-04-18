@@ -5,11 +5,9 @@
 use std::sync::Arc;
 
 use simply_daemon::api::*;
-use simply_daemon::embedded::EmbeddedDaemon;
 use simply_daemon::storage::SqliteStores;
 use simply_daemon::net;
-use simply_rpc::{ServiceRouter, RpcService};
-use simply_daemon::api::Daemon;
+use simply_rpc::RpcService;
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -40,32 +38,27 @@ async fn main() -> anyhow::Result<()> {
     let port = settings.daemon_port.unwrap_or(config::DEFAULT_DAEMON_PORT);
     let daemon_secret = settings.ensure_daemon_secret().to_string();
 
-    // Open storage and create daemon
+    // Open storage and build daemon
     let stores = Arc::new(SqliteStores::open()?);
     let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
     let token_store = Arc::new(simply_daemon::token_store::TransientTokenStore::new());
-    let daemon = EmbeddedDaemon::new(Arc::clone(&stores), vector_store, Arc::clone(&token_store)).await?;
+    let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
 
-    // Kill channel — shared with CoreService so /daemon/kill actually works
+    let daemon = simply_daemon::builder::DaemonBuilder {
+        stores: Arc::clone(&stores) as _,
+        coordinator,
+        vector_store,
+        token_store: Arc::clone(&token_store),
+        voice: simply_daemon::builder::create_voice_service(),
+        skills: vec![],  // TODO: register GDocsSkill here
+    }.build().await?;
+
+    // Kill channel — CoreApi is special (not in daemon_tools, needs kill_tx from here)
     let (kill_tx, mut kill_rx) = mpsc::channel(1);
-    let core_svc = Arc::new(simply_daemon::services::CoreService::new(kill_tx));
+    let core_svc: Arc<dyn simply_rpc::RestService> =
+        <dyn CoreApi>::service(Arc::new(simply_daemon::services::CoreService::new(kill_tx)));
 
-    // Register all services
-    let session_svc: Arc<dyn SessionApi> = daemon.clone();
-    let conversation_svc: Arc<dyn ConversationApi> = daemon.clone();
-
-    let rest_dispatcher = Arc::new(ServiceRouter::new()
-        .register(<dyn SessionApi>::service(session_svc))
-        .register(<dyn ConversationApi>::service(conversation_svc))
-        .register(<dyn AssetApi>::service(daemon.asset_service()))
-        .register(<dyn DocumentApi>::service(daemon.document_service()))
-        .register(<dyn McpApi>::service(daemon.mcp_service()))
-        .register(<dyn OAuthApi>::service(daemon.oauth_service()))
-        .register(<dyn ModelApi>::service(daemon.model_service()))
-        .register(<dyn VoiceApi>::service(daemon.voice_service()))
-        .register(<dyn SearchApi>::service(daemon.search_service()))
-        .register(<dyn UserApi>::service(daemon.user_service()))
-        .register(<dyn CoreApi>::service(core_svc)));
+    let rest_dispatcher = simply_daemon::builder::build_service_router(&daemon, vec![core_svc]);
 
     let tracker = net::server::ConnectionTracker::new();
 

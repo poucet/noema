@@ -57,6 +57,11 @@ impl DaemonToolService {
         self
     }
 
+    /// Access the registered service list (for ServiceRouter, etc.)
+    pub fn services(&self) -> &[Arc<dyn RestService>] {
+        &self.services
+    }
+
     /// Create a new DaemonToolService with the same services but a different context.
     /// Used to scope daemon tools to a specific user's session.
     pub fn with_context(&self, ctx: simply_rpc::RequestContext) -> Self {
@@ -114,7 +119,7 @@ impl Default for DaemonToolService {
 /// Combines daemon REST tools, MCP tools, and skills into a single service.
 /// Implements both `ToolService` (for in-process use) and `McpApi` (for REST).
 pub struct CompositeToolService {
-    daemon_tools: DaemonToolService,
+    daemon_tools: Arc<DaemonToolService>,
     mcp_tools: McpToolRegistry,
     mcp: Arc<McpService>,
     user_tools: Arc<crate::user_tools::UserToolServiceCache>,
@@ -123,12 +128,17 @@ pub struct CompositeToolService {
 
 impl CompositeToolService {
     pub fn new(
-        daemon_tools: DaemonToolService,
+        daemon_tools: Arc<DaemonToolService>,
         mcp_tools: McpToolRegistry,
         mcp: Arc<McpService>,
         user_tools: Arc<crate::user_tools::UserToolServiceCache>,
     ) -> Self {
         Self { daemon_tools, mcp_tools, mcp, user_tools, skills: Vec::new() }
+    }
+
+    /// Get the daemon tool services (same list used for REST dispatch).
+    pub fn daemon_tool_services(&self) -> Vec<Arc<dyn RestService>> {
+        self.daemon_tools.services().to_vec()
     }
 
     /// Register a skill. Skills provide additional tools alongside

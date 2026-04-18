@@ -120,23 +120,20 @@ pub async fn connect_or_host(
     let user_store = stores.sqlite();
     let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
     let token_store = Arc::new(crate::token_store::TransientTokenStore::new());
-    let daemon = EmbeddedDaemon::new(Arc::clone(&stores), vector_store, Arc::clone(&token_store)).await?;
+    let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
+    let daemon = crate::builder::DaemonBuilder {
+        stores: Arc::clone(&stores) as _,
+        coordinator,
+        vector_store,
+        token_store: Arc::clone(&token_store),
+        voice: crate::builder::create_voice_service(),
+        skills: vec![],
+    }.build().await?;
 
-    // Kill channel
     let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
-    let core_svc = Arc::new(CoreService::new(kill_tx));
-
-    let session_svc: Arc<dyn SessionApi> = daemon.clone();
-    let rest_dispatcher = Arc::new(ServiceRouter::new()
-        .register(<dyn SessionApi>::service(session_svc))
-        .register(<dyn ConversationApi>::service(daemon.clone() as Arc<dyn ConversationApi>))
-        .register(<dyn AssetApi>::service(daemon.asset_service()))
-        .register(<dyn DocumentApi>::service(daemon.document_service()))
-        .register(<dyn McpApi>::service(daemon.mcp_service()))
-        .register(<dyn OAuthApi>::service(daemon.oauth_service()))
-        .register(<dyn ModelApi>::service(daemon.model_service()))
-        .register(<dyn VoiceApi>::service(daemon.voice_service()))
-        .register(<dyn CoreApi>::service(core_svc)));
+    let core_svc: Arc<dyn simply_rpc::RestService> =
+        <dyn CoreApi>::service(Arc::new(CoreService::new(kill_tx)));
+    let rest_dispatcher = crate::builder::build_service_router(&daemon, vec![core_svc]);
 
     let tracker = server::ConnectionTracker::new();
     let oauth_tracker = daemon.oauth_tracker();
