@@ -125,6 +125,7 @@ pub struct CompositeToolService {
     user_tools: Arc<crate::services::user_tools::UserToolServiceCache>,
     token_store: Arc<crate::services::token_store::TransientTokenStore>,
     skills: tokio::sync::RwLock<Vec<Arc<dyn simply_daemon_api::Skill>>>,
+    ws_tools: Arc<crate::services::ws_tools::WsToolRegistry>,
 }
 
 impl CompositeToolService {
@@ -135,7 +136,7 @@ impl CompositeToolService {
         user_tools: Arc<crate::services::user_tools::UserToolServiceCache>,
         token_store: Arc<crate::services::token_store::TransientTokenStore>,
     ) -> Self {
-        Self { daemon_tools, mcp_tools, mcp, user_tools, token_store, skills: tokio::sync::RwLock::new(Vec::new()) }
+        Self { daemon_tools, mcp_tools, mcp, user_tools, token_store, skills: tokio::sync::RwLock::new(Vec::new()), ws_tools: Arc::new(crate::services::ws_tools::WsToolRegistry::new()) }
     }
 
     /// Register a skill at runtime (after daemon construction).
@@ -171,6 +172,11 @@ impl CompositeToolService {
         self.daemon_tools.services().to_vec()
     }
 
+    /// Set the shared WsToolRegistry (injected by the builder after construction).
+    pub fn set_ws_tools(&mut self, ws_tools: Arc<crate::services::ws_tools::WsToolRegistry>) {
+        self.ws_tools = ws_tools;
+    }
+
     /// Get a user-scoped tool service for a session.
     pub async fn for_user(
         self: &Arc<Self>,
@@ -198,6 +204,7 @@ impl CompositeToolService {
             skills,
             skill_ctx,
             mcp_fallback: Arc::clone(&self.mcp),
+            ws_tools: Arc::clone(&self.ws_tools),
         }))
     }
 }
@@ -210,6 +217,7 @@ struct UserScopedToolService {
     skills: Vec<Arc<dyn simply_daemon_api::Skill>>,
     skill_ctx: simply_daemon_api::SkillCallContext,
     mcp_fallback: Arc<McpService>,
+    ws_tools: Arc<crate::services::ws_tools::WsToolRegistry>,
 }
 
 #[async_trait]
@@ -222,6 +230,7 @@ impl ToolService for UserScopedToolService {
         for skill in &self.skills {
             defs.extend(skill.tools());
         }
+        defs.extend(self.ws_tools.get_definitions().await);
         defs
     }
 
@@ -261,7 +270,12 @@ impl ToolService for UserScopedToolService {
             }
         }
 
-        // 4. Fall back to global MCP registry
+        // 4. Try WS-registered tools (from connected clients like Lumina)
+        if self.ws_tools.has_tool(name).await {
+            return self.ws_tools.call_tool(name, arguments).await;
+        }
+
+        // 5. Fall back to global MCP registry
         let anon = simply_rpc::RequestContext::anonymous();
         let request = rmcp::model::CallToolRequestParams::new(name.to_string())
             .with_arguments(arguments.as_object().cloned().unwrap_or_default());
@@ -286,6 +300,7 @@ impl ToolService for CompositeToolService {
         for skill in self.skills.read().await.iter() {
             defs.extend(skill.tools());
         }
+        defs.extend(self.ws_tools.get_definitions().await);
         defs
     }
 
@@ -306,6 +321,10 @@ impl ToolService for CompositeToolService {
                 );
                 return skill.call_tool(name, arguments, &ctx).await;
             }
+        }
+        // Try WS-registered tools
+        if self.ws_tools.has_tool(name).await {
+            return self.ws_tools.call_tool(name, arguments).await;
         }
         // Fall back to MCP
         self.mcp_tools.call_tool(name, arguments).await

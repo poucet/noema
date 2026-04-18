@@ -11,6 +11,7 @@ pub mod tools;
 pub mod user_tools;
 pub mod embedding_queue;
 pub mod token_store;
+pub mod ws_tools;
 
 pub use model::ModelService;
 pub use asset::AssetService;
@@ -22,3 +23,4 @@ pub use user::UserService;
 pub use tools::{CompositeToolService, DaemonToolService};
 pub use embedding_queue::{EmbeddingQueue, ChannelEmbeddingQueue, EmbedJob};
 pub use token_store::{TransientTokenStore, McpUserToken};
+pub use ws_tools::WsToolRegistry;

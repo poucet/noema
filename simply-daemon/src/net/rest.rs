@@ -40,6 +40,7 @@ pub struct ServerConfig {
     pub user_store: Arc<dyn UserStore>,
     pub token_store: Arc<TransientTokenStore>,
     pub oauth_tracker: Option<Arc<crate::oauth::callback::CallbackTracker>>,
+    pub ws_tools: Arc<crate::services::WsToolRegistry>,
 }
 
 /// Shared state for axum handlers.
@@ -49,6 +50,7 @@ struct AppState {
     tracker: ConnectionTracker,
     daemon_secret: Arc<str>,
     sessions: SessionStore,
+    ws_tools: Arc<crate::services::WsToolRegistry>,
 }
 
 /// Starts the unified server (REST + WS + admin).
@@ -64,6 +66,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         tracker: config.tracker,
         daemon_secret: Arc::from(config.daemon_secret.as_str()),
         sessions: sessions.clone(),
+        ws_tools: config.ws_tools,
     };
 
     let admin_routes = Router::new()
@@ -322,7 +325,8 @@ async fn ws_upgrade_handler(
         ),
         None => simply_rpc::RequestContext::anonymous(),
     };
-    ws.on_upgrade(move |socket| handle_ws_connection(dispatcher, socket, tracker, addr, ctx))
+    let ws_tools = Arc::clone(&state.ws_tools);
+    ws.on_upgrade(move |socket| handle_ws_connection(dispatcher, socket, tracker, addr, ctx, ws_tools))
 }
 
 async fn handle_ws_connection(
@@ -331,6 +335,7 @@ async fn handle_ws_connection(
     tracker: ConnectionTracker,
     addr: std::net::SocketAddr,
     ctx: simply_rpc::RequestContext,
+    ws_tools: Arc<crate::services::WsToolRegistry>,
 ) {
     use futures_util::{SinkExt, StreamExt};
 
@@ -340,6 +345,7 @@ async fn handle_ws_connection(
     let (mut ws_sink, mut ws_source) = socket.split();
     let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
     let mut input_sinks: std::collections::HashMap<String, mpsc::Sender<serde_json::Value>> = std::collections::HashMap::new();
+    let mut ws_tool_conn_id: u64 = 0; // set when client registers tools
 
     let writer_handle = tokio::spawn(async move {
         while let Some(text) = write_rx.recv().await {
@@ -372,6 +378,18 @@ async fn handle_ws_connection(
             continue;
         }
 
+        // Handle responses to reverse RPC calls (tools.call responses from client)
+        if incoming.id.is_some() && incoming.method.is_none() && (incoming.result.is_some() || incoming.error.is_some()) {
+            let id = incoming.id.unwrap();
+            let result = if let Some(r) = incoming.result {
+                Ok(r)
+            } else {
+                Err(anyhow::anyhow!("tool call error: {:?}", incoming.error))
+            };
+            ws_tools.handle_response(ws_tool_conn_id, id, result).await;
+            continue;
+        }
+
         if !incoming.is_request() { continue; }
 
         let id = incoming.id.unwrap();
@@ -388,6 +406,26 @@ async fn handle_ws_connection(
             let response = WsResponse::ok(id, serde_json::json!({ "ok": true }));
             let text = serde_json::to_string(&response).unwrap_or_default();
             if write_tx.send(text).await.is_err() { break; }
+            continue;
+        }
+
+        // Built-in: register tools from this client
+        if method == "tools.register" {
+            let tools: Vec<llm::ToolDefinition> = params.get("tools")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            if tools.is_empty() {
+                let response = WsResponse::err(id, "no tools provided");
+                let text = serde_json::to_string(&response).unwrap_or_default();
+                if write_tx.send(text).await.is_err() { break; }
+            } else {
+                let count = tools.len();
+                ws_tool_conn_id = ws_tools.register(tools, write_tx.clone()).await;
+                tracing::info!(conn_id, ws_tool_conn_id, count, "client registered tools");
+                let response = WsResponse::ok(id, serde_json::json!({ "registered": count, "conn_id": ws_tool_conn_id }));
+                let text = serde_json::to_string(&response).unwrap_or_default();
+                if write_tx.send(text).await.is_err() { break; }
+            }
             continue;
         }
 
@@ -444,6 +482,9 @@ async fn handle_ws_connection(
 
     writer_handle.abort();
     tracker.remove(conn_id).await;
+    if ws_tool_conn_id != 0 {
+        ws_tools.unregister(ws_tool_conn_id).await;
+    }
     tracing::info!("WS client disconnected");
 }
 

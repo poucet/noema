@@ -37,6 +37,7 @@ pub struct DaemonHandle<S: StorageTypes> {
     pub daemon: Arc<EmbeddedDaemon<S>>,
     kill_rx: tokio::sync::mpsc::Receiver<()>,
     token_store: Arc<crate::services::token_store::TransientTokenStore>,
+    ws_tools: Arc<crate::services::WsToolRegistry>,
 }
 
 impl<S: StorageTypes> DaemonHandle<S>
@@ -62,6 +63,7 @@ where
             user_store,
             token_store: self.token_store,
             oauth_tracker: Some(oauth_tracker),
+            ws_tools: Arc::clone(&self.ws_tools),
         }).await?;
 
         let actual_port = server.port();
@@ -216,7 +218,8 @@ where
             tools.register_skill_runtime(skill).await;
         }
 
-        Ok(DaemonHandle { daemon, kill_rx, token_store })
+        let ws_tools = Arc::new(crate::services::WsToolRegistry::new());
+        Ok(DaemonHandle { daemon, kill_rx, token_store, ws_tools })
     }
 }
 

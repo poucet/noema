@@ -139,6 +139,7 @@ pub async fn connect_or_host(
         user_store,
         token_store,
         oauth_tracker: Some(oauth_tracker),
+        ws_tools: Arc::new(crate::services::WsToolRegistry::new()),
     }).await?;
 
     Ok(DaemonHandle::Host {

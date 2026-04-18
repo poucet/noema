@@ -51,6 +51,12 @@ impl RemoteDaemon {
         }))
     }
 
+    // TODO: register_tools() — send tools.register over WS, handle reverse calls.
+    // Needs WsConnection to support:
+    // 1. write_tx() to get a write channel for sending responses
+    // 2. on_reverse_call() to handle incoming requests from the server
+    // See simply-daemon/src/services/ws_tools.rs for the server-side protocol.
+
     pub fn connection_state(&self) -> ConnectionState {
         self.conn.connection_state()
     }
