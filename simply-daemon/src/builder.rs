@@ -26,11 +26,11 @@ pub struct DaemonBuilder<S: StorageTypes> {
     pub stores: Arc<dyn Stores<S>>,
     pub coordinator: Arc<StorageCoordinator<S>>,
     pub vector_store: Arc<dyn simply_core::embedding::VectorStore>,
-    pub token_store: Arc<crate::token_store::TransientTokenStore>,
+    pub token_store: Arc<crate::services::token_store::TransientTokenStore>,
     pub voice: VoiceService,
+    /// Kill channel sender — CoreService uses this to shut down the daemon.
+    pub kill_tx: tokio::sync::mpsc::Sender<()>,
     /// Skill factories — called with `Arc<dyn Daemon>` after daemon construction.
-    /// This breaks the circular dependency: daemon is built first, then skills
-    /// are constructed with a handle to it.
     pub skill_factories: Vec<simply_daemon_api::SkillFactory>,
 }
 
@@ -99,6 +99,8 @@ where
         ));
 
         // Tool service — built once, shared between user_tools and composite
+        let core = Arc::new(CoreService::new(self.kill_tx));
+
         let daemon_tools = Arc::new(
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
@@ -106,8 +108,10 @@ where
                 .register(<dyn ModelApi>::service(model.clone()))
                 .register(<dyn CoreApi>::service(core.clone()))
                 .register(<dyn McpApi>::service(mcp.clone()))
+                .register(<dyn OAuthApi>::service(mcp.clone()))
                 .register(<dyn VoiceApi>::service(voice.clone()))
-                .register(<dyn SearchApi>::service(search.clone())),
+                .register(<dyn SearchApi>::service(search.clone()))
+                .register(<dyn UserApi>::service(user_svc.clone())),
         );
 
         let token_store = self.token_store;
@@ -153,12 +157,10 @@ where
 
 /// Build the ServiceRouter from a daemon.
 ///
-/// Reuses the daemon_tools service list (registered once in the builder)
-/// and adds SessionApi + ConversationApi (implemented directly by the daemon).
-/// Optionally adds a CoreApi (with kill channel) provided by the caller.
+/// All services are registered once in the builder's daemon_tools.
+/// This just adds SessionApi + ConversationApi (implemented directly by the daemon).
 pub fn build_service_router<S: StorageTypes>(
     daemon: &Arc<EmbeddedDaemon<S>>,
-    extra_services: Vec<Arc<dyn simply_rpc::RestService>>,
 ) -> Arc<ServiceRouter>
 where
     S::Document: DocumentResolver,
@@ -170,13 +172,7 @@ where
         .register(<dyn SessionApi>::service(session_svc))
         .register(<dyn ConversationApi>::service(conversation_svc));
 
-    // Register all daemon tool services (Asset, Document, MCP, Model, Voice, Search, etc.)
     for svc in daemon.daemon_tool_services() {
-        router = router.register(svc);
-    }
-
-    // Extra services (e.g., CoreApi with kill channel)
-    for svc in extra_services {
         router = router.register(svc);
     }
 

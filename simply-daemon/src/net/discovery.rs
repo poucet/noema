@@ -121,19 +121,18 @@ pub async fn connect_or_host(
     let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
     let token_store = Arc::new(crate::token_store::TransientTokenStore::new());
     let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
+    let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
     let daemon = crate::builder::DaemonBuilder {
         stores: Arc::clone(&stores) as _,
         coordinator,
         vector_store,
         token_store: Arc::clone(&token_store),
         voice: crate::builder::create_voice_service(),
+        kill_tx,
         skill_factories: vec![],
     }.build().await?;
 
-    let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
-    let core_svc: Arc<dyn simply_rpc::RestService> =
-        <dyn CoreApi>::service(Arc::new(CoreService::new(kill_tx)));
-    let rest_dispatcher = crate::builder::build_service_router(&daemon, vec![core_svc]);
+    let rest_dispatcher = crate::builder::build_service_router(&daemon);
 
     let tracker = server::ConnectionTracker::new();
     let oauth_tracker = daemon.oauth_tracker();

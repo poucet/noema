@@ -44,24 +44,21 @@ async fn main() -> anyhow::Result<()> {
     let token_store = Arc::new(simply_daemon::token_store::TransientTokenStore::new());
     let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
 
+    let (kill_tx, mut kill_rx) = mpsc::channel(1);
+
     let daemon = simply_daemon::builder::DaemonBuilder {
         stores: Arc::clone(&stores) as _,
         coordinator,
         vector_store,
         token_store: Arc::clone(&token_store),
         voice: simply_daemon::builder::create_voice_service(),
+        kill_tx,
         skill_factories: vec![
-            // GDocsSkill — takes Arc<dyn Daemon>, uses DocumentApi + AssetApi
             Box::new(|daemon| Box::new(mcp_gdocs::GDocsSkill::new(daemon))),
         ],
     }.build().await?;
 
-    // Kill channel — CoreApi is special (not in daemon_tools, needs kill_tx from here)
-    let (kill_tx, mut kill_rx) = mpsc::channel(1);
-    let core_svc: Arc<dyn simply_rpc::RestService> =
-        <dyn CoreApi>::service(Arc::new(simply_daemon::services::CoreService::new(kill_tx)));
-
-    let rest_dispatcher = simply_daemon::builder::build_service_router(&daemon, vec![core_svc]);
+    let rest_dispatcher = simply_daemon::builder::build_service_router(&daemon);
 
     let tracker = net::server::ConnectionTracker::new();
 
