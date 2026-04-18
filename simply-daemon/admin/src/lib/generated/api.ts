@@ -69,6 +69,8 @@ export const documentApi = (t: Transport) => ({
   updateTab: (tabId: string, request: T.UpdateTabRequest) => t.rpc<void>('document.update_tab', 'PUT', `/api/document/tab/${tabId}`, { request }),
   /** Delete a tab. */
   deleteTab: (tabId: string) => t.rpc<void>('document.delete_tab', 'DELETE', `/api/document/tab/${tabId}`),
+  /** Flush pending embedding for a tab (process immediately, bypass debounce). Called on tab switch / page unload to ensure edits are embedded promptly. */
+  flushTabEmbedding: (tabId: string) => t.rpc<void>('document.flush_tab_embedding', 'POST', `/api/document/tab/${tabId}/flush`),
 });
 
 // McpApi
