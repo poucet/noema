@@ -4547,6 +4547,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simply-daemon-api",
+ "simply-rpc",
  "tokio",
  "tower-service",
  "tracing",

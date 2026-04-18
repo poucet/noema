@@ -123,7 +123,8 @@ pub struct CompositeToolService {
     mcp_tools: McpToolRegistry,
     mcp: Arc<McpService>,
     user_tools: Arc<crate::user_tools::UserToolServiceCache>,
-    skills: Vec<Arc<dyn simply_daemon_api::Skill>>,
+    token_store: Arc<crate::token_store::TransientTokenStore>,
+    skills: tokio::sync::RwLock<Vec<Arc<dyn simply_daemon_api::Skill>>>,
 }
 
 impl CompositeToolService {
@@ -132,8 +133,37 @@ impl CompositeToolService {
         mcp_tools: McpToolRegistry,
         mcp: Arc<McpService>,
         user_tools: Arc<crate::user_tools::UserToolServiceCache>,
+        token_store: Arc<crate::token_store::TransientTokenStore>,
     ) -> Self {
-        Self { daemon_tools, mcp_tools, mcp, user_tools, skills: Vec::new() }
+        Self { daemon_tools, mcp_tools, mcp, user_tools, token_store, skills: tokio::sync::RwLock::new(Vec::new()) }
+    }
+
+    /// Register a skill at runtime (after daemon construction).
+    pub async fn register_skill_runtime(&self, skill: Box<dyn simply_daemon_api::Skill>) {
+        let skill: Arc<dyn simply_daemon_api::Skill> = skill.into();
+        tracing::info!(skill = skill.name(), tools = skill.tools().len(), "registered skill (runtime)");
+        self.skills.write().await.push(skill);
+    }
+
+    /// Build a SkillCallContext for a user, populating tokens from the store.
+    async fn skill_context_for(&self, user_id: &simply_core::storage::ids::UserId) -> simply_daemon_api::SkillCallContext {
+        let mut ctx = simply_daemon_api::SkillCallContext::new(user_id.clone());
+        // Populate tokens from all known MCP servers
+        let registry = self.mcp.registry().lock().await;
+        for (server_id, _) in registry.config().servers.iter() {
+            if let Some(token) = self.token_store.get(user_id, server_id) {
+                ctx = ctx.with_token(server_id.clone(), token.access_token);
+            }
+        }
+        // Also check global server tokens (from OAuthService flow)
+        for (server_id, config) in registry.config().servers.iter() {
+            if let simply_core::AuthMethod::OAuth { access_token: Some(ref token), .. } = config.auth {
+                if !ctx.tokens.contains_key(server_id) {
+                    ctx = ctx.with_token(server_id.clone(), token.clone());
+                }
+            }
+        }
+        ctx
     }
 
     /// Get the daemon tool services (same list used for REST dispatch).
@@ -141,13 +171,6 @@ impl CompositeToolService {
         self.daemon_tools.services().to_vec()
     }
 
-    /// Register a skill. Skills provide additional tools alongside
-    /// daemon REST tools and MCP tools.
-    pub fn register_skill(mut self, skill: Arc<dyn simply_daemon_api::Skill>) -> Self {
-        tracing::info!(skill = skill.name(), tools = skill.tools().len(), "registered skill");
-        self.skills.push(skill);
-        self
-    }
 }
 
 #[async_trait]
@@ -155,7 +178,7 @@ impl ToolService for CompositeToolService {
     async fn get_definitions(&self) -> Vec<ToolDefinition> {
         let mut defs = self.daemon_tools.get_definitions().await;
         defs.extend(self.mcp_tools.get_definitions().await);
-        for skill in &self.skills {
+        for skill in self.skills.read().await.iter() {
             defs.extend(skill.tools());
         }
         defs
@@ -170,13 +193,13 @@ impl ToolService for CompositeToolService {
         if self.daemon_tools.get_definitions().await.iter().any(|d| d.name == name) {
             return self.daemon_tools.call_tool(name, arguments).await;
         }
-        // Try skills
-        for skill in &self.skills {
+        // Try skills (anonymous context — call_tool_direct handles user context)
+        for skill in self.skills.read().await.iter() {
             if skill.tools().iter().any(|t| t.name == name) {
-                // Skills need a user_id — use anonymous for now
-                // (the per-user tool service in call_tool_direct handles user context)
-                let anon = simply_core::storage::ids::UserId::from_string("anonymous");
-                return skill.call_tool(name, arguments, &anon).await;
+                let ctx = simply_daemon_api::SkillCallContext::new(
+                    simply_core::storage::ids::UserId::from_string("anonymous"),
+                );
+                return skill.call_tool(name, arguments, &ctx).await;
             }
         }
         // Fall back to MCP
@@ -222,21 +245,38 @@ impl McpApi for CompositeToolService {
             "call_tool_direct: dispatching"
         );
 
-        // Try per-user tool service first, then fall back to global MCP registry
+        // Try skills first (with user's OAuth tokens), then per-user tools, then MCP
         let content = if let Some(ref user_id) = ctx.scope.user_id {
             let uid = simply_core::storage::ids::UserId::from_string(user_id);
+
+            // Try skills with user's token context
+            let skill_ctx = self.skill_context_for(&uid).await;
+            for skill in self.skills.read().await.iter() {
+                if skill.tools().iter().any(|t| t.name == name) {
+                    tracing::info!(tool = name, %user_id, skill = skill.name(), "call_tool_direct: dispatching to skill");
+                    return match skill.call_tool(name, args, &skill_ctx).await {
+                        Ok(content) => {
+                            let mcp_content = content.into_iter().map(|c| match c {
+                                ToolResultContent::Text { text } => rmcp::model::Content::text(text),
+                                ToolResultContent::Image { data, mime_type } => rmcp::model::Content::image(data, mime_type),
+                                _ => rmcp::model::Content::text("[unsupported content type]"),
+                            }).collect();
+                            Ok(CallToolResult::success(mcp_content))
+                        }
+                        Err(e) => Ok(CallToolResult::error(vec![rmcp::model::Content::text(format!("Skill error: {e}"))]))
+                    };
+                }
+            }
+
+            // Try per-user tool service
             tracing::info!(tool = name, %user_id, "call_tool_direct: trying per-user tool service");
             match self.user_tools.get(&uid).await?.call_tool(name, args.clone()).await {
                 Ok(content) => content,
                 Err(e) => {
                     tracing::info!(tool = name, error = %e, "call_tool_direct: per-user failed, trying global MCP registry");
-                    // Fall back to global MCP registry (has globally-authed servers)
                     match self.mcp.call_tool_direct(ctx, request_clone.clone()).await {
                         Ok(result) => return Ok(result),
-                        Err(_) => {
-                            // Fall back to composite tool service
-                            self.call_tool(name, args).await?
-                        }
+                        Err(_) => self.call_tool(name, args).await?
                     }
                 }
             }

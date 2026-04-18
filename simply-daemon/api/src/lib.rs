@@ -34,7 +34,7 @@ pub use self::core::*;
 pub use search::*;
 pub use user::*;
 pub use types::*;
-pub use skill::Skill;
+pub use skill::{Skill, SkillCallContext, SkillFactory};
 pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
 /// Trait providing access to all daemon API services.

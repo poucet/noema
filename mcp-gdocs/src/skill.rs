@@ -1,7 +1,8 @@
 //! Google Docs skill — provides import tools to the daemon.
 //!
-//! Uses GoogleDocsClient directly (no MCP server needed).
-//! Accesses daemon via trait objects — no dependency on daemon internals.
+//! Uses GoogleDocsClient for Google API access.
+//! Uses `Arc<dyn Daemon>` for daemon API access (document creation, asset storage).
+//! Auth tokens come from `SkillCallContext` — injected by daemon, transparent to LLM.
 //! Requires the `skill` feature flag.
 
 use std::sync::Arc;
@@ -12,68 +13,75 @@ use base64::Engine;
 use serde::Deserialize;
 use tracing::info;
 
-use simply_daemon_api::skill::Skill;
-use simply_daemon_api::types::UserId;
+use simply_daemon_api::{
+    Daemon, Skill, SkillCallContext,
+    CreateDocumentRequest, CreateTabRequest,
+};
+use simply_rpc::RequestContext;
 use llm::{ToolDefinition, ToolResultContent};
 
 use crate::GoogleDocsClient;
 
-// ---------------------------------------------------------------------------
-// Trait objects the skill needs — daemon provides adapters
-// ---------------------------------------------------------------------------
+/// The server ID used to look up Google OAuth tokens in SkillCallContext.
+const GOOGLE_SERVER_ID: &str = "google-docs";
 
-/// Document operations the skill needs.
-#[async_trait]
-pub trait SkillDocumentApi: Send + Sync {
-    async fn create_document(&self, user_id: &UserId, title: &str, source_id: Option<&str>) -> Result<String>;
-    async fn create_tab(&self, doc_id: &str, title: &str, content: &str, parent_tab_id: Option<&str>, tab_index: i32) -> Result<String>;
-    async fn find_by_source(&self, user_id: &UserId, source_id: &str) -> Result<Option<String>>;
-}
-
-/// Asset storage the skill needs.
-#[async_trait]
-pub trait SkillAssetApi: Send + Sync {
-    async fn store_asset(&self, base64_data: &str, mime_type: &str) -> Result<String>;
-}
-
-// ---------------------------------------------------------------------------
-// GDocsSkill
-// ---------------------------------------------------------------------------
-
+/// Google Docs skill — import documents from Google Drive.
+///
+/// Takes `Arc<dyn Daemon>` — works with both embedded and remote daemons.
+/// Google OAuth tokens come from the daemon's token store via SkillCallContext.
 pub struct GDocsSkill {
-    documents: Arc<dyn SkillDocumentApi>,
-    assets: Arc<dyn SkillAssetApi>,
+    daemon: Arc<dyn Daemon>,
 }
 
 impl GDocsSkill {
-    pub fn new(documents: Arc<dyn SkillDocumentApi>, assets: Arc<dyn SkillAssetApi>) -> Self {
-        Self { documents, assets }
+    pub fn new(daemon: Arc<dyn Daemon>) -> Self {
+        Self { daemon }
     }
 
-    async fn handle_import(&self, args: ImportArgs, user_id: &UserId) -> Result<Vec<ToolResultContent>> {
-        let access_token = args.access_token
-            .ok_or_else(|| anyhow::anyhow!("access_token required for Google Docs import"))?;
-        let client = GoogleDocsClient::new(access_token);
+    fn ctx_for(ctx: &SkillCallContext) -> RequestContext {
+        RequestContext::with_scope(simply_rpc::Scope::user(ctx.user_id.as_str()))
+    }
+
+    fn get_google_token(ctx: &SkillCallContext) -> Result<String> {
+        ctx.token(GOOGLE_SERVER_ID)
+            .or_else(|| ctx.token("google"))
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!(
+                "No Google OAuth token found. Please authenticate with Google first."
+            ))
+    }
+
+    async fn handle_import(&self, args: ImportArgs, ctx: &SkillCallContext) -> Result<Vec<ToolResultContent>> {
+        let token = Self::get_google_token(ctx)?;
+        let client = GoogleDocsClient::new(token);
+        let rpc_ctx = Self::ctx_for(ctx);
 
         info!(doc_id = %args.doc_id, "importing Google Doc");
 
-        if let Some(existing_id) = self.documents.find_by_source(user_id, &args.doc_id).await? {
-            return Ok(vec![ToolResultContent::text(format!(
-                "Document already imported (id: {existing_id}). Use gdocs_sync to update.",
-            ))]);
-        }
-
+        // Extract from Google
         let extracted = client.extract_document(&args.doc_id).await?;
         info!(title = %extracted.title, tabs = extracted.tabs.len(), images = extracted.images.len(), "extracted");
 
-        let doc_id = self.documents.create_document(user_id, &extracted.title, Some(&args.doc_id)).await?;
+        // Create document via daemon API
+        let doc = self.daemon.document().create_document(&rpc_ctx, CreateDocumentRequest {
+            title: extracted.title.clone(),
+            document_type: Some("knowledge".to_string()),
+            content: None,
+            source_id: Some(args.doc_id.clone()),
+        }).await?;
 
-        // Store images
+        // Store images as assets via daemon API
         let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         for image in &extracted.images {
             let data_b64 = base64::engine::general_purpose::STANDARD.encode(&image.data);
-            let blob_hash = self.assets.store_asset(&data_b64, &image.mime_type).await?;
-            image_id_map.insert(image.object_id.clone(), blob_hash);
+            let info = self.daemon.asset().store_asset(
+                &rpc_ctx,
+                simply_daemon_api::BinaryUpload {
+                    data: data_b64.into_bytes(),
+                    mime_type: image.mime_type.clone(),
+                },
+            ).await?;
+            image_id_map.insert(image.object_id.clone(), info.blob_hash.as_str().to_string());
         }
 
         // Topological sort: parents first
@@ -88,31 +96,41 @@ impl GDocsSkill {
                 if let Some(ref parent) = tab.parent_tab_id {
                     if !id_map.contains_key(parent) { deferred.push(tab); continue; }
                 }
-                let parent_tab_id = tab.parent_tab_id.as_ref().and_then(|pid| id_map.get(pid)).map(|s| s.as_str());
+                let parent_tab_id = tab.parent_tab_id.as_ref()
+                    .and_then(|pid| id_map.get(pid))
+                    .cloned();
+
                 let mut content = tab.content_markdown.clone();
                 for (oid, hash) in &image_id_map {
                     content = content.replace(&format!("object:{oid}"), &format!("/api/blob/{hash}"));
                 }
+
                 let title = match &tab.icon {
                     Some(icon) => format!("{icon} {}", tab.title),
                     None => tab.title.clone(),
                 };
-                let tab_id = self.documents.create_tab(&doc_id, &title, &content, parent_tab_id, tab.tab_index).await?;
-                id_map.insert(tab.source_tab_id.clone(), tab_id);
+
+                let created_tab = self.daemon.document().create_tab(&rpc_ctx, &doc.id, CreateTabRequest {
+                    title,
+                    content: Some(content),
+                    parent_tab_id: parent_tab_id,
+                    tab_index: Some(tab.tab_index),
+                }).await?;
+
+                id_map.insert(tab.source_tab_id.clone(), created_tab.id.clone());
             }
             pending = deferred;
         }
 
         Ok(vec![ToolResultContent::text(format!(
-            "Imported '{}' with {} tabs and {} images (doc_id: {doc_id})",
-            extracted.title, id_map.len(), image_id_map.len(),
+            "Imported '{}' with {} tabs and {} images (doc_id: {})",
+            extracted.title, id_map.len(), image_id_map.len(), doc.id,
         ))])
     }
 
-    async fn handle_list(&self, args: ListArgs) -> Result<Vec<ToolResultContent>> {
-        let access_token = args.access_token
-            .ok_or_else(|| anyhow::anyhow!("access_token required"))?;
-        let client = GoogleDocsClient::new(access_token);
+    async fn handle_list(&self, args: ListArgs, ctx: &SkillCallContext) -> Result<Vec<ToolResultContent>> {
+        let token = Self::get_google_token(ctx)?;
+        let client = GoogleDocsClient::new(token);
         let files = client.list_documents(args.query.as_deref(), args.limit.unwrap_or(20)).await?;
         let result: Vec<serde_json::Value> = files.into_iter().map(|f| {
             serde_json::json!({ "id": f.id, "name": f.name, "modified_time": f.modified_time })
@@ -122,10 +140,10 @@ impl GDocsSkill {
 }
 
 #[derive(Deserialize)]
-struct ImportArgs { doc_id: String, access_token: Option<String> }
+struct ImportArgs { doc_id: String }
 
 #[derive(Deserialize)]
-struct ListArgs { query: Option<String>, limit: Option<usize>, access_token: Option<String> }
+struct ListArgs { query: Option<String>, limit: Option<usize> }
 
 #[async_trait]
 impl Skill for GDocsSkill {
@@ -146,21 +164,20 @@ impl Skill for GDocsSkill {
         ]
     }
 
-    async fn call_tool(&self, name: &str, arguments: serde_json::Value, user_id: &UserId) -> Result<Vec<ToolResultContent>> {
+    async fn call_tool(&self, name: &str, arguments: serde_json::Value, ctx: &SkillCallContext) -> Result<Vec<ToolResultContent>> {
         match name {
-            "gdocs_import" => self.handle_import(serde_json::from_value(arguments)?, user_id).await,
-            "gdocs_list" => self.handle_list(serde_json::from_value(arguments)?).await,
+            "gdocs_import" => self.handle_import(serde_json::from_value(arguments)?, ctx).await,
+            "gdocs_list" => self.handle_list(serde_json::from_value(arguments)?, ctx).await,
             _ => anyhow::bail!("unknown tool: {name}"),
         }
     }
 }
 
+// No access_token in tool schemas — daemon injects it via SkillCallContext
 #[derive(schemars::JsonSchema)]
 struct ImportToolInput {
     /// The Google Doc ID to import.
     doc_id: String,
-    /// OAuth access token for Google APIs.
-    access_token: Option<String>,
 }
 
 #[derive(schemars::JsonSchema)]
@@ -169,6 +186,4 @@ struct ListToolInput {
     query: Option<String>,
     /// Maximum number of documents to return (default: 20).
     limit: Option<usize>,
-    /// OAuth access token for Google APIs.
-    access_token: Option<String>,
 }

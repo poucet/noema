@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [features]
 default = []
-skill = ["dep:simply-daemon-api", "dep:async-trait", "dep:llm", "dep:schemars"]
+skill = ["dep:simply-daemon-api", "dep:simply-rpc", "dep:async-trait", "dep:llm", "dep:schemars"]
 
 [dependencies]
 # MCP protocol
@@ -22,6 +22,7 @@ rmcp = { workspace = true, features = ["server", "transport-streamable-http-serv
 
 # Skill system (optional — for embedding as daemon skill)
 simply-daemon-api = { workspace = true, optional = true }
+simply-rpc = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 llm = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }

@@ -28,7 +28,10 @@ pub struct DaemonBuilder<S: StorageTypes> {
     pub vector_store: Arc<dyn simply_core::embedding::VectorStore>,
     pub token_store: Arc<crate::token_store::TransientTokenStore>,
     pub voice: VoiceService,
-    pub skills: Vec<Arc<dyn simply_daemon_api::Skill>>,
+    /// Skill factories — called with `Arc<dyn Daemon>` after daemon construction.
+    /// This breaks the circular dependency: daemon is built first, then skills
+    /// are constructed with a handle to it.
+    pub skill_factories: Vec<simply_daemon_api::SkillFactory>,
 }
 
 impl<S: StorageTypes> DaemonBuilder<S>
@@ -107,24 +110,23 @@ where
                 .register(<dyn SearchApi>::service(search.clone())),
         );
 
+        let token_store = self.token_store;
         let user_tools = Arc::new(crate::user_tools::UserToolServiceCache::new(
             Arc::clone(&daemon_tools),
-            self.token_store,
+            Arc::clone(&token_store),
             Arc::clone(mcp.registry()),
         ));
 
-        let mut composite = CompositeToolService::new(
+        let composite = CompositeToolService::new(
             daemon_tools,
             McpToolRegistry::new(Arc::clone(mcp.registry())),
             Arc::clone(&mcp),
             Arc::clone(&user_tools),
+            token_store,
         );
-        for skill in self.skills {
-            composite = composite.register_skill(skill);
-        }
         let tools = Arc::new(composite);
 
-        EmbeddedDaemon::assemble(
+        let daemon = EmbeddedDaemon::assemble(
             self.coordinator,
             self.stores,
             mcp,
@@ -135,9 +137,18 @@ where
             core,
             search,
             user_svc,
-            tools,
+            tools.clone(),
             user_tools,
-        )
+        )?;
+
+        // Construct skills with the daemon handle, register with tool service
+        let daemon_ref: Arc<dyn simply_daemon_api::Daemon> = daemon.clone();
+        for factory in self.skill_factories {
+            let skill = factory(Arc::clone(&daemon_ref));
+            tools.register_skill_runtime(skill).await;
+        }
+
+        Ok(daemon)
     }
 }
 

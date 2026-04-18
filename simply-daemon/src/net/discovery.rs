@@ -127,7 +127,7 @@ pub async fn connect_or_host(
         vector_store,
         token_store: Arc::clone(&token_store),
         voice: crate::builder::create_voice_service(),
-        skills: vec![],
+        skill_factories: vec![],
     }.build().await?;
 
     let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);

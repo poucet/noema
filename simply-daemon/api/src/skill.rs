@@ -1,30 +1,67 @@
 //! Skill system — pluggable capabilities that extend the daemon with tools.
 //!
-//! A skill provides tool definitions and execution logic. Skills access
-//! daemon services via API trait objects (`Arc<dyn DocumentApi>`, etc.),
-//! getting embedding, validation, and access control for free.
+//! A skill is a bidirectional plugin:
+//! - **Daemon → Skill**: daemon routes tool calls to the skill
+//! - **Skill → Daemon**: skill calls daemon APIs via `Arc<dyn Daemon>`
 //!
-//! Current registration is explicit (daemon constructs at startup).
-//! Future: dynamic loading via shared libraries.
+//! # Auth flow
+//! When calling a skill's tool, the daemon injects the user's auth context
+//! (OAuth tokens, identity) via `SkillCallContext`. The LLM never sees
+//! auth tokens — they're resolved by the daemon from its token store.
+//!
+//! # Deployment modes
+//! - **Embedded**: skill lives in daemon process, `Arc<EmbeddedDaemon>`
+//! - **Remote**: skill lives in another process (e.g., Lumina), wrapped
+//!   as MCP server. Daemon sends auth context as Bearer header on MCP calls.
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use llm::{ToolDefinition, ToolResultContent};
 
+use crate::Daemon;
 use crate::types::UserId;
+
+/// Context passed to skill tool calls.
+///
+/// Populated by the daemon before dispatch. Includes the calling user's
+/// identity and any OAuth tokens the daemon has for this user.
+pub struct SkillCallContext {
+    /// The calling user.
+    pub user_id: UserId,
+    /// OAuth access tokens the daemon has for this user, keyed by provider/server ID.
+    /// e.g., {"google-docs": "ya29.a0AfH6SM...", "github": "gho_xxxx"}
+    pub tokens: HashMap<String, String>,
+}
+
+impl SkillCallContext {
+    pub fn new(user_id: UserId) -> Self {
+        Self { user_id, tokens: HashMap::new() }
+    }
+
+    pub fn with_token(mut self, server_id: impl Into<String>, token: impl Into<String>) -> Self {
+        self.tokens.insert(server_id.into(), token.into());
+        self
+    }
+
+    /// Get an OAuth token for a specific service/server.
+    pub fn token(&self, server_id: &str) -> Option<&str> {
+        self.tokens.get(server_id).map(|s| s.as_str())
+    }
+}
 
 /// A pluggable skill that provides tools to the daemon.
 ///
-/// Skills are constructed by the daemon (or host) at startup, receiving
-/// whatever API trait objects they need (`Arc<dyn DocumentApi>`, etc.).
-/// The `Skill` trait itself is deliberately minimal — construction is
-/// skill-specific.
+/// # Construction
+/// Skills receive `Arc<dyn Daemon>` at construction — their handle to
+/// the daemon's APIs. Works for both embedded and remote daemons.
 ///
-/// # Future: dynamic loading
-/// - Skills compiled as cdylib crates
-/// - Daemon loads `.so`/`.dylib` from a skills directory
-/// - Each library exports a factory function
-/// - The `Skill` trait is already object-safe for this purpose
+/// # Tool calls
+/// Auth tokens for the calling user are passed via `SkillCallContext`.
+/// The daemon populates this from its token store before dispatch.
+/// The LLM never sees tokens — it just calls `gdocs_import(doc_id: "...")`.
 #[async_trait]
 pub trait Skill: Send + Sync {
     /// Unique name for this skill (e.g., "gdocs", "github").
@@ -34,10 +71,16 @@ pub trait Skill: Send + Sync {
     fn tools(&self) -> Vec<ToolDefinition>;
 
     /// Execute a tool by name.
+    ///
+    /// `ctx` contains the calling user's identity and OAuth tokens.
     async fn call_tool(
         &self,
         name: &str,
         arguments: serde_json::Value,
-        user_id: &UserId,
+        ctx: &SkillCallContext,
     ) -> Result<Vec<ToolResultContent>>;
 }
+
+/// Factory function type for constructing a skill with a daemon handle.
+/// Used by hosts (daemon main.rs, Lumina) to create skills at startup.
+pub type SkillFactory = Box<dyn FnOnce(Arc<dyn Daemon>) -> Box<dyn Skill> + Send>;
