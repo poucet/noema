@@ -37,7 +37,7 @@ pub use llm::{
 // Re-exported MCP config types
 // ---------------------------------------------------------------------------
 
-pub use simply_core::{AuthMethod, McpRegistry, ServerConfig};
+pub use simply_core::{McpRegistry, ServerConfig};
 
 // ---------------------------------------------------------------------------
 // Daemon-specific types

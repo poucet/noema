@@ -62,18 +62,24 @@ impl SkillCallContext {
 /// Auth tokens for the calling user are passed via `SkillCallContext`.
 /// The daemon populates this from its token store before dispatch.
 /// The LLM never sees tokens — it just calls `gdocs_import(doc_id: "...")`.
-/// OAuth requirement for a skill — the daemon handles the auth flow.
+/// OAuth provider requirement for a skill — the daemon handles the auth flow.
+///
+/// `provider_id` is the shared provider name (e.g., "google", "notion").
+/// Multiple skills and MCP servers can reference the same provider — tokens
+/// are stored per `(user_id, provider_id)` so authenticating once covers all.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OAuthRequirement {
-    /// Unique ID for this auth provider (used as key in token store).
-    pub id: String,
-    /// Human-readable name (e.g., "Google Docs").
+    /// OAuth provider ID — shared across all consumers of the same provider.
+    /// e.g., "google" for all Google-based skills and MCP servers.
+    /// Used as the key in `TransientTokenStore` and `SkillCallContext.tokens`.
+    pub provider_id: String,
+    /// Human-readable name (e.g., "Google").
     pub display_name: String,
     /// Authorization endpoint URL.
     pub authorization_url: String,
     /// Token endpoint URL.
     pub token_url: String,
-    /// Required scopes.
+    /// Required scopes (merged with any already-registered scopes for this provider).
     pub scopes: Vec<String>,
     /// Userinfo endpoint (for resolving user email after auth).
     pub userinfo_url: Option<String>,

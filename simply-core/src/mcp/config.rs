@@ -1,105 +1,21 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Authentication method for an MCP server.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AuthMethod {
-    /// No authentication required
-    #[default]
-    None,
-    /// Static bearer token
-    Token {
-        token: String,
-    },
-    /// OAuth 2.0 authentication
-    OAuth {
-        /// OAuth client ID
-        client_id: String,
-        /// OAuth client secret (optional for public clients)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        client_secret: Option<String>,
-        /// Authorization endpoint URL (discovered via .well-known if not set)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        authorization_url: Option<String>,
-        /// Token endpoint URL (discovered via .well-known if not set)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        token_url: Option<String>,
-        /// Requested scopes
-        #[serde(default)]
-        scopes: Vec<String>,
-        /// Current access token (populated after OAuth flow)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        access_token: Option<String>,
-        /// Refresh token for obtaining new access tokens
-        #[serde(skip_serializing_if = "Option::is_none")]
-        refresh_token: Option<String>,
-        /// Token expiration timestamp (Unix epoch seconds)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        expires_at: Option<i64>,
-    },
-}
-
-impl AuthMethod {
-    /// Get the current bearer token for authorization header
-    pub fn bearer_token(&self) -> Option<&str> {
-        match self {
-            AuthMethod::None => None,
-            AuthMethod::Token { token } => Some(token),
-            AuthMethod::OAuth { access_token, .. } => access_token.as_deref(),
-        }
-    }
-
-    /// Check if OAuth token is expired or about to expire (within 60 seconds)
-    pub fn is_token_expired(&self) -> bool {
-        match self {
-            AuthMethod::OAuth { expires_at: Some(expires), .. } => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64;
-                *expires <= now + 60
-            }
-            _ => false,
-        }
-    }
-
-    /// Check if this auth method requires OAuth login
-    pub fn needs_oauth_login(&self) -> bool {
-        matches!(self, AuthMethod::OAuth { access_token: None, .. })
-    }
-}
-
-/// Configuration for a single MCP server.
+/// Minimal connection config for an MCP server.
+///
+/// Auth is intentionally absent — simply-core is auth-agnostic.
+/// The daemon resolves auth externally and passes a bearer token
+/// to `McpRegistry::connect` / `connect_to_server`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
-    /// Display name for the server
+    /// Display name for the server.
     pub name: String,
-    /// HTTP endpoint URL for the streamable HTTP server
+    /// HTTP endpoint URL for the streamable HTTP server.
     pub url: String,
-    /// Authentication method
-    #[serde(default)]
-    pub auth: AuthMethod,
-    /// Well-known OAuth provider (e.g. "google", "github", "notion").
-    /// Interpreted by the daemon to fill in OAuth URLs + scopes automatically.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub oauth_provider: Option<String>,
-    /// OAuth client ID (used with oauth_provider)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<String>,
-    /// OAuth client secret (used with oauth_provider)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_secret: Option<String>,
-    /// Whether to use .well-known discovery for OAuth endpoints
-    #[serde(default)]
-    pub use_well_known: bool,
-    /// Optional authentication token (legacy, prefer `auth` field)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth_token: Option<String>,
-    /// Automatically connect to this server on app startup
+    /// Automatically connect to this server on app startup.
     #[serde(default = "default_true")]
     pub auto_connect: bool,
-    /// Enable automatic retry with exponential backoff when connection fails
+    /// Enable automatic retry with exponential backoff when connection fails.
     #[serde(default = "default_true")]
     pub auto_retry: bool,
 }
@@ -108,24 +24,14 @@ fn default_true() -> bool {
     true
 }
 
-/// Stored OAuth client credentials, keyed by server URL.
-/// Persists independently from server entries so credentials survive remove/re-add.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct OAuthCredentials {
-    pub client_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_secret: Option<String>,
-}
-
-/// In-memory collection of MCP server configurations.
+/// In-memory collection of MCP server connection configs.
+///
+/// No auth, no credentials — those are daemon-side concerns.
 /// No file I/O — loading and saving is the daemon's responsibility.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpConfig {
     #[serde(default)]
     pub servers: HashMap<String, ServerConfig>,
-    /// OAuth client credentials keyed by server URL — survives server remove/re-add.
-    #[serde(default)]
-    pub oauth_credentials: HashMap<String, OAuthCredentials>,
 }
 
 impl McpConfig {

@@ -17,7 +17,7 @@ use simply_daemon_api::Daemon;
 use super::LuminaContext;
 use crate::register_command;
 
-const GOOGLE_DOCS_SERVER_ID: &str = "google-docs";
+const GOOGLE_PROVIDER_ID: &str = "google";
 
 #[derive(Default)]
 pub struct Google;
@@ -118,7 +118,7 @@ async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
     lx.register_user_scope(discord_id, scope).await;
 
     let base_url = lx.daemon.core().public_url().await?;
-    let auth_url = format!("{base_url}/auth/mcp/{GOOGLE_DOCS_SERVER_ID}?user_id={user_id}");
+    let auth_url = format!("{base_url}/auth/mcp/{GOOGLE_PROVIDER_ID}?user_id={user_id}");
 
     cmd.create_response(&lx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
@@ -163,7 +163,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
 
 async fn cmd_status(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let servers = lx.daemon.mcp().list_mcp_servers().await?;
-    let google = servers.iter().find(|s| s.id == GOOGLE_DOCS_SERVER_ID);
+    let google = servers.iter().find(|s| s.id == GOOGLE_PROVIDER_ID);
 
     let (status_text, color) = match google {
         Some(s) if s.is_connected => ("Connected", 0x14b8a6u32),

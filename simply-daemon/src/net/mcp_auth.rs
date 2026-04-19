@@ -1,9 +1,15 @@
-//! Per-user MCP OAuth routes.
+//! Per-user OAuth routes.
 //!
-//! Generic OAuth flow that works for any MCP server (Google, GitHub, Notion, etc.).
-//! OAuth config comes from the MCP server's config in mcp.toml.
-//! Tokens stored transiently in-memory via TransientTokenStore.
+//! `/auth/mcp/{id}?user_id=...` — initiates an OAuth flow for a user.
+//! `{id}` is either:
+//!   - An MCP server ID (from mcp.toml) — scopes come from the server config
+//!   - An OAuth provider ID (from oauth_providers.toml) — scopes come from the
+//!     in-memory union of all skill OAuthRequirement declarations for that provider
+//!
+//! Tokens are stored per-user in `TransientTokenStore` keyed by the resolved
+//! provider_id (so one login covers all consumers of that provider).
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -14,8 +20,9 @@ use serde::Deserialize;
 use simply_core::storage::ids::UserId;
 use simply_core::storage::traits::UserStore;
 
+use crate::mcp::auth::{DaemonMcpConfig, ServerAuth};
 use crate::oauth::callback::CallbackTracker;
-use crate::oauth::providers::resolve_server_auth;
+use crate::oauth::providers::{lookup_provider, ResolvedOAuth};
 use crate::token_store::{McpUserToken, TransientTokenStore};
 
 /// Shared state for MCP auth routes.
@@ -26,6 +33,10 @@ pub struct McpAuthState {
     pub public_url: String,
     /// OAuth callback tracker — bridges OAuthService.start_flow() to this route.
     pub oauth_tracker: Option<Arc<CallbackTracker>>,
+    /// MCP server configs (mcp.toml).
+    pub daemon_mcp_config: Arc<tokio::sync::Mutex<DaemonMcpConfig>>,
+    /// In-memory union of scopes declared by skills per provider.
+    pub skill_scopes: Arc<tokio::sync::Mutex<HashMap<String, HashSet<String>>>>,
 }
 
 #[derive(Deserialize)]
@@ -44,51 +55,83 @@ pub struct AuthCallbackQuery {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct OAuthState {
     user_id: String,
-    server_id: String,
-    /// OAuth provider name (e.g. "google", "github") — used to look up
-    /// provider-specific config (userinfo_url, etc.) in the callback.
-    provider: String,
+    /// The provider_id tokens will be stored under (shared across consumers).
+    provider_id: String,
 }
 
-/// `GET /auth/mcp/{server_id}?user_id=...`
-///
-/// Initiates the OAuth flow by redirecting the user to the provider's consent screen.
+/// Resolve `{id}` (server_id or provider_id) into (provider_id, ResolvedOAuth).
+fn resolve_for_auth(
+    id: &str,
+    daemon_cfg: &DaemonMcpConfig,
+    skill_scopes: &HashMap<String, HashSet<String>>,
+) -> Option<(String, ResolvedOAuth)> {
+    // 1. MCP server — scopes come from ServerAuth::OAuth.scopes
+    if let Some(server) = daemon_cfg.get_server(id) {
+        if let ServerAuth::OAuth { provider_id, scopes } = &server.auth {
+            let provider = lookup_provider(provider_id)?;
+            return Some((provider_id.clone(), ResolvedOAuth {
+                client_id: provider.client_id,
+                client_secret: provider.client_secret,
+                authorization_url: provider.authorization_url,
+                token_url: provider.token_url,
+                userinfo_url: provider.userinfo_url,
+                scopes: scopes.clone(),
+            }));
+        }
+    }
+    // 2. Direct provider (skills) — scopes from in-memory union
+    if let Some(provider) = lookup_provider(id) {
+        let scopes: Vec<String> = skill_scopes.get(id)
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default();
+        return Some((id.to_string(), ResolvedOAuth {
+            client_id: provider.client_id,
+            client_secret: provider.client_secret,
+            authorization_url: provider.authorization_url,
+            token_url: provider.token_url,
+            userinfo_url: provider.userinfo_url,
+            scopes,
+        }));
+    }
+    None
+}
+
+/// `GET /auth/mcp/{id}?user_id=...` — initiate per-user OAuth.
 pub async fn auth_initiate(
     State(state): State<McpAuthState>,
-    Path(server_id): Path<String>,
+    Path(id): Path<String>,
     Query(query): Query<AuthInitQuery>,
 ) -> Response {
-    let mcp_config = crate::mcp::config_io::load_mcp_config();
-    let server = match mcp_config.get_server(&server_id) {
-        Some(s) => s,
-        None => return Html(format!("Unknown MCP server: {server_id}")).into_response(),
+    let daemon_cfg = state.daemon_mcp_config.lock().await;
+    let skill_scopes = state.skill_scopes.lock().await;
+
+    let (provider_id, oauth) = match resolve_for_auth(&id, &daemon_cfg, &skill_scopes) {
+        Some(r) => r,
+        None => return Html(format!("Unknown OAuth provider or MCP server: {id}")).into_response(),
     };
+    drop(daemon_cfg);
+    drop(skill_scopes);
 
-    let oauth = match resolve_server_auth(server) {
-        Some(o) => o,
-        None => return Html(format!(
-            "OAuth not configured for server '{server_id}'. Set oauth_provider + client_id in mcp.toml."
-        )).into_response(),
-    };
+    if oauth.client_id.is_empty() {
+        return Html(format!(
+            "OAuth client_id not configured for provider '{provider_id}'. Set it in oauth_providers.toml or via settings."
+        )).into_response();
+    }
 
-    let client_id = oauth.client_id;
-    let authorization_url = oauth.authorization_url;
-    let scopes = oauth.scopes;
+    let redirect_uri = format!("{}/auth/mcp/callback", state.public_url);
+    let scope = oauth.scopes.join(" ");
 
-    let provider_name = server.oauth_provider.as_deref().unwrap_or("").to_string();
     let oauth_state = OAuthState {
         user_id: query.user_id,
-        server_id,
-        provider: provider_name,
+        provider_id,
     };
     let state_json = serde_json::to_string(&oauth_state).unwrap_or_default();
     let state_encoded = urlencoding::encode(&state_json);
 
-    let redirect_uri = format!("{}/auth/mcp/callback", state.public_url);
-    let scope = scopes.join(" ");
-
     let url = format!(
-        "{authorization_url}?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}&state={state_encoded}&access_type=offline&prompt=consent",
+        "{auth_url}?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}&state={state_encoded}&access_type=offline&prompt=consent",
+        auth_url = oauth.authorization_url,
+        client_id = oauth.client_id,
         redirect_uri = urlencoding::encode(&redirect_uri),
         scope = urlencoding::encode(&scope),
     );
@@ -97,15 +140,11 @@ pub async fn auth_initiate(
 }
 
 /// `GET /auth/mcp/callback?code=...&state=...`
-///
-/// OAuth callback — first tries the OAuthService tracker (for flows started
-/// via the RPC API), then falls back to per-user token exchange.
 pub async fn auth_callback(
     State(state): State<McpAuthState>,
     Query(query): Query<AuthCallbackQuery>,
 ) -> Response {
     if let Some(ref error) = query.error {
-        // Try dispatching error to tracker
         if let (Some(ref tracker), Some(ref s)) = (&state.oauth_tracker, &query.state) {
             tracker.dispatch_error(s, error).await;
         }
@@ -117,40 +156,28 @@ pub async fn auth_callback(
         _ => return auth_error_page("Missing code or state parameter"),
     };
 
-    // Try the OAuthService tracker first (for flows started via oAuthApi.startOauth)
+    // Try the OAuthService tracker first (for server-level flows from admin UI)
     if let Some(ref tracker) = state.oauth_tracker {
         if tracker.dispatch(&state_json, &code).await {
             return auth_success_page("MCP Server");
         }
     }
 
-    // Fall back to per-user token exchange (for flows started via /auth/mcp/{server_id})
-    let state_decoded = match urlencoding::decode(&state_json) {
-        Ok(s) => s.to_string(),
-        Err(_) => state_json,
-    };
+    // Per-user token exchange
+    let state_decoded = urlencoding::decode(&state_json)
+        .map(|s| s.to_string())
+        .unwrap_or(state_json);
 
     let oauth_state: OAuthState = match serde_json::from_str(&state_decoded) {
         Ok(s) => s,
         Err(_) => return auth_error_page("Invalid state parameter"),
     };
 
-    // Look up OAuth config for token exchange
-    let mcp_config = crate::mcp::config_io::load_mcp_config();
-    let server = match mcp_config.get_server(&oauth_state.server_id) {
-        Some(s) => s,
-        None => return auth_error_page(&format!("Unknown server: {}", oauth_state.server_id)),
-    };
-    let oauth = match resolve_server_auth(server) {
-        Some(o) => o,
-        None => return auth_error_page(&format!("OAuth not configured for server: {}", oauth_state.server_id)),
+    let provider = match lookup_provider(&oauth_state.provider_id) {
+        Some(p) => p,
+        None => return auth_error_page(&format!("Unknown OAuth provider: {}", oauth_state.provider_id)),
     };
 
-    let client_id = oauth.client_id;
-    let client_secret = oauth.client_secret;
-    let token_url = oauth.token_url;
-
-    // Exchange code for token
     let redirect_uri = format!("{}/auth/mcp/callback", state.public_url);
     let client = reqwest::Client::new();
 
@@ -158,22 +185,22 @@ pub async fn auth_callback(
         ("grant_type", "authorization_code"),
         ("code", &code),
         ("redirect_uri", &redirect_uri),
-        ("client_id", &client_id),
+        ("client_id", &provider.client_id),
     ];
     let secret_ref;
-    if let Some(ref secret) = client_secret {
+    if let Some(ref secret) = provider.client_secret {
         secret_ref = secret.clone();
         params.push(("client_secret", &secret_ref));
     }
 
-    let resp = match client.post(&token_url).form(&params).send().await {
+    let resp = match client.post(&provider.token_url).form(&params).send().await {
         Ok(r) => r,
         Err(e) => return auth_error_page(&format!("Token exchange failed: {e}")),
     };
 
     if !resp.status().is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return auth_error_page(&format!("Token exchange returned {}: {}", body.len(), body));
+        return auth_error_page(&format!("Token exchange error: {body}"));
     }
 
     #[derive(Deserialize)]
@@ -194,22 +221,12 @@ pub async fn auth_callback(
     let mut user_id = UserId::from_string(&oauth_state.user_id);
     let mut identity: Option<String> = None;
 
-    // If the provider has a userinfo endpoint, fetch the user's email
-    // and link identities with existing users.
-    if let Some(ref userinfo_url) = oauth.userinfo_url {
+    if let Some(ref userinfo_url) = provider.userinfo_url {
         if let Ok(email) = fetch_userinfo_email(userinfo_url, &token_resp.access_token).await {
             identity = Some(email.clone());
-            tracing::info!(%email, user_id = %oauth_state.user_id, "OAuth: got email from provider");
-
-            // If a user with this email already exists, store the token under that user
             if let Ok(Some(existing_user)) = state.user_store.get_user_by_email(&email).await {
                 if existing_user.id != user_id {
-                    tracing::info!(
-                        %email,
-                        existing_user_id = %existing_user.id,
-                        oauth_user_id = %user_id,
-                        "OAuth: linking to existing user with same email"
-                    );
+                    tracing::info!(%email, "OAuth: linking to existing user with same email");
                     user_id = existing_user.id;
                 }
             }
@@ -218,7 +235,7 @@ pub async fn auth_callback(
 
     state.token_store.store(
         &user_id,
-        &oauth_state.server_id,
+        &oauth_state.provider_id,
         McpUserToken {
             access_token: token_resp.access_token,
             expires_at,
@@ -228,15 +245,13 @@ pub async fn auth_callback(
 
     tracing::info!(
         user_id = %user_id,
-        server_id = %oauth_state.server_id,
+        provider_id = %oauth_state.provider_id,
         "OAuth token stored"
     );
 
-    auth_success_page(&oauth_state.server_id)
+    auth_success_page(&oauth_state.provider_id)
 }
 
-/// Fetch the user's email from an OAuth provider's userinfo endpoint.
-/// Expects a JSON response with an `email` field.
 async fn fetch_userinfo_email(userinfo_url: &str, access_token: &str) -> anyhow::Result<String> {
     let resp = reqwest::Client::new()
         .get(userinfo_url)
@@ -255,18 +270,17 @@ async fn fetch_userinfo_email(userinfo_url: &str, access_token: &str) -> anyhow:
         .ok_or_else(|| anyhow::anyhow!("no email in userinfo response"))
 }
 
-fn auth_success_page(server_id: &str) -> Response {
+fn auth_success_page(provider_id: &str) -> Response {
     Html(format!(
         r#"<!DOCTYPE html><html><head><title>Connected</title></head>
         <body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a1a;color:#fff">
         <div style="text-align:center">
-        <h1 style="color:#14b8a6">Connected to {server_id}</h1>
+        <h1 style="color:#14b8a6">Connected to {provider_id}</h1>
         <p>This window will close automatically…</p>
         </div>
         <script>setTimeout(function(){{ window.close(); }}, 1500);</script>
         </body></html>"#
-    ))
-    .into_response()
+    )).into_response()
 }
 
 fn auth_error_page(message: &str) -> Response {
@@ -277,6 +291,5 @@ fn auth_error_page(message: &str) -> Response {
         <h1 style="color:#ef4444">Authentication Failed</h1>
         <p>{message}</p>
         </div></body></html>"#
-    ))
-    .into_response()
+    )).into_response()
 }

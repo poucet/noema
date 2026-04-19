@@ -66,7 +66,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         tracker: config.tracker,
         daemon_secret: Arc::from(config.daemon_secret.as_str()),
         sessions: sessions.clone(),
-        tools: config.tools,
+        tools: Arc::clone(&config.tools),
     };
 
     let admin_routes = Router::new()
@@ -87,6 +87,8 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         user_store: Arc::clone(&config.user_store),
         public_url,
         oauth_tracker: config.oauth_tracker,
+        daemon_mcp_config: config.tools.mcp_service().daemon_config(),
+        skill_scopes: config.tools.mcp_service().skill_scopes(),
     };
 
     let auth_routes = Router::new()

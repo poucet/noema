@@ -114,34 +114,28 @@ pub trait Daemon: Send + Sync {
         self.register_client_tools(tools, handler).await
     }
 
-    /// Register an OAuth provider so users can authenticate for a skill.
-    /// Uses the existing MCP server infrastructure for auth routing + token storage.
+    /// Register an OAuth provider declared by a skill.
+    ///
+    /// Stored in `McpConfig.oauth_providers` — completely separate from MCP
+    /// server entries. No phantom servers, no auto-connect loops.
+    /// Multiple skills/servers can share the same provider_id (e.g., "google").
     async fn register_oauth_provider(
         &self,
         req: &skill::OAuthRequirement,
     ) -> anyhow::Result<()> {
-        // Check if this OAuth provider is already registered
-        let servers = self.mcp().list_mcp_servers().await?;
-        if servers.iter().any(|s| s.id == req.id) {
-            tracing::debug!(id = %req.id, "OAuth provider already registered");
-            return Ok(());
-        }
-
-        // Register as MCP server config for OAuth token management.
-        // The server won't be "connected" (no real MCP endpoint) but the
-        // auth routes and token store will work.
-        self.mcp().add_mcp_server(AddMcpServerRequest {
-            id: req.id.clone(),
-            name: req.display_name.clone(),
-            url: format!("skill://{}", req.id), // Not a real URL — marks this as a skill auth entry
-            auth_type: "oauth".to_string(),
-            auth_token: None,
-            client_id: None, // Uses stored oauth_credentials by URL
-            client_secret: None,
-            scopes: Some(req.scopes.clone()),
-        }).await?;
-
-        tracing::info!(id = %req.id, name = %req.display_name, "registered OAuth provider for skill");
+        self.oauth().register_oauth_provider(
+            &req.provider_id,
+            oauth::RegisterOAuthProviderRequest {
+                display_name: req.display_name.clone(),
+                authorization_url: req.authorization_url.clone(),
+                token_url: req.token_url.clone(),
+                scopes: req.scopes.clone(),
+                client_id: String::new(), // Must be configured by the user in settings
+                client_secret: None,
+                userinfo_url: req.userinfo_url.clone(),
+            },
+        ).await?;
+        tracing::info!(provider_id = %req.provider_id, name = %req.display_name, "registered OAuth provider");
         Ok(())
     }
 

@@ -16,9 +16,10 @@ use tokio::sync::Mutex;
 
 use simply_core::mcp::{McpRegistry, ServerConfig};
 use simply_core::storage::ids::UserId;
-use simply_core::{AuthMethod, ToolService};
+use simply_core::ToolService;
 use llm::{ToolDefinition, ToolResultContent};
 
+use crate::mcp::auth::DaemonMcpConfig;
 use crate::token_store::TransientTokenStore;
 use crate::tools::DaemonToolService;
 
@@ -35,6 +36,7 @@ pub struct UserToolServiceCache {
     daemon_tools: Arc<DaemonToolService>,
     token_store: Arc<TransientTokenStore>,
     mcp_registry: Arc<Mutex<McpRegistry>>,
+    daemon_mcp_config: Arc<Mutex<DaemonMcpConfig>>,
 }
 
 impl UserToolServiceCache {
@@ -42,12 +44,14 @@ impl UserToolServiceCache {
         daemon_tools: Arc<DaemonToolService>,
         token_store: Arc<TransientTokenStore>,
         mcp_registry: Arc<Mutex<McpRegistry>>,
+        daemon_mcp_config: Arc<Mutex<DaemonMcpConfig>>,
     ) -> Self {
         Self {
             cache: Mutex::new(HashMap::new()),
             daemon_tools,
             token_store,
             mcp_registry,
+            daemon_mcp_config,
         }
     }
 
@@ -107,32 +111,41 @@ impl UserToolServiceCache {
     /// Which MCP servers can this user access?
     async fn resolve_accessible_servers(&self, user_id: &UserId) -> Vec<String> {
         let registry = self.mcp_registry.lock().await;
+        let daemon_cfg = self.daemon_mcp_config.lock().await;
         let mut ids = Vec::new();
 
         for (id, _server) in registry.connected_servers() {
-            let config = registry.config().get_server(id)
-                .or_else(|| registry.get_ephemeral(id));
+            // OAuth servers require a per-user token under their provider_id
+            let oauth_provider = daemon_cfg.get_server(id)
+                .and_then(|c| c.auth.oauth_provider_id())
+                .map(|s| s.to_string());
 
-            let needs_oauth = config.map(|c| {
-                c.oauth_provider.is_some() || matches!(c.auth, AuthMethod::OAuth { .. })
-            }).unwrap_or(false);
-
-            let include = if needs_oauth {
-                let has_token = self.token_store.has_token(user_id, id);
+            let include = if let Some(provider_id) = &oauth_provider {
+                let has_token = self.token_store.has_token(user_id, provider_id);
                 tracing::debug!(
                     server_id = id,
+                    provider_id = %provider_id,
                     user_id = %user_id,
                     has_token,
                     "resolve_accessible: OAuth server"
                 );
                 has_token
             } else {
-                // No auth / static token: everyone gets it (role filtering is future)
                 true
             };
 
             if include {
                 ids.push(id.to_string());
+            }
+        }
+
+        // Also include OAuth servers the user has tokens for (even if not globally connected)
+        // These connect on-demand in build_mcp_callers
+        for (id, server_cfg) in &daemon_cfg.servers {
+            if let Some(provider_id) = server_cfg.auth.oauth_provider_id() {
+                if self.token_store.has_token(user_id, provider_id) && !ids.contains(id) {
+                    ids.push(id.clone());
+                }
             }
         }
 
@@ -146,25 +159,24 @@ impl UserToolServiceCache {
         user_id: &UserId,
         server_ids: &[String],
     ) -> Result<Vec<McpCaller>> {
-        // Phase 1: under lock, collect global callers and configs for per-user connections
-        let (global_callers, user_configs) = {
+        // Phase 1: under lock, collect global callers and (url, token) for per-user connections
+        let (global_callers, user_connections) = {
             let registry = self.mcp_registry.lock().await;
+            let daemon_cfg = self.daemon_mcp_config.lock().await;
             let mut global = Vec::new();
-            let mut needs_user_conn = Vec::new();
+            let mut needs_user_conn: Vec<(String, String, String)> = Vec::new(); // (id, url, token)
 
             for id in server_ids {
-                let config = registry.config().get_server(id)
-                    .or_else(|| registry.get_ephemeral(id));
+                let oauth_provider = daemon_cfg.get_server(id)
+                    .and_then(|c| c.auth.oauth_provider_id())
+                    .map(|s| s.to_string());
 
-                let is_oauth = config
-                    .map(|c| c.oauth_provider.is_some() || matches!(c.auth, AuthMethod::OAuth { .. }))
-                    .unwrap_or(false);
-
-                if is_oauth {
-                    if let (Some(cfg), Some(token)) = (config, self.token_store.get(user_id, id)) {
-                        let mut user_cfg = cfg.clone();
-                        user_cfg.auth = AuthMethod::Token { token: token.access_token };
-                        needs_user_conn.push((id.clone(), user_cfg));
+                if let Some(provider_id) = oauth_provider {
+                    if let Some(token) = self.token_store.get(user_id, &provider_id) {
+                        let url = daemon_cfg.get_server(id)
+                            .map(|c| c.url.clone())
+                            .unwrap_or_default();
+                        needs_user_conn.push((id.clone(), url, token.access_token));
                     }
                 } else if let Some(connected) = registry.get_connection(id) {
                     global.push(McpCaller::from_shared(connected));
@@ -173,18 +185,22 @@ impl UserToolServiceCache {
 
             (global, needs_user_conn)
         };
-        // Lock released here
+        // Locks released
 
-        // Phase 2: for OAuth servers, connect once to fetch tool definitions,
-        // then store config for on-demand reconnection per tool call.
+        // Phase 2: for OAuth servers, probe once to get tool list, then connect on-demand per call
         let mut callers = global_callers;
-        for (id, config) in user_configs {
-            match McpRegistry::connect_to_server(&config).await {
+        for (id, url, token) in user_connections {
+            let probe_config = ServerConfig {
+                name: id.clone(),
+                url: url.clone(),
+                auto_connect: false,
+                auto_retry: false,
+            };
+            match McpRegistry::connect_to_server(&probe_config, Some(&token)).await {
                 Ok(connected) => {
                     let tools = McpCaller::extract_tools(&connected);
-                    // Drop the connection — McpCaller will reconnect on demand
                     drop(connected);
-                    callers.push(McpCaller::on_demand(tools, config));
+                    callers.push(McpCaller::on_demand(tools, url, token));
                 }
                 Err(e) => {
                     tracing::warn!(server_id = %id, error = %e, "per-user MCP connection failed");
@@ -200,8 +216,8 @@ impl UserToolServiceCache {
 enum CallerKind {
     /// Global connection owned by the registry — just holds a cloned peer handle.
     Shared(simply_core::mcp::McpToolCaller),
-    /// Per-user OAuth connection — reconnects on demand for each tool call.
-    OnDemand { config: ServerConfig },
+    /// Per-user OAuth connection — reconnects on demand for each tool call using user's token.
+    OnDemand { url: String, bearer_token: String },
 }
 
 /// A single MCP server's tool definitions + connection strategy.
@@ -211,7 +227,6 @@ pub struct McpCaller {
 }
 
 impl McpCaller {
-    /// Create from a shared/global connection (peer cloned, registry owns the connection).
     fn from_shared(connected: &simply_core::mcp::ConnectedServer) -> Self {
         Self {
             tools: Self::extract_tools(connected),
@@ -219,12 +234,10 @@ impl McpCaller {
         }
     }
 
-    /// Create for a per-user OAuth server (connects on demand per tool call).
-    fn on_demand(tools: Vec<ToolDefinition>, config: ServerConfig) -> Self {
-        Self { tools, kind: CallerKind::OnDemand { config } }
+    fn on_demand(tools: Vec<ToolDefinition>, url: String, bearer_token: String) -> Self {
+        Self { tools, kind: CallerKind::OnDemand { url, bearer_token } }
     }
 
-    /// Call a tool, connecting on demand for per-user servers.
     pub async fn call_tool(
         &self,
         name: String,
@@ -232,10 +245,15 @@ impl McpCaller {
     ) -> Result<rmcp::model::CallToolResult> {
         match &self.kind {
             CallerKind::Shared(caller) => caller.call_tool(name, arguments).await,
-            CallerKind::OnDemand { config } => {
-                let connected = McpRegistry::connect_to_server(config).await?;
+            CallerKind::OnDemand { url, bearer_token } => {
+                let config = ServerConfig {
+                    name: String::new(),
+                    url: url.clone(),
+                    auto_connect: false,
+                    auto_retry: false,
+                };
+                let connected = McpRegistry::connect_to_server(&config, Some(bearer_token)).await?;
                 let result = connected.tool_caller().call_tool(name, arguments).await;
-                // connected drops here, closing the connection cleanly
                 result
             }
         }

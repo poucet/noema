@@ -94,15 +94,6 @@ impl ToolRegistry {
             }
         }
 
-        // Also check global OAuth tokens from MCP server configs
-        for (server_id, config) in registry.config().servers.iter() {
-            if let simply_core::AuthMethod::OAuth { access_token: Some(ref token), .. } = config.auth {
-                if !ctx.tokens.contains_key(server_id) {
-                    ctx.tokens.insert(server_id.clone(), token.clone());
-                }
-            }
-        }
-
         ctx
     }
 

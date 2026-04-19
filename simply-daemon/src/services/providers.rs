@@ -44,8 +44,9 @@ pub struct McpToolProvider {
 enum McpCallerKind {
     /// Global connection — cloned peer handle, registry owns the connection.
     Shared(McpToolCaller),
-    /// Per-user OAuth — reconnects on demand with the token from RequestContext.
-    OnDemand { config: ServerConfig },
+    /// Per-user OAuth — reconnects on demand using the user's token from RequestContext.
+    /// Token is looked up by `provider_id` in ctx.tokens.
+    OnDemand { url: String, provider_id: String },
 }
 
 impl McpToolProvider {
@@ -54,9 +55,9 @@ impl McpToolProvider {
         Self { id, name, tools, kind: McpCallerKind::Shared(caller) }
     }
 
-    /// Create for a per-user OAuth server (reconnects on demand).
-    pub fn on_demand(id: String, name: String, tools: Vec<Tool>, config: ServerConfig) -> Self {
-        Self { id, name, tools, kind: McpCallerKind::OnDemand { config } }
+    /// Create for a per-user OAuth server (reconnects on demand with user's token).
+    pub fn on_demand(id: String, name: String, tools: Vec<Tool>, url: String, provider_id: String) -> Self {
+        Self { id, name, tools, kind: McpCallerKind::OnDemand { url, provider_id } }
     }
 }
 
@@ -74,13 +75,15 @@ impl ToolProvider for McpToolProvider {
             McpCallerKind::Shared(caller) => {
                 caller.call_tool(request.name.to_string(), request.arguments).await
             }
-            McpCallerKind::OnDemand { config } => {
-                // Inject user's OAuth token if available
-                let mut user_config = config.clone();
-                if let Some(token) = ctx.tokens.get(&self.id) {
-                    user_config.auth = simply_core::AuthMethod::Token { token: token.clone() };
-                }
-                let connected = McpRegistry::connect_to_server(&user_config).await?;
+            McpCallerKind::OnDemand { url, provider_id } => {
+                let config = simply_core::ServerConfig {
+                    name: String::new(),
+                    url: url.clone(),
+                    auto_connect: false,
+                    auto_retry: false,
+                };
+                let bearer_token = ctx.tokens.get(provider_id).map(|t| t.as_str());
+                let connected = McpRegistry::connect_to_server(&config, bearer_token).await?;
                 let result = connected.tool_caller().call_tool(
                     request.name.to_string(),
                     request.arguments,

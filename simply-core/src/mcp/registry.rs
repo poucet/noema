@@ -18,16 +18,12 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 /// A cloneable handle for calling MCP tools without holding registry locks.
-///
-/// This is a lightweight wrapper around the rmcp Peer that can be cloned
-/// and used to make tool calls while not holding locks on the registry.
 #[derive(Clone)]
 pub struct McpToolCaller {
     peer: Peer<RoleClient>,
 }
 
 impl McpToolCaller {
-    /// Call a tool on this server
     pub async fn call_tool(
         &self,
         name: String,
@@ -54,15 +50,12 @@ pub struct ConnectedServer {
 
 impl ConnectedServer {
     /// Get a cloneable tool caller that can be used without holding registry locks.
-    ///
-    /// Use this when you need to make tool calls while releasing the registry lock.
     pub fn tool_caller(&self) -> McpToolCaller {
         McpToolCaller {
             peer: self.service.deref().clone(),
         }
     }
 
-    /// Call a tool on this server
     pub async fn call_tool(
         &self,
         name: String,
@@ -79,40 +72,34 @@ impl ConnectedServer {
         Ok(result)
     }
 
-    /// Disconnect from the server
     pub async fn disconnect(self) -> Result<()> {
         self.service.cancel().await?;
         Ok(())
     }
 }
 
-/// Status of a server's connection/retry state
+/// Status of a server's connection/retry state.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerStatus {
-    /// Not connected, no retry in progress
     Disconnected,
-    /// Connected successfully
     Connected,
-    /// Retry in progress with current attempt number
     Retrying { attempt: u32 },
-    /// Retry stopped (manually or max retries reached)
     RetryStopped { last_error: String },
 }
 
 /// Registry managing MCP server connections.
+///
+/// Auth-agnostic: the caller resolves auth externally and passes
+/// an optional bearer token when connecting.
 pub struct McpRegistry {
     config: McpConfig,
     connections: HashMap<String, ConnectedServer>,
-    /// Cancellation tokens for active retry tasks
     retry_tokens: HashMap<String, CancellationToken>,
-    /// Current status of each server
     server_status: HashMap<String, ServerStatus>,
-    /// Ephemeral servers (not persisted to config)
     ephemeral_servers: HashMap<String, ServerConfig>,
 }
 
 impl McpRegistry {
-    /// Create a new registry with the given configuration
     pub fn new(config: McpConfig) -> Self {
         Self {
             config,
@@ -123,56 +110,49 @@ impl McpRegistry {
         }
     }
 
-    /// Get the current configuration
     pub fn config(&self) -> &McpConfig {
         &self.config
     }
 
-    /// Get a mutable reference to the configuration
     pub fn config_mut(&mut self) -> &mut McpConfig {
         &mut self.config
     }
 
-    /// List all configured servers (includes ephemeral servers)
     pub fn list_servers(&self) -> Vec<(&str, &ServerConfig)> {
         let mut servers: Vec<_> = self.config
             .servers
             .iter()
             .map(|(id, cfg)| (id.as_str(), cfg))
             .collect();
-
-        // Add ephemeral servers
         servers.extend(
             self.ephemeral_servers
                 .iter()
                 .map(|(id, cfg)| (id.as_str(), cfg))
         );
-
         servers
     }
 
-    /// Check if a server is ephemeral (not persisted to config).
     pub fn is_ephemeral(&self, id: &str) -> bool {
         self.ephemeral_servers.contains_key(id)
     }
 
-    /// Check if a server is connected
     pub fn is_connected(&self, id: &str) -> bool {
         self.connections.contains_key(id)
     }
 
-    /// Get a connected server
     pub fn get_connection(&self, id: &str) -> Option<&ConnectedServer> {
         self.connections.get(id)
     }
 
-    /// Connect to a configured server (checks both persistent and ephemeral)
-    pub async fn connect(&mut self, id: &str) -> Result<&ConnectedServer> {
+    /// Connect to a server.
+    ///
+    /// `bearer_token` — optional Bearer token resolved externally by the daemon.
+    /// `simply-core` treats it as opaque — no OAuth logic here.
+    pub async fn connect(&mut self, id: &str, bearer_token: Option<&str>) -> Result<&ConnectedServer> {
         if self.connections.contains_key(id) {
             return Ok(self.connections.get(id).unwrap());
         }
 
-        // Check persistent config first, then ephemeral
         let server_config = self
             .config
             .get_server(id)
@@ -180,16 +160,13 @@ impl McpRegistry {
             .ok_or_else(|| anyhow::anyhow!("Server '{}' not found in configuration", id))?
             .clone();
 
-        let connected = Self::connect_to_server(&server_config).await?;
+        let connected = Self::connect_to_server(&server_config, bearer_token).await?;
         self.connections.insert(id.to_string(), connected);
         Ok(self.connections.get(id).unwrap())
     }
 
-    /// Connect to a server configuration (public for retry task access)
-    pub async fn connect_to_server(config: &ServerConfig) -> Result<ConnectedServer> {
-        // Get bearer token from auth method (new) or legacy auth_token field
-        let bearer_token = config.auth.bearer_token().or(config.auth_token.as_deref());
-
+    /// Connect to a server config with an optional bearer token.
+    pub async fn connect_to_server(config: &ServerConfig, bearer_token: Option<&str>) -> Result<ConnectedServer> {
         let transport = if let Some(token) = bearer_token {
             let mut transport_config =
                 StreamableHttpClientTransportConfig::with_uri(Arc::from(config.url.as_str()));
@@ -200,7 +177,6 @@ impl McpRegistry {
         };
 
         let service = ().serve(transport).await?;
-
         let tools_result = service.list_tools(Default::default()).await?;
 
         Ok(ConnectedServer {
@@ -210,7 +186,6 @@ impl McpRegistry {
         })
     }
 
-    /// Disconnect from a server
     pub async fn disconnect(&mut self, id: &str) -> Result<()> {
         if let Some(connection) = self.connections.remove(id) {
             connection.disconnect().await?;
@@ -218,7 +193,6 @@ impl McpRegistry {
         Ok(())
     }
 
-    /// Disconnect from all servers
     pub async fn disconnect_all(&mut self) -> Result<()> {
         let ids: Vec<String> = self.connections.keys().cloned().collect();
         for id in ids {
@@ -227,52 +201,39 @@ impl McpRegistry {
         Ok(())
     }
 
-    /// Add a new server to the configuration
     pub fn add_server(&mut self, id: String, config: ServerConfig) {
         self.config.add_server(id, config);
     }
 
-    /// Register an ephemeral server (not persisted to config).
-    /// These are typically in-process servers started per-conversation.
+    /// Register an ephemeral server (not persisted, no auth needed — local connections).
     pub fn register_ephemeral(&mut self, id: String, url: String) {
         let config = ServerConfig {
             name: id.clone(),
             url,
-            auth: crate::mcp::AuthMethod::None,
-            oauth_provider: None,
-            client_id: None,
-            client_secret: None,
-            auth_token: None,
             auto_connect: true,
             auto_retry: false,
-            use_well_known: false,
         };
         self.ephemeral_servers.insert(id, config);
     }
 
-    /// Unregister an ephemeral server and disconnect if connected
     pub async fn unregister_ephemeral(&mut self, id: &str) {
         self.ephemeral_servers.remove(id);
         self.disconnect(id).await.ok();
     }
 
-    /// Get an ephemeral server config
     pub fn get_ephemeral(&self, id: &str) -> Option<&ServerConfig> {
         self.ephemeral_servers.get(id)
     }
 
-    /// Remove a server from the configuration (disconnects if connected)
     pub async fn remove_server(&mut self, id: &str) -> Result<Option<ServerConfig>> {
         self.disconnect(id).await?;
         Ok(self.config.remove_server(id))
     }
 
-    /// Get all connected servers
     pub fn connected_servers(&self) -> impl Iterator<Item = (&str, &ConnectedServer)> {
         self.connections.iter().map(|(id, s)| (id.as_str(), s))
     }
 
-    /// Get the status of a server
     pub fn get_status(&self, id: &str) -> ServerStatus {
         self.server_status
             .get(id)
@@ -284,7 +245,6 @@ impl McpRegistry {
             })
     }
 
-    /// Get all server statuses
     pub fn all_statuses(&self) -> HashMap<String, ServerStatus> {
         let mut statuses = HashMap::new();
         for (id, _) in &self.config.servers {
@@ -293,41 +253,34 @@ impl McpRegistry {
         statuses
     }
 
-    /// Update server status
     pub fn set_status(&mut self, id: &str, status: ServerStatus) {
         self.server_status.insert(id.to_string(), status);
     }
 
-    /// Check if a retry is active for a server
     pub fn is_retry_active(&self, id: &str) -> bool {
         self.retry_tokens.contains_key(id)
     }
 
-    /// Store a retry cancellation token
     pub fn set_retry_token(&mut self, id: &str, token: CancellationToken) {
         self.retry_tokens.insert(id.to_string(), token);
     }
 
-    /// Cancel and remove a retry task
     pub fn cancel_retry(&mut self, id: &str) {
         if let Some(token) = self.retry_tokens.remove(id) {
             token.cancel();
         }
     }
 
-    /// Remove retry token (when retry completes naturally)
     pub fn remove_retry_token(&mut self, id: &str) {
         self.retry_tokens.remove(id);
     }
 
-    /// Store a successful connection (called from retry task)
     pub fn store_connection(&mut self, id: &str, server: ConnectedServer) {
         self.connections.insert(id.to_string(), server);
         self.server_status.insert(id.to_string(), ServerStatus::Connected);
         self.retry_tokens.remove(id);
     }
 
-    /// Get servers that should auto-connect (includes ephemeral servers)
     pub fn auto_connect_servers(&self) -> Vec<(String, ServerConfig)> {
         let mut servers: Vec<_> = self.config
             .servers
@@ -335,30 +288,30 @@ impl McpRegistry {
             .filter(|(_, cfg)| cfg.auto_connect)
             .map(|(id, cfg)| (id.clone(), cfg.clone()))
             .collect();
-
-        // Add ephemeral servers with auto_connect
         servers.extend(
             self.ephemeral_servers
                 .iter()
                 .filter(|(_, cfg)| cfg.auto_connect)
                 .map(|(id, cfg)| (id.clone(), cfg.clone()))
         );
-
         servers
     }
 }
 
-/// Constants for exponential backoff
-const INITIAL_BACKOFF_MS: u64 = 1000; // 1 second
-const MAX_BACKOFF_MS: u64 = 60000; // 1 minute
+const INITIAL_BACKOFF_MS: u64 = 1000;
+const MAX_BACKOFF_MS: u64 = 60000;
 const BACKOFF_MULTIPLIER: f64 = 2.0;
 
 /// Spawn a background retry task for connecting to an MCP server.
-/// Returns a cancellation token that can be used to stop the retry loop.
+///
+/// `bearer_token` — resolved externally by the daemon before spawning.
+/// If the token expires and a fresh one is needed, cancel this task and
+/// spawn a new one with updated credentials.
 pub fn spawn_retry_task(
     registry: Arc<Mutex<McpRegistry>>,
     server_id: String,
     config: ServerConfig,
+    bearer_token: Option<String>,
     on_status_change: Option<Box<dyn Fn(&str, &ServerStatus) + Send + Sync>>,
 ) -> CancellationToken {
     let token = CancellationToken::new();
@@ -371,7 +324,6 @@ pub fn spawn_retry_task(
         loop {
             attempt += 1;
 
-            // Update status to retrying
             {
                 let mut reg = registry.lock().await;
                 reg.set_status(&server_id, ServerStatus::Retrying { attempt });
@@ -380,10 +332,8 @@ pub fn spawn_retry_task(
                 }
             }
 
-            // Try to connect
-            match McpRegistry::connect_to_server(&config).await {
+            match McpRegistry::connect_to_server(&config, bearer_token.as_deref()).await {
                 Ok(connected) => {
-                    // Success! Store connection and exit
                     let mut reg = registry.lock().await;
                     reg.store_connection(&server_id, connected);
                     if let Some(ref cb) = on_status_change {
@@ -395,12 +345,9 @@ pub fn spawn_retry_task(
                 Err(e) => {
                     tracing::warn!(
                         "MCP server '{}' connection attempt {} failed: {}",
-                        server_id,
-                        attempt,
-                        e
+                        server_id, attempt, e
                     );
 
-                    // Check if auto_retry is still enabled
                     let should_retry = {
                         let reg = registry.lock().await;
                         reg.config()
@@ -411,9 +358,7 @@ pub fn spawn_retry_task(
 
                     if !should_retry {
                         let mut reg = registry.lock().await;
-                        let status = ServerStatus::RetryStopped {
-                            last_error: e.to_string(),
-                        };
+                        let status = ServerStatus::RetryStopped { last_error: e.to_string() };
                         reg.set_status(&server_id, status.clone());
                         reg.remove_retry_token(&server_id);
                         if let Some(ref cb) = on_status_change {
@@ -422,7 +367,6 @@ pub fn spawn_retry_task(
                         return;
                     }
 
-                    // Wait with exponential backoff, checking for cancellation
                     tokio::select! {
                         _ = cancel_token.cancelled() => {
                             let mut reg = registry.lock().await;
@@ -437,7 +381,6 @@ pub fn spawn_retry_task(
                             return;
                         }
                         _ = tokio::time::sleep(Duration::from_millis(backoff_ms)) => {
-                            // Increase backoff for next attempt
                             backoff_ms = ((backoff_ms as f64) * BACKOFF_MULTIPLIER) as u64;
                             backoff_ms = backoff_ms.min(MAX_BACKOFF_MS);
                         }
@@ -450,10 +393,10 @@ pub fn spawn_retry_task(
     token
 }
 
-/// Start auto-connect for all configured servers that have auto_connect enabled.
-/// Returns the number of servers that started connecting.
+/// Start auto-connect for all configured servers with auto_connect enabled.
 pub async fn start_auto_connect(
     registry: Arc<Mutex<McpRegistry>>,
+    bearer_tokens: HashMap<String, String>,
     on_status_change: Option<Arc<dyn Fn(&str, &ServerStatus) + Send + Sync>>,
 ) -> usize {
     let servers_to_connect: Vec<(String, ServerConfig)> = {
@@ -464,7 +407,6 @@ pub async fn start_auto_connect(
     let count = servers_to_connect.len();
 
     for (server_id, config) in servers_to_connect {
-        // Check if already connected or retry in progress
         {
             let reg = registry.lock().await;
             if reg.is_connected(&server_id) || reg.is_retry_active(&server_id) {
@@ -472,7 +414,6 @@ pub async fn start_auto_connect(
             }
         }
 
-        // Clone callback for this server's retry task
         let cb: Option<Box<dyn Fn(&str, &ServerStatus) + Send + Sync>> =
             on_status_change.as_ref().map(|f| {
                 let f = Arc::clone(f);
@@ -480,10 +421,9 @@ pub async fn start_auto_connect(
                     as Box<dyn Fn(&str, &ServerStatus) + Send + Sync>
             });
 
-        // Spawn retry task
-        let token = spawn_retry_task(Arc::clone(&registry), server_id.clone(), config, cb);
+        let bearer_token = bearer_tokens.get(&server_id).cloned();
+        let token = spawn_retry_task(Arc::clone(&registry), server_id.clone(), config, bearer_token, cb);
 
-        // Store the token
         {
             let mut reg = registry.lock().await;
             reg.set_retry_token(&server_id, token);
@@ -493,7 +433,6 @@ pub async fn start_auto_connect(
     count
 }
 
-/// Convert an MCP Tool to an llm ToolDefinition
 fn mcp_tool_to_definition(tool: &Tool) -> ToolDefinition {
     let schema_map: serde_json::Map<String, serde_json::Value> = serde_json::to_value(&*tool.input_schema)
         .ok()
@@ -508,15 +447,11 @@ fn mcp_tool_to_definition(tool: &Tool) -> ToolDefinition {
     }
 }
 
-/// Coerce string values to proper types based on the tool's schema.
-/// This fixes issues where LLMs (especially local models like Ollama) return
-/// string representations of numbers instead of actual numbers.
 fn coerce_args_to_schema(
     args: &serde_json::Value,
     schema: &serde_json::Value,
 ) -> serde_json::Value {
     match (args, schema.get("type").and_then(|t| t.as_str())) {
-        // If schema expects an integer and we have a string, parse as integer
         (serde_json::Value::String(s), Some("integer")) => {
             if let Ok(n) = s.parse::<i64>() {
                 serde_json::Value::Number(serde_json::Number::from(n))
@@ -524,7 +459,6 @@ fn coerce_args_to_schema(
                 args.clone()
             }
         }
-        // If schema expects a number (float) and we have a string, parse as float
         (serde_json::Value::String(s), Some("number")) => {
             if let Ok(n) = s.parse::<f64>() {
                 serde_json::Value::Number(
@@ -534,7 +468,6 @@ fn coerce_args_to_schema(
                 args.clone()
             }
         }
-        // If we have a float but schema expects integer, convert to integer
         (serde_json::Value::Number(n), Some("integer")) => {
             if let Some(f) = n.as_f64() {
                 serde_json::Value::Number(serde_json::Number::from(f as i64))
@@ -542,7 +475,6 @@ fn coerce_args_to_schema(
                 args.clone()
             }
         }
-        // If schema expects a boolean and we have a string, try to parse it
         (serde_json::Value::String(s), Some("boolean")) => {
             match s.to_lowercase().as_str() {
                 "true" | "1" | "yes" => serde_json::Value::Bool(true),
@@ -550,15 +482,12 @@ fn coerce_args_to_schema(
                 _ => args.clone(),
             }
         }
-        // If schema expects an array and we have a string, try to parse as JSON
         (serde_json::Value::String(s), Some("array")) => {
             serde_json::from_str(s).unwrap_or_else(|_| args.clone())
         }
-        // If schema expects an object and we have a string, try to parse as JSON
         (serde_json::Value::String(s), Some("object")) => {
             serde_json::from_str(s).unwrap_or_else(|_| args.clone())
         }
-        // Recursively handle objects
         (serde_json::Value::Object(obj), _) => {
             let properties = schema.get("properties");
             let mut new_obj = serde_json::Map::new();
@@ -570,7 +499,6 @@ fn coerce_args_to_schema(
             }
             serde_json::Value::Object(new_obj)
         }
-        // Recursively handle arrays
         (serde_json::Value::Array(arr), _) => {
             let items_schema = schema.get("items").unwrap_or(&serde_json::Value::Null);
             serde_json::Value::Array(
@@ -579,19 +507,16 @@ fn coerce_args_to_schema(
                     .collect(),
             )
         }
-        // Pass through unchanged
         _ => args.clone(),
     }
 }
 
-/// Convert MCP content to our ToolResultContent format
 fn mcp_content_to_tool_result(content: &RawContent) -> Option<ToolResultContent> {
     match content {
         RawContent::Text(text) => Some(ToolResultContent::text(&text.text)),
         RawContent::Image(img) => Some(ToolResultContent::image(&img.data, &img.mime_type)),
         RawContent::Audio(audio) => Some(ToolResultContent::audio(&audio.data, &audio.mime_type)),
         RawContent::Resource(resource) => {
-            // Extract text from embedded resources
             match &resource.resource {
                 rmcp::model::ResourceContents::TextResourceContents { text, .. } => {
                     Some(ToolResultContent::text(text))
@@ -599,46 +524,35 @@ fn mcp_content_to_tool_result(content: &RawContent) -> Option<ToolResultContent>
                 rmcp::model::ResourceContents::BlobResourceContents {
                     blob, mime_type, ..
                 } => {
-                    // Try to determine if it's image or audio from mime type
                     let mime = mime_type.as_deref().unwrap_or("application/octet-stream");
                     if mime.starts_with("image/") {
                         Some(ToolResultContent::image(blob, mime))
                     } else if mime.starts_with("audio/") {
                         Some(ToolResultContent::audio(blob, mime))
                     } else {
-                        // Unknown blob type, skip
                         None
                     }
                 }
             }
         }
-        RawContent::ResourceLink(_) => {
-            // Resource links are references, not content - skip
-            None
-        }
+        RawContent::ResourceLink(_) => None,
     }
 }
 
-/// A dynamic tool registry that wraps McpRegistry and queries it on each call.
-///
-/// Unlike static tool registries, this struct dynamically reflects
-/// any changes to connected MCP servers - new connections are immediately available.
+/// Dynamic tool registry wrapping McpRegistry.
 pub struct McpToolRegistry {
     mcp_registry: Arc<Mutex<McpRegistry>>,
 }
 
 impl McpToolRegistry {
-    /// Create a new dynamic MCP tool registry
     pub fn new(mcp_registry: Arc<Mutex<McpRegistry>>) -> Self {
         Self { mcp_registry }
     }
 
-    /// Check if a tool exists in any connected server
     pub async fn has_tool(&self, name: &str) -> bool {
         self.get_server_for_tool(name).await.is_some()
     }
 
-    /// Get the server ID that provides a tool. Handles prefixed names (e.g. "server.tool_name").
     pub async fn get_server_for_tool(&self, name: &str) -> Option<String> {
         let (target_server, tool_name) = name.split_once('.').unwrap_or(("", name));
         let registry = self.mcp_registry.lock().await;
@@ -653,7 +567,6 @@ impl McpToolRegistry {
         None
     }
 
-    /// Check if a tool belongs to a specific server
     pub async fn is_tool_from_server(&self, tool_name: &str, server_id: &str) -> bool {
         self.get_server_for_tool(tool_name).await.as_deref() == Some(server_id)
     }
@@ -681,7 +594,6 @@ impl crate::agent::ToolService for McpToolRegistry {
     ) -> Result<Vec<ToolResultContent>> {
         traffic_log::log_mcp_request(name, &args);
 
-        // Strip server prefix (e.g. "lumina-discord.list_channels" -> server_id="lumina-discord", tool_name="list_channels")
         let (target_server, tool_name) = name.split_once('.')
             .unwrap_or(("", name));
 
@@ -705,8 +617,7 @@ impl crate::agent::ToolService for McpToolRegistry {
             match found {
                 Some(f) => f,
                 None => {
-                    let err_msg =
-                        format!("Tool '{}' not found in any connected MCP server", name);
+                    let err_msg = format!("Tool '{}' not found in any connected MCP server", name);
                     traffic_log::log_mcp_error(name, &err_msg);
                     return Err(anyhow::anyhow!(err_msg));
                 }

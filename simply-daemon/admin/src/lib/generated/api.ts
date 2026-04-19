@@ -117,14 +117,16 @@ export const modelApi = (t: Transport) => ({
 
 // OAuthApi
 export const oAuthApi = (t: Transport) => ({
-  /** Start an OAuth flow for an MCP server. */
+  /** Start an OAuth flow for an MCP server or skill OAuth provider. */
   startOauth: (serverId: string) => t.rpc<T.OAuthFlowInfo>('oauth.start_oauth', 'POST', `/api/oauth/${serverId}`),
   /** Complete an OAuth flow by exchanging an authorization code for tokens. */
   completeOauth: (serverId: string, code: string, state: string) => t.rpc<void>('oauth.complete_oauth', 'POST', `/api/oauth/${serverId}/complete`, { code, state }),
   /** Complete an OAuth flow using just a code (manual entry, no state verification). */
   completeOauthWithCode: (serverId: string, code: string) => t.rpc<void>('oauth.complete_oauth_with_code', 'POST', `/api/oauth/${serverId}/code`, { code }),
-  /** Look up which server ID a pending OAuth state parameter belongs to. */
+  /** Look up which server/provider ID a pending OAuth state parameter belongs to. */
   resolveOauthState: (state: string) => t.rpc<string | null>('oauth.resolve_oauth_state', 'GET', `/api/oauth/${state}`),
+  /** Register an OAuth provider for a skill (or any non-MCP OAuth consumer).  Stored in `oauth_providers` section of config — never creates a phantom MCP server entry or triggers auto-connect. The `/auth/mcp/{provider_id}` route resolves OAuth config from here. */
+  registerOauthProvider: (providerId: string, request: T.RegisterOAuthProviderRequest) => t.rpc<void>('oauth.register_oauth_provider', 'PUT', `/api/oauth/providers/${providerId}`, { request }),
 });
 
 // SearchApi

@@ -120,6 +120,7 @@ where
 
         let mcp = Arc::new(McpService::start(
             McpServiceConfig { public_url },
+            Arc::clone(&token_store),
         ).await?);
 
         let model = Arc::new(ModelService::new(default_model_id));

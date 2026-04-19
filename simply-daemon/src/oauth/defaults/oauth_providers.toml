@@ -1,26 +1,32 @@
-# OAuth provider defaults.
-# Automatically copied to ~/.config/noema/oauth_providers.toml on first run.
-# When an MCP server in mcp.toml has oauth_provider = "google",
-# the daemon fills in authorization_url, token_url, and scopes from here.
-# Users only need to provide client_id and client_secret in mcp.toml.
+# OAuth provider identity and user-configured credentials.
+# Copied to ~/.local/share/noema/oauth_providers.toml on first run.
+#
+# Fill in client_id and client_secret for each provider you want to use.
+# These credentials survive MCP server add/remove — they live here, not in mcp.toml.
+#
+# Scopes are NOT stored here. They are declared per-consumer:
+#   - MCP servers: in mcp.toml under [servers.*.auth]
+#   - Skills: declared in code via OAuthRequirement
 
 [google]
+display_name = "Google"
 authorization_url = "https://accounts.google.com/o/oauth2/v2/auth"
 token_url = "https://oauth2.googleapis.com/token"
 userinfo_url = "https://www.googleapis.com/oauth2/v2/userinfo"
-scopes = [
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/documents.readonly",
-    "https://www.googleapis.com/auth/userinfo.email",
-]
+client_id = ""
+# client_secret = ""
 
 [github]
+display_name = "GitHub"
 authorization_url = "https://github.com/login/oauth/authorize"
 token_url = "https://github.com/login/oauth/access_token"
 userinfo_url = "https://api.github.com/user"
-scopes = ["repo", "read:user", "user:email"]
+client_id = ""
+# client_secret = ""
 
 [notion]
+display_name = "Notion"
 authorization_url = "https://api.notion.com/v1/oauth/authorize"
 token_url = "https://api.notion.com/v1/oauth/token"
-scopes = []
+client_id = ""
+# client_secret = ""

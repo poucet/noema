@@ -147,21 +147,25 @@ impl CompositeToolService {
     }
 
     /// Build a SkillCallContext for a user, populating tokens from the store.
+    ///
+    /// Tokens come exclusively from `TransientTokenStore` — keyed by provider_id.
+    /// Skills declare `OAuthRequirement { provider_id: "google", .. }` and look up
+    /// their token with `ctx.token("google")`.
     async fn skill_context_for(&self, user_id: &simply_core::storage::ids::UserId) -> simply_daemon_api::SkillCallContext {
         let mut ctx = simply_daemon_api::SkillCallContext::new(user_id.clone());
-        // Populate tokens from all known MCP servers
-        let registry = self.mcp.registry().lock().await;
-        for (server_id, _) in registry.config().servers.iter() {
+        // Token-auth MCP servers: tokens keyed by server_id.
+        let daemon_config = self.mcp.daemon_config();
+        let daemon_cfg = daemon_config.lock().await;
+        for server_id in daemon_cfg.servers.keys() {
             if let Some(token) = self.token_store.get(user_id, server_id) {
                 ctx = ctx.with_token(server_id.clone(), token.access_token);
             }
         }
-        // Also check global server tokens (from OAuthService flow)
-        for (server_id, config) in registry.config().servers.iter() {
-            if let simply_core::AuthMethod::OAuth { access_token: Some(ref token), .. } = config.auth {
-                if !ctx.tokens.contains_key(server_id) {
-                    ctx = ctx.with_token(server_id.clone(), token.clone());
-                }
+        drop(daemon_cfg);
+        // OAuth providers (used by skills and OAuth MCP servers): tokens keyed by provider_id.
+        for provider_id in crate::oauth::providers::known_providers() {
+            if let Some(token) = self.token_store.get(user_id, &provider_id) {
+                ctx = ctx.with_token(provider_id, token.access_token);
             }
         }
         ctx

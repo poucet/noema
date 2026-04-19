@@ -110,6 +110,10 @@ impl PathManager {
         Self::config_dir().map(|d| d.join("mcp.toml"))
     }
 
+    pub fn oauth_providers_path() -> Option<PathBuf> {
+        Self::config_dir().map(|d| d.join("oauth_providers.toml"))
+    }
+
     pub fn ensure_dirs_exist() -> std::io::Result<()> {
         if let Some(d) = Self::data_dir() {
             std::fs::create_dir_all(&d)?;

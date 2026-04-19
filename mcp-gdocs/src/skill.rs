@@ -22,8 +22,9 @@ use llm::{ToolDefinition, ToolResultContent};
 
 use crate::GoogleDocsClient;
 
-/// The server ID used to look up Google OAuth tokens in SkillCallContext.
-const GOOGLE_SERVER_ID: &str = "google-docs";
+/// Provider ID for Google OAuth — shared across all Google-based skills and servers.
+/// Tokens are stored in TransientTokenStore keyed by (user_id, "google").
+const GOOGLE_PROVIDER_ID: &str = "google";
 
 /// Google Docs skill — import documents from Google Drive.
 ///
@@ -43,8 +44,7 @@ impl GDocsSkill {
     }
 
     fn get_google_token(ctx: &SkillCallContext) -> Result<String> {
-        ctx.token(GOOGLE_SERVER_ID)
-            .or_else(|| ctx.token("google"))
+        ctx.token(GOOGLE_PROVIDER_ID)
             .map(|s| s.to_string())
             .ok_or_else(|| anyhow::anyhow!(
                 "No Google OAuth token found. Please authenticate with Google first."
@@ -151,8 +151,8 @@ impl Skill for GDocsSkill {
 
     fn oauth_requirements(&self) -> Vec<simply_daemon_api::skill::OAuthRequirement> {
         vec![simply_daemon_api::skill::OAuthRequirement {
-            id: GOOGLE_SERVER_ID.to_string(),
-            display_name: "Google Docs".to_string(),
+            provider_id: GOOGLE_PROVIDER_ID.to_string(),
+            display_name: "Google".to_string(),
             authorization_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
             token_url: "https://oauth2.googleapis.com/token".to_string(),
             scopes: vec![

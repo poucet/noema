@@ -38,10 +38,13 @@ pub struct AddMcpServerRequest {
     pub id: String,
     pub name: String,
     pub url: String,
+    /// "none", "token", or "oauth".
     pub auth_type: String,
+    /// Static bearer token for `auth_type = "token"`.
     pub auth_token: Option<String>,
-    pub client_id: Option<String>,
-    pub client_secret: Option<String>,
+    /// OAuth provider ID (must exist in oauth_providers.toml) for `auth_type = "oauth"`.
+    pub provider_id: Option<String>,
+    /// Scopes required by this server.
     pub scopes: Option<Vec<String>>,
 }
 

@@ -1,27 +1,27 @@
 //! MCP config file I/O.
 //!
-//! Loads and saves `McpConfig` from `~/.config/noema/mcp.toml`.
-//! simply-core's `McpConfig` is a pure in-memory type — this module
-//! adds the file persistence layer.
+//! Loads and saves `DaemonMcpConfig` (auth + connection config) from
+//! `~/.config/noema/mcp.toml`. The daemon splits this at runtime into
+//! `simply_core::McpConfig` (connections) + auth state.
 
-use simply_core::mcp::McpConfig;
+use crate::mcp::auth::DaemonMcpConfig;
 
-/// Load MCP config from the default path, or return empty config.
-pub fn load_mcp_config() -> McpConfig {
+/// Load daemon MCP config from the default path, or return empty config.
+pub fn load_mcp_config() -> DaemonMcpConfig {
     let Some(path) = config::PathManager::mcp_config_path() else {
-        return McpConfig::default();
+        return DaemonMcpConfig::default();
     };
     if !path.exists() {
-        return McpConfig::default();
+        return DaemonMcpConfig::default();
     }
     let Ok(content) = std::fs::read_to_string(&path) else {
-        return McpConfig::default();
+        return DaemonMcpConfig::default();
     };
     toml::from_str(&content).unwrap_or_default()
 }
 
-/// Save MCP config to the default path.
-pub fn save_mcp_config(config: &McpConfig) -> anyhow::Result<()> {
+/// Save daemon MCP config to the default path.
+pub fn save_mcp_config(config: &DaemonMcpConfig) -> anyhow::Result<()> {
     let path = config::PathManager::mcp_config_path()
         .ok_or_else(|| anyhow::anyhow!("Could not determine MCP config path"))?;
     if let Some(parent) = path.parent() {

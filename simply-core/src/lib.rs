@@ -16,4 +16,4 @@ pub use session_manager::{
     Persistence, SessionCommand, SessionEvent, SessionEventSender, SessionManager,
 };
 
-pub use mcp::{AuthMethod, McpConfig, McpRegistry, McpToolRegistry, OAuthCredentials, ServerConfig};
+pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
