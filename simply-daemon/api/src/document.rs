@@ -8,11 +8,14 @@ use ts_rs::TS;
 
 /// Document summary for listing.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
 #[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct DocumentInfo {
     pub id: String,
     pub user_id: String,
+    /// Email of the owning user, if the user has one. None for anonymous/stub users.
+    pub owner_email: Option<String>,
     pub title: String,
     pub document_type: String,
     pub source: String,

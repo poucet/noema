@@ -12,11 +12,12 @@ pub struct DocumentService<S: StorageTypes> {
     stores: Arc<dyn Stores<S>>,
     embedding_queue: Option<Arc<dyn crate::services::embedding_queue::EmbeddingQueue>>,
     vector_store: Option<Arc<dyn simply_core::embedding::VectorStore>>,
+    user_email_cache: Option<Arc<crate::services::user::UserEmailCache>>,
 }
 
 impl<S: StorageTypes> DocumentService<S> {
     pub fn new(stores: Arc<dyn Stores<S>>) -> Self {
-        Self { stores, embedding_queue: None, vector_store: None }
+        Self { stores, embedding_queue: None, vector_store: None, user_email_cache: None }
     }
 
     /// Attach an embedding queue and vector store for automatic indexing.
@@ -27,6 +28,15 @@ impl<S: StorageTypes> DocumentService<S> {
     ) -> Self {
         self.embedding_queue = Some(queue);
         self.vector_store = Some(vector_store);
+        self
+    }
+
+    /// Inject the shared user_id → email cache for populating `DocumentInfo.owner_email`.
+    pub fn with_user_email_cache(
+        mut self,
+        cache: Arc<crate::services::user::UserEmailCache>,
+    ) -> Self {
+        self.user_email_cache = Some(cache);
         self
     }
 
@@ -97,9 +107,14 @@ impl<S: StorageTypes> DocumentService<S> {
         let mut result = Vec::new();
         for doc in docs {
             let tabs = self.stores.document().list_document_tabs(&doc.id).await?;
+            let owner_email = match &self.user_email_cache {
+                Some(cache) => cache.get(&self.stores, &doc.user_id).await,
+                None => None,
+            };
             result.push(DocumentInfo {
                 id: doc.id.to_string(),
                 user_id: doc.user_id.to_string(),
+                owner_email,
                 title: doc.title.clone(),
                 document_type: doc.document_type.clone(),
                 source: format!("{:?}", doc.source),

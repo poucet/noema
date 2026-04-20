@@ -150,12 +150,14 @@ where
             "embedding provider initialized"
         );
 
+        let user_email_cache = Arc::new(crate::services::user::UserEmailCache::new());
         let document = Arc::new(
             DocumentService::new(Arc::clone(&self.stores))
                 .with_embedding(
                     embedding_queue.clone() as Arc<dyn EmbeddingQueue>,
                     Arc::clone(&self.vector_store),
                 )
+                .with_user_email_cache(Arc::clone(&user_email_cache))
         );
         let core = Arc::new(CoreService::new(kill_tx));
         let user_svc = Arc::new(UserService::new(Arc::clone(&self.stores)));
