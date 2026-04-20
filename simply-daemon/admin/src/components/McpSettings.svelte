@@ -9,6 +9,7 @@
   const oauth = oAuthApi(t);
 
   let servers = $state<McpServerInfo[]>([]);
+  let providers = $state<Array<{ id: string; displayName: string }>>([]);
   let selectedTools = $state<McpTool[]>([]);
   let selectedServerId = $state<string | null>(null);
   let error = $state<string | null>(null);
@@ -19,8 +20,9 @@
   let addName = $state('');
   let addUrl = $state('');
   let addAuthType = $state('none');
-  let addClientId = $state('');
-  let addClientSecret = $state('');
+  let addAuthToken = $state('');
+  let addProviderId = $state('');
+  let addScopes = $state('');
 
   onMount(() => refresh());
 
@@ -28,6 +30,8 @@
     loading = true;
     try {
       servers = await mcp.listMcpServers();
+      const provs = await (oauth as any).listOauthProviders();
+      providers = provs.map((p: any) => ({ id: p.id, displayName: p.displayName || p.id }));
     } catch (e) {
       console.error('[mcp]', e);
       error = `${e}`;
@@ -38,23 +42,24 @@
   async function addServer() {
     if (!addName.trim() || !addUrl.trim()) return;
     try {
-      const clientId = addClientId.trim() || null;
-      const clientSecret = addClientSecret.trim() || null;
+      const scopes = addAuthType === 'oauth'
+        ? addScopes.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
+        : null;
       await mcp.addMcpServer({
         id: addName.toLowerCase().replace(/\s+/g, '-'),
         name: addName,
         url: addUrl,
         authType: addAuthType,
-        authToken: null,
-        clientId,
-        clientSecret,
-        scopes: null,
-      });
+        authToken: addAuthType === 'token' ? (addAuthToken || null) : null,
+        providerId: addAuthType === 'oauth' ? (addProviderId || null) : null,
+        scopes,
+      } as any);
       addName = '';
       addUrl = '';
       addAuthType = 'none';
-      addClientId = '';
-      addClientSecret = '';
+      addAuthToken = '';
+      addProviderId = '';
+      addScopes = '';
       showAdd = false;
       await refresh();
     } catch (e) {
@@ -171,20 +176,36 @@
         bind:value={addAuthType}
       >
         <option value="none">No Auth</option>
+        <option value="token">Bearer Token</option>
         <option value="oauth">OAuth</option>
-        <option value="bearer">Bearer Token</option>
       </select>
-      {#if addAuthType === 'oauth'}
-        <input
-          class="w-full bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
-          placeholder="OAuth Client ID"
-          bind:value={addClientId}
-        />
+      {#if addAuthType === 'token'}
         <input
           class="w-full bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
           type="password"
-          placeholder="OAuth Client Secret (optional)"
-          bind:value={addClientSecret}
+          placeholder="Bearer token"
+          bind:value={addAuthToken}
+        />
+      {:else if addAuthType === 'oauth'}
+        {#if providers.length === 0}
+          <div class="text-xs text-yellow-400">
+            No OAuth providers configured. <a href="#oauth-providers" class="underline">Add one below</a> first.
+          </div>
+        {:else}
+          <select
+            class="w-full bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
+            bind:value={addProviderId}
+          >
+            <option value="">Select provider…</option>
+            {#each providers as p}
+              <option value={p.id}>{p.displayName}</option>
+            {/each}
+          </select>
+        {/if}
+        <input
+          class="w-full bg-white/5 border border-border rounded px-3 py-2 text-sm text-fg outline-none"
+          placeholder="Scopes (space or comma separated)"
+          bind:value={addScopes}
         />
       {/if}
       <button

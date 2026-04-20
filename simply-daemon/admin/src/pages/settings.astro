@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import GeneralSettings from '../components/GeneralSettings.svelte';
 import ApiKeySettings from '../components/ApiKeySettings.svelte';
+import OAuthProviders from '../components/OAuthProviders.svelte';
 import McpSettings from '../components/McpSettings.svelte';
 ---
 
@@ -9,6 +10,7 @@ import McpSettings from '../components/McpSettings.svelte';
   <div class="space-y-10">
     <GeneralSettings client:load />
     <ApiKeySettings client:load />
+    <OAuthProviders client:load />
     <McpSettings client:load />
   </div>
 </Base>

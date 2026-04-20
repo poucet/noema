@@ -41,6 +41,27 @@ pub struct RegisterOAuthProviderRequest {
     pub userinfo_url: Option<String>,
 }
 
+/// An OAuth provider entry — for admin UI listing.
+/// Never exposes `client_secret` over the API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+pub struct OAuthProviderInfo {
+    pub id: String,
+    pub display_name: String,
+    pub authorization_url: String,
+    pub token_url: String,
+    pub userinfo_url: Option<String>,
+    pub client_id: String,
+    /// True if client_secret is set (the secret itself is never returned).
+    pub has_client_secret: bool,
+    /// Last 4 characters of the client_secret, for visual confirmation. Empty if unset.
+    pub client_secret_suffix: String,
+    /// Scopes accumulated from skill registrations (in-memory, not persisted).
+    pub registered_scopes: Vec<String>,
+}
+
 #[simply_rpc::rpc_service("oauth")]
 #[async_trait]
 pub trait OAuthApi: Send + Sync {
@@ -60,15 +81,22 @@ pub trait OAuthApi: Send + Sync {
     #[rpc(get = "/oauth/{state}")]
     async fn resolve_oauth_state(&self, state: &str) -> Option<String>;
 
-    /// Register an OAuth provider for a skill (or any non-MCP OAuth consumer).
-    ///
-    /// Stored in `oauth_providers` section of config — never creates a phantom
-    /// MCP server entry or triggers auto-connect. The `/auth/mcp/{provider_id}`
-    /// route resolves OAuth config from here.
+    /// List all OAuth providers configured in oauth_providers.toml.
+    #[rpc(get = "/oauth/providers", no_tool)]
+    async fn list_oauth_providers(&self) -> anyhow::Result<Vec<OAuthProviderInfo>>;
+
+    /// Upsert an OAuth provider in oauth_providers.toml.
+    /// This is the admin-UI entry point — set credentials + URLs.
+    /// Skills also call this (with scopes) to accumulate the in-memory scope union.
     #[rpc(put = "/oauth/providers/{provider_id}", no_tool)]
     async fn register_oauth_provider(
         &self,
         provider_id: &str,
         request: RegisterOAuthProviderRequest,
     ) -> anyhow::Result<()>;
+
+    /// Remove an OAuth provider from oauth_providers.toml.
+    /// Fails if any MCP server still references this provider.
+    #[rpc(delete = "/oauth/providers/{provider_id}", no_tool)]
+    async fn remove_oauth_provider(&self, provider_id: &str) -> anyhow::Result<()>;
 }

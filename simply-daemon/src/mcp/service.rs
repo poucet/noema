@@ -330,6 +330,57 @@ impl OAuthApi for McpService {
         self.oauth.resolve_state(state).await
     }
 
+    async fn list_oauth_providers(&self) -> anyhow::Result<Vec<OAuthProviderInfo>> {
+        let providers = crate::oauth::providers::load_providers();
+        let skill_scopes = self.skill_scopes.lock().await;
+        let mut list: Vec<OAuthProviderInfo> = providers.into_iter().map(|(id, p)| {
+            let registered_scopes = skill_scopes.get(&id)
+                .map(|set| set.iter().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
+            OAuthProviderInfo {
+                id: id.clone(),
+                display_name: p.display_name,
+                authorization_url: p.authorization_url,
+                token_url: p.token_url,
+                userinfo_url: p.userinfo_url,
+                client_secret_suffix: p.client_secret.as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.chars().rev().take(4).collect::<String>().chars().rev().collect())
+                    .unwrap_or_default(),
+                client_id: p.client_id,
+                has_client_secret: p.client_secret.as_ref().map(|s| !s.is_empty()).unwrap_or(false),
+                registered_scopes,
+            }
+        }).collect();
+        list.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(list)
+    }
+
+    async fn remove_oauth_provider(&self, provider_id: &str) -> anyhow::Result<()> {
+        // Prevent removal if any MCP server still references this provider
+        let daemon_cfg = self.daemon_config.lock().await;
+        let referencing: Vec<String> = daemon_cfg.servers.iter()
+            .filter(|(_, s)| s.auth.oauth_provider_id() == Some(provider_id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        drop(daemon_cfg);
+        if !referencing.is_empty() {
+            anyhow::bail!(
+                "cannot remove provider '{provider_id}' — still referenced by MCP servers: {}",
+                referencing.join(", ")
+            );
+        }
+
+        let mut providers = crate::oauth::providers::load_providers();
+        if providers.remove(provider_id).is_none() {
+            anyhow::bail!("provider not found: {provider_id}");
+        }
+        crate::oauth::providers::save_providers(&providers)?;
+        self.skill_scopes.lock().await.remove(provider_id);
+        tracing::info!(provider_id, "OAuth provider removed");
+        Ok(())
+    }
+
     /// Upsert a provider in `oauth_providers.toml`, and merge any declared scopes
     /// into the in-memory union (used at auth time).
     async fn register_oauth_provider(

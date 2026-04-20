@@ -125,8 +125,12 @@ export const oAuthApi = (t: Transport) => ({
   completeOauthWithCode: (serverId: string, code: string) => t.rpc<void>('oauth.complete_oauth_with_code', 'POST', `/api/oauth/${serverId}/code`, { code }),
   /** Look up which server/provider ID a pending OAuth state parameter belongs to. */
   resolveOauthState: (state: string) => t.rpc<string | null>('oauth.resolve_oauth_state', 'GET', `/api/oauth/${state}`),
-  /** Register an OAuth provider for a skill (or any non-MCP OAuth consumer).  Stored in `oauth_providers` section of config — never creates a phantom MCP server entry or triggers auto-connect. The `/auth/mcp/{provider_id}` route resolves OAuth config from here. */
+  /** List all OAuth providers configured in oauth_providers.toml. */
+  listOauthProviders: () => t.rpc<T.OAuthProviderInfo[]>('oauth.list_oauth_providers', 'GET', '/api/oauth/providers'),
+  /** Upsert an OAuth provider in oauth_providers.toml. This is the admin-UI entry point — set credentials + URLs. Skills also call this (with scopes) to accumulate the in-memory scope union. */
   registerOauthProvider: (providerId: string, request: T.RegisterOAuthProviderRequest) => t.rpc<void>('oauth.register_oauth_provider', 'PUT', `/api/oauth/providers/${providerId}`, { request }),
+  /** Remove an OAuth provider from oauth_providers.toml. Fails if any MCP server still references this provider. */
+  removeOauthProvider: (providerId: string) => t.rpc<void>('oauth.remove_oauth_provider', 'DELETE', `/api/oauth/providers/${providerId}`),
 });
 
 // SearchApi

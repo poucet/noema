@@ -14,7 +14,13 @@ use std::fs;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=api/src/");
+    // Watch each .rs file individually — `rerun-if-changed=api/src/` only tracks
+    // the directory mtime, which doesn't change on file edits.
+    if let Ok(entries) = glob::glob("api/src/**/*.rs") {
+        for entry in entries.flatten() {
+            println!("cargo:rerun-if-changed={}", entry.display());
+        }
+    }
 
     if std::env::var("SKIP_ADMIN_BUILD").is_ok() {
         return;
