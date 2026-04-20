@@ -195,6 +195,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         // (re-import replaces the old version, including its embeddings)
         if let Some(ref sid) = request.source_id {
             if let Some(existing) = self.stores.document().get_document_by_source(&user_id, source.clone(), sid).await? {
+                tracing::debug!(existing_id = %existing.id, user_id = %user_id, source_id = %sid, "create_document: replacing existing");
                 self.delete_document_with_embeddings(&existing.id).await?;
             }
         }
