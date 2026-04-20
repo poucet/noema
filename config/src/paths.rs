@@ -34,14 +34,8 @@ impl PathManager {
     }
 
     pub fn config_dir() -> Option<PathBuf> {
-        // Use same base directory for config
-        Self::data_dir()
+        Self::data_dir().map(|d: PathBuf| d.join("config"))
     }
-
-    pub fn cache_dir() -> Option<PathBuf> {
-        Self::data_dir().map(|d| d.join("cache"))
-    }
-
     /// Directory containing the SQLite database
     pub fn database_dir() -> Option<PathBuf> {
         Self::data_dir().map(|d| d.join("database"))
@@ -54,7 +48,7 @@ impl PathManager {
 
     /// Directory for content-addressable blob storage
     pub fn blob_storage_dir() -> Option<PathBuf> {
-        Self::data_dir().map(|d| d.join("blob_storage"))
+        Self::data_dir().map(|d: PathBuf| d.join("blob_storage"))
     }
 
     /// Get the path for a specific blob by its SHA-256 hash
@@ -66,20 +60,14 @@ impl PathManager {
         let shard = &hash[0..2];
         Self::blob_storage_dir().map(|d| d.join(shard).join(hash))
     }
-
-    /// Directory for configuration files within data_dir
-    pub fn config_subdir() -> Option<PathBuf> {
-        Self::data_dir().map(|d| d.join("config"))
-    }
-
     /// Path to the unified settings file
     pub fn settings_path() -> Option<PathBuf> {
-        Self::config_subdir().map(|d| d.join("settings.toml"))
+        Self::config_dir().map(|d| d.join("settings.toml"))
     }
 
     /// Path to the secrets environment file
     pub fn env_path() -> Option<PathBuf> {
-        Self::config_subdir().map(|d| d.join(".env"))
+        Self::config_dir().map(|d| d.join(".env"))
     }
 
     pub fn logs_dir() -> Option<PathBuf> {
@@ -103,7 +91,7 @@ impl PathManager {
     }
 
     pub fn lumina_config_path() -> Option<PathBuf> {
-        Self::config_subdir().map(|d| d.join("lumina.toml"))
+        Self::config_dir().map(|d| d.join("lumina.toml"))
     }
 
     pub fn mcp_config_path() -> Option<PathBuf> {
@@ -125,9 +113,6 @@ impl PathManager {
             std::fs::create_dir_all(&d)?;
         }
         if let Some(d) = Self::blob_storage_dir() {
-            std::fs::create_dir_all(&d)?;
-        }
-        if let Some(d) = Self::config_subdir() {
             std::fs::create_dir_all(&d)?;
         }
         if let Some(d) = Self::logs_dir() {
