@@ -1,34 +1,32 @@
-//! Application state management
+//! Application state for the Tauri shell.
+//!
+//! With the admin UI driving all daemon interactions over HTTP+WS, Tauri only
+//! needs to hold: the daemon (for deep-link OAuth forwarding), the admin
+//! RequestContext (for the same), and the REST base URL (exposed to the
+//! webview via `daemon_base_url`).
 
 use simply_daemon::api::Daemon;
-use simply_daemon::types::ConversationId;
 use simply_daemon::net::DaemonHandle;
 use simply_rpc::RequestContext;
-use simply_voice::VoiceInput;
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{mpsc, Mutex, OnceCell};
+use std::sync::atomic::AtomicBool;
+use tokio::sync::OnceCell;
 
 pub struct AppState {
-    /// Guards against concurrent init_app calls (React StrictMode)
+    /// Guards against concurrent init calls.
     pub initializing: AtomicBool,
-    /// The daemon — primary API for everything (embedded or remote)
+    /// The daemon — primary API (embedded or remote).
     pub daemon: OnceCell<Arc<dyn Daemon>>,
-    /// Admin user's request context — set during initialization
+    /// Admin user's request context — resolved during init.
     pub admin_ctx: OnceCell<RequestContext>,
-    /// Keeps the daemon handle alive (owns server if we're the host)
+    /// Keeps the daemon handle alive (owns server if we're the host).
     pub _daemon_handle: OnceCell<DaemonHandle>,
-    /// REST base URL for the daemon (e.g. "http://127.0.0.1:9800")
+    /// REST base URL for the daemon (e.g. `http://127.0.0.1:9800`).
+    /// Exposed to the webview via `daemon_base_url`.
     pub rest_base_url: OnceCell<String>,
-    /// HTTP client with auth headers for daemon REST calls
+    /// HTTP client with auth headers — kept for any remaining server-side REST
+    /// calls in Tauri handlers (e.g. deep-link flows).
     pub http_client: OnceCell<reqwest::Client>,
-    /// Sender to push voice input to the daemon's voice pipeline.
-    /// Some = voice session active, None = inactive.
-    pub voice_audio_tx: Mutex<Option<mpsc::Sender<VoiceInput>>>,
-    pub voice_conversation: Mutex<Option<ConversationId>>,
-    pub processing: Mutex<HashMap<ConversationId, bool>>,
-    pub forwarders: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 impl AppState {
@@ -40,10 +38,6 @@ impl AppState {
             _daemon_handle: OnceCell::new(),
             rest_base_url: OnceCell::new(),
             http_client: OnceCell::new(),
-            voice_audio_tx: Mutex::new(None),
-            voice_conversation: Mutex::new(None),
-            processing: Mutex::new(HashMap::new()),
-            forwarders: Mutex::new(HashMap::new()),
         }
     }
 
@@ -51,33 +45,12 @@ impl AppState {
         self.daemon.get().cloned().ok_or_else(|| "Daemon not initialized".to_string())
     }
 
-    /// Get the admin user's RequestContext. Panics if not initialized.
     pub fn ctx(&self) -> RequestContext {
         self.admin_ctx.get().cloned().unwrap_or_default()
     }
 
     pub fn is_initialized(&self) -> bool {
         self.daemon.get().is_some()
-    }
-
-    pub async fn is_processing(&self, conversation_id: &ConversationId) -> bool {
-        self.processing.lock().await.get(conversation_id).copied().unwrap_or(false)
-    }
-
-    pub async fn set_processing(&self, conversation_id: &ConversationId, processing: bool) {
-        self.processing.lock().await.insert(conversation_id.clone(), processing);
-    }
-
-    pub async fn is_voice_conversation_processing(&self) -> bool {
-        if let Some(conv_id) = self.voice_conversation.lock().await.as_ref() {
-            self.processing.lock().await.get(conv_id).copied().unwrap_or(false)
-        } else {
-            false
-        }
-    }
-
-    pub async fn set_voice_conversation(&self, conversation_id: Option<ConversationId>) {
-        *self.voice_conversation.lock().await = conversation_id;
     }
 }
 

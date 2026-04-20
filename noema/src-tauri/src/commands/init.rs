@@ -1,29 +1,50 @@
-//! Application initialization command
+//! Application initialization + deep-link handling.
 
 use simply_daemon::api::*;
 use simply_daemon::net;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::logging::log_message;
 use crate::state::AppState;
 
+/// Return the daemon HTTP base URL (e.g. `http://127.0.0.1:9800`) so the webview
+/// can talk to the daemon over REST+WS — same protocol the web admin UI uses.
+///
+/// The Tauri `setup` hook kicks off `run_init` but doesn't await it, so the
+/// webview may call this before `rest_base_url` is populated. Poll with a
+/// short sleep up to a 30s budget; if init is still stuck past that, surface
+/// an error rather than hanging the UI.
 #[tauri::command]
-pub async fn init_app(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<String, String> {
+pub async fn daemon_base_url(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    for _ in 0..300 {
+        if let Some(url) = state.rest_base_url.get() {
+            return Ok(url.clone());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Err("Daemon init timed out".to_string())
+}
+
+/// Run daemon initialization once. Called from Tauri's `setup` hook at app
+/// launch — the admin UI doesn't know anything about `init_app`; by the time
+/// it loads and invokes `daemon_base_url`, the daemon URL is already set.
+pub async fn run_init(state: Arc<AppState>) -> Result<String, String> {
     if state.is_initialized() {
         return Ok(String::new());
     }
-
-    // Prevent concurrent init (React StrictMode calls this twice)
     if state.initializing.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return Ok(String::new());
     }
-
-    let state_arc = state.inner().clone();
-    do_init(app, state_arc).await
+    do_init(state).await
 }
 
-async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String> {
+#[tauri::command]
+pub async fn init_app(state: State<'_, Arc<AppState>>) -> Result<String, String> {
+    run_init(state.inner().clone()).await
+}
+
+async fn do_init(state: Arc<AppState>) -> Result<String, String> {
     log_message("Starting app initialization");
 
     config::load_env_file();
@@ -39,8 +60,9 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
     let is_host = handle.is_host();
     let daemon = handle.daemon();
 
-    // Set the REST base URL — used by asset protocol handler and other REST clients.
-    // When remote, this points to wherever the daemon is running.
+    // Set the REST base URL — used by the webview (via `daemon_base_url`) and
+    // any server-side REST clients. When remote, this points to wherever the
+    // daemon is running.
     let rest_base_url: String = format!("http://127.0.0.1:{daemon_port}");
     let _ = state.rest_base_url.set(rest_base_url);
 
@@ -61,7 +83,7 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
         .map(|e| format!("email:{e}"))
         .unwrap_or_else(|| "noema:admin".to_string());
     let admin_scope = daemon.user()
-        .resolve_or_create_user(simply_rpc::RequestContext::anonymous(), admin_external_id)
+        .resolve_or_create_user(&simply_rpc::RequestContext::anonymous(), admin_external_id)
         .await
         .unwrap_or_default();
     let admin_ctx = simply_rpc::RequestContext::with_scope(admin_scope);
@@ -77,4 +99,53 @@ async fn do_init(_app: AppHandle, state: Arc<AppState>) -> Result<String, String
         model_name
     ));
     Ok(model_name)
+}
+
+/// Handle incoming deep link URLs (e.g., `noema://oauth/callback?code=...&state=...`).
+///
+/// The webview can't register OS-level URL schemes, so Tauri receives them and
+/// forwards to the daemon's OAuth completion endpoint. On success/failure we
+/// emit a Tauri event the admin UI listens for.
+pub async fn handle_deep_link(app: &AppHandle, urls: Vec<url::Url>) {
+    let state: tauri::State<'_, Arc<AppState>> = app.state();
+    let daemon = match state.get_daemon() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!(error = %e, "Deep link received but daemon not initialized");
+            return;
+        }
+    };
+
+    for url in urls {
+        tracing::info!(url = %url, "Deep link received");
+
+        let is_oauth_callback = url.scheme() == "noema"
+            && url.host_str() == Some("oauth")
+            && url.path() == "/callback";
+        if !is_oauth_callback { continue; }
+
+        let code = url.query_pairs().find(|(k, _)| k == "code").map(|(_, v)| v.to_string());
+        let oauth_state = url.query_pairs().find(|(k, _)| k == "state").map(|(_, v)| v.to_string());
+        let (Some(code), Some(oauth_state)) = (code, oauth_state) else {
+            tracing::warn!("Incomplete OAuth callback — missing code or state");
+            continue;
+        };
+
+        let Some(server_id) = daemon.oauth().resolve_oauth_state(&oauth_state).await else {
+            tracing::warn!(state = %oauth_state, "No pending OAuth flow for state");
+            app.emit("oauth_error", "No pending OAuth flow found").ok();
+            continue;
+        };
+
+        match daemon.oauth().complete_oauth(&server_id, &code, &oauth_state).await {
+            Ok(()) => {
+                tracing::info!(server_id, "OAuth completed via deep link");
+                app.emit("oauth_complete", &server_id).ok();
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "OAuth deep link completion failed");
+                app.emit("oauth_error", e.to_string()).ok();
+            }
+        }
+    }
 }

@@ -26,6 +26,15 @@ fn main() {
         return;
     }
 
+    // Only build the admin UI when simply-daemon is itself the primary
+    // Cargo target. When another crate (e.g. noema) pulls us in as a dep,
+    // we skip: that consumer doesn't need admin/dist, and running `npm run
+    // build` here would rewrite `admin/.astro/*.d.ts`, which Tauri's dev
+    // watcher sees as a change and re-triggers the build in a loop.
+    if std::env::var("CARGO_PRIMARY_PACKAGE").is_err() {
+        return;
+    }
+
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let api_dir = manifest_dir.join("api/src");
     let admin_dir = manifest_dir.join("admin");

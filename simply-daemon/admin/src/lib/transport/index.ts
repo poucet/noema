@@ -32,6 +32,34 @@ export function setBaseUrl(url: string) {
   _baseUrl = url;
 }
 
+/**
+ * Kick off a one-shot Tauri base-URL fetch as soon as this module loads.
+ *
+ * In Tauri the webview origin is `tauri://localhost`, so relative `/api/*`
+ * URLs don't work — we need to ask the Tauri host (`init_app` has already
+ * run) for the daemon HTTP URL. Outside Tauri this resolves immediately and
+ * `detectBaseUrl()` handles same-origin vs. Astro-dev-server.
+ *
+ * Transport methods await this before their first call, so there's no race.
+ * Uses `window.__TAURI_INTERNALS__.invoke` directly to avoid pulling
+ * `@tauri-apps/api` into the admin build.
+ */
+const _readyPromise: Promise<void> = (async () => {
+  if (typeof window === 'undefined') return;
+  const internals = (window as any).__TAURI_INTERNALS__;
+  if (!internals || typeof internals.invoke !== 'function') return;
+  try {
+    const url = await internals.invoke('daemon_base_url');
+    if (typeof url === 'string' && url.length > 0) setBaseUrl(url);
+  } catch (e) {
+    console.warn('[transport] failed to fetch daemon base URL from Tauri', e);
+  }
+})();
+
+export function transportReady(): Promise<void> {
+  return _readyPromise;
+}
+
 // ---------------------------------------------------------------------------
 // Transport interface
 // ---------------------------------------------------------------------------
@@ -55,9 +83,9 @@ export function getTransport(): Transport {
 }
 
 export function createTransport(): Transport {
-  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-    throw new Error('TauriTransport not yet implemented — use HttpTransport');
-  }
+  // Tauri uses the same HttpTransport as the web build — the only difference
+  // is the base URL, which is fetched from the Tauri host via
+  // `invoke('daemon_base_url')` (see `_readyPromise` above).
   return new HttpTransportImpl();
 }
 
@@ -100,6 +128,7 @@ class HttpTransportImpl implements Transport {
     path: string,
     body?: unknown,
   ): Promise<T> {
+    await _readyPromise;
     const url = getBaseUrl() + path;
     const init: RequestInit = {
       method: httpMethod,
@@ -121,6 +150,7 @@ class HttpTransportImpl implements Transport {
   }
 
   async wsCall<T>(method: string, params: unknown = {}): Promise<T> {
+    await _readyPromise;
     this.ensureWs();
     await this.wsReady;
     if (!this.ws) throw new Error('WebSocket not connected');
@@ -169,40 +199,46 @@ class HttpTransportImpl implements Transport {
   private ensureWs(): void {
     if (this.ws) return;
 
+    // wsReady is resolved when the socket opens; we also gate the socket
+    // construction itself on `_readyPromise` so it uses the final base URL
+    // (in Tauri that URL is only known after `invoke('daemon_base_url')`).
     this.wsReady = new Promise((resolve) => { this.wsResolve = resolve; });
 
-    const base = getBaseUrl() || location.origin;
-    const wsBase = base.replace(/^http/, 'ws');
-    this.ws = new WebSocket(`${wsBase}/ws`);
+    _readyPromise.then(() => {
+      const base = getBaseUrl() || location.origin;
+      const wsBase = base.replace(/^http/, 'ws');
+      const ws = new WebSocket(`${wsBase}/ws`);
+      this.ws = ws;
 
-    this.ws.onopen = () => {
-      this.ws!.send(JSON.stringify({
-        id: 1,
-        method: 'client.identify',
-        params: { name: 'admin-ui' },
-      }));
-      this.wsResolve?.();
-    };
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          id: 1,
+          method: 'client.identify',
+          params: { name: 'admin-ui' },
+        }));
+        this.wsResolve?.();
+      };
 
-    this.ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        console.log('[ws] message:', msg);
-        if (msg.method && msg.id === undefined) {
-          this.dispatch(msg.method, msg.params);
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          console.log('[ws] message:', msg);
+          if (msg.method && msg.id === undefined) {
+            this.dispatch(msg.method, msg.params);
+          }
+        } catch { /* ignore */ }
+      };
+
+      ws.onclose = () => {
+        this.ws = null;
+        this.wsReady = null;
+        if (this.listeners.size > 0) {
+          setTimeout(() => this.ensureWs(), 2000);
         }
-      } catch { /* ignore */ }
-    };
+      };
 
-    this.ws.onclose = () => {
-      this.ws = null;
-      this.wsReady = null;
-      if (this.listeners.size > 0) {
-        setTimeout(() => this.ensureWs(), 2000);
-      }
-    };
-
-    this.ws.onerror = () => {};
+      ws.onerror = () => {};
+    });
   }
 
   private dispatch(method: string, params: unknown): void {

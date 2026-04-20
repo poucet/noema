@@ -4,5 +4,8 @@ import ChatPage from '../components/chat/ChatPage.svelte';
 ---
 
 <Base title="Chat — simply-daemon" fullWidth>
-  <ChatPage client:load />
+  <!-- Base has a 3rem top nav; give ChatPage the remaining viewport. -->
+  <div class="h-[calc(100vh-3rem)]">
+    <ChatPage client:load />
+  </div>
 </Base>

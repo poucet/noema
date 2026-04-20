@@ -125,13 +125,18 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         app = app.fallback_service(serve);
     }
 
-    // CORS: allow cross-origin requests from localhost dev servers only
+    // CORS: allow cross-origin requests from localhost dev servers and the
+    // Tauri webview. Tauri pages load from `tauri://localhost` (macOS/Linux)
+    // or `https://tauri.localhost` (Windows) and talk to the embedded daemon
+    // over HTTP on loopback.
     let cors = CorsLayer::new()
         .allow_origin([
             "http://localhost:4321".parse().unwrap(),  // Astro dev
             "http://127.0.0.1:4321".parse().unwrap(),
             "http://localhost:9800".parse().unwrap(),  // same-origin
             "http://127.0.0.1:9800".parse().unwrap(),
+            "tauri://localhost".parse().unwrap(),      // Tauri (macOS/Linux)
+            "https://tauri.localhost".parse().unwrap(),// Tauri (Windows)
         ])
         .allow_methods(Any)
         .allow_headers(Any);

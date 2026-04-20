@@ -4602,20 +4602,12 @@ checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
 name = "noema"
 version = "0.3.0"
 dependencies = [
- "base64 0.22.1",
- "chrono",
  "config",
  "dirs",
- "futures",
- "mcp-gdocs",
- "regex",
  "reqwest 0.12.28",
- "serde",
  "serde_json",
- "simply-audio",
  "simply-daemon",
  "simply-rpc",
- "simply-voice",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",
@@ -4624,15 +4616,11 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
- "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "ts-rs",
  "url",
- "urlencoding",
- "uuid",
 ]
 
 [[package]]

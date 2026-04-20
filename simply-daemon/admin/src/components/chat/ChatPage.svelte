@@ -21,7 +21,7 @@
   });
 </script>
 
-<div class="flex h-[calc(100vh-3rem)] overflow-hidden">
+<div class="flex h-full overflow-hidden">
   <!-- Sidebar: conversation list -->
   <div class="w-64 shrink-0 border-r border-border flex flex-col">
     <div class="p-3 border-b border-border flex items-center justify-between">

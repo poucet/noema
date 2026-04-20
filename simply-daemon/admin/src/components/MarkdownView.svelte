@@ -2,6 +2,7 @@
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import katex from 'katex';
+  import { getBaseUrl } from '../lib/transport';
   // katex/dist/katex.min.css is imported from Base.astro (Astro handles static CSS;
   // importing from inside Svelte breaks SSR because Node can't import .css).
 
@@ -9,6 +10,15 @@
   const { content }: Props = $props();
 
   let html = $state('');
+
+  // Embedded blob links are written as `/api/blob/{hash}` — same-origin when
+  // the daemon serves the admin UI, but in Tauri the page origin is
+  // `tauri://localhost` so we must absolute-ize them against the daemon URL.
+  function absolutizeApiUrls(src: string): string {
+    const base = getBaseUrl();
+    if (!base) return src;
+    return src.replace(/(["'(])\/api\//g, (_, lead) => `${lead}${base}/api/`);
+  }
 
   // Render math between $...$ (inline) and $$...$$ (display) into HTML via KaTeX.
   // Runs before marked so the TeX source isn't mangled by markdown parsing.
@@ -41,7 +51,8 @@
   $effect(() => {
     const withMath = renderMath(content ?? '');
     const rendered = marked.parse(withMath, { async: false, breaks: true, gfm: true }) as string;
-    html = DOMPurify.sanitize(rendered, {
+    const absolutized = absolutizeApiUrls(rendered);
+    html = DOMPurify.sanitize(absolutized, {
       // Allow images (needed for blob references) + KaTeX output tags.
       ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mtext'],
       ADD_ATTR: ['aria-hidden', 'encoding', 'display'],
