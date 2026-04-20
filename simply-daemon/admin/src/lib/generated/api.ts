@@ -13,9 +13,9 @@ export const assetApi = (t: Transport) => ({
   listAssets: () => t.rpc<string[]>('asset.list_assets', 'GET', '/api/asset'),
   /** Get asset metadata by ID. */
   getAssetInfo: (id: string) => t.rpc<T.AssetInfo>('asset.get_asset_info', 'GET', `/api/asset/${id}/info`),
-  /** Get an asset (metadata + binary data) by ID. */
+  /** Get an asset (metadata + binary data) by ID. Auto-detected as binary response from the `BinaryResponse` return type. */
   getAsset: (id: string) => t.rpc<T.BinaryResponse>('asset.get_asset', 'GET', `/api/asset/${id}`),
-  /** Get blob data + mime type by content hash. */
+  /** Get blob data + mime type by content hash. Auto-detected as binary response from the `BinaryResponse` return type. */
   getBlob: (hash: string) => t.rpc<T.BinaryResponse>('asset.get_blob', 'GET', `/api/blob/${hash}`),
 });
 
