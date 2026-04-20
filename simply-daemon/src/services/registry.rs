@@ -14,7 +14,7 @@ use simply_rpc::{RequestContext, RestService};
 use tokio::sync::RwLock;
 
 use simply_core::ToolService;
-use simply_daemon_api::ToolProvider;
+use simply_daemon_api::{ProviderKind, ToolProvider};
 
 use crate::api::*;
 use crate::mcp::McpService;
@@ -241,6 +241,37 @@ impl ToolService for UserScopedTools {
             }
         }
         anyhow::bail!("tool not found: {name}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SkillsApi — read-only listing of registered skills
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl SkillsApi for ToolRegistry {
+    async fn list_skills(&self) -> anyhow::Result<Vec<SkillInfo>> {
+        let providers = self.providers.read().await;
+        let mut skills = Vec::new();
+        for provider in providers.iter() {
+            let kind = match provider.kind() {
+                ProviderKind::Skill => "embedded",
+                ProviderKind::WsClient => "ws",
+                ProviderKind::Mcp => continue,
+            };
+            let oauth_provider_ids = provider.oauth_requirements().await
+                .into_iter().map(|r| r.provider_id).collect();
+            skills.push(SkillInfo {
+                id: provider.id().to_string(),
+                display_name: provider.display_name().to_string(),
+                kind: kind.to_string(),
+                tool_count: provider.tools().await.len(),
+                is_connected: provider.is_connected(),
+                oauth_provider_ids,
+            });
+        }
+        skills.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(skills)
     }
 }
 

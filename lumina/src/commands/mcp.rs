@@ -52,8 +52,7 @@ mod mcp {
             url,
             auth_type: auth,
             auth_token: None,
-            client_id: None,
-            client_secret: None,
+            provider_id: None,
             scopes: None,
         }).await?;
 

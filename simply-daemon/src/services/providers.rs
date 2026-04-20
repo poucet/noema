@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 use simply_core::mcp::{McpRegistry, McpToolCaller, ServerConfig};
 use simply_daemon_api::skill::OAuthRequirement;
-use simply_daemon_api::ToolProvider;
+use simply_daemon_api::{ProviderKind, ToolProvider};
 
 /// Convert an `llm::ToolDefinition` to an `rmcp::model::Tool`.
 fn definition_to_tool(td: llm::ToolDefinition) -> Tool {
@@ -146,6 +146,7 @@ impl WsToolProvider {
 impl ToolProvider for WsToolProvider {
     fn id(&self) -> &str { &self.conn_id }
     fn display_name(&self) -> &str { &self.display }
+    fn kind(&self) -> ProviderKind { ProviderKind::WsClient }
 
     async fn tools(&self) -> Vec<Tool> {
         self.tools.clone()
@@ -234,6 +235,7 @@ impl EmbeddedToolProvider {
 impl ToolProvider for EmbeddedToolProvider {
     fn id(&self) -> &str { self.skill.name() }
     fn display_name(&self) -> &str { self.skill.name() }
+    fn kind(&self) -> ProviderKind { ProviderKind::Skill }
 
     async fn tools(&self) -> Vec<Tool> {
         self.skill.tools().into_iter().map(definition_to_tool).collect()

@@ -232,11 +232,13 @@ where
     let session_svc: Arc<dyn SessionApi> = daemon.clone();
     let conversation_svc: Arc<dyn ConversationApi> = daemon.clone();
     let mcp_svc: Arc<dyn McpApi> = daemon.tool_registry().clone();
+    let skills_svc: Arc<dyn SkillsApi> = daemon.tool_registry().clone();
 
     let mut router = ServiceRouter::new()
         .register(<dyn SessionApi>::service(session_svc))
         .register(<dyn ConversationApi>::service(conversation_svc))
-        .register(<dyn McpApi>::service(mcp_svc));
+        .register(<dyn McpApi>::service(mcp_svc))
+        .register(<dyn SkillsApi>::service(skills_svc));
 
     for svc in daemon.daemon_tool_services() {
         router = router.register(svc);

@@ -4,6 +4,7 @@ import GeneralSettings from '../components/GeneralSettings.svelte';
 import ApiKeySettings from '../components/ApiKeySettings.svelte';
 import OAuthProviders from '../components/OAuthProviders.svelte';
 import McpSettings from '../components/McpSettings.svelte';
+import Skills from '../components/Skills.svelte';
 ---
 
 <Base title="Settings — simply-daemon">
@@ -12,5 +13,6 @@ import McpSettings from '../components/McpSettings.svelte';
     <ApiKeySettings client:load />
     <OAuthProviders client:load />
     <McpSettings client:load />
+    <Skills client:load />
   </div>
 </Base>

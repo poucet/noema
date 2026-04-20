@@ -422,6 +422,7 @@ where S::Document: DocumentResolver,
     fn core(&self) -> &dyn CoreApi { &*self.core }
     fn search(&self) -> &dyn SearchApi { &*self.search }
     fn user(&self) -> &dyn UserApi { &*self.user_svc }
+    fn skills(&self) -> &dyn SkillsApi { &*self.tools }
     fn tools(&self) -> &dyn ToolService { &*self.tools }
 
     async fn register_skill(&self, skill: Arc<dyn simply_daemon_api::Skill>) -> anyhow::Result<()> {

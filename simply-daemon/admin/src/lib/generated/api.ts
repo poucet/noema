@@ -153,6 +153,12 @@ export const sessionApi = (t: Transport) => ({
   pushEvent: (event: T.InboundEvent) => t.rpc<void>('session.push_event', 'POST', '/api/session/event', event),
 });
 
+// SkillsApi
+export const skillsApi = (t: Transport) => ({
+  /** List all skills registered with the daemon. */
+  listSkills: () => t.rpc<T.SkillInfo[]>('skills.list_skills', 'GET', '/api/skills'),
+});
+
 // UserApi
 export const userApi = (t: Transport) => ({
   /** Look up an external identity. Returns the user's Scope if mapped, None if unknown. Does NOT create a user — use `resolve_or_create_user` for that. */

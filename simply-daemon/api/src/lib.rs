@@ -19,6 +19,7 @@
 #[macro_use] mod core;
 #[macro_use] mod search;
 #[macro_use] mod user;
+#[macro_use] mod skills;
 pub mod client;
 pub mod provider;
 pub mod remote;
@@ -36,9 +37,10 @@ pub use voice::*;
 pub use self::core::*;
 pub use search::*;
 pub use user::*;
+pub use skills::*;
 pub use types::*;
 pub use skill::{Skill, SkillCallContext, SkillFactory, OAuthRequirement};
-pub use provider::ToolProvider;
+pub use provider::{ProviderKind, ToolProvider};
 pub use remote::RemoteDaemon;
 pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
@@ -77,6 +79,7 @@ pub trait Daemon: Send + Sync {
     fn core(&self) -> &dyn CoreApi;
     fn search(&self) -> &dyn SearchApi;
     fn user(&self) -> &dyn UserApi;
+    fn skills(&self) -> &dyn SkillsApi;
     fn tools(&self) -> &dyn simply_core::ToolService;
 
     /// Register a skill with the daemon.
