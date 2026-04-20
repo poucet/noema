@@ -681,8 +681,13 @@ async fn rest_handler(
     };
 
     let is_binary_upload = state.rest_dispatcher.is_binary_upload(http_method, &path);
+    // Native HTTP binary upload = body is raw bytes, Content-Type header carries the mime type.
+    // But internal clients (generated RemoteXxxApi → rest_call) send BinaryUpload as
+    // JSON (serde base64-encodes data). If Content-Type is application/json, treat the
+    // body as a regular JSON payload so BinaryUpload deserializes correctly.
+    let native_binary_upload = is_binary_upload && !content_type.starts_with("application/json");
 
-    let body = if is_binary_upload {
+    let body = if native_binary_upload {
         serde_json::to_value(simply_rpc::BinaryUpload::new(raw_bytes.to_vec(), content_type))
             .unwrap_or(serde_json::Value::Null)
     } else if raw_bytes.is_empty() {

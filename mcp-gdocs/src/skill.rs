@@ -45,12 +45,6 @@ impl GDocsSkill {
     }
 
     fn get_google_token(ctx: &SkillCallContext) -> Result<String> {
-        let token_keys: Vec<&String> = ctx.tokens.keys().collect();
-        tracing::debug!(
-            user_id = %ctx.user_id,
-            token_keys = ?token_keys,
-            "gdocs: looking up google token"
-        );
         ctx.token(GOOGLE_PROVIDER_ID)
             .map(|s| s.to_string())
             .ok_or_else(|| anyhow::anyhow!(
@@ -59,7 +53,6 @@ impl GDocsSkill {
     }
 
     async fn handle_import(&self, args: ImportArgs, ctx: &SkillCallContext) -> Result<CallToolResult> {
-        tracing::info!(doc_id = %args.doc_id, "gdocs_import: starting");
         let token = Self::get_google_token(ctx)?;
         let client = GoogleDocsClient::new(token);
         let rpc_ctx = Self::ctx_for(ctx);
@@ -71,25 +64,22 @@ impl GDocsSkill {
         info!(title = %extracted.title, tabs = extracted.tabs.len(), images = extracted.images.len(), "extracted");
 
         // Create document via daemon API
-        info!("gdocs_import: creating document via daemon");
         let doc = self.daemon.document().create_document(&rpc_ctx, CreateDocumentRequest {
             title: extracted.title.clone(),
             document_type: Some("knowledge".to_string()),
             content: None,
             source_id: Some(args.doc_id.clone()),
         }).await?;
-        info!(doc_id = %doc.id, "gdocs_import: document created");
 
         // Store images as assets via daemon API
-        let image_count = extracted.images.len();
         let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        for (idx, image) in extracted.images.iter().enumerate() {
-            info!(idx, total = image_count, "gdocs_import: storing image");
-            let data_b64 = base64::engine::general_purpose::STANDARD.encode(&image.data);
+        for image in &extracted.images {
+            // `BinaryUpload.data` is `Vec<u8>` — raw bytes. Don't pre-encode;
+            // serde handles base64 for the wire via #[serde(with = "base64_bytes")].
             let info = self.daemon.asset().store_asset(
                 &rpc_ctx,
                 simply_daemon_api::BinaryUpload {
-                    data: data_b64.into_bytes(),
+                    data: image.data.clone(),
                     mime_type: image.mime_type.clone(),
                 },
             ).await?;
@@ -99,9 +89,7 @@ impl GDocsSkill {
         // Topological sort: parents first
         let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut pending: Vec<_> = extracted.tabs.into_iter().collect();
-        let total_tabs = pending.len();
         let mut max_passes = pending.len() + 1;
-        info!(total_tabs, "gdocs_import: creating tabs");
 
         while !pending.is_empty() && max_passes > 0 {
             max_passes -= 1;
@@ -124,7 +112,6 @@ impl GDocsSkill {
                     None => tab.title.clone(),
                 };
 
-                info!(title = %title, content_len = content.len(), "gdocs_import: creating tab");
                 let created_tab = self.daemon.document().create_tab(&rpc_ctx, &doc.id, CreateTabRequest {
                     title,
                     content: Some(content),
@@ -145,17 +132,9 @@ impl GDocsSkill {
     }
 
     async fn handle_list(&self, args: ListArgs, ctx: &SkillCallContext) -> Result<CallToolResult> {
-        tracing::info!(query = ?args.query, limit = ?args.limit, "gdocs_list: starting");
         let token = Self::get_google_token(ctx)?;
         let client = GoogleDocsClient::new(token);
-        let files = match client.list_documents(args.query.as_deref(), args.limit.unwrap_or(20)).await {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::warn!(error = %e, "gdocs_list: drive API call failed");
-                return Err(e);
-            }
-        };
-        tracing::info!(count = files.len(), "gdocs_list: got results");
+        let files = client.list_documents(args.query.as_deref(), args.limit.unwrap_or(20)).await?;
         let result: Vec<serde_json::Value> = files.into_iter().map(|f| {
             serde_json::json!({ "id": f.id, "name": f.name, "modified_time": f.modified_time })
         }).collect();

@@ -43,10 +43,12 @@ pub trait AssetApi: Send + Sync {
     async fn get_asset_info(&self, ctx: &RequestContext, id: &AssetId) -> anyhow::Result<AssetInfo>;
 
     /// Get an asset (metadata + binary data) by ID.
-    #[rpc(get = "/asset/{id}", binary_response)]
+    /// Auto-detected as binary response from the `BinaryResponse` return type.
+    #[rpc(get = "/asset/{id}")]
     async fn get_asset(&self, ctx: &RequestContext, id: &AssetId) -> anyhow::Result<BinaryResponse>;
 
     /// Get blob data + mime type by content hash.
+    /// Auto-detected as binary response from the `BinaryResponse` return type.
     #[rpc(get = "/blob/{hash}", immutable_cache)]
     async fn get_blob(&self, ctx: &RequestContext, hash: &BlobHash) -> anyhow::Result<BinaryResponse>;
 }
