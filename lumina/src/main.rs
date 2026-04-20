@@ -16,10 +16,10 @@ use serenity::prelude::*;
 use songbird::SerenityInit;
 use songbird::Config as SongbirdConfig;
 use songbird::driver::{DecodeMode, DecodeConfig, Channels, SampleRate};
-use simply_daemon_api::{Daemon, McpApi, RegisterEphemeralRequest, Skill};
+use simply_daemon_api::{Daemon, Skill};
 
 pub struct McpServerKey;
-impl TypeMapKey for McpServerKey { type Value = mcp::LuminaMcpServer; }
+impl TypeMapKey for McpServerKey { type Value = mcp::DiscordSkill; }
 
 pub struct DaemonKey;
 impl TypeMapKey for DaemonKey { type Value = Arc<dyn Daemon>; }
@@ -43,12 +43,9 @@ async fn main() -> anyhow::Result<()> {
     let daemon = connect_daemon(&settings).await?;
 
     // Register skills with daemon (works over WS for both embedded and remote)
-    register_skills(&daemon).await?;
-
-    // Start Lumina's MCP server and register tools with daemon
     let http = Arc::new(serenity::http::Http::new(&token));
-    let mcp_server = mcp::LuminaMcpServer::new(http);
-    register_mcp_tools(&daemon, &mcp_server).await?;
+    let discord_skill = mcp::DiscordSkill::new(http);
+    register_skills(&daemon, &discord_skill).await?;
 
     // Discord client
     let registry = CommandRegistry::collect();
@@ -74,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
         .type_map_insert::<ConfigKey>(lumina_cfg)
         .type_map_insert::<CommandRegistry>(registry)
         .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new()))
-        .type_map_insert::<McpServerKey>(mcp_server)
+        .type_map_insert::<McpServerKey>(discord_skill)
         .await?;
 
     tracing::info!("lumina starting");
@@ -111,45 +108,16 @@ async fn connect_daemon(settings: &config::Settings) -> anyhow::Result<Arc<dyn D
 }
 
 // ---------------------------------------------------------------------------
-// Skills — registered with daemon via register_client_tools (works embedded + remote)
+// Skills — registered with daemon over Skill trait (in-process or WS reverse-RPC)
 // ---------------------------------------------------------------------------
 
-async fn register_skills(daemon: &Arc<dyn Daemon>) -> anyhow::Result<()> {
+async fn register_skills(daemon: &Arc<dyn Daemon>, discord: &mcp::DiscordSkill) -> anyhow::Result<()> {
     let gdocs = Arc::new(mcp_gdocs::GDocsSkill::new(Arc::clone(daemon)));
     daemon.register_skill(gdocs).await?;
     tracing::info!("GDocs skill registered with daemon");
-    Ok(())
-}
 
-// ---------------------------------------------------------------------------
-// MCP server registration (works for both embedded and remote)
-// ---------------------------------------------------------------------------
-
-/// Start Lumina's MCP server and register its tools with the daemon.
-async fn register_mcp_tools(
-    daemon: &Arc<dyn Daemon>,
-    mcp_server: &mcp::LuminaMcpServer,
-) -> anyhow::Result<()> {
-    // Host Lumina's MCP server
-    #[cfg(feature = "embedded")]
-    let mcp_handle = simply_daemon::mcp::start_server(mcp_server.clone()).await?;
-    #[cfg(not(feature = "embedded"))]
-    let mcp_handle = {
-        // TODO: move generic MCP hosting to simply-daemon-api or simply-rpc
-        tracing::warn!("MCP tool registration skipped in remote mode");
-        return Ok(());
-    };
-
-    let mcp_url = mcp_handle.url();
-    tracing::info!(url = %mcp_url, "lumina MCP server started");
-
-    let tool_count = daemon
-        .mcp().register_ephemeral_mcp(RegisterEphemeralRequest {
-            id: "discord".to_string(),
-            url: mcp_url,
-        })
-        .await?;
-    tracing::info!(tool_count, "registered lumina MCP service with daemon");
+    daemon.register_skill(Arc::new(discord.clone())).await?;
+    tracing::info!("Discord skill registered with daemon");
     Ok(())
 }
 

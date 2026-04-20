@@ -96,7 +96,6 @@ pub struct McpRegistry {
     connections: HashMap<String, ConnectedServer>,
     retry_tokens: HashMap<String, CancellationToken>,
     server_status: HashMap<String, ServerStatus>,
-    ephemeral_servers: HashMap<String, ServerConfig>,
 }
 
 impl McpRegistry {
@@ -106,7 +105,6 @@ impl McpRegistry {
             connections: HashMap::new(),
             retry_tokens: HashMap::new(),
             server_status: HashMap::new(),
-            ephemeral_servers: HashMap::new(),
         }
     }
 
@@ -119,21 +117,11 @@ impl McpRegistry {
     }
 
     pub fn list_servers(&self) -> Vec<(&str, &ServerConfig)> {
-        let mut servers: Vec<_> = self.config
+        self.config
             .servers
             .iter()
             .map(|(id, cfg)| (id.as_str(), cfg))
-            .collect();
-        servers.extend(
-            self.ephemeral_servers
-                .iter()
-                .map(|(id, cfg)| (id.as_str(), cfg))
-        );
-        servers
-    }
-
-    pub fn is_ephemeral(&self, id: &str) -> bool {
-        self.ephemeral_servers.contains_key(id)
+            .collect()
     }
 
     pub fn is_connected(&self, id: &str) -> bool {
@@ -156,7 +144,6 @@ impl McpRegistry {
         let server_config = self
             .config
             .get_server(id)
-            .or_else(|| self.ephemeral_servers.get(id))
             .ok_or_else(|| anyhow::anyhow!("Server '{}' not found in configuration", id))?
             .clone();
 
@@ -203,26 +190,6 @@ impl McpRegistry {
 
     pub fn add_server(&mut self, id: String, config: ServerConfig) {
         self.config.add_server(id, config);
-    }
-
-    /// Register an ephemeral server (not persisted, no auth needed — local connections).
-    pub fn register_ephemeral(&mut self, id: String, url: String) {
-        let config = ServerConfig {
-            name: id.clone(),
-            url,
-            auto_connect: true,
-            auto_retry: false,
-        };
-        self.ephemeral_servers.insert(id, config);
-    }
-
-    pub async fn unregister_ephemeral(&mut self, id: &str) {
-        self.ephemeral_servers.remove(id);
-        self.disconnect(id).await.ok();
-    }
-
-    pub fn get_ephemeral(&self, id: &str) -> Option<&ServerConfig> {
-        self.ephemeral_servers.get(id)
     }
 
     pub async fn remove_server(&mut self, id: &str) -> Result<Option<ServerConfig>> {
@@ -282,19 +249,12 @@ impl McpRegistry {
     }
 
     pub fn auto_connect_servers(&self) -> Vec<(String, ServerConfig)> {
-        let mut servers: Vec<_> = self.config
+        self.config
             .servers
             .iter()
             .filter(|(_, cfg)| cfg.auto_connect)
             .map(|(id, cfg)| (id.clone(), cfg.clone()))
-            .collect();
-        servers.extend(
-            self.ephemeral_servers
-                .iter()
-                .filter(|(_, cfg)| cfg.auto_connect)
-                .map(|(id, cfg)| (id.clone(), cfg.clone()))
-        );
-        servers
+            .collect()
     }
 }
 

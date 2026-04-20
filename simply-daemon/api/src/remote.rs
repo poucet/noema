@@ -78,6 +78,70 @@ impl Daemon for RemoteDaemon {
     fn skills(&self) -> &dyn SkillsApi { &self.skills }
     fn tools(&self) -> &dyn simply_core::ToolService { &self.mcp }
 
+    /// Register a skill with the remote daemon.
+    ///
+    /// Sends the skill's name + display info + OAuth requirements + tools as a
+    /// single `tools.register` WS message, and sets up a reverse-RPC handler so
+    /// tool calls routed back from the daemon invoke the local `Skill` impl.
+    async fn register_skill(&self, skill: std::sync::Arc<dyn crate::skill::Skill>) -> anyhow::Result<()> {
+        use crate::skill::SkillCallContext;
+        let name = skill.name().to_string();
+        let tools = skill.tools();
+        let oauth_reqs = skill.oauth_requirements();
+
+        // Reverse-RPC handler: daemon calls tools.call, we dispatch to skill.call_tool
+        let skill_clone = std::sync::Arc::clone(&skill);
+        self.conn.ws().set_reverse_handler(std::sync::Arc::new(move |id, method, params, write_tx| {
+            let skill = std::sync::Arc::clone(&skill_clone);
+            Box::pin(async move {
+                if method != "tools.call" {
+                    let resp = serde_json::json!({ "id": id, "error": { "message": format!("unknown reverse method: {method}") } });
+                    let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
+                    return;
+                }
+                let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let arguments = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
+                let (user_id, tokens) = params.get("__ctx")
+                    .map(|v| {
+                        let tokens = v.get("tokens")
+                            .and_then(|t| serde_json::from_value(t.clone()).ok())
+                            .unwrap_or_default();
+                        let user_id = v.get("user_id")
+                            .and_then(|u| u.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "anonymous".to_string());
+                        (user_id, tokens)
+                    })
+                    .unwrap_or_else(|| ("anonymous".to_string(), std::collections::HashMap::new()));
+
+                let ctx = SkillCallContext {
+                    user_id: crate::types::UserId::from_string(&user_id),
+                    tokens,
+                };
+                let result = skill.call_tool(&tool_name, arguments, &ctx).await;
+                let resp = match result {
+                    Ok(value) => serde_json::json!({ "id": id, "result": value }),
+                    Err(e) => serde_json::json!({ "id": id, "error": { "message": e.to_string() } }),
+                };
+                let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
+            })
+        })).await;
+
+        // Send tools.register with full skill metadata
+        let result = self.conn.rpc_call(
+            "tools.register",
+            serde_json::json!({
+                "id": name,
+                "display_name": name,
+                "tools": tools,
+                "oauth_requirements": oauth_reqs,
+            }),
+            &simply_rpc::RequestContext::anonymous(),
+        ).await?;
+        tracing::info!(skill = %name, result = %result, "skill registered with daemon over WS");
+        Ok(())
+    }
+
     async fn register_client_tools(
         &self,
         tools: Vec<llm::ToolDefinition>,

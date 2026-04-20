@@ -42,6 +42,18 @@ pub use types::*;
 pub use skill::{Skill, SkillCallContext, SkillFactory, OAuthRequirement};
 pub use provider::{ProviderKind, ToolProvider};
 pub use remote::RemoteDaemon;
+pub use skill_macros::skill_router;
+// Re-export types used by generated skill_router code, so skills only need `simply-daemon-api`.
+pub use llm::{ToolDefinition, ToolResultContent};
+pub use async_trait::async_trait as __async_trait_reexport;
+
+/// Re-exports used by `#[skill_router]`-generated code. Not a stable API.
+#[doc(hidden)]
+pub mod __private {
+    pub use anyhow;
+    pub use rmcp;
+    pub use serde_json;
+}
 pub use simply_rpc::{BinaryResponse, BinaryUpload};
 
 use std::collections::HashMap;
@@ -180,7 +192,6 @@ mod ts_export {
         UpdateTabRequest::export_all().expect("UpdateTabRequest");
         McpServerInfo::export_all().expect("McpServerInfo");
         AddMcpServerRequest::export_all().expect("AddMcpServerRequest");
-        RegisterEphemeralRequest::export_all().expect("RegisterEphemeralRequest");
         UpdateMcpServerRequest::export_all().expect("UpdateMcpServerRequest");
         OAuthFlowInfo::export_all().expect("OAuthFlowInfo");
         AssetInfo::export_all().expect("AssetInfo");

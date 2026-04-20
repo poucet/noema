@@ -159,8 +159,6 @@ impl McpApi for ToolRegistry {
     async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()> { self.mcp.update_mcp_server_settings(server_id, request).await }
     async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.stop_mcp_retry(server_id).await }
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.start_mcp_retry(server_id).await }
-    async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize> { self.mcp.register_ephemeral_mcp(request).await }
-    async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()> { self.mcp.unregister_ephemeral_mcp(server_id).await }
 
     async fn list_all_tools(&self, _ctx: &RequestContext) -> anyhow::Result<Vec<McpTool>> {
         let defs = self.get_definitions().await;
@@ -255,8 +253,8 @@ impl SkillsApi for ToolRegistry {
         let mut skills = Vec::new();
         for provider in providers.iter() {
             let kind = match provider.kind() {
-                ProviderKind::Skill => "embedded",
-                ProviderKind::WsClient => "ws",
+                ProviderKind::InProcess => "in-process",
+                ProviderKind::Remote => "remote",
                 ProviderKind::Mcp => continue,
             };
             let oauth_provider_ids = provider.oauth_requirements().await
@@ -272,6 +270,17 @@ impl SkillsApi for ToolRegistry {
         }
         skills.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(skills)
+    }
+
+    async fn list_skill_tools(&self, skill_id: &str) -> anyhow::Result<Vec<McpTool>> {
+        let providers = self.providers.read().await;
+        for provider in providers.iter() {
+            if provider.kind() == ProviderKind::Mcp { continue; }
+            if provider.id() == skill_id {
+                return Ok(provider.tools().await);
+            }
+        }
+        anyhow::bail!("skill not found: {skill_id}")
     }
 }
 

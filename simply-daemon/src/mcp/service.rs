@@ -182,9 +182,6 @@ impl McpApi for McpService {
     }
 
     async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()> {
-        if self.registry.lock().await.is_ephemeral(server_id) {
-            anyhow::bail!("cannot remove ephemeral server '{server_id}' — it is managed by its host process");
-        }
         self.registry.lock().await.remove_server(server_id).await?;
         let mut daemon_cfg = self.daemon_config.lock().await;
         daemon_cfg.remove_server(server_id);
@@ -261,21 +258,6 @@ impl McpApi for McpService {
             bearer_token,
             None,
         );
-        Ok(())
-    }
-
-    async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize> {
-        let mut registry = self.registry.lock().await;
-        registry.register_ephemeral(request.id.clone(), request.url);
-        registry.connect(&request.id, None).await?;
-        let tool_count = registry.get_connection(&request.id).map(|c| c.tools.len()).unwrap_or(0);
-        tracing::info!(id = %request.id, tool_count, "ephemeral MCP service registered");
-        Ok(tool_count)
-    }
-
-    async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()> {
-        self.registry.lock().await.unregister_ephemeral(server_id).await;
-        tracing::info!(id = %server_id, "ephemeral MCP service unregistered");
         Ok(())
     }
 

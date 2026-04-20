@@ -109,9 +109,10 @@ struct PendingCall {
 /// Tool calls are dispatched as reverse RPC over the same WS connection.
 /// User context (tokens, user_id) is sent as `__ctx` in the call params.
 pub struct WsToolProvider {
-    conn_id: String,
+    id: String,
     display: String,
     tools: Vec<Tool>,
+    oauth_reqs: Vec<OAuthRequirement>,
     write_tx: mpsc::Sender<String>,
     pending: Arc<Mutex<HashMap<u64, PendingCall>>>,
     next_id: std::sync::atomic::AtomicU64,
@@ -119,15 +120,17 @@ pub struct WsToolProvider {
 
 impl WsToolProvider {
     pub fn new(
-        conn_id: String,
+        id: String,
         display_name: String,
         tools: Vec<Tool>,
+        oauth_reqs: Vec<OAuthRequirement>,
         write_tx: mpsc::Sender<String>,
     ) -> Self {
         Self {
-            conn_id,
+            id,
             display: display_name,
             tools,
+            oauth_reqs,
             write_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
             next_id: std::sync::atomic::AtomicU64::new(1_000_000),
@@ -144,12 +147,16 @@ impl WsToolProvider {
 
 #[async_trait]
 impl ToolProvider for WsToolProvider {
-    fn id(&self) -> &str { &self.conn_id }
+    fn id(&self) -> &str { &self.id }
     fn display_name(&self) -> &str { &self.display }
-    fn kind(&self) -> ProviderKind { ProviderKind::WsClient }
+    fn kind(&self) -> ProviderKind { ProviderKind::Remote }
 
     async fn tools(&self) -> Vec<Tool> {
         self.tools.clone()
+    }
+
+    async fn oauth_requirements(&self) -> Vec<OAuthRequirement> {
+        self.oauth_reqs.clone()
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, ctx: &RequestContext) -> Result<CallToolResult> {
@@ -235,7 +242,7 @@ impl EmbeddedToolProvider {
 impl ToolProvider for EmbeddedToolProvider {
     fn id(&self) -> &str { self.skill.name() }
     fn display_name(&self) -> &str { self.skill.name() }
-    fn kind(&self) -> ProviderKind { ProviderKind::Skill }
+    fn kind(&self) -> ProviderKind { ProviderKind::InProcess }
 
     async fn tools(&self) -> Vec<Tool> {
         self.skill.tools().into_iter().map(definition_to_tool).collect()

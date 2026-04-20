@@ -48,15 +48,6 @@ pub struct AddMcpServerRequest {
     pub scopes: Option<Vec<String>>,
 }
 
-/// Request to register an ephemeral MCP server at runtime.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
-pub struct RegisterEphemeralRequest {
-    pub id: String,
-    pub url: String,
-}
-
 /// Request to update MCP server settings.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -109,14 +100,6 @@ pub trait McpApi: Send + Sync {
     /// Start retry attempts for an MCP server.
     #[rpc(post = "/mcp/{server_id}/retry")]
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()>;
-
-    /// Register an ephemeral MCP server and connect to it.
-    #[rpc(post = "/mcp/ephemeral", no_tool)]
-    async fn register_ephemeral_mcp(&self, request: RegisterEphemeralRequest) -> anyhow::Result<usize>;
-
-    /// Unregister an ephemeral MCP server and disconnect.
-    #[rpc(delete = "/mcp/ephemeral/{server_id}", no_tool)]
-    async fn unregister_ephemeral_mcp(&self, server_id: &str) -> anyhow::Result<()>;
 
     // -- Tool operations (user-scoped) --
 

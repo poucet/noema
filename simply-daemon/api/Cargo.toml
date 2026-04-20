@@ -12,6 +12,7 @@ ts = ["dep:ts-rs"]
 simply-core = { workspace = true }
 simply-rpc = { workspace = true }
 simply-voice = { workspace = true }
+skill-macros = { workspace = true }
 llm = { workspace = true }
 rmcp = { workspace = true, features = ["client"] }
 async-trait = { workspace = true }

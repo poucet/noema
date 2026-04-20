@@ -2,11 +2,13 @@
   import { onMount } from 'svelte';
   import { getTransport } from '../lib/transport';
   import { skillsApi } from '../lib/generated/api';
-  import type { SkillInfo } from '../lib/generated/types';
+  import type { SkillInfo, McpTool } from '../lib/generated/types';
 
   const skills = skillsApi(getTransport());
 
   let items = $state<SkillInfo[]>([]);
+  let expandedId = $state<string | null>(null);
+  let toolsById = $state<Record<string, McpTool[]>>({});
   let error = $state<string | null>(null);
   let loading = $state(false);
 
@@ -23,9 +25,25 @@
     loading = false;
   }
 
+  async function toggle(skill: SkillInfo) {
+    if (expandedId === skill.id) {
+      expandedId = null;
+      return;
+    }
+    expandedId = skill.id;
+    if (!toolsById[skill.id]) {
+      try {
+        toolsById[skill.id] = await skills.listSkillTools(skill.id);
+      } catch (e) {
+        console.error('[skills] load tools failed:', e);
+        error = `Failed to load tools: ${e}`;
+      }
+    }
+  }
+
   function kindLabel(kind: string): string {
-    if (kind === 'embedded') return 'Embedded';
-    if (kind === 'ws') return 'WebSocket';
+    if (kind === 'in-process') return 'In-process';
+    if (kind === 'remote') return 'Remote';
     return kind;
   }
 </script>
@@ -79,7 +97,36 @@
                 {/if}
               </div>
             </div>
+            <div class="shrink-0">
+              <button
+                class="text-xs px-2 py-1 rounded bg-white/5 text-muted hover:text-fg"
+                onclick={() => toggle(skill)}
+              >{expandedId === skill.id ? 'Hide' : 'Tools'}</button>
+            </div>
           </div>
+
+          {#if expandedId === skill.id}
+            <div class="mt-3 border-t border-border/50 pt-2">
+              {#if toolsById[skill.id]}
+                {#if toolsById[skill.id].length === 0}
+                  <div class="text-xs text-muted">No tools.</div>
+                {:else}
+                  <div class="grid gap-1">
+                    {#each toolsById[skill.id] as tool}
+                      <div class="text-xs p-2 bg-black/20 rounded">
+                        <div class="font-mono text-accent">{tool.name}</div>
+                        {#if tool.description}
+                          <div class="text-muted mt-0.5">{tool.description}</div>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              {:else}
+                <div class="text-xs text-muted">Loading tools…</div>
+              {/if}
+            </div>
+          {/if}
         </div>
       {/each}
     </div>

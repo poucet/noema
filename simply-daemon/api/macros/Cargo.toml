@@ -1,0 +1,13 @@
+[package]
+name = "skill-macros"
+version.workspace = true
+edition.workspace = true
+description = "Proc macros for implementing Skill from rmcp #[tool]-annotated methods"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"

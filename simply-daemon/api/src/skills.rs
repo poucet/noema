@@ -9,16 +9,18 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts")]
 use ts_rs::TS;
 
+use crate::McpTool;
+
 /// A skill registered with the daemon — in-process or via WS.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
 #[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
 pub struct SkillInfo {
-    /// Provider ID (e.g. "gdocs", or a WS connection ID).
+    /// Skill ID — the name declared by `Skill::name()`.
     pub id: String,
     pub display_name: String,
-    /// "embedded" (in-process) or "ws" (remote client).
+    /// "in-process" or "remote" — where the skill's tool handlers run.
     pub kind: String,
     pub tool_count: usize,
     pub is_connected: bool,
@@ -32,4 +34,8 @@ pub trait SkillsApi: Send + Sync {
     /// List all skills registered with the daemon.
     #[rpc(get = "/skills", no_tool)]
     async fn list_skills(&self) -> anyhow::Result<Vec<SkillInfo>>;
+
+    /// Get the tools provided by a specific skill.
+    #[rpc(get = "/skills/{skill_id}/tools", no_tool)]
+    async fn list_skill_tools(&self, skill_id: &str) -> anyhow::Result<Vec<McpTool>>;
 }

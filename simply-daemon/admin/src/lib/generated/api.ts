@@ -93,10 +93,6 @@ export const mcpApi = (t: Transport) => ({
   stopMcpRetry: (serverId: string) => t.rpc<void>('mcp.stop_mcp_retry', 'POST', `/api/mcp/${serverId}/stop-retry`),
   /** Start retry attempts for an MCP server. */
   startMcpRetry: (serverId: string) => t.rpc<void>('mcp.start_mcp_retry', 'POST', `/api/mcp/${serverId}/retry`),
-  /** Register an ephemeral MCP server and connect to it. */
-  registerEphemeralMcp: (request: T.RegisterEphemeralRequest) => t.rpc<number>('mcp.register_ephemeral_mcp', 'POST', '/api/mcp/ephemeral', request),
-  /** Unregister an ephemeral MCP server and disconnect. */
-  unregisterEphemeralMcp: (serverId: string) => t.rpc<void>('mcp.unregister_ephemeral_mcp', 'DELETE', `/api/mcp/ephemeral/${serverId}`),
   /** List all tools across all connected servers (includes schemas). */
   listAllTools: () => t.rpc<T.McpTool[]>('mcp.list_all_tools', 'GET', '/api/mcp/tools'),
   /** Call a tool by name (routed via ToolService to the providing server). */
@@ -157,6 +153,8 @@ export const sessionApi = (t: Transport) => ({
 export const skillsApi = (t: Transport) => ({
   /** List all skills registered with the daemon. */
   listSkills: () => t.rpc<T.SkillInfo[]>('skills.list_skills', 'GET', '/api/skills'),
+  /** Get the tools provided by a specific skill. */
+  listSkillTools: (skillId: string) => t.rpc<T.McpTool[]>('skills.list_skill_tools', 'GET', `/api/skills/${skillId}/tools`),
 });
 
 // UserApi

@@ -414,7 +414,9 @@ async fn handle_ws_connection(
             continue;
         }
 
-        // Built-in: register tools from this client
+        // Built-in: register a skill (tools + optional OAuth requirements) from this client.
+        // Payload: { id, display_name, tools, oauth_requirements? }
+        // Legacy payload with just `tools` is accepted and falls back to conn-derived id.
         if method == "tools.register" {
             let tool_defs: Vec<llm::ToolDefinition> = params.get("tools")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -423,27 +425,57 @@ async fn handle_ws_connection(
                 let response = WsResponse::err(id, "no tools provided");
                 let text = serde_json::to_string(&response).unwrap_or_default();
                 if write_tx.send(text).await.is_err() { break; }
-            } else {
-                let count = tool_defs.len();
-                // Convert to rmcp Tools and create a WsToolProvider
-                let rmcp_tools: Vec<rmcp::model::Tool> = tool_defs.into_iter().map(|td| {
-                    let schema = serde_json::to_value(&td.input_schema).unwrap_or_default();
-                    let schema_map = schema.as_object().cloned().unwrap_or_default();
-                    rmcp::model::Tool::new(td.name, td.description.unwrap_or_default(), schema_map)
-                }).collect();
-                let provider = Arc::new(crate::services::providers::WsToolProvider::new(
-                    ws_conn_id.clone(),
-                    format!("ws-client-{}", conn_id),
-                    rmcp_tools,
-                    write_tx.clone(),
-                ));
-                tools.register(provider.clone()).await;
-                ws_provider = Some(provider);
-                tracing::info!(conn_id, count, "client registered tools via WsToolProvider");
-                let response = WsResponse::ok(id, serde_json::json!({ "registered": count }));
-                let text = serde_json::to_string(&response).unwrap_or_default();
-                if write_tx.send(text).await.is_err() { break; }
+                continue;
             }
+
+            let skill_id = params.get("id").and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("ws-client-{conn_id}"));
+            let display_name = params.get("display_name").and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| skill_id.clone());
+            let oauth_reqs: Vec<simply_daemon_api::OAuthRequirement> = params.get("oauth_requirements")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            // Register OAuth providers declared by the skill (same as embedded register_skill)
+            let mcp = tools.mcp_service();
+            for req in &oauth_reqs {
+                let register_req = simply_daemon_api::RegisterOAuthProviderRequest {
+                    display_name: req.display_name.clone(),
+                    authorization_url: req.authorization_url.clone(),
+                    token_url: req.token_url.clone(),
+                    scopes: req.scopes.clone(),
+                    client_id: String::new(),
+                    client_secret: None,
+                    userinfo_url: req.userinfo_url.clone(),
+                };
+                if let Err(e) = simply_daemon_api::OAuthApi::register_oauth_provider(
+                    mcp.as_ref(), &req.provider_id, register_req
+                ).await {
+                    tracing::warn!(error = %e, provider = %req.provider_id, "failed to register OAuth provider from WS skill");
+                }
+            }
+
+            let count = tool_defs.len();
+            let rmcp_tools: Vec<rmcp::model::Tool> = tool_defs.into_iter().map(|td| {
+                let schema = serde_json::to_value(&td.input_schema).unwrap_or_default();
+                let schema_map = schema.as_object().cloned().unwrap_or_default();
+                rmcp::model::Tool::new(td.name, td.description.unwrap_or_default(), schema_map)
+            }).collect();
+            let provider = Arc::new(crate::services::providers::WsToolProvider::new(
+                skill_id.clone(),
+                display_name,
+                rmcp_tools,
+                oauth_reqs,
+                write_tx.clone(),
+            ));
+            tools.register(provider.clone()).await;
+            ws_provider = Some(provider);
+            tracing::info!(conn_id, skill_id = %skill_id, count, "remote skill registered via WS");
+            let response = WsResponse::ok(id, serde_json::json!({ "registered": count }));
+            let text = serde_json::to_string(&response).unwrap_or_default();
+            if write_tx.send(text).await.is_err() { break; }
             continue;
         }
 
@@ -500,8 +532,8 @@ async fn handle_ws_connection(
 
     writer_handle.abort();
     tracker.remove(conn_id).await;
-    if ws_provider.is_some() {
-        tools.unregister(&ws_conn_id).await;
+    if let Some(ref provider) = ws_provider {
+        tools.unregister(<_ as simply_daemon_api::ToolProvider>::id(provider.as_ref())).await;
     }
     tracing::info!("WS client disconnected");
 }

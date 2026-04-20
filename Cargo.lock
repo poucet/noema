@@ -7407,6 +7407,7 @@ dependencies = [
  "simply-core",
  "simply-rpc",
  "simply-voice",
+ "skill-macros",
  "tokio",
  "tracing",
  "ts-rs",
@@ -7476,6 +7477,15 @@ name = "siphasher"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
+
+[[package]]
+name = "skill-macros"
+version = "0.3.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "slab"

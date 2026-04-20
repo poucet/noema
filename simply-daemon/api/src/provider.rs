@@ -16,10 +16,10 @@ use crate::skill::OAuthRequirement;
 pub enum ProviderKind {
     /// External MCP server (connected over HTTP/WS).
     Mcp,
-    /// In-process skill (embedded via `Skill` trait).
-    Skill,
-    /// Client-registered tools over WebSocket reverse-RPC.
-    WsClient,
+    /// Skill running in the same process as the daemon.
+    InProcess,
+    /// Skill running in a remote client, reached via WS reverse-RPC.
+    Remote,
 }
 
 /// A provider of tools to the daemon.
