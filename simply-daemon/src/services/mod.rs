@@ -6,7 +6,7 @@ mod document;
 mod voice;
 mod core;
 mod search;
-mod user;
+pub mod user;
 pub mod tools;
 pub mod user_tools;  // TODO: remove once migration verified
 pub mod ws_tools;    // TODO: remove once migration verified
