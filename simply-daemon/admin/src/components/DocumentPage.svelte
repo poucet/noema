@@ -236,6 +236,9 @@
               <span>{getTabCount(doc)} tab{getTabCount(doc) !== 1 ? 's' : ''}</span>
               <span>{formatDate(getUpdatedAt(doc))}</span>
             </div>
+            <div class="text-[11px] text-muted/70 truncate">
+              {doc.ownerEmail ?? `anon · ${doc.userId.slice(0, 8)}`}
+            </div>
             <button
               class="absolute right-2 top-2 text-xs text-muted hover:text-danger opacity-0 group-hover:opacity-100"
               onclick={(e) => { e.stopPropagation(); deleteDocument(doc.id); }}
