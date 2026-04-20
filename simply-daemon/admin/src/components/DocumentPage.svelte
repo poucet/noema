@@ -4,6 +4,7 @@
   import { getTransport } from '../lib/transport';
   import type { DocumentInfo, DocumentDetail, TabInfo } from '../lib/generated/types';
   import DocumentEditor from './DocumentEditor.svelte';
+  import MarkdownView from './MarkdownView.svelte';
 
   const transport = getTransport();
 
@@ -21,6 +22,7 @@
   let creatingTab = $state(false);
   let newDocTitle = $state('');
   let newTabTitle = $state('');
+  let viewMode = $state<'render' | 'edit'>('render');
 
   function flushCurrentTab() {
     if (selectedTab) {
@@ -323,12 +325,35 @@
       </div>
     </div>
 
-    <!-- Editor -->
+    <!-- Editor / Rendered view -->
     <div class="flex-1 flex flex-col min-w-0">
       {#if selectedTab}
-        {#key selectedTab.id}
-          <DocumentEditor content={(selectedTab as any).contentMarkdown ?? (selectedTab as any).content_markdown ?? ''} onsave={saveTab} />
-        {/key}
+        {@const tabContent = (selectedTab as any).contentMarkdown ?? (selectedTab as any).content_markdown ?? ''}
+        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-border text-xs">
+          <button
+            class="px-2 py-0.5 rounded transition-colors"
+            class:bg-accent={viewMode === 'render'}
+            class:text-bg={viewMode === 'render'}
+            class:text-muted={viewMode !== 'render'}
+            onclick={() => viewMode = 'render'}
+          >Rendered</button>
+          <button
+            class="px-2 py-0.5 rounded transition-colors"
+            class:bg-accent={viewMode === 'edit'}
+            class:text-bg={viewMode === 'edit'}
+            class:text-muted={viewMode !== 'edit'}
+            onclick={() => viewMode = 'edit'}
+          >Edit</button>
+        </div>
+        {#if viewMode === 'edit'}
+          {#key selectedTab.id}
+            <DocumentEditor content={tabContent} onsave={saveTab} />
+          {/key}
+        {:else}
+          <div class="flex-1 overflow-auto p-6">
+            <MarkdownView content={tabContent} />
+          </div>
+        {/if}
       {:else}
         <div class="flex items-center justify-center h-full text-muted text-sm">
           No tabs yet — click + to create one

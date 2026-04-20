@@ -27,9 +27,9 @@ export default defineConfig({
         ignored: ['**/dist/**', '**/.astro/**'],
       },
       proxy: {
-        '/api': 'http://127.0.0.1:9800',
-        '/admin/api': 'http://127.0.0.1:9800',
-        '/auth': 'http://127.0.0.1:9800',
+        '/api': { target: 'http://127.0.0.1:9800', changeOrigin: true },
+        '/admin/api': { target: 'http://127.0.0.1:9800', changeOrigin: true },
+        '/auth': { target: 'http://127.0.0.1:9800', changeOrigin: true },
         '/ws': { target: 'ws://127.0.0.1:9800', ws: true },
       },
     },

@@ -21,6 +21,9 @@
     "@tailwindcss/vite": "^4.2.2",
     "astro": "^6.1.4",
     "codemirror": "^6.0.2",
+    "dompurify": "^3.2.0",
+    "katex": "^0.16.11",
+    "marked": "^15.0.0",
     "svelte": "^5.55.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3"
