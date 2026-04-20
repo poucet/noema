@@ -722,15 +722,16 @@ impl GoogleDocsClient {
             // Also detect URL-like text (underlined URLs without link property)
             let looks_like_url = text.starts_with("http://") || text.starts_with("https://");
 
-            // Apply formatting
+            // Apply formatting. Wrap markers *inside* leading/trailing whitespace
+            // — `**foo **` doesn't render as bold in CommonMark; needs to be `**foo** `.
             if style.bold {
-                text = format!("**{}**", text);
+                text = wrap_with_markers(&text, "**");
             }
             if style.italic {
-                text = format!("*{}*", text);
+                text = wrap_with_markers(&text, "*");
             }
             if style.strikethrough {
-                text = format!("~~{}~~", text);
+                text = wrap_with_markers(&text, "~~");
             }
             // Only apply underline to non-links (links are underlined by default in rendered HTML)
             // Also skip underline for URL-like text
@@ -941,4 +942,22 @@ mod urlencoding {
         }
         result
     }
+}
+
+/// Wrap non-whitespace content with `marker` on both sides, preserving any
+/// leading/trailing whitespace outside the markers.
+///
+/// CommonMark's emphasis rules require the opening `**`/`*`/`~~` to be
+/// left-flanking (no whitespace after) and the closing to be right-flanking
+/// (no whitespace before). Without this, `**Premise: **` renders literally
+/// instead of bolding "Premise:".
+fn wrap_with_markers(text: &str, marker: &str) -> String {
+    let trimmed_start = text.trim_start();
+    let lead = &text[..text.len() - trimmed_start.len()];
+    let trimmed = trimmed_start.trim_end();
+    if trimmed.is_empty() {
+        return text.to_string();
+    }
+    let trail = &trimmed_start[trimmed.len()..];
+    format!("{lead}{marker}{trimmed}{marker}{trail}")
 }
