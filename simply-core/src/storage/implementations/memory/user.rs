@@ -99,6 +99,12 @@ impl UserStore for MemoryUserStore {
         self.discord_mappings.lock().unwrap().insert(external_id.to_string(), id);
         Ok(stored)
     }
+
+    async fn link_external_id(&self, user_id: &UserId, external_id: &str) -> Result<()> {
+        self.discord_mappings.lock().unwrap()
+            .insert(external_id.to_string(), user_id.clone());
+        Ok(())
+    }
 }
 
 #[cfg(test)]

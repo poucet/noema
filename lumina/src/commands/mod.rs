@@ -29,27 +29,14 @@ use simply_rpc::RequestContext;
 // ---------------------------------------------------------------------------
 
 /// Shared state across all handlers.
-pub struct SharedState {
-    /// Cached discord_id → Scope mappings for authenticated users.
-    user_scopes: tokio::sync::RwLock<std::collections::HashMap<u64, simply_rpc::Scope>>,
-}
+///
+/// User identity is resolved from the daemon on every request — no local
+/// cache, because the discord-id → simply-user mapping can change (e.g. after
+/// `/google auth` links the discord id to an email-based user).
+pub struct SharedState {}
 
 impl SharedState {
-    pub fn new() -> Self {
-        Self {
-            user_scopes: tokio::sync::RwLock::new(std::collections::HashMap::new()),
-        }
-    }
-
-    /// Cache a user's scope after authentication.
-    pub async fn set_user_scope(&self, discord_user_id: u64, scope: simply_rpc::Scope) {
-        self.user_scopes.write().await.insert(discord_user_id, scope);
-    }
-
-    /// Get a cached user scope, if the user has authenticated.
-    pub async fn get_user_scope(&self, discord_user_id: u64) -> Option<simply_rpc::Scope> {
-        self.user_scopes.read().await.get(&discord_user_id).cloned()
-    }
+    pub fn new() -> Self { Self {} }
 }
 
 impl TypeMapKey for SharedState {
@@ -71,33 +58,18 @@ pub struct LuminaContext {
 impl LuminaContext {
     /// Get a RequestContext for a Discord user.
     ///
-    /// If the user has authenticated (scope cached), returns their scoped context.
-    /// If not cached, tries to resolve from the daemon (without creating).
-    /// Falls back to anonymous if the user hasn't authenticated.
+    /// Always resolves via the daemon — no local cache. The mapping from a
+    /// Discord identity to a simply user can change when the user completes
+    /// OAuth (e.g. `/google auth` links `discord:123` to their email-based
+    /// user), so caching would serve stale identities. Returns anonymous if
+    /// no mapping exists — never creates a user.
     pub async fn ctx_for(&self, discord_user_id: u64) -> RequestContext {
-        // Check local cache first
-        if let Some(scope) = self.state.get_user_scope(discord_user_id).await {
-            return RequestContext::with_scope(scope);
-        }
-
-        // Try resolving from daemon (doesn't create — just looks up)
         let external_id = format!("discord:{discord_user_id}");
         let anon = RequestContext::anonymous();
-        if let Ok(Some(scope)) = self.daemon.user().resolve_user(
-            &anon, external_id,
-        ).await {
-            // Cache it for future calls
-            self.state.set_user_scope(discord_user_id, scope.clone()).await;
-            return RequestContext::with_scope(scope);
+        match self.daemon.user().resolve_user(&anon, external_id).await {
+            Ok(Some(scope)) => RequestContext::with_scope(scope),
+            _ => RequestContext::anonymous(),
         }
-
-        RequestContext::anonymous()
-    }
-
-    /// Register a user's scope after explicit authentication (/auth, /google auth).
-    /// This caches the scope so all subsequent commands use it.
-    pub async fn register_user_scope(&self, discord_user_id: u64, scope: simply_rpc::Scope) {
-        self.state.set_user_scope(discord_user_id, scope).await;
     }
 
     /// Build from serenity Context by extracting TypeMap values.

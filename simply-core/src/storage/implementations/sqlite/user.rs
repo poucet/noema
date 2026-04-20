@@ -188,4 +188,13 @@ impl UserStore for SqliteStore {
 
         Ok(Keyed::new(id, User::anonymous()))
     }
+
+    async fn link_external_id(&self, user_id: &UserId, external_id: &str) -> Result<()> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO discord_user_mappings (discord_user_id, user_id) VALUES (?1, ?2)",
+            params![external_id, user_id.as_str()],
+        )?;
+        Ok(())
+    }
 }

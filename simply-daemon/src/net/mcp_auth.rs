@@ -17,7 +17,6 @@ use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
-use simply_core::storage::ids::UserId;
 use simply_core::storage::traits::UserStore;
 
 use crate::mcp::auth::{DaemonMcpConfig, ServerAuth};
@@ -41,7 +40,11 @@ pub struct McpAuthState {
 
 #[derive(Deserialize)]
 pub struct AuthInitQuery {
-    pub user_id: String,
+    /// External identity that initiated the flow (e.g. "discord:123456").
+    /// The callback will create (or reuse) a user with this external_id linked
+    /// and store the OAuth token under that user. No user exists yet — the
+    /// email from OAuth is the canonical identity.
+    pub external_id: String,
 }
 
 #[derive(Deserialize)]
@@ -54,7 +57,8 @@ pub struct AuthCallbackQuery {
 /// Encoded in the OAuth `state` parameter.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct OAuthState {
-    user_id: String,
+    /// External identity that initiated the flow — linked to the user in the callback.
+    external_id: String,
     /// The provider_id tokens will be stored under (shared across consumers).
     provider_id: String,
 }
@@ -122,7 +126,7 @@ pub async fn auth_initiate(
     let scope = oauth.scopes.join(" ");
 
     let oauth_state = OAuthState {
-        user_id: query.user_id,
+        external_id: query.external_id,
         provider_id,
     };
     let state_json = serde_json::to_string(&oauth_state).unwrap_or_default();
@@ -218,19 +222,35 @@ pub async fn auth_callback(
         .expires_in
         .map(|secs| Instant::now() + Duration::from_secs(secs));
 
-    let mut user_id = UserId::from_string(&oauth_state.user_id);
-    let mut identity: Option<String> = None;
-
-    if let Some(ref userinfo_url) = provider.userinfo_url {
-        if let Ok(email) = fetch_userinfo_email(userinfo_url, &token_resp.access_token).await {
-            identity = Some(email.clone());
-            if let Ok(Some(existing_user)) = state.user_store.get_user_by_email(&email).await {
-                if existing_user.id != user_id {
-                    tracing::info!(%email, "OAuth: linking to existing user with same email");
-                    user_id = existing_user.id;
-                }
-            }
+    // Resolve the user: email is canonical. Get-or-create a user by email and
+    // link the external_id to it. If the external_id was previously linked
+    // to a different (anonymous) user, this overwrites the mapping — the old
+    // stub user is orphaned.
+    let Some(ref userinfo_url) = provider.userinfo_url else {
+        return auth_error_page(&format!(
+            "Provider '{}' has no userinfo_url configured — cannot resolve the user's email. \
+             Set userinfo_url in oauth_providers.toml or via the admin UI.",
+            oauth_state.provider_id,
+        ));
+    };
+    let email = match fetch_userinfo_email(userinfo_url, &token_resp.access_token).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(error = %e, userinfo_url, "userinfo fetch failed");
+            return auth_error_page(&format!(
+                "Failed to fetch user identity from {userinfo_url}: {e}"
+            ));
         }
+    };
+
+    let stored_user = match state.user_store.get_or_create_user_by_email(&email).await {
+        Ok(u) => u,
+        Err(e) => return auth_error_page(&format!("Failed to resolve/create user: {e}")),
+    };
+    let user_id = stored_user.id.clone();
+
+    if let Err(e) = state.user_store.link_external_id(&user_id, &oauth_state.external_id).await {
+        tracing::warn!(error = %e, "failed to link external_id to user");
     }
 
     state.token_store.store(
@@ -239,14 +259,16 @@ pub async fn auth_callback(
         McpUserToken {
             access_token: token_resp.access_token,
             expires_at,
-            identity,
+            identity: Some(email.clone()),
         },
     );
 
     tracing::info!(
         user_id = %user_id,
+        external_id = %oauth_state.external_id,
+        email = %email,
         provider_id = %oauth_state.provider_id,
-        "OAuth token stored"
+        "OAuth token stored, external_id linked"
     );
 
     auth_success_page(&oauth_state.provider_id)

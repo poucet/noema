@@ -38,4 +38,10 @@ pub trait UserStore: Send + Sync {
     /// and the mapping if they don't exist yet. Idempotent — same external_id
     /// always returns the same user. A single user can have multiple external IDs.
     async fn resolve_or_create_external_user(&self, external_id: &str) -> Result<StoredUser>;
+
+    /// Link an external identity (e.g. "discord:123") to an existing user.
+    /// Idempotent — calling with the same pair twice is a no-op.
+    /// If the external_id was previously linked to a different user, it is
+    /// overwritten to point at the new user.
+    async fn link_external_id(&self, user_id: &UserId, external_id: &str) -> Result<()>;
 }

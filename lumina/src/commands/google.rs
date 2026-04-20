@@ -124,15 +124,16 @@ impl super::SlashCommand for Google {
 
 async fn cmd_auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let discord_id = cmd.user.id.get();
-
     let external_id = format!("discord:{discord_id}");
-    let ctx = lx.ctx_for(discord_id).await;
-    let scope = lx.daemon.user().resolve_or_create_user(&ctx, external_id).await?;
-    let user_id = scope.user_id.clone().unwrap_or_default();
-    lx.register_user_scope(discord_id, scope).await;
 
+    // Don't create a simply user upfront — the OAuth callback will get-or-create
+    // the user by email and link this discord external_id to that user. Email
+    // is the canonical identity.
     let base_url = lx.daemon.core().public_url().await?;
-    let auth_url = format!("{base_url}/auth/mcp/{GOOGLE_PROVIDER_ID}?user_id={user_id}");
+    let auth_url = format!(
+        "{base_url}/auth/mcp/{GOOGLE_PROVIDER_ID}?external_id={}",
+        urlencoding::encode(&external_id),
+    );
 
     cmd.create_response(&lx.http, CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()

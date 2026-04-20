@@ -182,6 +182,8 @@ impl Skill for GDocsSkill {
             scopes: vec![
                 "https://www.googleapis.com/auth/documents.readonly".to_string(),
                 "https://www.googleapis.com/auth/drive.readonly".to_string(),
+                // Needed by the userinfo endpoint so OAuth callback can resolve the user's identity.
+                "https://www.googleapis.com/auth/userinfo.email".to_string(),
             ],
             userinfo_url: Some("https://www.googleapis.com/oauth2/v2/userinfo".to_string()),
         }]

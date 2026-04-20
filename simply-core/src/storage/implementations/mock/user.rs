@@ -35,4 +35,7 @@ impl UserStore for MockUserStore {
     async fn resolve_or_create_external_user(&self, _: &str) -> Result<StoredUser> {
         unimplemented!()
     }
+    async fn link_external_id(&self, _: &UserId, _: &str) -> Result<()> {
+        unimplemented!()
+    }
 }
