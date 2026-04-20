@@ -47,9 +47,12 @@ impl WsResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WsError {
+    #[serde(default = "default_err_code")]
     pub code: i32,
     pub message: String,
 }
+
+fn default_err_code() -> i32 { -1 }
 
 /// Server → Client push notification (no id).
 #[derive(Debug, Serialize, Deserialize)]

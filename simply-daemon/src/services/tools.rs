@@ -251,7 +251,8 @@ impl ToolService for UserScopedToolService {
         // 2. Try skills (with user's token context)
         for skill in &self.skills {
             if skill.tools().iter().any(|t| t.name == name) {
-                return skill.call_tool(name, arguments, &self.skill_ctx).await;
+                let result = skill.call_tool(name, arguments, &self.skill_ctx).await?;
+                return Ok(call_tool_result_to_llm(result));
             }
         }
 
@@ -324,7 +325,8 @@ impl ToolService for CompositeToolService {
                 let ctx = simply_daemon_api::SkillCallContext::new(
                     simply_core::storage::ids::UserId::from_string("anonymous"),
                 );
-                return skill.call_tool(name, arguments, &ctx).await;
+                let result = skill.call_tool(name, arguments, &ctx).await?;
+                return Ok(call_tool_result_to_llm(result));
             }
         }
         // Try WS-registered tools (no tokens in global context)
@@ -395,4 +397,13 @@ impl McpApi for CompositeToolService {
 
         Ok(CallToolResult::success(mcp_content))
     }
+}
+
+/// Convert an rmcp `CallToolResult` to the LLM-facing `Vec<ToolResultContent>`.
+fn call_tool_result_to_llm(result: rmcp::model::CallToolResult) -> Vec<ToolResultContent> {
+    result.content.into_iter().map(|c| match c.raw {
+        rmcp::model::RawContent::Text(t) => ToolResultContent::text(t.text),
+        rmcp::model::RawContent::Image(img) => ToolResultContent::image(img.data, img.mime_type),
+        _ => ToolResultContent::text("[unsupported content type]"),
+    }).collect()
 }

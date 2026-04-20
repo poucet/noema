@@ -634,7 +634,7 @@ impl GoogleDocsClient {
             let indent = "  ".repeat(bullet.nesting_level as usize);
             let list_id = bullet.list_id.as_deref().unwrap_or("<none>");
 
-            debug!(
+            trace!(
                 "Found bullet: list_id={}, nesting_level={}, text='{}'",
                 list_id, bullet.nesting_level, text
             );
@@ -650,7 +650,7 @@ impl GoogleDocsClient {
                 .map(|glyph| glyph == "GLYPH_TYPE_UNSPECIFIED")
                 .unwrap_or(false);
 
-            debug!(
+            trace!(
                 "  list_def exists={}, nesting_level exists={}, glyph_type={:?}, is_checkbox={}",
                 list_def.is_some(),
                 nesting_level.is_some(),
@@ -670,7 +670,7 @@ impl GoogleDocsClient {
                     .map(|ts| ts.strikethrough)
                     .unwrap_or(false);
 
-                debug!(
+                trace!(
                     "  checkbox: text_style={:?}, strikethrough={}",
                     bullet.text_style.as_ref().map(|ts| format!("bold={},italic={},strike={}", ts.bold, ts.italic, ts.strikethrough)),
                     is_checked
@@ -678,11 +678,11 @@ impl GoogleDocsClient {
 
                 let checkbox_marker = if is_checked { "[x]" } else { "[ ]" };
                 let result = format!("{}- {} {}", indent, checkbox_marker, text);
-                debug!("  -> checkbox result (checked={}): '{}'", is_checked, result);
+                trace!("  -> checkbox result (checked={}): '{}'", is_checked, result);
                 return result;
             }
             let result = format!("{}- {}", indent, text);
-            debug!("  -> list item result: '{}'", result);
+            trace!("  -> list item result: '{}'", result);
             return result;
         }
 

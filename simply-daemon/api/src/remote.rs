@@ -29,12 +29,66 @@ pub struct RemoteDaemon {
     search: RemoteSearchApi,
     user: RemoteUserApi,
     skills: RemoteSkillsApi,
+    /// Skills registered by this client, keyed by skill id.
+    /// A single reverse-RPC handler dispatches by skill_id instead of each
+    /// register_skill clobbering the previous handler.
+    registered_skills: std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, std::sync::Arc<dyn crate::skill::Skill>>>>,
 }
 
 impl RemoteDaemon {
     pub async fn connect_as(addr: &str, name: &str, daemon_secret: &str, user_id: Option<&str>) -> anyhow::Result<Arc<Self>> {
         let conn = Arc::new(DaemonRpcConnection::connect(addr, name, daemon_secret, user_id).await?);
         let rpc: Arc<dyn RpcConnection> = conn.clone();
+
+        let registered_skills: std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, std::sync::Arc<dyn crate::skill::Skill>>>> =
+            std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
+        // Install a single reverse-RPC handler that dispatches by __skill_id.
+        let skills_map = std::sync::Arc::clone(&registered_skills);
+        conn.ws().set_reverse_handler(std::sync::Arc::new(move |id, method, params, write_tx| {
+            let skills_map = std::sync::Arc::clone(&skills_map);
+            Box::pin(async move {
+                if method != "tools.call" {
+                    let resp = serde_json::json!({ "id": id, "error": { "message": format!("unknown reverse method: {method}") } });
+                    let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
+                    return;
+                }
+
+                let skill_id = params.get("__skill_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let skill = { skills_map.read().await.get(&skill_id).cloned() };
+                let Some(skill) = skill else {
+                    let resp = serde_json::json!({ "id": id, "error": { "message": format!("no skill registered with id `{skill_id}`") } });
+                    let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
+                    return;
+                };
+
+                let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let arguments = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
+                let (user_id, tokens) = params.get("__ctx")
+                    .map(|v| {
+                        let tokens = v.get("tokens")
+                            .and_then(|t| serde_json::from_value(t.clone()).ok())
+                            .unwrap_or_default();
+                        let user_id = v.get("user_id")
+                            .and_then(|u| u.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "anonymous".to_string());
+                        (user_id, tokens)
+                    })
+                    .unwrap_or_else(|| ("anonymous".to_string(), std::collections::HashMap::new()));
+
+                let ctx = crate::skill::SkillCallContext {
+                    user_id: crate::types::UserId::from_string(&user_id),
+                    tokens,
+                };
+                let result = skill.call_tool(&tool_name, arguments, &ctx).await;
+                let resp = match result {
+                    Ok(value) => serde_json::json!({ "id": id, "result": value }),
+                    Err(e) => serde_json::json!({ "id": id, "error": { "message": e.to_string() } }),
+                };
+                let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
+            })
+        })).await;
 
         Ok(Arc::new(Self {
             session: RemoteSessionApi::new(rpc.clone()),
@@ -49,6 +103,7 @@ impl RemoteDaemon {
             search: RemoteSearchApi::new(rpc.clone()),
             user: RemoteUserApi::new(rpc.clone()),
             skills: RemoteSkillsApi::new(rpc),
+            registered_skills,
             conn,
         }))
     }
@@ -80,54 +135,17 @@ impl Daemon for RemoteDaemon {
 
     /// Register a skill with the remote daemon.
     ///
-    /// Sends the skill's name + display info + OAuth requirements + tools as a
-    /// single `tools.register` WS message, and sets up a reverse-RPC handler so
-    /// tool calls routed back from the daemon invoke the local `Skill` impl.
+    /// Stores the skill locally (keyed by name) and sends a `tools.register`
+    /// WS message. The daemon dispatches tool calls back as reverse-RPC with
+    /// a `__skill_id` field; a single shared handler (installed in `connect_as`)
+    /// routes to the right skill.
     async fn register_skill(&self, skill: std::sync::Arc<dyn crate::skill::Skill>) -> anyhow::Result<()> {
-        use crate::skill::SkillCallContext;
         let name = skill.name().to_string();
         let tools = skill.tools();
         let oauth_reqs = skill.oauth_requirements();
 
-        // Reverse-RPC handler: daemon calls tools.call, we dispatch to skill.call_tool
-        let skill_clone = std::sync::Arc::clone(&skill);
-        self.conn.ws().set_reverse_handler(std::sync::Arc::new(move |id, method, params, write_tx| {
-            let skill = std::sync::Arc::clone(&skill_clone);
-            Box::pin(async move {
-                if method != "tools.call" {
-                    let resp = serde_json::json!({ "id": id, "error": { "message": format!("unknown reverse method: {method}") } });
-                    let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
-                    return;
-                }
-                let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let arguments = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
-                let (user_id, tokens) = params.get("__ctx")
-                    .map(|v| {
-                        let tokens = v.get("tokens")
-                            .and_then(|t| serde_json::from_value(t.clone()).ok())
-                            .unwrap_or_default();
-                        let user_id = v.get("user_id")
-                            .and_then(|u| u.as_str())
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| "anonymous".to_string());
-                        (user_id, tokens)
-                    })
-                    .unwrap_or_else(|| ("anonymous".to_string(), std::collections::HashMap::new()));
+        self.registered_skills.write().await.insert(name.clone(), skill);
 
-                let ctx = SkillCallContext {
-                    user_id: crate::types::UserId::from_string(&user_id),
-                    tokens,
-                };
-                let result = skill.call_tool(&tool_name, arguments, &ctx).await;
-                let resp = match result {
-                    Ok(value) => serde_json::json!({ "id": id, "result": value }),
-                    Err(e) => serde_json::json!({ "id": id, "error": { "message": e.to_string() } }),
-                };
-                let _ = write_tx.send(serde_json::to_string(&resp).unwrap_or_default()).await;
-            })
-        })).await;
-
-        // Send tools.register with full skill metadata
         let result = self.conn.rpc_call(
             "tools.register",
             serde_json::json!({

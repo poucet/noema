@@ -81,12 +81,22 @@ impl super::SlashCommand for Google {
             }).unwrap_or_default()
         } else { String::new() };
 
+        tracing::debug!(partial = %partial, discord_id = ac.user.id.get(), "gdocs autocomplete: calling gdocs_list");
+
         // Use gdocs_list tool for autocomplete
         let choices = match call_tool(lx, ac.user.id.get(), "gdocs_list",
             serde_json::json!({ "query": if partial.is_empty() { None } else { Some(&partial) }, "limit": 25 }),
         ).await {
             Ok(text) => {
-                let docs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap_or_default();
+                tracing::debug!(text_len = text.len(), "gdocs_list returned");
+                let docs: Vec<serde_json::Value> = match serde_json::from_str(&text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!(error = %e, text = %text, "failed to parse gdocs_list response");
+                        Vec::new()
+                    }
+                };
+                tracing::debug!(doc_count = docs.len(), "gdocs_list parsed");
                 docs.iter().take(25).filter_map(|d| {
                     let id = d.get("id")?.as_str()?;
                     let name = d.get("name")?.as_str()?;
@@ -94,9 +104,13 @@ impl super::SlashCommand for Google {
                     Some(AutocompleteChoice::new(display, id))
                 }).collect()
             }
-            Err(_) => vec![AutocompleteChoice::new("(connect Google first: /google auth)", "")],
+            Err(e) => {
+                tracing::warn!(error = %e, "gdocs_list call failed");
+                vec![AutocompleteChoice::new("(connect Google first: /google auth)", "")]
+            }
         };
 
+        tracing::debug!(choice_count = choices.len(), "gdocs autocomplete: responding");
         ac.create_response(&lx.http, CreateInteractionResponse::Autocomplete(
             CreateAutocompleteResponse::new().set_choices(choices),
         )).await?;
@@ -132,11 +146,13 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
     let discord_id = cmd.user.id.get();
     let doc_id = extract_doc_id(doc_input);
 
+    tracing::info!(discord_id, doc_id = %doc_id, "gdocs import: starting");
     lx.defer(cmd).await?;
 
     // Call gdocs_import skill tool — handles extraction, tab creation, image storage
     match call_tool(lx, discord_id, "gdocs_import", serde_json::json!({ "doc_id": doc_id })).await {
         Ok(text) => {
+            tracing::info!(text_len = text.len(), "gdocs_import: ok");
             let embed = CreateEmbed::new()
                 .title("Google Doc Imported")
                 .description(text)
@@ -144,6 +160,7 @@ async fn cmd_import(lx: &LuminaContext, cmd: &CommandInteraction, doc_input: &st
             cmd.edit_response(&lx.http, serenity::builder::EditInteractionResponse::new().embed(embed)).await?;
         }
         Err(e) => {
+            tracing::warn!(error = %e, "gdocs_import: failed");
             let msg = format!("{e}");
             if msg.contains("authenticate") || msg.contains("token") {
                 cmd.edit_response(&lx.http,
@@ -186,22 +203,37 @@ async fn cmd_status(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Res
 /// Call a daemon tool and return the text result.
 async fn call_tool(lx: &LuminaContext, discord_user_id: u64, tool_name: &str, args: serde_json::Value) -> anyhow::Result<String> {
     let ctx = lx.ctx_for(discord_user_id).await;
+    tracing::debug!(
+        tool = tool_name,
+        discord_user_id,
+        resolved_user_id = ?ctx.scope.user_id,
+        "call_tool: dispatching to daemon"
+    );
     let request = simply_daemon_api::CallToolRequestParams::new(tool_name.to_string())
         .with_arguments(args.as_object().cloned().unwrap_or_default());
-    let result = lx.daemon.mcp().call_tool_direct(&ctx, request).await?;
+    let result = match lx.daemon.mcp().call_tool_direct(&ctx, request).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(tool = tool_name, error = %e, "call_tool: daemon returned error");
+            return Err(e);
+        }
+    };
 
     if result.is_error.unwrap_or(false) {
         let text = result.content.iter().find_map(|c| match &c.raw {
             rmcp::model::RawContent::Text(t) => Some(t.text.to_string()),
             _ => None,
         }).unwrap_or_default();
+        tracing::warn!(tool = tool_name, error_text = %text, "call_tool: tool reported error");
         anyhow::bail!(text);
     }
 
-    Ok(result.content.iter().find_map(|c| match &c.raw {
+    let text = result.content.iter().find_map(|c| match &c.raw {
         rmcp::model::RawContent::Text(t) => Some(t.text.to_string()),
         _ => None,
-    }).unwrap_or_default())
+    }).unwrap_or_default();
+    tracing::debug!(tool = tool_name, text_len = text.len(), "call_tool: ok");
+    Ok(text)
 }
 
 fn extract_doc_id(input: &str) -> String {

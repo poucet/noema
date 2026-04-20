@@ -87,16 +87,10 @@ pub fn skill_router(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! {
             #tool_name => {
                 let output = { #invoke };
-                let result = <_ as ::simply_daemon_api::__private::rmcp::handler::server::tool::IntoCallToolResult>::into_call_tool_result(output)
-                    .map_err(|e| ::simply_daemon_api::__private::anyhow::anyhow!("tool `{}` failed: {:?}", #tool_name, e))?;
-                let contents: Vec<::simply_daemon_api::ToolResultContent> = result.content.into_iter().map(|c| {
-                    match c.raw {
-                        ::simply_daemon_api::__private::rmcp::model::RawContent::Text(t) => ::simply_daemon_api::ToolResultContent::text(t.text),
-                        ::simply_daemon_api::__private::rmcp::model::RawContent::Image(img) => ::simply_daemon_api::ToolResultContent::image(img.data, img.mime_type),
-                        _ => ::simply_daemon_api::ToolResultContent::text("[unsupported content type]"),
-                    }
-                }).collect();
-                Ok(contents)
+                // rmcp's IntoCallToolResult handles every supported return type:
+                // String, impl IntoContents, Result<T, E>, Json<T>, CallToolResult, etc.
+                <_ as ::simply_daemon_api::__private::rmcp::handler::server::tool::IntoCallToolResult>::into_call_tool_result(output)
+                    .map_err(|e| ::simply_daemon_api::__private::anyhow::anyhow!("tool `{}` failed: {:?}", #tool_name, e))
             }
         }
     });
@@ -120,7 +114,7 @@ pub fn skill_router(attr: TokenStream, item: TokenStream) -> TokenStream {
                 name: &str,
                 arguments: ::simply_daemon_api::__private::serde_json::Value,
                 _ctx: &::simply_daemon_api::SkillCallContext,
-            ) -> ::simply_daemon_api::__private::anyhow::Result<Vec<::simply_daemon_api::ToolResultContent>> {
+            ) -> ::simply_daemon_api::__private::anyhow::Result<::simply_daemon_api::__private::rmcp::model::CallToolResult> {
                 match name {
                     #(#dispatch_arms),*
                     other => ::simply_daemon_api::__private::anyhow::bail!("unknown tool: {other}"),

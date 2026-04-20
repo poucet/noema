@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use llm::{ToolDefinition, ToolResultContent};
+use llm::ToolDefinition;
+use rmcp::model::CallToolResult;
 
 use crate::Daemon;
 use crate::types::UserId;
@@ -101,12 +102,14 @@ pub trait Skill: Send + Sync {
     /// Execute a tool by name.
     ///
     /// `ctx` contains the calling user's identity and OAuth tokens.
+    /// Returns an `rmcp::CallToolResult` so the response serializes
+    /// identically whether the skill is embedded or running remotely.
     async fn call_tool(
         &self,
         name: &str,
         arguments: serde_json::Value,
         ctx: &SkillCallContext,
-    ) -> Result<Vec<ToolResultContent>>;
+    ) -> Result<CallToolResult>;
 }
 
 /// Factory function type for constructing a skill with a daemon handle.

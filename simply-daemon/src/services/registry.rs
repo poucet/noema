@@ -80,19 +80,39 @@ impl ToolRegistry {
     }
 
     /// Build a RequestContext with tokens for a user.
+    ///
+    /// Pulls tokens from the TransientTokenStore for:
+    /// - Each MCP server (keyed by server_id — legacy Token-auth servers)
+    /// - Each OAuth provider (keyed by provider_id — what skills and OAuth
+    ///   MCP servers both look up)
     pub async fn ctx_with_tokens(&self, user_id: &simply_core::storage::ids::UserId) -> RequestContext {
         let mut ctx = RequestContext::with_scope(
             simply_rpc::Scope::user(user_id.as_str()),
         );
 
-        let registry = self.mcp.registry().lock().await;
-
-        // Populate tokens from TransientTokenStore (per-user OAuth)
-        for (server_id, _) in registry.config().servers.iter() {
-            if let Some(token) = self.token_store.get(user_id, server_id) {
-                ctx.tokens.insert(server_id.clone(), token.access_token);
+        {
+            let registry = self.mcp.registry().lock().await;
+            for (server_id, _) in registry.config().servers.iter() {
+                if let Some(token) = self.token_store.get(user_id, server_id) {
+                    ctx.tokens.insert(server_id.clone(), token.access_token);
+                }
             }
         }
+
+        // OAuth providers (used by skills and OAuth MCP servers) — tokens keyed by provider_id.
+        let known = crate::oauth::providers::known_providers();
+        for provider_id in &known {
+            if let Some(token) = self.token_store.get(user_id, provider_id) {
+                ctx.tokens.insert(provider_id.clone(), token.access_token);
+            }
+        }
+
+        tracing::debug!(
+            user_id = %user_id,
+            known_providers = ?known,
+            token_keys = ?ctx.tokens.keys().collect::<Vec<_>>(),
+            "ctx_with_tokens built"
+        );
 
         ctx
     }

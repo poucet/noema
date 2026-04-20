@@ -347,7 +347,11 @@ async fn handle_ws_connection(
     let (mut ws_sink, mut ws_source) = socket.split();
     let (write_tx, mut write_rx) = mpsc::channel::<String>(256);
     let mut input_sinks: std::collections::HashMap<String, mpsc::Sender<serde_json::Value>> = std::collections::HashMap::new();
-    let mut ws_provider: Option<Arc<crate::services::providers::WsToolProvider>> = None;
+    // Shared per-connection reverse-RPC state (pending map, id counter).
+    // All WsToolProviders registered on this connection share this so their
+    // reverse-call ids never collide and responses route unambiguously.
+    let ws_conn_state = Arc::new(crate::services::providers::WsConnState::new(write_tx.clone()));
+    let mut ws_providers: Vec<Arc<crate::services::providers::WsToolProvider>> = Vec::new();
     let ws_conn_id = format!("ws-{}", conn_id);
 
     let writer_handle = tokio::spawn(async move {
@@ -381,7 +385,9 @@ async fn handle_ws_connection(
             continue;
         }
 
-        // Handle responses to reverse RPC calls (tools.call responses from client)
+        // Handle responses to reverse RPC calls (tools.call responses from client).
+        // Ids are unique across all skills on this connection (shared WsConnState),
+        // so a single lookup on the shared pending map routes correctly.
         if incoming.id.is_some() && incoming.method.is_none() && (incoming.result.is_some() || incoming.error.is_some()) {
             let id = incoming.id.unwrap();
             let result = if let Some(r) = incoming.result {
@@ -389,9 +395,7 @@ async fn handle_ws_connection(
             } else {
                 Err(anyhow::anyhow!("tool call error: {:?}", incoming.error))
             };
-            if let Some(ref provider) = ws_provider {
-                provider.handle_response(id, result).await;
-            }
+            ws_conn_state.handle_response(id, result).await;
             continue;
         }
 
@@ -468,10 +472,10 @@ async fn handle_ws_connection(
                 display_name,
                 rmcp_tools,
                 oauth_reqs,
-                write_tx.clone(),
+                Arc::clone(&ws_conn_state),
             ));
             tools.register(provider.clone()).await;
-            ws_provider = Some(provider);
+            ws_providers.push(provider);
             tracing::info!(conn_id, skill_id = %skill_id, count, "remote skill registered via WS");
             let response = WsResponse::ok(id, serde_json::json!({ "registered": count }));
             let text = serde_json::to_string(&response).unwrap_or_default();
@@ -497,42 +501,47 @@ async fn handle_ws_connection(
             other => other,
         };
 
-        // Try stream dispatch first, then regular RPC
-        let (mut response, sink) = if let Some(ws_result) = dispatcher.ws_dispatch_by_method(&method, &msg_ctx, params.clone(), write_tx.clone()).await {
-            let r = match ws_result.result {
-                Ok(v) => WsResponse::ok(0, v),
-                Err(e) => WsResponse::err(0, e),
+        // Streaming dispatch must stay in-line because it returns an input_sink
+        // that needs to be registered in the local `input_sinks` map.
+        if let Some(ws_result) = dispatcher.ws_dispatch_by_method(&method, &msg_ctx, params.clone(), write_tx.clone()).await {
+            let mut response = match ws_result.result {
+                Ok(v) => WsResponse::ok(id, v),
+                Err(e) => WsResponse::err(id, e),
             };
-            (r, Some(ws_result.input_sink))
-        } else if let Some(rpc_result) = dispatcher.dispatch_by_method(&method, &msg_ctx, params).await {
-            let r = match rpc_result {
-                Ok(v) => WsResponse::ok(0, v),
-                Err(e) => WsResponse::err(0, e),
-            };
-            (r, None)
-        } else {
-            (WsResponse::err(0, format!("unknown method: {method}")), None)
-        };
-
-        response.id = id;
-
-        if let Some(sink) = sink {
-            input_sinks.insert(method.clone(), sink);
+            response.id = id;
+            input_sinks.insert(method.clone(), ws_result.input_sink);
+            let is_err = response.error.is_some();
+            tracing::debug!(id, method = %method, error = is_err, "WS response (stream)");
+            let text = serde_json::to_string(&response).unwrap_or_default();
+            if write_tx.send(text).await.is_err() { break; }
+            continue;
         }
 
-        let is_err = response.error.is_some();
-        tracing::debug!(id, method = %method, error = is_err, "WS response");
-        if is_err {
-            tracing::debug!(id, error = ?response.error, "WS response error");
-        }
-
-        let text = serde_json::to_string(&response).unwrap_or_default();
-        if write_tx.send(text).await.is_err() { break; }
+        // Regular RPC — spawn so the reader loop keeps advancing. This prevents
+        // a deadlock when a tool call triggers a reverse-RPC back to this client:
+        // the reverse-response arrives on the same WS connection and needs the
+        // reader to process it while the dispatch future is awaiting.
+        let dispatcher = Arc::clone(&dispatcher);
+        let write_tx_task = write_tx.clone();
+        tokio::spawn(async move {
+            let response = match dispatcher.dispatch_by_method(&method, &msg_ctx, params).await {
+                Some(Ok(v)) => WsResponse::ok(id, v),
+                Some(Err(e)) => WsResponse::err(id, e),
+                None => WsResponse::err(id, format!("unknown method: {method}")),
+            };
+            let is_err = response.error.is_some();
+            tracing::debug!(id, method = %method, error = is_err, "WS response");
+            if is_err {
+                tracing::debug!(id, error = ?response.error, "WS response error");
+            }
+            let text = serde_json::to_string(&response).unwrap_or_default();
+            let _ = write_tx_task.send(text).await;
+        });
     }
 
     writer_handle.abort();
     tracker.remove(conn_id).await;
-    if let Some(ref provider) = ws_provider {
+    for provider in &ws_providers {
         tools.unregister(<_ as simply_daemon_api::ToolProvider>::id(provider.as_ref())).await;
     }
     tracing::info!("WS client disconnected");

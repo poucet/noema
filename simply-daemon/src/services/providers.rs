@@ -104,6 +104,33 @@ struct PendingCall {
     tx: oneshot::Sender<Result<serde_json::Value>>,
 }
 
+/// Per-WS-connection state shared by all skills registered on that connection.
+///
+/// All reverse calls (for any skill) use the same id namespace here, so
+/// ids never collide across skills and response routing is unambiguous.
+pub struct WsConnState {
+    write_tx: mpsc::Sender<String>,
+    pending: Mutex<HashMap<u64, PendingCall>>,
+    next_id: std::sync::atomic::AtomicU64,
+}
+
+impl WsConnState {
+    pub fn new(write_tx: mpsc::Sender<String>) -> Self {
+        Self {
+            write_tx,
+            pending: Mutex::new(HashMap::new()),
+            next_id: std::sync::atomic::AtomicU64::new(1_000_000),
+        }
+    }
+
+    /// Route a reverse response to the matching pending call, if any.
+    pub async fn handle_response(&self, id: u64, result: Result<serde_json::Value>) {
+        if let Some(call) = self.pending.lock().await.remove(&id) {
+            let _ = call.tx.send(result);
+        }
+    }
+}
+
 /// Wraps tools from a single WebSocket-connected client as a ToolProvider.
 ///
 /// Tool calls are dispatched as reverse RPC over the same WS connection.
@@ -113,9 +140,7 @@ pub struct WsToolProvider {
     display: String,
     tools: Vec<Tool>,
     oauth_reqs: Vec<OAuthRequirement>,
-    write_tx: mpsc::Sender<String>,
-    pending: Arc<Mutex<HashMap<u64, PendingCall>>>,
-    next_id: std::sync::atomic::AtomicU64,
+    conn: Arc<WsConnState>,
 }
 
 impl WsToolProvider {
@@ -124,23 +149,14 @@ impl WsToolProvider {
         display_name: String,
         tools: Vec<Tool>,
         oauth_reqs: Vec<OAuthRequirement>,
-        write_tx: mpsc::Sender<String>,
+        conn: Arc<WsConnState>,
     ) -> Self {
         Self {
             id,
             display: display_name,
             tools,
             oauth_reqs,
-            write_tx,
-            pending: Arc::new(Mutex::new(HashMap::new())),
-            next_id: std::sync::atomic::AtomicU64::new(1_000_000),
-        }
-    }
-
-    /// Handle a response from the client for a pending reverse call.
-    pub async fn handle_response(&self, id: u64, result: Result<serde_json::Value>) {
-        if let Some(call) = self.pending.lock().await.remove(&id) {
-            let _ = call.tx.send(result);
+            conn,
         }
     }
 }
@@ -160,16 +176,18 @@ impl ToolProvider for WsToolProvider {
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, ctx: &RequestContext) -> Result<CallToolResult> {
-        let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = self.conn.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        // Register pending call
+        // Register pending call in the shared conn-level map
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, PendingCall { tx });
+        self.conn.pending.lock().await.insert(id, PendingCall { tx });
 
-        // Build reverse RPC request with user context
+        // Build reverse RPC request with user context.
+        // Include __skill_id so the client can route to the right skill when multiple are registered.
         let mut params = serde_json::json!({
             "name": request.name.as_ref(),
             "arguments": request.arguments,
+            "__skill_id": self.id,
         });
         let mut ctx_obj = serde_json::Map::new();
         if !ctx.tokens.is_empty() {
@@ -187,7 +205,7 @@ impl ToolProvider for WsToolProvider {
             "method": "tools.call",
             "params": params,
         });
-        self.write_tx.send(serde_json::to_string(&rpc_request)?).await
+        self.conn.write_tx.send(serde_json::to_string(&rpc_request)?).await
             .map_err(|_| anyhow::anyhow!("WS connection closed"))?;
 
         // Wait with timeout
@@ -199,23 +217,10 @@ impl ToolProvider for WsToolProvider {
             .map_err(|_| anyhow::anyhow!("WS connection dropped during tool call"))?;
 
         let value = result?;
-
-        // Parse response into CallToolResult
-        let content = if let Some(arr) = value.get("content").and_then(|v| v.as_array()) {
-            arr.iter().map(|c| {
-                if let Some(text) = c.get("text").and_then(|v| v.as_str()) {
-                    Content::text(text)
-                } else {
-                    Content::text(serde_json::to_string(c).unwrap_or_default())
-                }
-            }).collect()
-        } else if let Some(text) = value.as_str() {
-            vec![Content::text(text)]
-        } else {
-            vec![Content::text(serde_json::to_string(&value)?)]
-        };
-
-        Ok(CallToolResult::success(content))
+        // The client sends back an `rmcp::CallToolResult` verbatim — rmcp's
+        // serde impl round-trips cleanly, so just deserialize.
+        serde_json::from_value::<CallToolResult>(value)
+            .map_err(|e| anyhow::anyhow!("invalid tool result from client: {e}"))
     }
 }
 
@@ -225,9 +230,9 @@ impl ToolProvider for WsToolProvider {
 
 /// Wraps a `Skill` as a ToolProvider, converting between llm types and rmcp types.
 ///
-/// Skills use `llm::ToolDefinition` + `llm::ToolResultContent`.
-/// ToolProvider uses `rmcp::model::Tool` + `rmcp::model::CallToolResult`.
-/// This adapter handles the conversion.
+/// Both `Skill` and `ToolProvider` now return `rmcp::CallToolResult`, so
+/// this adapter only needs to translate `ToolDefinition` → `Tool` and build
+/// the `SkillCallContext`. Results flow through unchanged.
 pub struct EmbeddedToolProvider {
     skill: Arc<dyn simply_daemon_api::Skill>,
 }
@@ -253,29 +258,15 @@ impl ToolProvider for EmbeddedToolProvider {
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, ctx: &RequestContext) -> Result<CallToolResult> {
-        // Convert RequestContext → SkillCallContext
         let user_id = ctx.scope.user_id.as_deref().unwrap_or("anonymous");
         let skill_ctx = simply_daemon_api::SkillCallContext {
             user_id: simply_core::storage::ids::UserId::from_string(user_id),
             tokens: ctx.tokens.clone(),
         };
-
         let args = request.arguments
             .map(serde_json::Value::Object)
             .unwrap_or_default();
-
-        let results = self.skill.call_tool(request.name.as_ref(), args, &skill_ctx).await?;
-
-        // Convert ToolResultContent → rmcp Content
-        let content: Vec<Content> = results.into_iter().map(|c| {
-            match c {
-                llm::ToolResultContent::Text { text } => Content::text(text),
-                llm::ToolResultContent::Image { data, mime_type } => Content::image(data, mime_type),
-                _ => Content::text("[unsupported content type]"),
-            }
-        }).collect();
-
-        Ok(CallToolResult::success(content))
+        self.skill.call_tool(request.name.as_ref(), args, &skill_ctx).await
     }
 }
 
@@ -328,19 +319,13 @@ impl ToolProvider for ClientToolProvider {
 
         let result = (self.handler)(request.name.to_string(), args, tool_ctx).await?;
 
-        // Parse result into CallToolResult
-        let content = if let Some(arr) = result.get("content").and_then(|v| v.as_array()) {
-            arr.iter().map(|c| {
-                if let Some(text) = c.get("text").and_then(|v| v.as_str()) {
-                    Content::text(text)
-                } else {
-                    Content::text(serde_json::to_string(c).unwrap_or_default())
-                }
-            }).collect()
-        } else {
-            vec![Content::text(serde_json::to_string(&result)?)]
-        };
-
-        Ok(CallToolResult::success(content))
+        // Prefer rmcp's native format; fall back to a single-text wrapper.
+        if let Ok(ct) = serde_json::from_value::<CallToolResult>(result.clone()) {
+            return Ok(ct);
+        }
+        let text = result.as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| serde_json::to_string(&result).unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 }

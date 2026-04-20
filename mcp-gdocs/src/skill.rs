@@ -18,7 +18,8 @@ use simply_daemon_api::{
     CreateDocumentRequest, CreateTabRequest,
 };
 use simply_rpc::RequestContext;
-use llm::{ToolDefinition, ToolResultContent};
+use llm::ToolDefinition;
+use rmcp::model::{CallToolResult, Content};
 
 use crate::GoogleDocsClient;
 
@@ -44,6 +45,12 @@ impl GDocsSkill {
     }
 
     fn get_google_token(ctx: &SkillCallContext) -> Result<String> {
+        let token_keys: Vec<&String> = ctx.tokens.keys().collect();
+        tracing::debug!(
+            user_id = %ctx.user_id,
+            token_keys = ?token_keys,
+            "gdocs: looking up google token"
+        );
         ctx.token(GOOGLE_PROVIDER_ID)
             .map(|s| s.to_string())
             .ok_or_else(|| anyhow::anyhow!(
@@ -51,7 +58,8 @@ impl GDocsSkill {
             ))
     }
 
-    async fn handle_import(&self, args: ImportArgs, ctx: &SkillCallContext) -> Result<Vec<ToolResultContent>> {
+    async fn handle_import(&self, args: ImportArgs, ctx: &SkillCallContext) -> Result<CallToolResult> {
+        tracing::info!(doc_id = %args.doc_id, "gdocs_import: starting");
         let token = Self::get_google_token(ctx)?;
         let client = GoogleDocsClient::new(token);
         let rpc_ctx = Self::ctx_for(ctx);
@@ -63,16 +71,20 @@ impl GDocsSkill {
         info!(title = %extracted.title, tabs = extracted.tabs.len(), images = extracted.images.len(), "extracted");
 
         // Create document via daemon API
+        info!("gdocs_import: creating document via daemon");
         let doc = self.daemon.document().create_document(&rpc_ctx, CreateDocumentRequest {
             title: extracted.title.clone(),
             document_type: Some("knowledge".to_string()),
             content: None,
             source_id: Some(args.doc_id.clone()),
         }).await?;
+        info!(doc_id = %doc.id, "gdocs_import: document created");
 
         // Store images as assets via daemon API
+        let image_count = extracted.images.len();
         let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        for image in &extracted.images {
+        for (idx, image) in extracted.images.iter().enumerate() {
+            info!(idx, total = image_count, "gdocs_import: storing image");
             let data_b64 = base64::engine::general_purpose::STANDARD.encode(&image.data);
             let info = self.daemon.asset().store_asset(
                 &rpc_ctx,
@@ -87,7 +99,9 @@ impl GDocsSkill {
         // Topological sort: parents first
         let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut pending: Vec<_> = extracted.tabs.into_iter().collect();
+        let total_tabs = pending.len();
         let mut max_passes = pending.len() + 1;
+        info!(total_tabs, "gdocs_import: creating tabs");
 
         while !pending.is_empty() && max_passes > 0 {
             max_passes -= 1;
@@ -110,6 +124,7 @@ impl GDocsSkill {
                     None => tab.title.clone(),
                 };
 
+                info!(title = %title, content_len = content.len(), "gdocs_import: creating tab");
                 let created_tab = self.daemon.document().create_tab(&rpc_ctx, &doc.id, CreateTabRequest {
                     title,
                     content: Some(content),
@@ -122,20 +137,29 @@ impl GDocsSkill {
             pending = deferred;
         }
 
-        Ok(vec![ToolResultContent::text(format!(
+        info!(tabs = id_map.len(), images = image_id_map.len(), "gdocs_import: done");
+        Ok(CallToolResult::success(vec![Content::text(format!(
             "Imported '{}' with {} tabs and {} images (doc_id: {})",
             extracted.title, id_map.len(), image_id_map.len(), doc.id,
-        ))])
+        ))]))
     }
 
-    async fn handle_list(&self, args: ListArgs, ctx: &SkillCallContext) -> Result<Vec<ToolResultContent>> {
+    async fn handle_list(&self, args: ListArgs, ctx: &SkillCallContext) -> Result<CallToolResult> {
+        tracing::info!(query = ?args.query, limit = ?args.limit, "gdocs_list: starting");
         let token = Self::get_google_token(ctx)?;
         let client = GoogleDocsClient::new(token);
-        let files = client.list_documents(args.query.as_deref(), args.limit.unwrap_or(20)).await?;
+        let files = match client.list_documents(args.query.as_deref(), args.limit.unwrap_or(20)).await {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(error = %e, "gdocs_list: drive API call failed");
+                return Err(e);
+            }
+        };
+        tracing::info!(count = files.len(), "gdocs_list: got results");
         let result: Vec<serde_json::Value> = files.into_iter().map(|f| {
             serde_json::json!({ "id": f.id, "name": f.name, "modified_time": f.modified_time })
         }).collect();
-        Ok(vec![ToolResultContent::text(serde_json::to_string_pretty(&result)?)])
+        Ok(CallToolResult::success(vec![Content::text(serde_json::to_string_pretty(&result)?)]))
     }
 }
 
@@ -178,7 +202,7 @@ impl Skill for GDocsSkill {
         ]
     }
 
-    async fn call_tool(&self, name: &str, arguments: serde_json::Value, ctx: &SkillCallContext) -> Result<Vec<ToolResultContent>> {
+    async fn call_tool(&self, name: &str, arguments: serde_json::Value, ctx: &SkillCallContext) -> Result<CallToolResult> {
         match name {
             "gdocs_import" => self.handle_import(serde_json::from_value(arguments)?, ctx).await,
             "gdocs_list" => self.handle_list(serde_json::from_value(arguments)?, ctx).await,
