@@ -7,10 +7,8 @@
 mod auth;
 pub mod chat;
 mod google;
-mod mcp;
 mod model;
 mod ping;
-mod skills;
 pub mod tool;
 pub mod voice;
 

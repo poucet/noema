@@ -1,8 +1,17 @@
-//! /tool — invoke and browse MCP tools from Discord.
+//! /tool — unified tool browsing, calling, and source management.
 //!
-//! Subcommands:
-//! - `/tool call <name>` — autocomplete + modal form → execute tool
-//! - `/tool list` — paginated embed of all available tools
+//! This absorbs what used to be separate `/skills` and `/mcp` commands —
+//! users think in "tools", not in providers/servers/skills, so the surface
+//! area is one command with all the tool-related subcommands:
+//!
+//! - `/tool list`               — concise one-line-per-tool listing
+//! - `/tool info <name>`        — full details for one tool (description, params, schema)
+//! - `/tool call <name>`        — autocomplete + modal form → execute tool
+//! - `/tool sources`            — list tool sources (daemon, skills, MCP servers)
+//! - `/tool connect <id>`       — connect an MCP server
+//! - `/tool disconnect <id>`    — disconnect an MCP server
+//! - `/tool add <id> <name> <url>` — register a new MCP server
+//! - `/tool remove <id>`        — remove an MCP server
 
 use async_trait::async_trait;
 use serenity::all::{
@@ -14,7 +23,7 @@ use serenity::builder::{
     CreateActionRow, CreateCommand, CreateCommandOption, CreateEmbed, CreateInputText,
     CreateMessage, CreateModal,
 };
-use simply_daemon_api::Daemon; // ToolService is accessed via daemon.tools()
+use simply_daemon_api::{Daemon, McpApi, SkillsApi};
 use std::time::Duration;
 
 use super::LuminaContext;
@@ -35,9 +44,12 @@ impl super::SlashCommand for Tool {
 
     fn register(&self) -> CreateCommand {
         CreateCommand::new("tool")
-            .description("MCP tool management")
+            .description("Browse, call, and manage tools and their sources")
             .add_option(
-                CreateCommandOption::new(CommandOptionType::SubCommand, "call", "Call an MCP tool")
+                CreateCommandOption::new(CommandOptionType::SubCommand, "list", "List all available tools (names only)")
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::SubCommand, "info", "Show full details for a tool")
                     .add_sub_option(
                         CreateCommandOption::new(CommandOptionType::String, "name", "Tool name")
                             .required(true)
@@ -45,7 +57,54 @@ impl super::SlashCommand for Tool {
                     ),
             )
             .add_option(
-                CreateCommandOption::new(CommandOptionType::SubCommand, "list", "List all available tools"),
+                CreateCommandOption::new(CommandOptionType::SubCommand, "call", "Call a tool via a form")
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "name", "Tool name")
+                            .required(true)
+                            .set_autocomplete(true),
+                    ),
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::SubCommand, "sources", "List where tools come from (daemon, skills, MCP servers)")
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::SubCommand, "connect", "Connect an MCP server")
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "id", "Server id")
+                            .required(true)
+                            .set_autocomplete(true),
+                    ),
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::SubCommand, "disconnect", "Disconnect an MCP server")
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "id", "Server id")
+                            .required(true)
+                            .set_autocomplete(true),
+                    ),
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::SubCommand, "add", "Add a new MCP server")
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "id", "Server id (also used as display name)")
+                            .required(true),
+                    )
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "url", "Server URL")
+                            .required(true),
+                    )
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "auth_type", "Auth: none | oauth | token")
+                            .required(false),
+                    ),
+            )
+            .add_option(
+                CreateCommandOption::new(CommandOptionType::SubCommand, "remove", "Remove an MCP server")
+                    .add_sub_option(
+                        CreateCommandOption::new(CommandOptionType::String, "id", "Server id")
+                            .required(true)
+                            .set_autocomplete(true),
+                    ),
             )
     }
 
@@ -54,55 +113,84 @@ impl super::SlashCommand for Tool {
         let sub = opts.first().ok_or_else(|| anyhow::anyhow!("missing subcommand"))?;
 
         match sub.name {
+            "list" => cmd_list(lx, cmd).await,
+            "info" => {
+                let name = sub_string_arg(&sub.value, "name")
+                    .ok_or_else(|| anyhow::anyhow!("missing tool name"))?;
+                cmd_info(lx, cmd, name).await
+            }
             "call" => {
-                let tool_name = if let ResolvedValue::SubCommand(ref sub_opts) = sub.value {
-                    sub_opts.iter().find_map(|o| match o {
-                        ResolvedOption { name: "name", value: ResolvedValue::String(s), .. } => Some(*s),
-                        _ => None,
-                    })
-                } else {
-                    None
-                }.ok_or_else(|| anyhow::anyhow!("missing tool name"))?;
-
+                let tool_name = sub_string_arg(&sub.value, "name")
+                    .ok_or_else(|| anyhow::anyhow!("missing tool name"))?;
                 cmd_call(lx, cmd, tool_name).await
             }
-            "list" => cmd_list(lx, cmd).await,
+            "sources" => cmd_sources(lx, cmd).await,
+            "connect" => {
+                let id = sub_string_arg(&sub.value, "id")
+                    .ok_or_else(|| anyhow::anyhow!("missing server id"))?;
+                cmd_connect(lx, cmd, id).await
+            }
+            "disconnect" => {
+                let id = sub_string_arg(&sub.value, "id")
+                    .ok_or_else(|| anyhow::anyhow!("missing server id"))?;
+                cmd_disconnect(lx, cmd, id).await
+            }
+            "add" => {
+                let id = sub_string_arg(&sub.value, "id")
+                    .ok_or_else(|| anyhow::anyhow!("missing id"))?;
+                let url = sub_string_arg(&sub.value, "url")
+                    .ok_or_else(|| anyhow::anyhow!("missing url"))?;
+                let auth_type = sub_string_arg(&sub.value, "auth_type");
+                cmd_add(lx, cmd, id, url, auth_type).await
+            }
+            "remove" => {
+                let id = sub_string_arg(&sub.value, "id")
+                    .ok_or_else(|| anyhow::anyhow!("missing server id"))?;
+                cmd_remove(lx, cmd, id).await
+            }
             other => Err(anyhow::anyhow!("unknown subcommand `{other}`")),
         }
     }
 
     async fn autocomplete(&self, lx: &LuminaContext, ac: &CommandInteraction) -> anyhow::Result<()> {
         let opts = ac.data.options();
-        let sub = match opts.first() {
-            Some(o) if o.name == "call" => o,
-            _ => return Ok(()),
-        };
+        let Some(sub) = opts.first() else { return Ok(()); };
 
         let partial = ac.data.autocomplete()
             .map(|opt| opt.value.to_lowercase())
             .unwrap_or_default();
 
-        let tools = lx.daemon.tools().get_definitions().await;
-        let choices: Vec<AutocompleteChoice> = tools
-            .into_iter()
-            .filter(|t| partial.is_empty() || t.name.to_lowercase().contains(&partial))
-            .take(25)
-            .map(|t| {
-                let display = match t.description.as_deref() {
-                    Some(d) => {
-                        let full = format!("{} — {d}", t.name);
-                        if full.len() <= 100 { full }
-                        else {
-                            let max_desc = 97_usize.saturating_sub(t.name.len() + 4);
-                            if max_desc > 3 { format!("{} — {}...", t.name, &d[..max_desc]) }
-                            else { t.name.chars().take(100).collect() }
-                        }
-                    }
-                    None => t.name.chars().take(100).collect(),
-                };
-                AutocompleteChoice::new(display, t.name)
-            })
-            .collect();
+        let choices: Vec<AutocompleteChoice> = match sub.name {
+            // Tool-name autocomplete: name only (no description) to keep the
+            // popup scannable; info/call explain the tool on invocation.
+            "call" | "info" => {
+                let tools = lx.daemon.tools().get_definitions().await;
+                tools.into_iter()
+                    .filter(|t| partial.is_empty() || t.name.to_lowercase().contains(&partial))
+                    .take(25)
+                    .map(|t| {
+                        let label: String = t.name.chars().take(100).collect();
+                        AutocompleteChoice::new(label, t.name)
+                    })
+                    .collect()
+            }
+            // MCP-server-id autocomplete: all configured servers; the label
+            // shows status so the user doesn't have to guess.
+            "connect" | "disconnect" | "remove" => {
+                let servers = lx.daemon.mcp().list_mcp_servers().await.unwrap_or_default();
+                servers.into_iter()
+                    .filter(|s| partial.is_empty() || s.id.to_lowercase().contains(&partial))
+                    .take(25)
+                    .map(|s| {
+                        let marker = if s.is_connected { "✅" } else { "❌" };
+                        let label = format!("{marker} {} — {}", s.id, s.name);
+                        let label: String = label.chars().take(100).collect();
+                        AutocompleteChoice::new(label, s.id)
+                    })
+                    .collect()
+            }
+            _ => vec![],
+        };
 
         ac.create_response(
             &lx.http,
@@ -112,6 +200,25 @@ impl super::SlashCommand for Tool {
         ).await?;
         Ok(())
     }
+}
+
+/// Extract a String argument from a SubCommand's options by name.
+fn sub_string_arg<'a>(sub_value: &'a ResolvedValue<'a>, name: &str) -> Option<&'a str> {
+    let ResolvedValue::SubCommand(sub_opts) = sub_value else { return None };
+    sub_opts.iter().find_map(|o| match o {
+        ResolvedOption { name: n, value: ResolvedValue::String(s), .. } if *n == name => Some(*s),
+        _ => None,
+    })
+}
+
+async fn reply_ephemeral(lx: &LuminaContext, cmd: &CommandInteraction, content: &str) -> anyhow::Result<()> {
+    cmd.create_response(
+        &lx.http,
+        CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new().content(content).ephemeral(true),
+        ),
+    ).await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -172,31 +279,26 @@ async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str)
 }
 
 // ---------------------------------------------------------------------------
-// /tool list
+// /tool list — names only, grouped lightly
 // ---------------------------------------------------------------------------
 
 async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let tools = lx.daemon.tools().get_definitions().await;
 
     if tools.is_empty() {
-        cmd.create_response(&lx.http, CreateInteractionResponse::Message(
-            CreateInteractionResponseMessage::new().content("No tools available.").ephemeral(true),
-        )).await?;
-        return Ok(());
+        return reply_ephemeral(lx, cmd, "No tools available.").await;
     }
 
-    let mut text = String::new();
-    for tool in &tools {
-        let desc = tool.description.as_deref().unwrap_or("No description");
-        let param_count = tool.input_schema.get("properties")
-            .and_then(|p| p.as_object())
-            .map(|p| p.len())
-            .unwrap_or(0);
-        text.push_str(&format!("**`{}`** — {desc} ({param_count} params)\n", tool.name));
-    }
+    // Sort for stable output. Just the names — full details live in /tool info.
+    let mut names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+    names.sort();
 
-    let pages = crate::paginator::paginate_text(&text, 1800);
+    let body = names.iter()
+        .map(|n| format!("`{n}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
 
+    let pages = crate::paginator::paginate_text(&body, 1800);
     if pages.len() <= 1 {
         let embed = CreateEmbed::new()
             .title(format!("Tools ({} total)", tools.len()))
@@ -213,6 +315,144 @@ async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// /tool info — full details + raw JSON schema for debugging
+// ---------------------------------------------------------------------------
+
+async fn cmd_info(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str) -> anyhow::Result<()> {
+    let tools = lx.daemon.tools().get_definitions().await;
+    let Some(tool) = tools.iter().find(|t| t.name == tool_name) else {
+        return reply_ephemeral(lx, cmd, &format!("Tool not found: `{tool_name}`")).await;
+    };
+
+    let schema = serde_json::to_value(&tool.input_schema).unwrap_or_default();
+    let schema_pretty = serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string());
+    let schema_block = if schema_pretty.len() > 1600 {
+        format!("{}\n... (truncated)", &schema_pretty[..1600])
+    } else {
+        schema_pretty
+    };
+
+    let params = extract_params(&schema);
+    let params_block = if params.is_empty() {
+        "(no parameters)".to_string()
+    } else {
+        params.iter().map(|p| {
+            let req = if p.required { " **required**" } else { "" };
+            let desc = p.description.as_deref().unwrap_or("");
+            format!("• `{}`{req} — {desc}", p.name)
+        }).collect::<Vec<_>>().join("\n")
+    };
+
+    let description = tool.description.as_deref().unwrap_or("(no description)");
+    let body = format!(
+        "**Description**\n{description}\n\n**Parameters**\n{params_block}\n\n**Raw input_schema**\n```json\n{schema_block}\n```"
+    );
+
+    let embed = CreateEmbed::new()
+        .title(format!("Tool: {tool_name}"))
+        .description(body)
+        .color(0x5865F2);
+    cmd.create_response(&lx.http, CreateInteractionResponse::Message(
+        CreateInteractionResponseMessage::new().embed(embed).ephemeral(true),
+    )).await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// /tool sources — unified skills + MCP-server view
+// ---------------------------------------------------------------------------
+
+async fn cmd_sources(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
+    let skills = lx.daemon.skills().list_skills().await.unwrap_or_default();
+    let servers = lx.daemon.mcp().list_mcp_servers().await.unwrap_or_default();
+
+    let mut lines = Vec::new();
+
+    if !skills.is_empty() {
+        lines.push("**Skills**".to_string());
+        for s in &skills {
+            let marker = if s.is_connected { "✅" } else { "❌" };
+            let kind = match s.kind.as_str() {
+                "embedded" => "in-process",
+                "ws" => "WS client",
+                other => other,
+            };
+            let oauth = if s.oauth_provider_ids.is_empty() {
+                String::new()
+            } else {
+                format!(" · needs: {}", s.oauth_provider_ids.join(", "))
+            };
+            let tool_word = if s.tool_count == 1 { "tool" } else { "tools" };
+            lines.push(format!(
+                "{marker} `{}` — {} ({kind}, {} {tool_word}){oauth}",
+                s.id, s.display_name, s.tool_count,
+            ));
+        }
+    }
+
+    if !servers.is_empty() {
+        if !lines.is_empty() { lines.push(String::new()); }
+        lines.push("**MCP servers**".to_string());
+        for s in &servers {
+            let status = if s.is_connected {
+                format!("✅ {} tools", s.tool_count)
+            } else if s.needs_oauth_login {
+                "🔑 needs OAuth login".to_string()
+            } else {
+                format!("❌ {}", s.status)
+            };
+            lines.push(format!("`{}` — {} — {status}", s.id, s.name));
+        }
+    }
+
+    if lines.is_empty() {
+        return reply_ephemeral(lx, cmd, "No tool sources registered.").await;
+    }
+    reply_ephemeral(lx, cmd, &lines.join("\n")).await
+}
+
+// ---------------------------------------------------------------------------
+// /tool connect | disconnect | add | remove — MCP server management
+// ---------------------------------------------------------------------------
+
+async fn cmd_connect(lx: &LuminaContext, cmd: &CommandInteraction, id: &str) -> anyhow::Result<()> {
+    let count = lx.daemon.mcp().connect_mcp_server(id).await?;
+    reply_ephemeral(lx, cmd, &format!("Connected to `{id}` — {count} tools available.")).await
+}
+
+async fn cmd_disconnect(lx: &LuminaContext, cmd: &CommandInteraction, id: &str) -> anyhow::Result<()> {
+    lx.daemon.mcp().disconnect_mcp_server(id).await?;
+    reply_ephemeral(lx, cmd, &format!("Disconnected from `{id}`.")).await
+}
+
+async fn cmd_add(
+    lx: &LuminaContext,
+    cmd: &CommandInteraction,
+    id: &str,
+    url: &str,
+    auth_type: Option<&str>,
+) -> anyhow::Result<()> {
+    // `id` doubles as the display name — users were being asked for both and
+    // just typing the same thing twice.
+    let auth = auth_type.unwrap_or("none").to_string();
+    lx.daemon.mcp().add_mcp_server(simply_daemon_api::AddMcpServerRequest {
+        id: id.to_string(),
+        name: id.to_string(),
+        url: url.to_string(),
+        auth_type: auth,
+        auth_token: None,
+        provider_id: None,
+        scopes: None,
+    }).await?;
+    reply_ephemeral(lx, cmd, &format!("Added MCP server `{id}`.")).await
+}
+
+async fn cmd_remove(lx: &LuminaContext, cmd: &CommandInteraction, id: &str) -> anyhow::Result<()> {
+    lx.daemon.mcp().remove_mcp_server(id).await?;
+    reply_ephemeral(lx, cmd, &format!("Removed MCP server `{id}`.")).await
 }
 
 // ---------------------------------------------------------------------------
