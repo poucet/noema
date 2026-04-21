@@ -462,12 +462,19 @@ impl DiscordSkill {
             })
             .context("no voice channels available in this server")?;
 
-        let text_channel = ctx.metadata_u64("discord.channel_id")
-            .map(|id| SerenityChannelId::new(id))
-            .unwrap_or(voice_channel);
+        // Mint a fresh context for the voice session — carry only identity
+        // (scope + tokens), not the caller's chat metadata. Otherwise the
+        // voice session inherits `discord.channel_id` from the text chat
+        // that invoked this tool, and all voice output gets routed back to
+        // that original chat instead of the voice channel.
+        let voice_ctx = RequestContext {
+            scope: ctx.scope.clone(),
+            tokens: ctx.tokens.clone(),
+            metadata: Default::default(),
+        };
 
         let outcome = voice_mgr.join_voice(
-            ctx.clone(), guild_id, voice_channel, text_channel,
+            voice_ctx, guild_id, voice_channel, voice_channel,
             Vec::new(), self.http().clone(),
         ).await?;
 
