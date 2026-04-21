@@ -84,7 +84,8 @@ impl ToolService for DaemonToolService {
                     Some(ToolDefinition {
                         name: rm.method_name.to_string(),
                         description: rm.description.map(|s| s.to_string()),
-                        input_schema: (rm.tool_schema)().cloned().unwrap_or_default(),
+                        input_schema: (rm.tool_schema)().cloned()
+                            .unwrap_or_else(empty_object_schema),
                     })
                 })
             })
@@ -111,4 +112,16 @@ impl ToolService for DaemonToolService {
 
 impl Default for DaemonToolService {
     fn default() -> Self { Self::new() }
+}
+
+/// A minimal `{"type":"object","properties":{}}` schema for parameter-less
+/// tools. Claude's API rejects input_schemas that lack a `type` field
+/// (`tools.N.custom.input_schema.type: Field required`), and other
+/// providers need the same baseline.
+fn empty_object_schema() -> schemars::Schema {
+    serde_json::from_value(serde_json::json!({
+        "type": "object",
+        "properties": {},
+    }))
+    .expect("empty object schema is always valid")
 }
