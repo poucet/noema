@@ -31,7 +31,7 @@ pub struct Asset {
 #[async_trait]
 pub trait AssetApi: Send + Sync {
     /// Store binary content. Returns the asset ID and blob hash.
-    #[rpc(post = "/asset")]
+    #[rpc(post = "/asset", no_tool)]
     async fn store_asset(&self, ctx: &RequestContext, upload: BinaryUpload) -> anyhow::Result<AssetInfo>;
 
     /// List all asset IDs.
@@ -39,7 +39,7 @@ pub trait AssetApi: Send + Sync {
     async fn list_assets(&self, ctx: &RequestContext) -> anyhow::Result<Vec<AssetId>>;
 
     /// Get asset metadata by ID.
-    #[rpc(get = "/asset/{id}/info")]
+    #[rpc(get = "/asset/{id}/info", no_tool)]
     async fn get_asset_info(&self, ctx: &RequestContext, id: &AssetId) -> anyhow::Result<AssetInfo>;
 
     /// Get an asset (metadata + binary data) by ID.

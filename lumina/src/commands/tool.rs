@@ -289,14 +289,15 @@ async fn cmd_list(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Resul
         return reply_ephemeral(lx, cmd, "No tools available.").await;
     }
 
-    // Sort for stable output. Just the names — full details live in /tool info.
-    let mut names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
-    names.sort();
-
-    let body = names.iter()
-        .map(|n| format!("`{n}`"))
+    // Preserve the order `get_definitions()` returns so the index here matches
+    // `tools.N.*` in LLM API error messages. Number entries so you can map an
+    // error like "tools.0.custom.input_schema.type" straight to the offender.
+    let width = (tools.len() - 1).to_string().len();
+    let body = tools.iter()
+        .enumerate()
+        .map(|(i, t)| format!("`{:>w$}  {}`", i, t.name, w = width))
         .collect::<Vec<_>>()
-        .join(", ");
+        .join("\n");
 
     let pages = crate::paginator::paginate_text(&body, 1800);
     if pages.len() <= 1 {
