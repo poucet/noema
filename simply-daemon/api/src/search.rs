@@ -53,6 +53,6 @@ pub trait SearchApi: Send + Sync {
     async fn reindex(&self, ctx: &RequestContext) -> anyhow::Result<ReindexStatus>;
 
     /// Get embedding queue status.
-    #[rpc(get = "/search/status")]
+    #[rpc(get = "/search/status", no_tool)]
     async fn queue_status(&self, ctx: &RequestContext) -> anyhow::Result<EmbeddingQueueStatus>;
 }

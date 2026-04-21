@@ -66,19 +66,19 @@ pub struct OAuthProviderInfo {
 #[async_trait]
 pub trait OAuthApi: Send + Sync {
     /// Start an OAuth flow for an MCP server or skill OAuth provider.
-    #[rpc(post = "/oauth/{server_id}")]
+    #[rpc(post = "/oauth/{server_id}", no_tool)]
     async fn start_oauth(&self, server_id: &str) -> anyhow::Result<OAuthFlowInfo>;
 
     /// Complete an OAuth flow by exchanging an authorization code for tokens.
-    #[rpc(post = "/oauth/{server_id}/complete")]
+    #[rpc(post = "/oauth/{server_id}/complete", no_tool)]
     async fn complete_oauth(&self, server_id: &str, code: &str, state: &str) -> anyhow::Result<()>;
 
     /// Complete an OAuth flow using just a code (manual entry, no state verification).
-    #[rpc(post = "/oauth/{server_id}/code")]
+    #[rpc(post = "/oauth/{server_id}/code", no_tool)]
     async fn complete_oauth_with_code(&self, server_id: &str, code: &str) -> anyhow::Result<()>;
 
     /// Look up which server/provider ID a pending OAuth state parameter belongs to.
-    #[rpc(get = "/oauth/{state}")]
+    #[rpc(get = "/oauth/{state}", no_tool)]
     async fn resolve_oauth_state(&self, state: &str) -> Option<String>;
 
     /// List all OAuth providers configured in oauth_providers.toml.

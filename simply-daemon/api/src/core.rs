@@ -13,7 +13,7 @@ pub struct DaemonHealth {
 #[async_trait]
 pub trait CoreApi: Send + Sync {
     /// Check daemon health.
-    #[rpc(get = "/daemon")]
+    #[rpc(get = "/daemon", no_tool)]
     async fn health(&self) -> anyhow::Result<DaemonHealth>;
 
     /// Shut down the daemon.
@@ -21,10 +21,10 @@ pub trait CoreApi: Send + Sync {
     async fn kill(&self) -> anyhow::Result<()>;
 
     /// Get daemon version.
-    #[rpc(get = "/daemon/version")]
+    #[rpc(get = "/daemon/version", no_tool)]
     async fn version(&self) -> anyhow::Result<String>;
 
     /// Get the daemon's public URL (for OAuth callbacks, auth links, etc.).
-    #[rpc(get = "/daemon/public-url")]
+    #[rpc(get = "/daemon/public-url", no_tool)]
     async fn public_url(&self) -> anyhow::Result<String>;
 }
