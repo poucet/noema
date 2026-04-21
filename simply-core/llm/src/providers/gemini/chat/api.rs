@@ -504,7 +504,17 @@ fn sanitize_schema_recursive(
         }
     }
 
-    // Build new object without unsupported keys
+    // Build new object without unsupported keys.
+    //
+    // `const: X` is JSON Schema draft 2019-09+; Gemini rejects it but
+    // accepts the equivalent `enum: [X]`. Rewrite in place so tools
+    // that pin a literal string/number still express the restriction.
+    let mut obj = obj;
+    if let Some(const_val) = obj.remove("const") {
+        obj.entry("enum".to_string())
+            .or_insert_with(|| serde_json::Value::Array(vec![const_val]));
+    }
+
     let mut result = serde_json::Map::new();
     for (key, value) in obj {
         // Skip unsupported keys
