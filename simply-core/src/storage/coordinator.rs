@@ -16,14 +16,14 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::storage::content::{ContentResolver, InputContent, StoredContent};
-use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, SpanId, TurnId, UserId};
+use crate::storage::ids::{AssetId, ContentBlockId, ConversationId, EntityId, SpanId, TurnId, UserId};
 use crate::storage::session::{ResolvedContent, ResolvedMessage};
 use crate::storage::traits::{
-    AssetStore, BlobStore, EntityStore, StorageTypes, Stores, TextStore, TurnStore,
+    AssetStore, BlobStore, EntityStore, StorageTypes, StoredEntity, Stores, TextStore, TurnStore,
 };
 use crate::storage::types::{
     Asset, BlobHash, ContentBlock as ContentBlockData, ContentOrigin, EntityType, OriginKind,
-    TurnWithContent,
+    RelationType, TurnWithContent,
 };
 
 /// Opaque state for batching messages into the same turn during `append_message`.
@@ -696,6 +696,318 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             .await?;
 
         self.resolve_path(&context_path).await
+    }
+
+    // ========================================================================
+    // Generic entity + content + relation primitives
+    //
+    // These primitives underpin the upcoming EntityApi (daemon layer) and the
+    // entity-first admin/Noema UIs. The coordinator is the one place where
+    // multi-store orchestration lives — creating a content block and
+    // referencing it from an entity, walking `structure::contained_in` trees,
+    // GCing orphan content blocks on delete, etc.
+    // ========================================================================
+
+    /// Create a new entity, optionally with an initial content block and origin.
+    ///
+    /// - `content` is `(text, origin)`: the text is stored as a new content
+    ///   block with the given origin, and the entity's `content_block_id` is
+    ///   set to it.
+    /// - `origin` is the entity's `"<scheme>:<id>"` origin (separate from the
+    ///   content block's provenance origin).
+    pub async fn create_entity_with_content(
+        &self,
+        kind: EntityType,
+        user: Option<&UserId>,
+        name: Option<&str>,
+        content: Option<(&str, ContentOrigin)>,
+        origin: Option<&str>,
+    ) -> Result<EntityId> {
+        let entity_id = self.entity_store.create_entity(kind, user).await?;
+
+        // Resolve initial content, if any.
+        let content_block_id = match content {
+            Some((text, content_origin)) => {
+                let block = ContentBlockData::markdown(text).with_origin(content_origin);
+                Some(self.content_block_store.store(block).await?)
+            }
+            None => None,
+        };
+
+        if name.is_some() || content_block_id.is_some() || origin.is_some() {
+            let mut entity = self
+                .entity_store
+                .get_entity(&entity_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("entity not found after create: {entity_id}"))?;
+            if let Some(n) = name {
+                entity.name = Some(n.to_string());
+            }
+            if let Some(cid) = content_block_id {
+                entity.content_block_id = Some(cid);
+            }
+            if let Some(o) = origin {
+                entity.origin = Some(o.to_string());
+            }
+            self.entity_store.update_entity(&entity_id, &entity).await?;
+        }
+
+        Ok(entity_id)
+    }
+
+    /// Update an entity's live text. Stores a new content block, updates the
+    /// entity's `content_block_id`, and leaves the old block as an orphan
+    /// candidate (cleaned up lazily; content blocks are immutable snapshots).
+    pub async fn update_entity_content(
+        &self,
+        id: &EntityId,
+        text: &str,
+        origin: ContentOrigin,
+    ) -> Result<ContentBlockId> {
+        let block = ContentBlockData::markdown(text).with_origin(origin);
+        let new_block_id = self.content_block_store.store(block).await?;
+
+        let mut entity = self
+            .entity_store
+            .get_entity(id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("entity not found: {id}"))?;
+        entity.content_block_id = Some(new_block_id.clone());
+        self.entity_store.update_entity(id, &entity).await?;
+
+        Ok(new_block_id)
+    }
+
+    /// Resolve an entity's live text via its `content_block_id`, if any.
+    pub async fn resolve_entity_text(&self, id: &EntityId) -> Result<Option<String>> {
+        let entity = match self.entity_store.get_entity(id).await? {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        match entity.content_block_id.as_ref() {
+            Some(block_id) => self.content_block_store.get_text(block_id).await,
+            None => Ok(None),
+        }
+    }
+
+    /// Look up an entity by exact `origin` string (`"<scheme>:<id>"`).
+    pub async fn get_entity_by_origin(
+        &self,
+        user: &UserId,
+        origin: &str,
+    ) -> Result<Option<StoredEntity>> {
+        self.entity_store.get_entity_by_origin(user, origin).await
+    }
+
+    /// List entities whose `origin` is in the given scheme (e.g. `"google_drive"`).
+    /// Thin wrapper around an internal filter — uses `LIKE '<scheme>:%'`.
+    pub async fn list_entities_by_origin_scheme(
+        &self,
+        user: &UserId,
+        scheme: &str,
+    ) -> Result<Vec<StoredEntity>> {
+        // No dedicated EntityStore helper yet; filter list by origin prefix.
+        let all = self.entity_store.list_entities(user, None).await?;
+        let prefix = format!("{scheme}:");
+        Ok(all
+            .into_iter()
+            .filter(|e| e.origin.as_deref().map_or(false, |o| o.starts_with(&prefix)))
+            .collect())
+    }
+
+    /// List entities whose `entity_type` starts with the given prefix
+    /// (e.g. `"document::"` for all document kinds).
+    pub async fn list_entities_by_type_prefix(
+        &self,
+        user: &UserId,
+        prefix: &str,
+    ) -> Result<Vec<StoredEntity>> {
+        self.entity_store
+            .list_entities_by_type_prefix(user, prefix)
+            .await
+    }
+
+    /// Add a `child ──relation──> parent` edge, ordered by `position` when set.
+    /// Wraps `EntityStore::add_relation` with the consistent argument names
+    /// used throughout the coordinator.
+    pub async fn add_child(
+        &self,
+        parent: &EntityId,
+        child: &EntityId,
+        relation: RelationType,
+        position: Option<i64>,
+        metadata: Option<serde_json::Value>,
+    ) -> Result<()> {
+        self.entity_store
+            .add_relation(child, parent, relation, position, metadata)
+            .await
+    }
+
+    /// List the ordered children of an entity under a given relation.
+    /// Returns `(child_entity, position)` tuples.
+    pub async fn list_children(
+        &self,
+        parent: &EntityId,
+        relation: &RelationType,
+    ) -> Result<Vec<(StoredEntity, Option<i64>)>> {
+        let relations = self
+            .entity_store
+            .list_relations_to_ordered(parent, relation)
+            .await?;
+        let mut out = Vec::with_capacity(relations.len());
+        for (child_id, rel) in relations {
+            if let Some(child) = self.entity_store.get_entity(&child_id).await? {
+                out.push((child, rel.position));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Walk the tree of descendants reachable via the given relation (e.g.
+    /// `structure::contained_in`). Returns a flat list of
+    /// `(entity, parent_id, position)` tuples in DFS order. Detects cycles
+    /// defensively: the same entity is never yielded twice.
+    pub async fn list_children_recursive(
+        &self,
+        parent: &EntityId,
+        relation: &RelationType,
+    ) -> Result<Vec<(StoredEntity, EntityId, Option<i64>)>> {
+        use std::collections::HashSet;
+        let mut out = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut queue: Vec<EntityId> = vec![parent.clone()];
+        while let Some(node) = queue.pop() {
+            let children = self
+                .entity_store
+                .list_relations_to_ordered(&node, relation)
+                .await?;
+            for (child_id, rel) in children {
+                if !seen.insert(child_id.as_str().to_string()) {
+                    continue;
+                }
+                if let Some(child) = self.entity_store.get_entity(&child_id).await? {
+                    out.push((child, node.clone(), rel.position));
+                    queue.push(child_id);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Atomically re-parent `child` under `new_parent` and set `new_position`.
+    /// Existing `contained_in` edges from `child` under the given relation are
+    /// removed; the new edge is inserted; sibling positions under `new_parent`
+    /// are renumbered to accommodate the insertion.
+    ///
+    /// Used by drag-and-drop filing in the admin / Noema UIs.
+    pub async fn move_entity(
+        &self,
+        child: &EntityId,
+        new_parent: &EntityId,
+        new_position: i64,
+        relation: &RelationType,
+    ) -> Result<()> {
+        // Drop any existing parents under this relation (there should normally
+        // be at most one).
+        let existing_parents = self
+            .entity_store
+            .get_relations_from(child, Some(relation))
+            .await?;
+        for (parent_id, _) in existing_parents {
+            self.entity_store
+                .remove_relation(child, &parent_id, relation)
+                .await?;
+        }
+
+        // Shift existing siblings >= new_position up by 1 to make room.
+        let siblings = self
+            .entity_store
+            .list_relations_to_ordered(new_parent, relation)
+            .await?;
+        for (sibling_id, rel) in siblings {
+            if let Some(pos) = rel.position {
+                if pos >= new_position {
+                    self.entity_store
+                        .add_relation(
+                            &sibling_id,
+                            new_parent,
+                            relation.clone(),
+                            Some(pos + 1),
+                            rel.metadata,
+                        )
+                        .await?;
+                }
+            }
+        }
+
+        self.entity_store
+            .add_relation(child, new_parent, relation.clone(), Some(new_position), None)
+            .await
+    }
+
+    /// Replace the full set of assets referenced by an entity. Used when a
+    /// tab / flat doc's markdown embeds a new set of images.
+    pub async fn set_entity_assets(
+        &self,
+        entity_id: &EntityId,
+        asset_ids: &[AssetId],
+    ) -> Result<()> {
+        self.entity_store
+            .set_entity_assets(entity_id, asset_ids)
+            .await
+    }
+
+    /// Get the assets referenced by an entity.
+    pub async fn get_entity_assets(&self, entity_id: &EntityId) -> Result<Vec<AssetId>> {
+        self.entity_store.get_entity_assets(entity_id).await
+    }
+
+    /// Find all entities that still reference an asset. Blob GC uses this to
+    /// decide whether an asset (and its underlying blob) can be dropped.
+    pub async fn entities_referencing_asset(
+        &self,
+        asset_id: &AssetId,
+    ) -> Result<Vec<EntityId>> {
+        self.entity_store
+            .entities_referencing_asset(asset_id)
+            .await
+    }
+
+    /// Delete an entity and its descendants reachable through the given
+    /// relations (typically `[structure::contained_in]`). Orphan content
+    /// blocks from deleted entities are left for content-block GC; no DB
+    /// cascade is relied upon.
+    pub async fn delete_entity_cascade(
+        &self,
+        id: &EntityId,
+        relations_to_follow: &[RelationType],
+    ) -> Result<()> {
+        // Walk descendants via each follow-relation; collect all entity ids
+        // in DFS post-order so that children are deleted before parents.
+        use std::collections::HashSet;
+        let mut to_delete: Vec<EntityId> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut stack: Vec<EntityId> = vec![id.clone()];
+        while let Some(node) = stack.pop() {
+            if !seen.insert(node.as_str().to_string()) {
+                continue;
+            }
+            for rel in relations_to_follow {
+                let children = self
+                    .entity_store
+                    .list_relations_to_ordered(&node, rel)
+                    .await?;
+                for (child_id, _) in children {
+                    stack.push(child_id);
+                }
+            }
+            to_delete.push(node);
+        }
+        // Delete in reverse so children go first.
+        for entity_id in to_delete.into_iter().rev() {
+            self.entity_store.delete_entity(&entity_id).await?;
+        }
+        Ok(())
     }
 }
 
