@@ -184,21 +184,14 @@ impl ToolProvider for WsToolProvider {
 
         // Build reverse RPC request with user context.
         // Include __skill_id so the client can route to the right skill when multiple are registered.
-        let mut params = serde_json::json!({
+        // __ctx is the full RequestContext (scope, tokens, metadata) so skills
+        // get the same context the daemon received.
+        let params = serde_json::json!({
             "name": request.name.as_ref(),
             "arguments": request.arguments,
             "__skill_id": self.id,
+            "__ctx": serde_json::to_value(ctx)?,
         });
-        let mut ctx_obj = serde_json::Map::new();
-        if !ctx.tokens.is_empty() {
-            ctx_obj.insert("tokens".to_string(), serde_json::to_value(&ctx.tokens)?);
-        }
-        if let Some(ref uid) = ctx.scope.user_id {
-            ctx_obj.insert("user_id".to_string(), serde_json::Value::String(uid.clone()));
-        }
-        if !ctx_obj.is_empty() {
-            params["__ctx"] = serde_json::Value::Object(ctx_obj);
-        }
 
         let rpc_request = serde_json::json!({
             "id": id,
@@ -230,9 +223,8 @@ impl ToolProvider for WsToolProvider {
 
 /// Wraps a `Skill` as a ToolProvider, converting between llm types and rmcp types.
 ///
-/// Both `Skill` and `ToolProvider` now return `rmcp::CallToolResult`, so
-/// this adapter only needs to translate `ToolDefinition` → `Tool` and build
-/// the `SkillCallContext`. Results flow through unchanged.
+/// `Skill::call_tool` already takes the caller's `RequestContext`, so this
+/// adapter just forwards it.
 pub struct EmbeddedToolProvider {
     skill: Arc<dyn simply_daemon_api::Skill>,
 }
@@ -258,15 +250,10 @@ impl ToolProvider for EmbeddedToolProvider {
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, ctx: &RequestContext) -> Result<CallToolResult> {
-        let user_id = ctx.scope.user_id.as_deref().unwrap_or("anonymous");
-        let skill_ctx = simply_daemon_api::SkillCallContext {
-            user_id: simply_core::storage::ids::UserId::from_string(user_id),
-            tokens: ctx.tokens.clone(),
-        };
         let args = request.arguments
             .map(serde_json::Value::Object)
             .unwrap_or_default();
-        self.skill.call_tool(request.name.as_ref(), args, &skill_ctx).await
+        self.skill.call_tool(request.name.as_ref(), args, ctx).await
     }
 }
 
@@ -308,16 +295,11 @@ impl ToolProvider for ClientToolProvider {
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, ctx: &RequestContext) -> Result<CallToolResult> {
-        let tool_ctx = simply_daemon_api::ToolCallContext {
-            user_id: ctx.scope.user_id.clone(),
-            tokens: ctx.tokens.clone(),
-        };
-
         let args = request.arguments
             .map(serde_json::Value::Object)
             .unwrap_or_default();
 
-        let result = (self.handler)(request.name.to_string(), args, tool_ctx).await?;
+        let result = (self.handler)(request.name.to_string(), args, ctx.clone()).await?;
 
         // Prefer rmcp's native format; fall back to a single-text wrapper.
         if let Ok(ct) = serde_json::from_value::<CallToolResult>(result.clone()) {

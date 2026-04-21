@@ -5,64 +5,26 @@
 //! - **Skill → Daemon**: skill calls daemon APIs via `Arc<dyn Daemon>`
 //!
 //! # Auth flow
-//! When calling a skill's tool, the daemon injects the user's auth context
-//! (OAuth tokens, identity) via `SkillCallContext`. The LLM never sees
-//! auth tokens — they're resolved by the daemon from its token store.
+//! When calling a skill's tool, the daemon forwards the same
+//! `simply_rpc::RequestContext` that carried the call through the RPC
+//! layer — it already has user identity, OAuth tokens, and free-form
+//! origin metadata. The LLM never sees auth tokens.
 //!
 //! # Deployment modes
 //! - **Embedded**: skill lives in daemon process, `Arc<EmbeddedDaemon>`
 //! - **Remote**: skill lives in another process (e.g., Lumina), wrapped
 //!   as MCP server. Daemon sends auth context as Bearer header on MCP calls.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use llm::ToolDefinition;
 use rmcp::model::CallToolResult;
+use simply_rpc::RequestContext;
 
 use crate::Daemon;
-use crate::types::UserId;
 
-/// Context passed to skill tool calls.
-///
-/// Populated by the daemon before dispatch. Includes the calling user's
-/// identity and any OAuth tokens the daemon has for this user.
-pub struct SkillCallContext {
-    /// The calling user.
-    pub user_id: UserId,
-    /// OAuth access tokens the daemon has for this user, keyed by provider/server ID.
-    /// e.g., {"google-docs": "ya29.a0AfH6SM...", "github": "gho_xxxx"}
-    pub tokens: HashMap<String, String>,
-}
-
-impl SkillCallContext {
-    pub fn new(user_id: UserId) -> Self {
-        Self { user_id, tokens: HashMap::new() }
-    }
-
-    pub fn with_token(mut self, server_id: impl Into<String>, token: impl Into<String>) -> Self {
-        self.tokens.insert(server_id.into(), token.into());
-        self
-    }
-
-    /// Get an OAuth token for a specific service/server.
-    pub fn token(&self, server_id: &str) -> Option<&str> {
-        self.tokens.get(server_id).map(|s| s.as_str())
-    }
-}
-
-/// A pluggable skill that provides tools to the daemon.
-///
-/// # Construction
-/// Skills receive `Arc<dyn Daemon>` at construction — their handle to
-/// the daemon's APIs. Works for both embedded and remote daemons.
-///
-/// # Tool calls
-/// Auth tokens for the calling user are passed via `SkillCallContext`.
-/// The daemon populates this from its token store before dispatch.
-/// The LLM never sees tokens — it just calls `gdocs_import(doc_id: "...")`.
 /// OAuth provider requirement for a skill — the daemon handles the auth flow.
 ///
 /// `provider_id` is the shared provider name (e.g., "google", "notion").
@@ -72,7 +34,7 @@ impl SkillCallContext {
 pub struct OAuthRequirement {
     /// OAuth provider ID — shared across all consumers of the same provider.
     /// e.g., "google" for all Google-based skills and MCP servers.
-    /// Used as the key in `TransientTokenStore` and `SkillCallContext.tokens`.
+    /// Used as the key in `TransientTokenStore` and `RequestContext.tokens`.
     pub provider_id: String,
     /// Human-readable name (e.g., "Google").
     pub display_name: String,
@@ -86,6 +48,15 @@ pub struct OAuthRequirement {
     pub userinfo_url: Option<String>,
 }
 
+/// A pluggable skill that provides tools to the daemon.
+///
+/// # Construction
+/// Skills receive `Arc<dyn Daemon>` at construction — their handle to
+/// the daemon's APIs. Works for both embedded and remote daemons.
+///
+/// # Tool calls
+/// `call_tool` receives the same `RequestContext` that flowed through the
+/// RPC layer — user id, OAuth tokens, and origin metadata.
 #[async_trait]
 pub trait Skill: Send + Sync {
     /// Unique name for this skill (e.g., "gdocs", "github").
@@ -95,20 +66,21 @@ pub trait Skill: Send + Sync {
     fn tools(&self) -> Vec<ToolDefinition>;
 
     /// OAuth providers this skill needs. The daemon registers auth routes
-    /// for each and populates tokens in SkillCallContext.
+    /// for each and populates tokens in RequestContext.
     /// Default: no OAuth needed.
     fn oauth_requirements(&self) -> Vec<OAuthRequirement> { vec![] }
 
     /// Execute a tool by name.
     ///
-    /// `ctx` contains the calling user's identity and OAuth tokens.
-    /// Returns an `rmcp::CallToolResult` so the response serializes
-    /// identically whether the skill is embedded or running remotely.
+    /// `ctx` is the caller's RequestContext — user identity, OAuth tokens,
+    /// and free-form origin metadata. Returns an `rmcp::CallToolResult` so
+    /// the response serializes identically whether the skill is embedded or
+    /// running remotely.
     async fn call_tool(
         &self,
         name: &str,
         arguments: serde_json::Value,
-        ctx: &SkillCallContext,
+        ctx: &RequestContext,
     ) -> Result<CallToolResult>;
 }
 

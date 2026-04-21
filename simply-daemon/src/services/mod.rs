@@ -8,8 +8,7 @@ mod core;
 mod search;
 pub mod user;
 pub mod tools;
-pub mod user_tools;  // TODO: remove once migration verified
-pub mod ws_tools;    // TODO: remove once migration verified
+pub mod ws_tools;
 pub mod registry;
 pub mod providers;
 pub mod embedding_queue;

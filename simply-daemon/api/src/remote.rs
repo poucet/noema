@@ -64,23 +64,11 @@ impl RemoteDaemon {
 
                 let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let arguments = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
-                let (user_id, tokens) = params.get("__ctx")
-                    .map(|v| {
-                        let tokens = v.get("tokens")
-                            .and_then(|t| serde_json::from_value(t.clone()).ok())
-                            .unwrap_or_default();
-                        let user_id = v.get("user_id")
-                            .and_then(|u| u.as_str())
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| "anonymous".to_string());
-                        (user_id, tokens)
-                    })
-                    .unwrap_or_else(|| ("anonymous".to_string(), std::collections::HashMap::new()));
+                // Deserialize the full RequestContext the daemon sent.
+                let ctx: simply_rpc::RequestContext = params.get("__ctx")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_else(simply_rpc::RequestContext::anonymous);
 
-                let ctx = crate::skill::SkillCallContext {
-                    user_id: crate::types::UserId::from_string(&user_id),
-                    tokens,
-                };
                 let result = skill.call_tool(&tool_name, arguments, &ctx).await;
                 let resp = match result {
                     Ok(value) => serde_json::json!({ "id": id, "result": value }),
@@ -165,7 +153,7 @@ impl Daemon for RemoteDaemon {
         tools: Vec<llm::ToolDefinition>,
         handler: crate::ToolCallHandler,
     ) -> anyhow::Result<()> {
-        // Set up reverse call handler that extracts __ctx and passes ToolCallContext
+        // Set up reverse call handler that extracts the full RequestContext.
         let handler = handler.clone();
         self.conn.ws().set_reverse_handler(Arc::new(move |id, method, params, write_tx| {
             let handler = handler.clone();
@@ -178,17 +166,9 @@ impl Daemon for RemoteDaemon {
 
                 let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let arguments = params.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
-                let ctx = params.get("__ctx")
-                    .and_then(|v| {
-                        let tokens = v.get("tokens")
-                            .and_then(|t| serde_json::from_value(t.clone()).ok())
-                            .unwrap_or_default();
-                        let user_id = v.get("user_id")
-                            .and_then(|u| u.as_str())
-                            .map(|s| s.to_string());
-                        Some(crate::ToolCallContext { user_id, tokens })
-                    })
-                    .unwrap_or_default();
+                let ctx: simply_rpc::RequestContext = params.get("__ctx")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_else(simply_rpc::RequestContext::anonymous);
 
                 let result = handler(name, arguments, ctx).await;
                 let resp = match result {

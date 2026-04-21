@@ -39,7 +39,7 @@ pub use search::*;
 pub use user::*;
 pub use skills::*;
 pub use types::*;
-pub use skill::{Skill, SkillCallContext, SkillFactory, OAuthRequirement};
+pub use skill::{Skill, SkillFactory, OAuthRequirement};
 pub use provider::{ProviderKind, ToolProvider};
 pub use remote::RemoteDaemon;
 pub use skill_macros::skill_router;
@@ -54,24 +54,15 @@ pub mod __private {
     pub use rmcp;
     pub use serde_json;
 }
-pub use simply_rpc::{BinaryResponse, BinaryUpload};
+pub use simply_rpc::{BinaryResponse, BinaryUpload, RequestContext};
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Context passed to tool call handlers (from __ctx in WS reverse calls).
-#[derive(Debug, Clone, Default)]
-pub struct ToolCallContext {
-    /// The calling user's ID (from the daemon's user resolution).
-    pub user_id: Option<String>,
-    /// OAuth tokens keyed by server/provider ID.
-    pub tokens: HashMap<String, String>,
-}
-
 /// Handler for tool calls from the daemon.
-/// Receives (name, arguments, ctx) where ctx contains user tokens from __ctx.
+/// Receives (name, arguments, ctx) where ctx is the caller's RequestContext
+/// (user id, OAuth tokens, origin metadata).
 pub type ToolCallHandler = Arc<
-    dyn Fn(String, serde_json::Value, ToolCallContext) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+    dyn Fn(String, serde_json::Value, RequestContext) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>
     + Send + Sync
 >;
 
@@ -104,11 +95,7 @@ pub trait Daemon: Send + Sync {
         let handler: ToolCallHandler = Arc::new(move |name, args, ctx| {
             let skill = Arc::clone(&skill);
             Box::pin(async move {
-                let skill_ctx = skill::SkillCallContext {
-                    user_id: types::UserId::from_string(ctx.user_id.as_deref().unwrap_or("anonymous")),
-                    tokens: ctx.tokens,
-                };
-                let result = skill.call_tool(&name, args, &skill_ctx).await?;
+                let result = skill.call_tool(&name, args, &ctx).await?;
                 Ok(serde_json::to_value(&result)?)
             })
         });

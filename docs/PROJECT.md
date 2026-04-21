@@ -84,7 +84,7 @@ graph TD
 #### simply-daemon-api (shared types)
 **Purpose**: API traits and types shared by daemon, skills, and clients
 **Key files**: `api/src/lib.rs` — Daemon trait, `api/src/provider.rs` — ToolProvider, `api/src/skill.rs` — Skill + OAuthRequirement
-**Exposes**: `Daemon`, `ToolProvider`, `Skill`, `RemoteDaemon`, `SkillCallContext`
+**Exposes**: `Daemon`, `ToolProvider`, `Skill`, `RemoteDaemon` (skills receive `simply_rpc::RequestContext` directly)
 
 #### simply-core (internal library)
 **Purpose**: LLM abstraction, MCP client, agent orchestration, storage traits

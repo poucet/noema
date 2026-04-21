@@ -31,12 +31,14 @@ struct WsToolProvider {
 
 impl WsToolProvider {
     /// Send a reverse RPC call to the client and wait for the response.
+    ///
+    /// `ctx` is forwarded as `__ctx` so the remote skill sees the same
+    /// RequestContext the daemon received (user, tokens, metadata).
     async fn call_tool(
         &self,
         name: &str,
         arguments: serde_json::Value,
-        tokens: Option<&std::collections::HashMap<String, String>>,
-        user_id: Option<&str>,
+        ctx: &simply_rpc::RequestContext,
     ) -> Result<serde_json::Value> {
         let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
@@ -44,22 +46,11 @@ impl WsToolProvider {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, PendingCall { tx });
 
-        // Send reverse RPC request to client with user context
-        let mut params = serde_json::json!({
+        let params = serde_json::json!({
             "name": name,
             "arguments": arguments,
+            "__ctx": serde_json::to_value(ctx).unwrap_or_default(),
         });
-        // Include user context as __ctx (same pattern as regular WS RPC calls)
-        let mut ctx = serde_json::Map::new();
-        if let Some(tokens) = tokens {
-            ctx.insert("tokens".to_string(), serde_json::to_value(tokens).unwrap_or_default());
-        }
-        if let Some(uid) = user_id {
-            ctx.insert("user_id".to_string(), serde_json::Value::String(uid.to_string()));
-        }
-        if !ctx.is_empty() {
-            params["__ctx"] = serde_json::Value::Object(ctx);
-        }
         let request = serde_json::json!({
             "id": id,
             "method": "tools.call",
@@ -155,14 +146,13 @@ impl WsToolRegistry {
         &self,
         name: &str,
         arguments: serde_json::Value,
-        tokens: Option<&HashMap<String, String>>,
-        user_id: Option<&str>,
+        ctx: &simply_rpc::RequestContext,
     ) -> Result<Vec<ToolResultContent>> {
         let providers = self.providers.read().await;
 
         for provider in providers.values() {
             if provider.tools.iter().any(|t| t.name == name) {
-                let result = provider.call_tool(name, arguments, tokens, user_id).await?;
+                let result = provider.call_tool(name, arguments, ctx).await?;
 
                 // Parse the result as CallToolResult-like structure
                 let content = if let Some(arr) = result.get("content").and_then(|v| v.as_array()) {

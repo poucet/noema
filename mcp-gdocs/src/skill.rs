@@ -2,7 +2,8 @@
 //!
 //! Uses GoogleDocsClient for Google API access.
 //! Uses `Arc<dyn Daemon>` for daemon API access (document creation, asset storage).
-//! Auth tokens come from `SkillCallContext` — injected by daemon, transparent to LLM.
+//! Auth tokens come from the caller's `RequestContext` — injected by the
+//! daemon, transparent to the LLM.
 //! Requires the `skill` feature flag.
 
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use serde::Deserialize;
 use tracing::info;
 
 use simply_daemon_api::{
-    Daemon, Skill, SkillCallContext,
+    Daemon, Skill,
     CreateDocumentRequest, CreateTabRequest,
 };
 use simply_rpc::RequestContext;
@@ -30,7 +31,8 @@ const GOOGLE_PROVIDER_ID: &str = "google";
 /// Google Docs skill — import documents from Google Drive.
 ///
 /// Takes `Arc<dyn Daemon>` — works with both embedded and remote daemons.
-/// Google OAuth tokens come from the daemon's token store via SkillCallContext.
+/// Google OAuth tokens come from the daemon's token store via the caller's
+/// `RequestContext`.
 pub struct GDocsSkill {
     daemon: Arc<dyn Daemon>,
 }
@@ -40,22 +42,18 @@ impl GDocsSkill {
         Self { daemon }
     }
 
-    fn ctx_for(ctx: &SkillCallContext) -> RequestContext {
-        RequestContext::with_scope(simply_rpc::Scope::user(ctx.user_id.as_str()))
-    }
-
-    fn get_google_token(ctx: &SkillCallContext) -> Result<String> {
-        ctx.token(GOOGLE_PROVIDER_ID)
-            .map(|s| s.to_string())
+    fn get_google_token(ctx: &RequestContext) -> Result<String> {
+        ctx.tokens.get(GOOGLE_PROVIDER_ID)
+            .cloned()
             .ok_or_else(|| anyhow::anyhow!(
                 "No Google OAuth token found. Please authenticate with Google first."
             ))
     }
 
-    async fn handle_import(&self, args: ImportArgs, ctx: &SkillCallContext) -> Result<CallToolResult> {
+    async fn handle_import(&self, args: ImportArgs, ctx: &RequestContext) -> Result<CallToolResult> {
         let token = Self::get_google_token(ctx)?;
         let client = GoogleDocsClient::new(token);
-        let rpc_ctx = Self::ctx_for(ctx);
+        let rpc_ctx = ctx.clone();
 
         info!(doc_id = %args.doc_id, "importing Google Doc");
 
@@ -131,7 +129,7 @@ impl GDocsSkill {
         ))]))
     }
 
-    async fn handle_list(&self, args: ListArgs, ctx: &SkillCallContext) -> Result<CallToolResult> {
+    async fn handle_list(&self, args: ListArgs, ctx: &RequestContext) -> Result<CallToolResult> {
         let token = Self::get_google_token(ctx)?;
         let client = GoogleDocsClient::new(token);
         let files = client.list_documents(args.query.as_deref(), args.limit.unwrap_or(20)).await?;
@@ -183,7 +181,7 @@ impl Skill for GDocsSkill {
         ]
     }
 
-    async fn call_tool(&self, name: &str, arguments: serde_json::Value, ctx: &SkillCallContext) -> Result<CallToolResult> {
+    async fn call_tool(&self, name: &str, arguments: serde_json::Value, ctx: &RequestContext) -> Result<CallToolResult> {
         match name {
             "gdocs_import" => self.handle_import(serde_json::from_value(arguments)?, ctx).await,
             "gdocs_list" => self.handle_list(serde_json::from_value(arguments)?, ctx).await,
@@ -192,7 +190,7 @@ impl Skill for GDocsSkill {
     }
 }
 
-// No access_token in tool schemas — daemon injects it via SkillCallContext
+// No access_token in tool schemas — daemon injects it via RequestContext.tokens
 #[derive(schemars::JsonSchema)]
 struct ImportToolInput {
     /// The Google Doc ID to import.
