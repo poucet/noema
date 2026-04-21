@@ -21,6 +21,13 @@ export default defineConfig({
     build: {
       cssCodeSplit: false,
     },
+    // Our workspace packages are shipped as raw TypeScript source (no build
+    // step). Astro's SSR externalizes workspace deps by default, which hands
+    // them to Node's strict ESM resolver and breaks on directory imports like
+    // `./transport`. Inlining them forces Vite to resolve and transpile.
+    ssr: {
+      noExternal: ['@simply/client', '@simply/entity-ui'],
+    },
     plugins: [tailwindcss()],
     server: {
       watch: {

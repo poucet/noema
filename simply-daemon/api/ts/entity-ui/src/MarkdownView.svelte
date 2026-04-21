@@ -1,3 +1,10 @@
+<!--
+  Shared markdown + math renderer used by admin and Noema.
+
+  Consumers are responsible for loading katex's CSS themselves (admin imports
+  via Astro's layout; Noema imports from the global entry). Importing .css
+  from inside a Svelte component breaks SSR because Node can't parse it.
+-->
 <script lang="ts">
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -18,7 +25,10 @@
     return src.replace(/(["'(])\/api\//g, (_, lead) => `${lead}${base}/api/`);
   }
 
+  // Render math between $...$ (inline) and $$...$$ (display) into HTML via KaTeX.
+  // Runs before marked so the TeX source isn't mangled by markdown parsing.
   function renderMath(src: string): string {
+    // Display math: $$...$$ (multiline allowed)
     let out = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
       try {
         return katex.renderToString(tex, { displayMode: true, throwOnError: false });
@@ -26,6 +36,7 @@
         return `<code>${escapeHtml(tex)}</code>`;
       }
     });
+    // Inline math: $...$ (no newlines, not escaped \$)
     out = out.replace(/(?<!\\)\$([^\n$]+?)\$/g, (_, tex) => {
       try {
         return katex.renderToString(tex, { displayMode: false, throwOnError: false });
@@ -47,6 +58,7 @@
     const rendered = marked.parse(withMath, { async: false, breaks: true, gfm: true }) as string;
     const absolutized = absolutizeApiUrls(rendered);
     html = DOMPurify.sanitize(absolutized, {
+      // Allow images (needed for blob references) + KaTeX output tags.
       ADD_TAGS: ['math', 'annotation', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'msqrt', 'mtext'],
       ADD_ATTR: ['aria-hidden', 'encoding', 'display'],
     });

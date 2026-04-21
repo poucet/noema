@@ -1,6 +1,6 @@
 <script lang="ts">
   import ChatPage from '../chat/ChatPage.svelte';
-  import DocumentPage from '../DocumentPage.svelte';
+  import EntitiesPage from '../EntitiesPage.svelte';
   import SettingsModal from './SettingsModal.svelte';
 
   type View = 'chat' | 'documents';
@@ -46,9 +46,7 @@
     {#if view === 'chat'}
       <ChatPage />
     {:else if view === 'documents'}
-      <div class="h-full overflow-y-auto p-6">
-        <DocumentPage />
-      </div>
+      <EntitiesPage />
     {/if}
   </main>
 </div>

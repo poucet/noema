@@ -14,25 +14,15 @@ use std::fs;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    // Watch each .rs file individually — `rerun-if-changed=api/src/` only tracks
-    // the directory mtime, which doesn't change on file edits.
+    // Watch each .rs file individually — `rerun-if-changed=api/src/` alone only
+    // tracks directory mtime, which doesn't bubble file edits. But we also
+    // keep the directory watch so newly-added api files (that weren't in the
+    // previous glob) still trigger a rebuild of the generated TS client.
+    println!("cargo:rerun-if-changed=api/src");
     if let Ok(entries) = glob::glob("api/src/**/*.rs") {
         for entry in entries.flatten() {
             println!("cargo:rerun-if-changed={}", entry.display());
         }
-    }
-
-    if std::env::var("SKIP_ADMIN_BUILD").is_ok() {
-        return;
-    }
-
-    // Only build the admin UI when simply-daemon is itself the primary
-    // Cargo target. When another crate (e.g. noema) pulls us in as a dep,
-    // we skip: that consumer doesn't need admin/dist, and running `npm run
-    // build` here would rewrite `admin/.astro/*.d.ts`, which Tauri's dev
-    // watcher sees as a change and re-triggers the build in a loop.
-    if std::env::var("CARGO_PRIMARY_PACKAGE").is_err() {
-        return;
     }
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -41,7 +31,12 @@ fn main() {
     // TS client package — sibling of the Rust `api/` crate, at api/ts/.
     let generated_dir = manifest_dir.join("api/ts/src/generated");
 
-    // Step 1: Generate API client + types barrel
+    // Step 1: Generate API client + types barrel.
+    //
+    // Always regenerate (even when simply-daemon is pulled in as a dependency
+    // by another crate like noema), because the TS client is consumed by
+    // downstream UIs and must track the Rust API surface. We guard against
+    // Tauri watcher rebuild-loops by writing only when contents change.
     if api_dir.is_dir() {
         fs::create_dir_all(&generated_dir).ok();
         fs::create_dir_all(generated_dir.join("types")).ok();
@@ -49,15 +44,29 @@ fn main() {
         generate_types_barrel(&generated_dir);
     }
 
-    // Step 2: Build admin UI
+    // Step 2 (admin UI build) is opt-out via SKIP_ADMIN_BUILD and additionally
+    // scoped to the case where simply-daemon is the primary cargo target.
+    // Skip if either gate rejects — the admin UI is a heavy npm build and
+    // irrelevant when simply-daemon is a transitive dep.
+    if std::env::var("SKIP_ADMIN_BUILD").is_ok() { return; }
+    if std::env::var("CARGO_PRIMARY_PACKAGE").is_err() { return; }
+
     if admin_dir.join("package.json").exists() {
-        // npm install if needed
         if !admin_dir.join("node_modules").exists() {
             run_or_panic("npm", &["install"], &admin_dir, "npm install failed");
         }
-        // npm run build
         run_or_panic("npm", &["run", "build"], &admin_dir, "admin UI build failed");
     }
+}
+
+/// Write `contents` to `path` only if the file doesn't exist or its current
+/// contents differ. Prevents Tauri's file watcher from firing rebuild loops
+/// on no-op regenerations.
+fn write_if_changed(path: &PathBuf, contents: &str) {
+    if let Ok(existing) = fs::read_to_string(path) {
+        if existing == contents { return; }
+    }
+    fs::write(path, contents).unwrap_or_else(|e| panic!("failed to write {}: {e}", path.display()));
 }
 
 fn run_or_panic(cmd: &str, args: &[&str], dir: &PathBuf, msg: &str) {
@@ -124,13 +133,10 @@ fn generate_api_client(api_dir: &PathBuf, out_dir: &PathBuf) {
         }
     }
 
-    fs::write(out_dir.join("api.ts"), &client).expect("failed to write api.ts");
+    write_if_changed(&out_dir.join("api.ts"), &client);
 
-    // Generate index.ts barrel
-    let mut index = String::from("// Auto-generated barrel export\n");
-    index.push_str("export * from './types';\n");
-    index.push_str("export * from './api';\n");
-    fs::write(out_dir.join("index.ts"), &index).expect("failed to write index.ts");
+    // `index.ts` barrel is a static committed file — it only re-exports
+    // `./types` + `./api`, no dynamic content to emit.
 
     println!(
         "cargo:warning=Generated {service_count} API clients → {}",
@@ -166,7 +172,7 @@ fn generate_types_barrel(out_dir: &PathBuf) {
     }
 
     let type_count = files.len();
-    fs::write(out_dir.join("types.ts"), &barrel).expect("failed to write types.ts barrel");
+    write_if_changed(&out_dir.join("types.ts"), &barrel);
 
     println!(
         "cargo:warning=Generated types barrel with {type_count} type files → {}",

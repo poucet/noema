@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getBaseUrl } from '@simply/client';
+  import { MarkdownView } from '@simply/entity-ui';
   import type { DisplayMessage } from './stores/chat.svelte';
-  import MarkdownView from './MarkdownView.svelte';
 
   type Props = { message: DisplayMessage };
   const { message }: Props = $props();

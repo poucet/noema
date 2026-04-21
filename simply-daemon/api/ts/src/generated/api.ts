@@ -73,6 +73,40 @@ export const documentApi = (t: Transport) => ({
   flushTabEmbedding: (tabId: string) => t.rpc<void>('document.flush_tab_embedding', 'POST', `/api/document/tab/${tabId}/flush`),
 });
 
+// EntityApi
+export const entityApi = (t: Transport) => ({
+  /** List all entities for the authenticated user. Filter by `type_prefix` for `LIKE 'prefix%'` matching — e.g. `"document::"` for all document kinds. */
+  listEntities: (typePrefix: string | null) => t.rpc<T.EntitySummary[]>('entity.list_entities', 'GET', '/api/entity', typePrefix),
+  /** Search entities by title (case-insensitive). Optionally filter by type prefix. */
+  searchEntities: (query: string, typePrefix: string | null) => t.rpc<T.EntitySummary[]>('entity.search_entities', 'GET', `/api/entity/search/${query}`, { typePrefix }),
+  /** Get an entity's summary (no content). */
+  getEntity: (entityId: string) => t.rpc<T.EntitySummary>('entity.get_entity', 'GET', `/api/entity/${entityId}`),
+  /** Create a new entity, optionally with initial content. */
+  createEntity: (request: T.CreateEntityRequest) => t.rpc<T.EntitySummary>('entity.create_entity', 'POST', '/api/entity', request),
+  /** Rename an entity. */
+  renameEntity: (entityId: string, name: string) => t.rpc<void>('entity.rename_entity', 'PUT', `/api/entity/${entityId}`, { name }),
+  /** Change an entity's kind (e.g. `document::note` → `document::todo`). Restricted to kinds in the `document::` namespace so UI callers can't accidentally convert entities into conversations, directories, etc. */
+  changeEntityKind: (entityId: string, newKind: string) => t.rpc<void>('entity.change_entity_kind', 'PUT', `/api/entity/${entityId}/kind`, { newKind }),
+  /** Delete an entity and its descendants via `structure::contained_in`. */
+  deleteEntity: (entityId: string) => t.rpc<void>('entity.delete_entity', 'DELETE', `/api/entity/${entityId}`),
+  /** Fetch an entity's live content (lazy). Returns `content_markdown = None` if the entity has no content block. */
+  getEntityContent: (entityId: string) => t.rpc<T.EntityContent>('entity.get_entity_content', 'GET', `/api/entity/${entityId}/content`),
+  /** Replace an entity's content. Creates a new content block; the old one is orphaned for later GC. */
+  updateEntityContent: (entityId: string, request: T.UpdateEntityContentRequest) => t.rpc<void>('entity.update_entity_content', 'PUT', `/api/entity/${entityId}/content`, { request }),
+  /** Flush pending embedding for an entity (process immediately, bypass debounce). Called on tab switch / page unload to ensure edits are embedded promptly. */
+  flushEntityEmbedding: (entityId: string) => t.rpc<void>('entity.flush_entity_embedding', 'POST', `/api/entity/${entityId}/flush_embedding`),
+  /** List entities with an *incoming* edge at `entity_id` under `relation` (i.e. edges where `to_id = entity_id`). Ordered by `position` when the relation uses ordering.  Examples: a tabbed doc's tabs (`structure::contained_in`), an entity's backlinks (`reference::to`), the set of notes carrying a label (`label::tagged_with` on the label). */
+  listIncoming: (entityId: string, relation: string) => t.rpc<T.RelatedEntity[]>('entity.list_incoming', 'GET', `/api/entity/${entityId}/relations/incoming/${relation}`),
+  /** List entities with an *outgoing* edge at `entity_id` under `relation` (i.e. edges where `from_id = entity_id`). Ordered by `position` when the relation uses ordering.  Examples: a tab's parent doc (`structure::contained_in`), an entity's outgoing citations (`reference::to`), the labels attached to a note (`label::tagged_with` on the note). */
+  listOutgoing: (entityId: string, relation: string) => t.rpc<T.RelatedEntity[]>('entity.list_outgoing', 'GET', `/api/entity/${entityId}/relations/outgoing/${relation}`),
+  /** Add a relation edge `from_id → to_id`. */
+  addRelation: (request: T.AddRelationRequest) => t.rpc<void>('entity.add_relation', 'POST', '/api/entity/relation', request),
+  /** Remove a specific edge `(from_id, to_id, relation)`. */
+  removeRelation: (fromId: string, toId: string, relation: string) => t.rpc<void>('entity.remove_relation', 'DELETE', `/api/entity/relation/${fromId}/${toId}/${relation}`),
+  /** Atomically rewrite an edge's `to` endpoint and position, resequencing siblings that share the new endpoint. Used for drag-and-drop filing (`structure::contained_in`) and re-targeting citations (`reference::to`). */
+  moveRelation: (request: T.MoveRelationRequest) => t.rpc<void>('entity.move_relation', 'POST', '/api/entity/relation/move', request),
+});
+
 // McpApi
 export const mcpApi = (t: Transport) => ({
   /** List all configured MCP servers with their status. */
@@ -163,6 +197,8 @@ export const userApi = (t: Transport) => ({
   resolveUser: (externalId: string) => t.rpc<T.Scope | null>('user.resolve_user', 'GET', `/api/user/resolve/${externalId}`),
   /** Resolve an external identity to a daemon user. Creates a new user if one doesn't exist for this identity. The external_id is an opaque string (e.g. "discord:123456789"). Returns a Scope that can be used for subsequent requests. */
   resolveOrCreateUser: (externalId: string) => t.rpc<T.Scope>('user.resolve_or_create_user', 'POST', `/api/user/resolve/${externalId}`),
+  /** Look up a user by email, creating one if missing. Matches admin's "Create user" flow (same underlying `user_store.get_or_create_user_by_email`), so single-user desktop clients like Noema converge on the same user id admin ends up showing in the picker. */
+  getOrCreateUserByEmail: (email: string) => t.rpc<T.Scope>('user.get_or_create_user_by_email', 'POST', '/api/user/by-email', email),
 });
 
 // VoiceApi
@@ -176,3 +212,4 @@ export const voiceApi = (t: Transport) => ({
   /** Disconnect a voice stream. */
   voiceDisconnect: (sessionId: string) => t.rpc<void>('voice.voice_disconnect', 'DELETE', `/api/voice/${sessionId}`),
 });
+

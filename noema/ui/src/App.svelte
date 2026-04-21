@@ -8,7 +8,7 @@
   import ModelSelector from './lib/ModelSelector.svelte';
   import UserPicker from './lib/UserPicker.svelte';
   import { chatStore } from './lib/stores/chat.svelte';
-  import { documentsStore } from './lib/stores/documents.svelte';
+  import { documentsBrowser } from './lib/stores/documents.svelte';
 
   // Active activity persists across reloads — otherwise a UserPicker switch
   // (which full-page-reloads) always snaps back to conversations.
@@ -51,7 +51,8 @@
       daemonError = e instanceof Error ? e.message : String(e);
       return;
     }
-    await Promise.all([chatStore.init(), documentsStore.init()]);
+    // Documents load lazily on first sidebar mount (EntitySidebar handles it).
+    await chatStore.init();
 
     // Auto-select the most recent conversation if any.
     if (chatStore.conversations.length > 0 && chatStore.currentConversationId == null) {
@@ -90,7 +91,7 @@
         {#if active === 'conversations'}
           {chatStore.currentConversation?.name ?? 'Noema'}
         {:else}
-          {documentsStore.selected?.title ?? 'Noema'}
+          {documentsBrowser().selected?.title ?? 'Noema'}
         {/if}
       </h1>
 

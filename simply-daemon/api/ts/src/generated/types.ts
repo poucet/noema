@@ -162,10 +162,13 @@ export interface EntitySummary {
   createdAt: number;
   updatedAt: number;
   hasContent: boolean;
-  childCounts: Record<string, number>;
+  /** For each relation, count of edges where this entity is the `to`. */
+  incomingCounts: Record<string, number>;
+  /** For each relation, count of edges where this entity is the `from`. */
+  outgoingCounts: Record<string, number>;
 }
 
-export interface ChildEntity {
+export interface RelatedEntity {
   summary: EntitySummary;
   position: number | null;
 }
@@ -189,18 +192,18 @@ export interface UpdateEntityContentRequest {
   referencedAssets: string[];
 }
 
-export interface AddChildRequest {
-  parentId: string;
-  childId: string;
+export interface AddRelationRequest {
+  fromId: string;
+  toId: string;
   relation: string;
   position: number | null;
 }
 
-export interface MoveChildRequest {
-  childId: string;
-  newParentId: string;
-  newPosition: number;
+export interface MoveRelationRequest {
+  fromId: string;
   relation: string;
+  newToId: string;
+  newPosition: number;
 }
 
 export interface McpServerInfo {

@@ -5,7 +5,16 @@
 //! clients (gdocs skill, admin UI, Noema UI) migrate one at a time and the
 //! legacy surface is removed once there are no callers.
 //!
-//! Structure-only responses (`EntitySummary`, `ChildEntity`) never ship
+//! Relations in UCM are directed edges in a graph — not a tree. Every edge has
+//! a `from` endpoint and a `to` endpoint under a named relation. The API
+//! reflects that: a caller asks for an entity's *outgoing* edges (where it's
+//! the `from`) or its *incoming* edges (where it's the `to`). Some relations
+//! are naturally hierarchical by convention (`structure::contained_in` goes
+//! child → parent) but the API does not assume it — `reference::to`,
+//! `label::tagged_with`, `conversation::forked_from`, etc. are all queried the
+//! same way.
+//!
+//! Structure-only responses (`EntitySummary`, `RelatedEntity`) never ship
 //! content bodies. Content is fetched per-entity on demand via
 //! [`EntityApi::get_entity_content`] — the UI loads a tab's markdown only
 //! when the user opens it.
@@ -46,18 +55,25 @@ pub struct EntitySummary {
     /// True if `content_block_id` is set. UI dispatches on this to decide
     /// whether to show a markdown editor.
     pub has_content: bool,
-    /// Map of `relation` → count of children under that relation. Lets the UI
-    /// render tree nav / backlinks counts without extra round-trips.
-    pub child_counts: BTreeMap<String, u32>,
+    /// For each relation, count of edges where this entity is the `to`
+    /// endpoint (edges pointing *at* this entity). Covers e.g. a tabbed doc's
+    /// tabs (`structure::contained_in` — each tab points at the doc) or an
+    /// entity's backlinks (`reference::to`).
+    pub incoming_counts: BTreeMap<String, u32>,
+    /// For each relation, count of edges where this entity is the `from`
+    /// endpoint (edges originating *at* this entity). Covers e.g. a tab's
+    /// parent doc (`structure::contained_in` — outgoing once) or an entity's
+    /// outgoing references / labels.
+    pub outgoing_counts: BTreeMap<String, u32>,
 }
 
-/// A child entity returned from a relation-listing call, bundled with its
-/// ordering position (if any) under the relation.
+/// An entity on the far side of a relation edge, bundled with the edge's
+/// position (if the relation uses ordering).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
 #[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
-pub struct ChildEntity {
+pub struct RelatedEntity {
     pub summary: EntitySummary,
     pub position: Option<i64>,
 }
@@ -109,30 +125,33 @@ pub struct UpdateEntityContentRequest {
     pub referenced_assets: Vec<AssetId>,
 }
 
-/// Request to add a child entity under a parent via a specific relation.
+/// Request to add a relation edge `from_id → to_id` under a named relation.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
 #[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
-pub struct AddChildRequest {
-    pub parent_id: String,
-    pub child_id: String,
-    /// Namespaced relation (e.g. `"structure::contained_in"`).
+pub struct AddRelationRequest {
+    pub from_id: String,
+    pub to_id: String,
+    /// Namespaced relation (e.g. `"structure::contained_in"`, `"reference::to"`).
     pub relation: String,
     pub position: Option<i64>,
 }
 
-/// Request to move a child entity to a new position (and optionally a new
-/// parent) under a relation. Used by drag-and-drop filing.
+/// Request to rewrite an existing edge's `to` endpoint and/or position.
+/// Atomically updates the edge `(from_id, relation, *) → (from_id, relation, new_to_id)`
+/// and resequences siblings sharing the new endpoint. For `structure::contained_in`
+/// this is how drag-and-drop reparenting works; for `reference::to` it re-targets
+/// a citation.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
 #[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
-pub struct MoveChildRequest {
-    pub child_id: String,
-    pub new_parent_id: String,
-    pub new_position: i64,
+pub struct MoveRelationRequest {
+    pub from_id: String,
     pub relation: String,
+    pub new_to_id: String,
+    pub new_position: i64,
 }
 
 // ============================================================================
@@ -241,42 +260,64 @@ pub trait EntityApi: Send + Sync {
         entity_id: &str,
     ) -> anyhow::Result<()>;
 
-    // ----- Relations / children -----
+    // ----- Relations -----
 
-    /// List ordered children of `parent_id` under the given relation
-    /// (e.g. `"structure::contained_in"` to get a doc's tabs).
-    #[rpc(get = "/entity/{parent_id}/children/{relation}")]
-    async fn list_children(
+    /// List entities with an *incoming* edge at `entity_id` under `relation`
+    /// (i.e. edges where `to_id = entity_id`). Ordered by `position` when the
+    /// relation uses ordering.
+    ///
+    /// Examples: a tabbed doc's tabs (`structure::contained_in`), an entity's
+    /// backlinks (`reference::to`), the set of notes carrying a label
+    /// (`label::tagged_with` on the label).
+    #[rpc(get = "/entity/{entity_id}/relations/incoming/{relation}")]
+    async fn list_incoming(
         &self,
         ctx: &RequestContext,
-        parent_id: &str,
+        entity_id: &str,
         relation: &str,
-    ) -> anyhow::Result<Vec<ChildEntity>>;
+    ) -> anyhow::Result<Vec<RelatedEntity>>;
 
-    /// Add a child to a parent under a relation, with optional position.
+    /// List entities with an *outgoing* edge at `entity_id` under `relation`
+    /// (i.e. edges where `from_id = entity_id`). Ordered by `position` when
+    /// the relation uses ordering.
+    ///
+    /// Examples: a tab's parent doc (`structure::contained_in`), an entity's
+    /// outgoing citations (`reference::to`), the labels attached to a note
+    /// (`label::tagged_with` on the note).
+    #[rpc(get = "/entity/{entity_id}/relations/outgoing/{relation}")]
+    async fn list_outgoing(
+        &self,
+        ctx: &RequestContext,
+        entity_id: &str,
+        relation: &str,
+    ) -> anyhow::Result<Vec<RelatedEntity>>;
+
+    /// Add a relation edge `from_id → to_id`.
     #[rpc(post = "/entity/relation", no_tool)]
-    async fn add_child(
+    async fn add_relation(
         &self,
         ctx: &RequestContext,
-        request: AddChildRequest,
+        request: AddRelationRequest,
     ) -> anyhow::Result<()>;
 
-    /// Remove a specific (parent, child, relation) edge.
-    #[rpc(delete = "/entity/{parent_id}/child/{child_id}/{relation}", no_tool)]
-    async fn remove_child(
+    /// Remove a specific edge `(from_id, to_id, relation)`.
+    #[rpc(delete = "/entity/relation/{from_id}/{to_id}/{relation}", no_tool)]
+    async fn remove_relation(
         &self,
         ctx: &RequestContext,
-        parent_id: &str,
-        child_id: &str,
+        from_id: &str,
+        to_id: &str,
         relation: &str,
     ) -> anyhow::Result<()>;
 
-    /// Atomically reparent `child_id` under `new_parent_id` at `new_position`.
-    /// Used by drag-and-drop filing in the admin / Noema UIs.
-    #[rpc(post = "/entity/move_child", no_tool)]
-    async fn move_child(
+    /// Atomically rewrite an edge's `to` endpoint and position, resequencing
+    /// siblings that share the new endpoint. Used for drag-and-drop filing
+    /// (`structure::contained_in`) and re-targeting citations
+    /// (`reference::to`).
+    #[rpc(post = "/entity/relation/move", no_tool)]
+    async fn move_relation(
         &self,
         ctx: &RequestContext,
-        request: MoveChildRequest,
+        request: MoveRelationRequest,
     ) -> anyhow::Result<()>;
 }

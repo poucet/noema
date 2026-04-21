@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "simply-daemon/api/ts",
+    "simply-daemon/api/ts/entity-ui",
     "simply-daemon/admin",
     "noema/ui"
   ]

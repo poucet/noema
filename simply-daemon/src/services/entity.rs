@@ -20,8 +20,9 @@ use simply_rpc::RequestContext;
 use crate::api::*;
 use crate::types::AssetId;
 
-/// Relations whose child-counts are useful on an `EntitySummary`. We query
-/// these for every summary; more exotic relations are inspected on demand.
+/// Relations whose incoming/outgoing edge-counts are useful on an
+/// `EntitySummary`. We query these for every summary; more exotic relations
+/// are inspected on demand.
 const SUMMARY_COUNT_RELATIONS: &[&str] = &[
     "structure::contained_in",
     "reference::to",
@@ -95,22 +96,29 @@ impl<S: StorageTypes> EntityService<S> {
     }
 
     /// Convert a `StoredEntity` to a wire `EntitySummary`, populating
-    /// `has_content`, `owner_email`, and the `child_counts` for relations we
-    /// surface by default.
+    /// `has_content`, `owner_email`, and per-relation incoming/outgoing edge
+    /// counts for the relations we surface by default.
     async fn to_summary(&self, entity: StoredEntity) -> anyhow::Result<EntitySummary> {
         let owner_email = match (&entity.user_id, &self.user_email_cache) {
             (Some(uid), Some(cache)) => cache.get(&self.stores, uid).await,
             _ => None,
         };
 
-        // Query counts for the well-known relations. Each relation is a round-trip;
-        // for bulk listings the caller should page or specialize.
-        let mut child_counts: BTreeMap<String, u32> = BTreeMap::new();
+        // Query incoming + outgoing counts for the well-known relations. Each
+        // direction is a round-trip; for bulk listings the caller should page
+        // or specialize. Zero-count relations are omitted so clients can
+        // cheaply check existence via `.has(rel)`.
+        let mut incoming_counts: BTreeMap<String, u32> = BTreeMap::new();
+        let mut outgoing_counts: BTreeMap<String, u32> = BTreeMap::new();
         for rel_name in SUMMARY_COUNT_RELATIONS {
             let rel = RelationType::new(*rel_name);
-            let children = self.stores.entity().get_relations_to(&entity.id, Some(&rel)).await?;
-            if !children.is_empty() {
-                child_counts.insert((*rel_name).to_string(), children.len() as u32);
+            let incoming = self.stores.entity().get_relations_to(&entity.id, Some(&rel)).await?;
+            if !incoming.is_empty() {
+                incoming_counts.insert((*rel_name).to_string(), incoming.len() as u32);
+            }
+            let outgoing = self.stores.entity().get_relations_from(&entity.id, Some(&rel)).await?;
+            if !outgoing.is_empty() {
+                outgoing_counts.insert((*rel_name).to_string(), outgoing.len() as u32);
             }
         }
 
@@ -125,7 +133,8 @@ impl<S: StorageTypes> EntityService<S> {
             created_at: entity.content.created_at,
             updated_at: entity.content.updated_at,
             has_content: entity.content_block_id.is_some(),
-            child_counts,
+            incoming_counts,
+            outgoing_counts,
         })
     }
 
@@ -391,74 +400,116 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         Ok(())
     }
 
-    // ----- Relations / children -------------------------------------------
+    // ----- Relations ------------------------------------------------------
 
-    async fn list_children(
+    async fn list_incoming(
         &self,
         ctx: &RequestContext,
-        parent_id: &str,
+        entity_id: &str,
         relation: &str,
-    ) -> anyhow::Result<Vec<ChildEntity>> {
+    ) -> anyhow::Result<Vec<RelatedEntity>> {
         let user_id = Self::require_user(ctx)?;
-        let id = EntityId::from_string(parent_id);
+        let id = EntityId::from_string(entity_id);
         self.verify_access(&user_id, &id).await?;
 
         let rel = RelationType::new(relation);
-        let children = self.coordinator.list_children(&id, &rel).await?;
+        let related = self
+            .stores
+            .entity()
+            .list_relations_to_ordered(&id, &rel)
+            .await?;
 
-        let mut out = Vec::with_capacity(children.len());
-        for (child_entity, position) in children {
-            let summary = self.to_summary(child_entity).await?;
-            out.push(ChildEntity { summary, position });
+        let mut out = Vec::with_capacity(related.len());
+        for (other_id, edge) in related {
+            let Some(other) = self.stores.entity().get_entity(&other_id).await? else {
+                continue;
+            };
+            out.push(RelatedEntity {
+                summary: self.to_summary(other).await?,
+                position: edge.position,
+            });
         }
         Ok(out)
     }
 
-    async fn add_child(
+    async fn list_outgoing(
         &self,
         ctx: &RequestContext,
-        request: AddChildRequest,
-    ) -> anyhow::Result<()> {
+        entity_id: &str,
+        relation: &str,
+    ) -> anyhow::Result<Vec<RelatedEntity>> {
         let user_id = Self::require_user(ctx)?;
-        let parent = EntityId::from_string(&request.parent_id);
-        let child = EntityId::from_string(&request.child_id);
-        self.verify_access(&user_id, &parent).await?;
-        self.verify_access(&user_id, &child).await?;
+        let id = EntityId::from_string(entity_id);
+        self.verify_access(&user_id, &id).await?;
 
-        let rel = RelationType::new(&request.relation);
-        self.coordinator.add_child(&parent, &child, rel, request.position, None).await
+        let rel = RelationType::new(relation);
+        let related = self
+            .stores
+            .entity()
+            .list_relations_from_ordered(&id, &rel)
+            .await?;
+
+        let mut out = Vec::with_capacity(related.len());
+        for (other_id, edge) in related {
+            let Some(other) = self.stores.entity().get_entity(&other_id).await? else {
+                continue;
+            };
+            out.push(RelatedEntity {
+                summary: self.to_summary(other).await?,
+                position: edge.position,
+            });
+        }
+        Ok(out)
     }
 
-    async fn remove_child(
+    async fn add_relation(
         &self,
         ctx: &RequestContext,
-        parent_id: &str,
-        child_id: &str,
+        request: AddRelationRequest,
+    ) -> anyhow::Result<()> {
+        let user_id = Self::require_user(ctx)?;
+        let from = EntityId::from_string(&request.from_id);
+        let to = EntityId::from_string(&request.to_id);
+        self.verify_access(&user_id, &from).await?;
+        self.verify_access(&user_id, &to).await?;
+
+        let rel = RelationType::new(&request.relation);
+        self.stores
+            .entity()
+            .add_relation(&from, &to, rel, request.position, None)
+            .await
+    }
+
+    async fn remove_relation(
+        &self,
+        ctx: &RequestContext,
+        from_id: &str,
+        to_id: &str,
         relation: &str,
     ) -> anyhow::Result<()> {
         let user_id = Self::require_user(ctx)?;
-        let parent = EntityId::from_string(parent_id);
-        let child = EntityId::from_string(child_id);
-        self.verify_access(&user_id, &parent).await?;
+        let from = EntityId::from_string(from_id);
+        let to = EntityId::from_string(to_id);
+        self.verify_access(&user_id, &from).await?;
 
         let rel = RelationType::new(relation);
-        self.stores.entity().remove_relation(&child, &parent, &rel).await
+        self.stores.entity().remove_relation(&from, &to, &rel).await
     }
 
-    async fn move_child(
+    async fn move_relation(
         &self,
         ctx: &RequestContext,
-        request: MoveChildRequest,
+        request: MoveRelationRequest,
     ) -> anyhow::Result<()> {
         let user_id = Self::require_user(ctx)?;
-        let child = EntityId::from_string(&request.child_id);
-        let new_parent = EntityId::from_string(&request.new_parent_id);
-        self.verify_access(&user_id, &child).await?;
-        self.verify_access(&user_id, &new_parent).await?;
+        let from = EntityId::from_string(&request.from_id);
+        let new_to = EntityId::from_string(&request.new_to_id);
+        self.verify_access(&user_id, &from).await?;
+        self.verify_access(&user_id, &new_to).await?;
 
         let rel = RelationType::new(&request.relation);
         self.coordinator
-            .move_entity(&child, &new_parent, request.new_position, &rel)
+            .move_entity(&from, &new_to, request.new_position, &rel)
             .await
     }
 }

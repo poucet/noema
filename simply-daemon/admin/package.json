@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@simply/client": "*",
+    "@simply/entity-ui": "*",
     "@astrojs/svelte": "^8.0.4",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language-data": "^6.5.2",

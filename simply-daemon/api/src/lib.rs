@@ -181,12 +181,12 @@ mod ts_export {
         CreateTabRequest::export_all().expect("CreateTabRequest");
         UpdateTabRequest::export_all().expect("UpdateTabRequest");
         EntitySummary::export_all().expect("EntitySummary");
-        ChildEntity::export_all().expect("ChildEntity");
+        RelatedEntity::export_all().expect("RelatedEntity");
         EntityContent::export_all().expect("EntityContent");
         CreateEntityRequest::export_all().expect("CreateEntityRequest");
         UpdateEntityContentRequest::export_all().expect("UpdateEntityContentRequest");
-        AddChildRequest::export_all().expect("AddChildRequest");
-        MoveChildRequest::export_all().expect("MoveChildRequest");
+        AddRelationRequest::export_all().expect("AddRelationRequest");
+        MoveRelationRequest::export_all().expect("MoveRelationRequest");
         McpServerInfo::export_all().expect("McpServerInfo");
         AddMcpServerRequest::export_all().expect("AddMcpServerRequest");
         UpdateMcpServerRequest::export_all().expect("UpdateMcpServerRequest");
