@@ -3,6 +3,8 @@
 //! Processes messages in AI Chats category channels and @mentions,
 //! forwarding them to the daemon for LLM responses.
 
+use std::collections::HashMap;
+
 use serenity::builder::{CreateEmbed, GetMessages};
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
@@ -346,6 +348,10 @@ async fn stream_response(
     session: &mut simply_daemon::DaemonSession,
 ) -> anyhow::Result<()> {
     let mut text_buffer = String::new();
+    // DaemonEvent::ToolResult only carries the tool-call id; the rendered
+    // "Tool result" message is titled with the tool name, so track the
+    // name seen on the matching ToolCall.
+    let mut tool_names: HashMap<String, String> = HashMap::new();
 
     loop {
         match session.recv().await {
@@ -390,7 +396,7 @@ async fn stream_response(
                     .color(0x5865F2);
                 let call = ToolCall {
                     id: id.clone(),
-                    name,
+                    name: name.clone(),
                     arguments,
                     extra: serde_json::Value::Null,
                 };
@@ -405,33 +411,39 @@ async fn stream_response(
                         serenity::builder::CreateMessage::new().embed(embed).add_file(attachment),
                     )
                     .await?;
+                tool_names.insert(id, name);
             }
             Ok(DaemonEvent::ToolResult { id, result }) => {
-                let result_str = serde_json::to_string_pretty(&result).unwrap_or_default();
-                tracing::debug!(result = %truncate(&result_str, 500), "tool result");
-                let formatted = crate::tool_render::format_tool_output(&result_str);
-                let display = truncate_for_discord(&formatted);
-                let embed = CreateEmbed::new()
-                    .title("\u{1f4e6} Tool result")
-                    .description(&display)
-                    .color(0x2ECC71);
-                let content: Vec<ToolResultContent> =
+                tracing::debug!(
+                    result = %truncate(&serde_json::to_string_pretty(&result).unwrap_or_default(), 500),
+                    "tool result",
+                );
+                let blocks: Vec<ToolResultContent> =
                     serde_json::from_value(result).unwrap_or_default();
                 let tool_result = ToolResult {
                     tool_call_id: id.clone(),
-                    content,
+                    content: blocks.clone(),
                 };
                 let bytes = serde_json::to_vec_pretty(&tool_result).unwrap_or_default();
                 let attachment = serenity::builder::CreateAttachment::bytes(
                     bytes,
                     format!("tool_result_{id}.json"),
                 );
-                msg.channel_id
-                    .send_message(
-                        &lx.http,
-                        serenity::builder::CreateMessage::new().embed(embed).add_file(attachment),
-                    )
-                    .await?;
+                let tool_name = tool_names
+                    .remove(&id)
+                    .unwrap_or_else(|| "\u{1f4e6} Tool result".to_string());
+                if let Err(e) = crate::tool_render::render_tool_result_to_channel(
+                    &lx.http,
+                    &lx.ctx.shard,
+                    msg.channel_id,
+                    &tool_name,
+                    Ok(blocks),
+                    vec![attachment],
+                )
+                .await
+                {
+                    tracing::warn!(tool = %tool_name, error = %e, "failed to render tool result");
+                }
             }
             Ok(DaemonEvent::TurnComplete) => {
                 if !text_buffer.is_empty() {

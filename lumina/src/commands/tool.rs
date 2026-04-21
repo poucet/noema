@@ -651,7 +651,7 @@ async fn send_tool_result_from_service(
     };
 
     crate::tool_render::render_tool_result_to_channel(
-        &lx.http, &lx.ctx.shard, channel_id, tool_name, result,
+        &lx.http, &lx.ctx.shard, channel_id, tool_name, result, Vec::new(),
     ).await?;
 
     if let SendTarget::Command(cmd) = target {

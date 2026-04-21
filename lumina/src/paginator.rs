@@ -118,6 +118,10 @@ fn nav_buttons(page: usize, total: usize) -> Vec<CreateActionRow> {
 }
 
 /// Send a paginated embed to a channel with prev/next buttons.
+///
+/// `extra_files` are attached to the initial message only; Discord preserves
+/// them across edits triggered by page navigation, so they remain reachable
+/// regardless of the page currently rendered.
 pub async fn send_paginated_embeds_to_channel(
     http: &Arc<Http>,
     shard: &ShardMessenger,
@@ -125,12 +129,17 @@ pub async fn send_paginated_embeds_to_channel(
     title: &str,
     pages: &[String],
     timeout: Duration,
+    extra_files: Vec<serenity::builder::CreateAttachment>,
 ) -> anyhow::Result<()> {
     use serenity::builder::{CreateEmbed, CreateMessage, EditMessage};
 
     if pages.is_empty() {
         let embed = CreateEmbed::new().title(title).description("(empty)").color(0x2ECC71);
-        channel_id.send_message(http, CreateMessage::new().embed(embed)).await?;
+        let mut msg = CreateMessage::new().embed(embed);
+        for f in extra_files {
+            msg = msg.add_file(f);
+        }
+        channel_id.send_message(http, msg).await?;
         return Ok(());
     }
 
@@ -148,10 +157,11 @@ pub async fn send_paginated_embeds_to_channel(
     };
 
     let components = if total > 1 { nav_buttons(page, total) } else { vec![] };
-    let msg = channel_id.send_message(
-        http,
-        CreateMessage::new().embed(make_embed(page)).components(components),
-    ).await?;
+    let mut initial = CreateMessage::new().embed(make_embed(page)).components(components);
+    for f in extra_files {
+        initial = initial.add_file(f);
+    }
+    let msg = channel_id.send_message(http, initial).await?;
 
     if total <= 1 {
         return Ok(());

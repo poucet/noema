@@ -102,7 +102,7 @@ async fn post_tool_result(
         return;
     };
     if let Err(e) = crate::tool_render::render_tool_result_to_channel(
-        http, shard, text_channel, tool_name, Ok(blocks),
+        http, shard, text_channel, tool_name, Ok(blocks), Vec::new(),
     ).await {
         tracing::warn!(tool = %tool_name, error = %e, "voice: failed to post tool result");
     }
