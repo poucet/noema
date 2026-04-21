@@ -4,6 +4,7 @@
   import ActivityBar, { type ActivityId } from './lib/ActivityBar.svelte';
   import SidePanel from './lib/SidePanel.svelte';
   import ChatView from './lib/ChatView.svelte';
+  import ModelSelector from './lib/ModelSelector.svelte';
   import { chatStore } from './lib/stores/chat.svelte';
 
   let active = $state<ActivityId>('conversations');
@@ -74,9 +75,13 @@
       </h1>
 
       {#if daemonStatus === 'ok'}
-        <span class="rounded bg-elevated px-2 py-1 text-xs text-teal-300">
-          {chatStore.currentModelId || `daemon v${daemonVersion}`}
-        </span>
+        {#if active === 'conversations'}
+          <ModelSelector />
+        {:else}
+          <span class="rounded bg-elevated px-2 py-1 text-xs text-teal-300">
+            daemon v{daemonVersion}
+          </span>
+        {/if}
       {:else if daemonStatus === 'error'}
         <span class="rounded bg-red-900/50 px-2 py-1 text-xs text-red-200" title={daemonError}>
           daemon unreachable
