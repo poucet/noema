@@ -42,10 +42,7 @@ Ships non-breaking: each commit leaves daemon, Lumina, and Noema running. Fast-f
 ### 2. Events & Intents
 Reactive event system — timers, platform events (Discord, desktop), LLM-compiled intents with action ASTs. Scheduled prompts, automated workflows.
 
-### 3. Web Extension & RTC (paused)
-Chrome extension as daemon client — chat, MCP tools, content capture. Google Meet caption scraping. Deprioritized for now.
-
-### 4. Multi-user Polish
+### 3. Multi-user Polish
 Per-user per-MCP-server persistent tokens, Discord role-based access control, admin user management UI.
 
 ---
@@ -61,3 +58,4 @@ Per-user per-MCP-server persistent tokens, Discord role-based access control, ad
 - OAuth identity linking not working end-to-end (Discord→email user merge)
 - Document visibility (is_public flag exists but unused)
 - Noema search panel + document refs (depends on UI work)
+- **Chrome extension (far future)** — daemon client for in-browser contexts. Most promising small near-term slice: a "send this page to Simply as an imported document" action that pushes the active tab's content/URL through the gdocs-style import path, creating a `document::tabbed` or flat `document::knowledge` entity with `origin = "browser:<url>"`. Full extension (sidebar chat, Meet caption scraping, audio streaming) is post-v1.
