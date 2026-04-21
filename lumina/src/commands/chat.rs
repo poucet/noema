@@ -9,7 +9,6 @@ use serenity::all::{
 };
 use serenity::builder::{CreateCommand, CreateCommandOption};
 use serenity::model::channel::ChannelType;
-use simply_daemon_api::ModelApi;
 
 use super::LuminaContext;
 use crate::register_command;

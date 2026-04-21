@@ -1,15 +1,13 @@
 //! /voice — Discord voice channel commands.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use serenity::all::{
     AutocompleteChoice, ChannelId, CommandInteraction, CreateAutocompleteResponse,
-    CreateInteractionResponse, CreateInteractionResponseMessage, ResolvedOption, ResolvedValue,
+    CreateInteractionResponse,
 };
 use serenity::builder::GetMessages;
 use simply_daemon_api::*;
-use simply_rpc::RequestContext;
 
 use super::LuminaContext;
 use crate::voice::{VoiceManagerKey, VoiceMode};
@@ -62,62 +60,6 @@ mod voice {
         lx.reply_ephemeral(cmd, reply).await
     }
 
-    #[sub_command(description = "Speak text in the voice channel via TTS")]
-    pub async fn say(
-        lx: &LuminaContext,
-        cmd: &CommandInteraction,
-        #[describe("Text to speak")] text: String,
-    ) -> anyhow::Result<()> {
-        if text.is_empty() {
-            return lx.reply(cmd, "No text provided").await;
-        }
-
-        let guild_id = cmd.guild_id.ok_or_else(|| anyhow::anyhow!("Not in a guild"))?;
-        let manager = songbird::get(&lx.ctx).await
-            .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
-
-        // Auto-join if not connected to a channel
-        let needs_join = match manager.get(guild_id) {
-            Some(h) => {
-                let handler = h.lock().await;
-                handler.current_channel().is_none()
-            }
-            None => true,
-        };
-        if needs_join {
-            join_user_channel(lx, cmd).await.map_err(|e| anyhow::anyhow!(e))?;
-        }
-        let handler_lock = manager.get(guild_id)
-            .ok_or_else(|| anyhow::anyhow!("Failed to get voice handler"))?;
-
-        lx.reply(cmd, &format!("Speaking: _{text}_")).await?;
-
-        let voice_mgr = get_voice_manager(lx).await?;
-        let stereo = voice_mgr.synthesize_for_discord(&text).await?;
-
-        tracing::info!(
-            stereo_samples = stereo.len(),
-            duration_secs = stereo.len() as f32 / 48_000.0 / 2.0,
-            "playing TTS in voice channel"
-        );
-
-        // Build WAV in memory and play via songbird
-        let wav = crate::voice::build_wav_f32(&stereo, 48_000, 2);
-        let cursor = std::io::Cursor::new(wav);
-        let input = songbird::input::Input::Live(
-            songbird::input::LiveInput::Raw(
-                songbird::input::AudioStream { input: Box::new(cursor) },
-            ),
-            None,
-        );
-        let mut handler = handler_lock.lock().await;
-
-        let track = handler.play_input(input);
-        tracing::info!(track_uuid = %track.uuid(), "track queued in songbird");
-
-        Ok(())
-    }
-
     #[sub_command(description = "Leave the voice channel")]
     pub async fn leave(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
         let guild_id = cmd.guild_id.ok_or_else(|| anyhow::anyhow!("Not in a guild"))?;
@@ -138,14 +80,14 @@ mod voice {
             "stt" => {
                 voice_mgr.set_stt_provider(id.clone()).await;
                 save_voice_config(lx, &voice_mgr).await;
-                lx.reply(cmd, &format!("STT provider set to **{id}**")).await
+                lx.reply_ephemeral(cmd, &format!("STT provider set to **{id}**")).await
             }
             "tts" => {
                 voice_mgr.set_tts_provider(id.clone()).await;
                 save_voice_config(lx, &voice_mgr).await;
                 lx.reply(cmd, &format!("TTS provider set to **{id}**")).await
             }
-            _ => lx.reply(cmd, "Type must be 'stt' or 'tts'").await,
+            _ => lx.reply_ephemeral(cmd, "Type must be 'stt' or 'tts'").await,
         }
     }
 
@@ -158,7 +100,7 @@ mod voice {
         let voice_mgr = get_voice_manager(lx).await?;
         voice_mgr.set_tts_voice(id.clone()).await;
         save_voice_config(lx, &voice_mgr).await;
-        lx.reply(cmd, &format!("TTS voice set to **{id}**")).await
+        lx.reply_ephemeral(cmd, &format!("TTS voice set to **{id}**")).await
     }
 
     #[sub_command(description = "List available providers and voices")]
