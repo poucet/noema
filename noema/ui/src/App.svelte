@@ -1,18 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    getTransport,
-    setCurrentUser,
-    coreApi,
-    conversationApi,
-    type ConversationInfo,
-  } from '@simply/client';
+  import { getTransport, setCurrentUser, coreApi } from '@simply/client';
   import ActivityBar, { type ActivityId } from './lib/ActivityBar.svelte';
   import SidePanel from './lib/SidePanel.svelte';
-
-  const t = getTransport();
-  const core = coreApi(t);
-  const conversations$api = conversationApi(t);
+  import ChatView from './lib/ChatView.svelte';
+  import { chatStore } from './lib/stores/chat.svelte';
 
   let active = $state<ActivityId>('conversations');
   let showSettings = $state(false);
@@ -20,13 +12,6 @@
   let daemonStatus = $state<'checking' | 'ok' | 'error'>('checking');
   let daemonVersion = $state<string | null>(null);
   let daemonError = $state<string | null>(null);
-
-  let conversations = $state<ConversationInfo[]>([]);
-  let currentConversationId = $state<string | null>(null);
-
-  async function refreshConversations() {
-    conversations = await conversations$api.listConversations();
-  }
 
   async function syncAdminUserId() {
     const internals = (window as any).__TAURI_INTERNALS__;
@@ -42,41 +27,27 @@
   onMount(async () => {
     await syncAdminUserId();
     try {
-      daemonVersion = await core.version();
+      daemonVersion = await coreApi(getTransport()).version();
       daemonStatus = 'ok';
     } catch (e) {
       daemonStatus = 'error';
       daemonError = e instanceof Error ? e.message : String(e);
       return;
     }
-    try {
-      await refreshConversations();
-      if (conversations.length > 0) currentConversationId = conversations[0].id;
-    } catch (e) {
-      console.error('[noema] failed to load conversations', e);
+    await chatStore.init();
+
+    // Auto-select the most recent conversation if any.
+    if (chatStore.conversations.length > 0 && chatStore.currentConversationId == null) {
+      await chatStore.selectConversation(chatStore.conversations[0].id);
     }
   });
 
-  async function handleNewConversation() {
-    const id = await conversations$api.createConversation(null);
-    await refreshConversations();
-    currentConversationId = id;
-  }
-
-  function handleSelectConversation(id: string) {
-    currentConversationId = id;
-  }
-
-  async function handleRenameConversation(id: string, name: string) {
-    await conversations$api.renameConversation(id, name);
-    await refreshConversations();
-  }
-
-  async function handleDeleteConversation(id: string) {
-    await conversations$api.deleteConversation(id);
-    if (currentConversationId === id) currentConversationId = null;
-    await refreshConversations();
-  }
+  // Best-effort session teardown on window close — WS alone might miss it.
+  $effect(() => {
+    const handler = () => chatStore.cleanup();
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  });
 </script>
 
 <div class="flex h-screen bg-background">
@@ -88,21 +59,23 @@
 
   <SidePanel
     {active}
-    {conversations}
-    {currentConversationId}
-    onNewConversation={handleNewConversation}
-    onSelectConversation={handleSelectConversation}
-    onRenameConversation={handleRenameConversation}
-    onDeleteConversation={handleDeleteConversation}
+    conversations={chatStore.conversations}
+    currentConversationId={chatStore.currentConversationId}
+    onNewConversation={() => chatStore.newConversation()}
+    onSelectConversation={(id) => chatStore.selectConversation(id)}
+    onRenameConversation={(id, name) => chatStore.renameConversation(id, name)}
+    onDeleteConversation={(id) => chatStore.deleteConversation(id)}
   />
 
   <div class="flex min-w-0 flex-1 flex-col">
     <div class="flex items-center justify-between border-b border-gray-700 bg-background px-4 py-3">
-      <h1 class="text-lg font-semibold text-foreground">Noema</h1>
+      <h1 class="text-lg font-semibold text-foreground">
+        {chatStore.currentConversation?.name ?? 'Noema'}
+      </h1>
 
       {#if daemonStatus === 'ok'}
         <span class="rounded bg-elevated px-2 py-1 text-xs text-teal-300">
-          daemon v{daemonVersion}
+          {chatStore.currentModelId || `daemon v${daemonVersion}`}
         </span>
       {:else if daemonStatus === 'error'}
         <span class="rounded bg-red-900/50 px-2 py-1 text-xs text-red-200" title={daemonError}>
@@ -111,17 +84,13 @@
       {/if}
     </div>
 
-    <div class="flex flex-1 items-center justify-center">
-      {#if active === 'conversations'}
-        {#if currentConversationId}
-          <p class="text-muted">Chat for {currentConversationId} lands here.</p>
-        {:else}
-          <p class="text-muted">Select or create a conversation.</p>
-        {/if}
-      {:else}
+    {#if active === 'conversations'}
+      <ChatView />
+    {:else}
+      <div class="flex flex-1 items-center justify-center">
         <p class="text-muted">Document view lands here.</p>
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 
   {#if showSettings}
