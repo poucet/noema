@@ -134,7 +134,9 @@ async fn register_skills(daemon: &Arc<dyn Daemon>, discord: &mcp::DiscordSkill) 
 
 fn setup_logging() {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "lumina=debug,simply_daemon=info,mcp_gdocs=debug".into());
+        .unwrap_or_else(|_| {
+            "lumina=debug,simply_daemon=info,simply_core=debug,mcp_gdocs=debug".into()
+        });
 
     if let Ok(log_path) = std::env::var("LUMINA_LOG_FILE") {
         let file = std::fs::File::create(&log_path).expect("failed to create log file");
