@@ -66,15 +66,15 @@ pub trait McpApi: Send + Sync {
     // -- Server management (no user context needed) --
 
     /// List all configured MCP servers with their status.
-    #[rpc(get = "/mcp")]
+    #[rpc(get = "/mcp", no_tool)]
     async fn list_mcp_servers(&self) -> anyhow::Result<Vec<McpServerInfo>>;
 
     /// Add a new MCP server configuration.
-    #[rpc(post = "/mcp")]
+    #[rpc(post = "/mcp", no_tool)]
     async fn add_mcp_server(&self, request: AddMcpServerRequest) -> anyhow::Result<()>;
 
     /// Remove an MCP server configuration.
-    #[rpc(delete = "/mcp/{server_id}")]
+    #[rpc(delete = "/mcp/{server_id}", no_tool)]
     async fn remove_mcp_server(&self, server_id: &str) -> anyhow::Result<()>;
 
     /// Connect to an MCP server. Returns tool count.
@@ -82,23 +82,23 @@ pub trait McpApi: Send + Sync {
     async fn connect_mcp_server(&self, server_id: &str) -> anyhow::Result<usize>;
 
     /// Disconnect from an MCP server.
-    #[rpc(post = "/mcp/{server_id}/disconnect")]
+    #[rpc(post = "/mcp/{server_id}/disconnect", no_tool)]
     async fn disconnect_mcp_server(&self, server_id: &str) -> anyhow::Result<()>;
 
     /// Get tools provided by a specific MCP server.
-    #[rpc(get = "/mcp/{server_id}/tools")]
+    #[rpc(get = "/mcp/{server_id}/tools", no_tool)]
     async fn get_mcp_server_tools(&self, server_id: &str) -> anyhow::Result<Vec<McpTool>>;
 
     /// Update settings for an MCP server.
-    #[rpc(put = "/mcp/{server_id}")]
+    #[rpc(put = "/mcp/{server_id}", no_tool)]
     async fn update_mcp_server_settings(&self, server_id: &str, request: UpdateMcpServerRequest) -> anyhow::Result<()>;
 
     /// Stop retry attempts for an MCP server.
-    #[rpc(post = "/mcp/{server_id}/stop-retry")]
+    #[rpc(post = "/mcp/{server_id}/stop-retry", no_tool)]
     async fn stop_mcp_retry(&self, server_id: &str) -> anyhow::Result<()>;
 
     /// Start retry attempts for an MCP server.
-    #[rpc(post = "/mcp/{server_id}/retry")]
+    #[rpc(post = "/mcp/{server_id}/retry", no_tool)]
     async fn start_mcp_retry(&self, server_id: &str) -> anyhow::Result<()>;
 
     // -- Tool operations (user-scoped) --

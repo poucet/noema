@@ -56,14 +56,14 @@ pub struct SeedMessage {
 #[simply_rpc::rpc_service("session")]
 #[async_trait]
 pub trait SessionApi: Send + Sync {
-    #[rpc(stream = "/session/new")]
+    #[rpc(stream = "/session/new", no_tool)]
     async fn create_session(
         &self,
         ctx: &RequestContext,
         options: CreateSessionOptions,
     ) -> anyhow::Result<(SessionInfo, broadcast::Receiver<DaemonEvent>)>;
 
-    #[rpc(stream = "/session/{session_id}/subscribe")]
+    #[rpc(stream = "/session/{session_id}/subscribe", no_tool)]
     async fn subscribe_session(
         &self,
         ctx: &RequestContext,
@@ -73,7 +73,7 @@ pub trait SessionApi: Send + Sync {
     #[rpc(get = "/session")]
     async fn list_sessions(&self, ctx: &RequestContext) -> anyhow::Result<Vec<SessionInfo>>;
 
-    #[rpc(post = "/session/{session_id}/message")]
+    #[rpc(post = "/session/{session_id}/message", no_tool)]
     async fn send_message(
         &self,
         ctx: &RequestContext,
@@ -81,15 +81,15 @@ pub trait SessionApi: Send + Sync {
         message: UserMessage,
     ) -> anyhow::Result<()>;
 
-    #[rpc(put = "/session/{session_id}/model")]
+    #[rpc(put = "/session/{session_id}/model", no_tool)]
     async fn set_model(&self, ctx: &RequestContext, session_id: &SessionId, model_id: &str) -> anyhow::Result<()>;
 
-    #[rpc(delete = "/session/{session_id}")]
+    #[rpc(delete = "/session/{session_id}", no_tool)]
     async fn close_session(&self, ctx: &RequestContext, session_id: &SessionId) -> anyhow::Result<()>;
 
-    #[rpc(delete = "/session")]
+    #[rpc(delete = "/session", no_tool)]
     async fn close_all_sessions(&self) -> anyhow::Result<()>;
 
-    #[rpc(post = "/session/event")]
+    #[rpc(post = "/session/event", no_tool)]
     async fn push_event(&self, ctx: &RequestContext, event: InboundEvent) -> anyhow::Result<()>;
 }
