@@ -76,6 +76,13 @@
   );
   const viewContentMarkdown = $derived(viewContent?.contentMarkdown ?? '');
 
+  /** True if `title` already starts with an emoji (pictographic codepoint),
+   *  e.g. imported Google Doc tabs that carry their own icon. Used to skip
+   *  the default 📄 prefix so we don't double up. */
+  function startsWithEmoji(title: string | null | undefined): boolean {
+    return !!title && /^\p{Extended_Pictographic}/u.test(title);
+  }
+
   function displayKind(kind: string): string {
     return kind.startsWith('document::') ? kind.slice('document::'.length) : kind;
   }
@@ -123,16 +130,21 @@
                    {isActive ? 'bg-elevated text-fg' : 'text-muted'}"
             onclick={() => onopenChild(child.summary)}
           >
-            <span class="shrink-0">📄</span>
+            {#if !startsWithEmoji(child.summary.title)}
+              <span class="shrink-0">📄</span>
+            {/if}
             <span class="truncate flex-1">{child.summary.title ?? '(untitled)'}</span>
             {#if ondeleteChild && contained.length > 1}
               <span
                 role="button"
                 tabindex="-1"
-                class="text-muted hover:text-danger opacity-0 group-hover:opacity-100 shrink-0"
+                class="text-muted hover:text-danger opacity-0 group-hover:opacity-100 shrink-0 p-0.5 -m-0.5 rounded hover:bg-danger/10"
                 onclick={(e) => { e.stopPropagation(); ondeleteChild?.(child.summary.id); }}
                 onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); ondeleteChild?.(child.summary.id); } }}
-              >&times;</span>
+                aria-label="Delete"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+              </span>
             {/if}
           </button>
         {/each}

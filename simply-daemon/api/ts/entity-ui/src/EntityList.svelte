@@ -62,10 +62,6 @@
     searchTimeout = setTimeout(() => onsearch(v), 300);
   }
 
-  function displayKind(kind: string): string {
-    return kind.startsWith('document::') ? kind.slice('document::'.length) : kind;
-  }
-
   function formatDate(ts: number): string {
     return new Date(ts).toLocaleDateString(undefined, {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -105,30 +101,29 @@
     {:else}
       {#each entities as entity (entity.id)}
         <div
-          class="relative w-full text-left px-3 py-2 text-sm border-b border-border hover:bg-elevated transition-colors group cursor-pointer"
+          class="w-full text-left px-3 py-2 text-sm border-b border-border hover:bg-elevated transition-colors group cursor-pointer"
           class:bg-elevated={selectedId === entity.id}
           role="button"
           tabindex="0"
           onclick={() => onselect(entity.id)}
           onkeydown={(e) => { if (e.key === 'Enter') onselect(entity.id); }}
         >
-          <div class="font-medium text-fg truncate pr-5">{entity.title ?? '(untitled)'}</div>
-          <div class="text-xs text-muted flex justify-between">
-            <span class="uppercase tracking-wide">{displayKind(entity.kind)}</span>
-            <span>{formatDate(entity.updatedAt)}</span>
+          <div class="flex items-center gap-2">
+            <div class="font-medium text-fg truncate flex-1 min-w-0">{entity.title ?? '(untitled)'}</div>
+            <button
+              class="shrink-0 p-1 -m-1 rounded text-muted hover:text-danger hover:bg-danger/10 opacity-0 group-hover:opacity-100 transition"
+              onclick={(e) => { e.stopPropagation(); ondelete(entity.id); }}
+              aria-label="Delete"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>
           </div>
+          <div class="text-xs text-muted">{formatDate(entity.updatedAt)}</div>
           {#if showOwner}
             <div class="text-[11px] text-muted/70 truncate">
               {entity.ownerEmail ?? (entity.userId ? `anon · ${entity.userId.slice(0, 8)}` : 'no owner')}
             </div>
           {/if}
-          <button
-            class="absolute right-2 top-2 text-xs text-muted hover:text-danger opacity-0 group-hover:opacity-100"
-            onclick={(e) => { e.stopPropagation(); ondelete(entity.id); }}
-            aria-label="Delete"
-          >
-            &times;
-          </button>
         </div>
       {/each}
     {/if}
