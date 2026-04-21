@@ -57,5 +57,6 @@ Per-user per-MCP-server persistent tokens, Discord role-based access control, ad
 - Persist OAuth tokens across daemon restarts (encrypt-at-rest or refresh tokens)
 - OAuth identity linking not working end-to-end (Discord→email user merge)
 - Document visibility (is_public flag exists but unused)
+- `simply-daemon/build.rs` `STRING_TYPES` hardcodes id newtype names — auto-discover by parsing `simply-core/src/storage/ids.rs` for `define_id!` invocations instead
 - Noema search panel + document refs (depends on UI work)
 - **Chrome extension (far future)** — daemon client for in-browser contexts. Most promising small near-term slice: a "send this page to Simply as an imported document" action that pushes the active tab's content/URL through the gdocs-style import path, creating a `document::tabbed` or flat `document::knowledge` entity with `origin = "browser:<url>"`. Full extension (sidebar chat, Meet caption scraping, audio streaming) is post-v1.
