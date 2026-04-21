@@ -204,6 +204,14 @@ pub fn spawn_event_handler(
                 }
                 VoiceEvent::Listening => {
                     tracing::debug!(guild_id = %guild_id, "voice: listening");
+                    // Barge-in: VAD says the user started speaking, so stop any
+                    // TTS playback we're in the middle of. The full response is
+                    // still in the text channel, the user doesn't need to wait
+                    // for the audio to finish before giving a new command.
+                    {
+                        let mut handler = call.lock().await;
+                        handler.stop();
+                    }
                 }
                 VoiceEvent::Transcribing => {
                     tracing::debug!(guild_id = %guild_id, "voice: transcribing");
