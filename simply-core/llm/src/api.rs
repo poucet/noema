@@ -49,7 +49,7 @@ pub struct ToolDefinition {
     pub input_schema: schemars::Schema,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
 pub struct ToolCall {
     pub id: String,
@@ -62,7 +62,7 @@ pub struct ToolCall {
 
 /// Content within a tool result - can be text, images, audio, etc.
 /// This is a subset of ContentBlock without recursive tool calls.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolResultContent {
@@ -92,7 +92,7 @@ impl ToolResultContent {
 }
 
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
 pub struct ToolResult {
     pub tool_call_id: String,

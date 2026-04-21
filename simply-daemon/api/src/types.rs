@@ -29,8 +29,8 @@ pub use simply_core::storage::types::BlobHash;
 // ---------------------------------------------------------------------------
 
 pub use llm::{
-    ChatMessage, ContentBlock, ModelCapability, ModelInfo, ProviderInfo, Role, ToolResultContent,
-    list_providers,
+    ChatMessage, ContentBlock, ModelCapability, ModelInfo, ProviderInfo, Role, ToolCall,
+    ToolResult, ToolResultContent, list_providers,
 };
 
 // ---------------------------------------------------------------------------

@@ -223,30 +223,18 @@ async fn load_channel_history(
 
     // Discord returns newest-first, we need oldest-first
     // Skip bot messages that appear before any user message (e.g. welcome messages)
-    let mut seed: Vec<SeedMessage> = all_messages
+    let ordered: Vec<&Message> = all_messages
         .iter()
         .rev()
-        .filter(|m| !m.content.is_empty())
         .skip_while(|m| m.author.id.get() == bot_user_id) // skip leading bot messages
-        .map(|m| {
-            let role = if m.author.id.get() == bot_user_id {
-                Role::Assistant
-            } else {
-                Role::User
-            };
-
-            let text = if role == Role::User {
-                format!("<@{}> says: {}", m.author.id, m.content)
-            } else {
-                m.content.clone()
-            };
-
-            SeedMessage {
-                role,
-                content: vec![InputContent::Text { text }],
-            }
-        })
         .collect();
+
+    let mut seed: Vec<SeedMessage> = Vec::with_capacity(ordered.len());
+    for m in ordered {
+        if let Some(msg) = message_to_seed(m, bot_user_id).await {
+            seed.push(msg);
+        }
+    }
 
     // Don't include the current message (it'll be sent separately)
     if let Some(last) = seed.last() {
@@ -256,6 +244,98 @@ async fn load_channel_history(
     }
 
     Ok(seed)
+}
+
+/// Convert a Discord message to a SeedMessage. Returns `None` if the
+/// message carries nothing we can seed from (e.g. embed-only without
+/// structured attachments).
+async fn message_to_seed(m: &Message, bot_user_id: u64) -> Option<SeedMessage> {
+    let is_bot = m.author.id.get() == bot_user_id;
+
+    if is_bot {
+        // Check for structured tool call/result attachments first.
+        if let Some(content) = parse_tool_attachments(m).await {
+            // Tool results are sent as User role in the daemon; tool calls
+            // stay on the assistant turn.
+            let role = if content.iter().any(|c| matches!(c, InputContent::ToolResult(_))) {
+                Role::User
+            } else {
+                Role::Assistant
+            };
+            return Some(SeedMessage { role, content });
+        }
+
+        if m.content.is_empty() {
+            return None;
+        }
+        Some(SeedMessage {
+            role: Role::Assistant,
+            content: vec![InputContent::Text { text: m.content.clone() }],
+        })
+    } else {
+        if m.content.is_empty() {
+            return None;
+        }
+        let text = format!("<@{}> says: {}", m.author.id, m.content);
+        Some(SeedMessage {
+            role: Role::User,
+            content: vec![InputContent::Text { text }],
+        })
+    }
+}
+
+/// Scan a bot message for `tool_call_<id>.json` / `tool_result_<id>.json`
+/// attachments and decode them into structured `InputContent`. Returns
+/// `None` if no such attachments exist, or if every one fails to
+/// download/parse (caller falls back to text).
+async fn parse_tool_attachments(m: &Message) -> Option<Vec<InputContent>> {
+    let candidates: Vec<&serenity::model::channel::Attachment> = m
+        .attachments
+        .iter()
+        .filter(|a| {
+            a.filename.ends_with(".json")
+                && (a.filename.starts_with("tool_call_") || a.filename.starts_with("tool_result_"))
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let mut content = Vec::with_capacity(candidates.len());
+    for att in candidates {
+        let bytes = match att.download().await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(error = %e, file = %att.filename, "tool attachment download failed");
+                continue;
+            }
+        };
+
+        let parsed: Option<InputContent> = if att.filename.starts_with("tool_call_") {
+            match serde_json::from_slice::<ToolCall>(&bytes) {
+                Ok(call) => Some(InputContent::ToolCall(call)),
+                Err(e) => {
+                    tracing::warn!(error = %e, file = %att.filename, "tool_call JSON parse failed");
+                    None
+                }
+            }
+        } else {
+            match serde_json::from_slice::<ToolResult>(&bytes) {
+                Ok(r) => Some(InputContent::ToolResult(r)),
+                Err(e) => {
+                    tracing::warn!(error = %e, file = %att.filename, "tool_result JSON parse failed");
+                    None
+                }
+            }
+        };
+
+        if let Some(c) = parsed {
+            content.push(c);
+        }
+    }
+
+    if content.is_empty() { None } else { Some(content) }
 }
 
 /// Stream daemon events back to Discord.
@@ -302,15 +382,31 @@ async fn stream_response(
                     _ => {}
                 }
             }
-            Ok(DaemonEvent::ToolCall { id: _, name, arguments }) => {
+            Ok(DaemonEvent::ToolCall { id, name, arguments }) => {
                 let args_str = truncate_for_discord(&serde_json::to_string_pretty(&arguments).unwrap_or_default());
                 let embed = CreateEmbed::new()
                     .title(format!("\u{1f527} Using: {name}"))
                     .description(format!("```json\n{args_str}\n```"))
                     .color(0x5865F2);
-                msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed)).await?;
+                let call = ToolCall {
+                    id: id.clone(),
+                    name,
+                    arguments,
+                    extra: serde_json::Value::Null,
+                };
+                let bytes = serde_json::to_vec_pretty(&call).unwrap_or_default();
+                let attachment = serenity::builder::CreateAttachment::bytes(
+                    bytes,
+                    format!("tool_call_{id}.json"),
+                );
+                msg.channel_id
+                    .send_message(
+                        &lx.http,
+                        serenity::builder::CreateMessage::new().embed(embed).add_file(attachment),
+                    )
+                    .await?;
             }
-            Ok(DaemonEvent::ToolResult { id: _, result }) => {
+            Ok(DaemonEvent::ToolResult { id, result }) => {
                 let result_str = serde_json::to_string_pretty(&result).unwrap_or_default();
                 tracing::debug!(result = %truncate(&result_str, 500), "tool result");
                 let formatted = crate::tool_render::format_tool_output(&result_str);
@@ -319,7 +415,23 @@ async fn stream_response(
                     .title("\u{1f4e6} Tool result")
                     .description(&display)
                     .color(0x2ECC71);
-                msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed)).await?;
+                let content: Vec<ToolResultContent> =
+                    serde_json::from_value(result).unwrap_or_default();
+                let tool_result = ToolResult {
+                    tool_call_id: id.clone(),
+                    content,
+                };
+                let bytes = serde_json::to_vec_pretty(&tool_result).unwrap_or_default();
+                let attachment = serenity::builder::CreateAttachment::bytes(
+                    bytes,
+                    format!("tool_result_{id}.json"),
+                );
+                msg.channel_id
+                    .send_message(
+                        &lx.http,
+                        serenity::builder::CreateMessage::new().embed(embed).add_file(attachment),
+                    )
+                    .await?;
             }
             Ok(DaemonEvent::TurnComplete) => {
                 if !text_buffer.is_empty() {

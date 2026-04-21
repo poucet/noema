@@ -268,6 +268,10 @@ pub enum InputContent {
         #[serde(rename = "mimeType")]
         mime_type: String,
     },
+    /// Structured tool call — seeded from prior assistant turns
+    ToolCall(ToolCall),
+    /// Structured tool result — seeded from prior assistant turns
+    ToolResult(ToolResult),
 }
 
 impl InputContent {
@@ -279,6 +283,8 @@ impl InputContent {
             InputContent::Image { data, mime_type } => Some(ContentBlock::Image { data, mime_type }),
             InputContent::Audio { data, mime_type } => Some(ContentBlock::Audio { data, mime_type }),
             InputContent::DocumentRef { id } => Some(ContentBlock::DocumentRef { id: id.to_string() }),
+            InputContent::ToolCall(call) => Some(ContentBlock::ToolCall(call)),
+            InputContent::ToolResult(result) => Some(ContentBlock::ToolResult(result)),
             InputContent::AssetRef { .. } => None, // Requires storage to resolve
         }
     }
@@ -298,6 +304,8 @@ impl InputContent {
             InputContent::DocumentRef { id } => Ok(ContentBlock::DocumentRef {
                 id: id.to_string(),
             }),
+            InputContent::ToolCall(call) => Ok(ContentBlock::ToolCall(call)),
+            InputContent::ToolResult(result) => Ok(ContentBlock::ToolResult(result)),
             InputContent::AssetRef {
                 asset_id,
                 mime_type,

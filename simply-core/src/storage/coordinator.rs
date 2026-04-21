@@ -141,6 +141,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                 InputContent::AssetRef { asset_id, mime_type } => {
                     StoredContent::asset_ref(asset_id, mime_type)
                 }
+                InputContent::ToolCall(call) => StoredContent::ToolCall(call),
+                InputContent::ToolResult(result) => StoredContent::ToolResult(result),
             };
             stored.push(stored_item);
         }
