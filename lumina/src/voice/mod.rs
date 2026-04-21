@@ -43,6 +43,12 @@ pub struct VoiceSession {
     pub mode: VoiceMode,
     /// Daemon conversation session (for listen mode — persistent across utterances).
     pub daemon_session: Option<simply_daemon::DaemonSession>,
+    /// Handle on the receiver task — aborted when the session is stopped so
+    /// we don't leave a zombie consumer of a stale STT event stream hanging
+    /// around after `leave_voice`. Without this, a subsequent `/voice join`
+    /// would spawn a *second* receiver while the old one is still running,
+    /// causing every transcript to be posted twice.
+    pub receiver_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// What the voice session is doing.
@@ -169,6 +175,7 @@ impl VoiceManager {
                 voice_channel,
                 mode: VoiceMode::Listen,
                 daemon_session: None,
+                receiver_task: None,
             });
         }
 
@@ -254,8 +261,10 @@ impl VoiceManager {
             );
         }
 
-        // Spawn event handler — processes STT results
-        receiver::spawn_event_handler(
+        // Spawn event handler — processes STT results. Keep the JoinHandle
+        // so stop_session can abort the task, otherwise it zombies past a
+        // `leave_voice` and double-processes audio once we rejoin.
+        let receiver_task = receiver::spawn_event_handler(
             guild_id,
             text_channel,
             mode,
@@ -270,6 +279,7 @@ impl VoiceManager {
             voice_channel,
             mode,
             daemon_session,
+            receiver_task: Some(receiver_task),
         };
         self.sessions.lock().await.insert(guild_id, session);
         tracing::info!(
@@ -283,10 +293,15 @@ impl VoiceManager {
         Ok(())
     }
 
-    /// Stop and remove the voice session for a guild.
+    /// Stop and remove the voice session for a guild. Also aborts the
+    /// receiver task so it doesn't linger and double-process audio on a
+    /// subsequent rejoin.
     pub async fn stop_session(&self, guild_id: &GuildId) -> Option<VoiceSession> {
         let session = self.sessions.lock().await.remove(guild_id);
-        if session.is_some() {
+        if let Some(ref s) = session {
+            if let Some(ref handle) = s.receiver_task {
+                handle.abort();
+            }
             tracing::info!(guild_id = %guild_id, "voice session stopped");
         }
         session

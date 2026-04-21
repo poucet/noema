@@ -190,7 +190,8 @@ async fn process_llm_turn(
     if response_text.trim().is_empty() { None } else { Some(response_text) }
 }
 
-/// Spawn a task that processes STT events and acts on them.
+/// Spawn a task that processes STT events and acts on them. Returns the
+/// `JoinHandle` so the owning `VoiceSession` can abort the task on stop.
 pub fn spawn_event_handler(
     guild_id: GuildId,
     text_channel: ChannelId,
@@ -199,7 +200,7 @@ pub fn spawn_event_handler(
     http: Arc<serenity::http::Http>,
     voice_mgr: Arc<super::VoiceManager>,
     call: Arc<Mutex<songbird::Call>>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!(guild_id = %guild_id, mode = ?mode, "voice event handler started");
 
@@ -296,5 +297,5 @@ pub fn spawn_event_handler(
         }
 
         tracing::info!(guild_id = %guild_id, "voice event handler stopped");
-    });
+    })
 }
