@@ -74,6 +74,51 @@ fn truncate_preview(s: &str, max_chars: usize) -> String {
     }
 }
 
+/// Send one user transcript to the daemon session and collect the LLM response,
+/// surfacing tool activity to the text channel along the way. Runs without
+/// holding `voice_mgr.sessions.lock()` so skill tools that need the same lock
+/// (e.g. `leave_voice`) can run concurrently.
+async fn process_llm_turn(
+    daemon_session: &mut simply_daemon::DaemonSession,
+    user_text: &str,
+    text_channel: &ChannelId,
+    http: &Arc<serenity::http::Http>,
+) -> Option<String> {
+    let send_result = daemon_session.send(simply_daemon_api::UserMessage {
+        content: vec![simply_daemon_api::InputContent::Text { text: user_text.to_string() }],
+    }).await;
+    if let Err(e) = send_result {
+        tracing::error!(error = %e, "failed to send to session");
+        return None;
+    }
+
+    let mut response_text = String::new();
+    loop {
+        match daemon_session.recv().await {
+            Ok(simply_daemon_api::DaemonEvent::TextDelta(delta)) => {
+                response_text.push_str(&delta);
+            }
+            Ok(simply_daemon_api::DaemonEvent::ToolCall { name, arguments, .. }) => {
+                tracing::info!(tool = %name, "voice tool call");
+                let preview = truncate_preview(&serde_json::to_string(&arguments).unwrap_or_default(), 200);
+                let _ = text_channel.say(http, format!("🔧 `{name}` {preview}")).await;
+            }
+            Ok(simply_daemon_api::DaemonEvent::ToolResult { result, .. }) => {
+                let preview = truncate_preview(&serde_json::to_string(&result).unwrap_or_default(), 400);
+                let _ = text_channel.say(http, format!("✅ {preview}")).await;
+            }
+            Ok(simply_daemon_api::DaemonEvent::TurnComplete) => break,
+            Ok(simply_daemon_api::DaemonEvent::Error(e)) => {
+                tracing::error!(error = %e, "session error");
+                break;
+            }
+            Err(_) => break,
+            _ => {}
+        }
+    }
+    if response_text.trim().is_empty() { None } else { Some(response_text) }
+}
+
 /// Spawn a task that processes STT events and acts on them.
 pub fn spawn_event_handler(
     guild_id: GuildId,
@@ -100,56 +145,29 @@ pub fn spawn_event_handler(
                             // Post transcript to text channel
                             let _ = text_channel.say(&http, format!("🗣️ {text}")).await;
 
-                            // Send to daemon session → get LLM response → TTS → play
-                            let response = {
+                            // Take the DaemonSession out of the map so tool calls (e.g.
+                            // leave_voice, which takes sessions.lock()) can run concurrently
+                            // with the send/recv loop and don't deadlock on our lock.
+                            let daemon_session = {
                                 let mut sessions = voice_mgr.sessions.lock().await;
-                                if let Some(session) = sessions.get_mut(&guild_id) {
-                                    if let Some(ref mut daemon_session) = session.daemon_session {
-                                        // Send user transcript to session
-                                        let send_result = daemon_session.send(simply_daemon_api::UserMessage {
-                                            content: vec![simply_daemon_api::InputContent::Text {
-                                                text: text.clone(),
-                                            }],
-                                        }).await;
-
-                                        if let Err(e) = send_result {
-                                            tracing::error!(error = %e, "failed to send to session");
-                                            None
-                                        } else {
-                                            // Collect the response, surfacing tool activity to the text channel.
-                                            let mut response_text = String::new();
-                                            loop {
-                                                match daemon_session.recv().await {
-                                                    Ok(simply_daemon_api::DaemonEvent::TextDelta(delta)) => {
-                                                        response_text.push_str(&delta);
-                                                    }
-                                                    Ok(simply_daemon_api::DaemonEvent::ToolCall { name, arguments, .. }) => {
-                                                        tracing::info!(tool = %name, "voice tool call");
-                                                        let args_preview = serde_json::to_string(&arguments)
-                                                            .unwrap_or_default();
-                                                        let args_preview = truncate_preview(&args_preview, 200);
-                                                        let _ = text_channel.say(&http, format!("🔧 `{name}` {args_preview}")).await;
-                                                    }
-                                                    Ok(simply_daemon_api::DaemonEvent::ToolResult { result, .. }) => {
-                                                        let result_preview = serde_json::to_string(&result)
-                                                            .unwrap_or_default();
-                                                        let result_preview = truncate_preview(&result_preview, 400);
-                                                        let _ = text_channel.say(&http, format!("✅ {result_preview}")).await;
-                                                    }
-                                                    Ok(simply_daemon_api::DaemonEvent::TurnComplete) => break,
-                                                    Ok(simply_daemon_api::DaemonEvent::Error(e)) => {
-                                                        tracing::error!(error = %e, "session error");
-                                                        break;
-                                                    }
-                                                    Err(_) => break,
-                                                    _ => {}
-                                                }
-                                            }
-                                            if response_text.trim().is_empty() { None } else { Some(response_text) }
-                                        }
-                                    } else { None }
-                                } else { None }
+                                sessions.get_mut(&guild_id).and_then(|s| s.daemon_session.take())
                             };
+
+                            let (response, daemon_session) = if let Some(mut ds) = daemon_session {
+                                let response = process_llm_turn(&mut ds, &text, &text_channel, &http).await;
+                                (response, Some(ds))
+                            } else {
+                                (None, None)
+                            };
+
+                            // Put the session back — unless it was removed (e.g. by a
+                            // concurrent leave_voice, in which case daemon_session drops).
+                            if let Some(ds) = daemon_session {
+                                let mut sessions = voice_mgr.sessions.lock().await;
+                                if let Some(s) = sessions.get_mut(&guild_id) {
+                                    s.daemon_session = Some(ds);
+                                }
+                            }
 
                             if let Some(response_text) = response {
                                 // TTS → play in voice channel (with retry + fallback)
