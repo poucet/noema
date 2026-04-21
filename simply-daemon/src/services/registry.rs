@@ -83,22 +83,27 @@ impl ToolRegistry {
         &self.mcp
     }
 
-    /// Build a RequestContext with tokens for a user.
+    /// Augment a caller-supplied context with OAuth tokens for the ctx's user.
     ///
     /// Pulls tokens from the TransientTokenStore for:
     /// - Each MCP server (keyed by server_id — legacy Token-auth servers)
     /// - Each OAuth provider (keyed by provider_id — what skills and OAuth
     ///   MCP servers both look up)
-    pub async fn ctx_with_tokens(&self, user_id: &simply_core::storage::ids::UserId) -> RequestContext {
-        let mut ctx = RequestContext::with_scope(
-            simply_rpc::Scope::user(user_id.as_str()),
-        );
+    ///
+    /// Everything else on the ctx (scope, pre-existing tokens, metadata) is
+    /// preserved — so origin hints like `discord.guild_id` set at session
+    /// creation flow through to tool handlers.
+    pub async fn augment_with_tokens(&self, mut ctx: RequestContext) -> RequestContext {
+        let Some(uid_str) = ctx.scope.user_id.clone() else { return ctx; };
+        let user_id = simply_core::storage::ids::UserId::from_string(&uid_str);
 
         {
             let registry = self.mcp.registry().lock().await;
             for (server_id, _) in registry.config().servers.iter() {
-                if let Some(token) = self.token_store.get(user_id, server_id) {
-                    ctx.tokens.insert(server_id.clone(), token.access_token);
+                if !ctx.tokens.contains_key(server_id) {
+                    if let Some(token) = self.token_store.get(&user_id, server_id) {
+                        ctx.tokens.insert(server_id.clone(), token.access_token);
+                    }
                 }
             }
         }
@@ -106,28 +111,29 @@ impl ToolRegistry {
         // OAuth providers (used by skills and OAuth MCP servers) — tokens keyed by provider_id.
         let known = crate::oauth::providers::known_providers();
         for provider_id in &known {
-            if let Some(token) = self.token_store.get(user_id, provider_id) {
-                ctx.tokens.insert(provider_id.clone(), token.access_token);
+            if !ctx.tokens.contains_key(provider_id) {
+                if let Some(token) = self.token_store.get(&user_id, provider_id) {
+                    ctx.tokens.insert(provider_id.clone(), token.access_token);
+                }
             }
         }
 
         tracing::debug!(
-            user_id = %user_id,
+            user_id = %uid_str,
             known_providers = ?known,
             token_keys = ?ctx.tokens.keys().collect::<Vec<_>>(),
-            "ctx_with_tokens built"
+            metadata_keys = ?ctx.metadata.keys().collect::<Vec<_>>(),
+            "augment_with_tokens"
         );
 
         ctx
     }
 
-    /// Get a user-scoped ToolService for a session (daemon tools + all providers +
-    /// live MCP tools sourced from `McpService`).
-    pub async fn for_user(
-        self: &Arc<Self>,
-        user_id: &simply_core::storage::ids::UserId,
-    ) -> Arc<dyn ToolService> {
-        let ctx = self.ctx_with_tokens(user_id).await;
+    /// Get a ToolService bound to a specific request context (user + tokens +
+    /// origin metadata). Used by sessions so tool calls carry the caller's
+    /// ambient context (e.g. `discord.guild_id`) through to skills.
+    pub async fn for_ctx(self: &Arc<Self>, base_ctx: RequestContext) -> Arc<dyn ToolService> {
+        let ctx = self.augment_with_tokens(base_ctx).await;
         let scoped_daemon = Arc::new(self.daemon_tools.with_context(ctx.clone()));
         Arc::new(UserScopedTools { registry: Arc::clone(self), scoped_daemon, ctx })
     }
@@ -246,14 +252,9 @@ impl McpApi for ToolRegistry {
             "call_tool_direct: dispatching"
         );
 
-        // Build a scoped context (populates OAuth tokens) if user_id is present,
-        // otherwise dispatch with the caller's ctx as-is.
-        let scoped_ctx = if let Some(ref user_id) = ctx.scope.user_id {
-            let uid = simply_core::storage::ids::UserId::from_string(user_id);
-            self.ctx_with_tokens(&uid).await
-        } else {
-            ctx.clone()
-        };
+        // Augment the caller's ctx with any OAuth tokens we hold for them;
+        // metadata and pre-existing tokens are preserved.
+        let scoped_ctx = self.augment_with_tokens(ctx.clone()).await;
         let scoped_daemon = self.daemon_tools.with_context(scoped_ctx.clone());
         let content = self.dispatch(&scoped_daemon, name, args, &scoped_ctx).await?;
 

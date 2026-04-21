@@ -258,13 +258,10 @@ where
         let (broadcast_tx, broadcast_rx) = broadcast::channel(256);
         let info = Self::make_session_info(&session_id, persistence.clone(), model_id);
 
-        let tools: Arc<dyn ToolService> = match &ctx.scope.user_id {
-            Some(uid) => {
-                let user_id = simply_core::storage::ids::UserId::from_string(uid);
-                self.tools.for_user(&user_id).await
-            },
-            None => self.tools.clone(),
-        };
+        // Bind the session's tool service to the caller's ctx — preserves
+        // origin metadata (e.g. discord.guild_id) and augments with any
+        // stored OAuth tokens for the user.
+        let tools: Arc<dyn ToolService> = self.tools.for_ctx(ctx.clone()).await;
         let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
         let evt_tx = Self::spawn_event_forwarder(&session_id, &broadcast_tx);
 

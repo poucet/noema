@@ -48,9 +48,10 @@ mod voice {
 
         let voice_mgr = get_voice_manager(lx).await?;
         let history = load_channel_seed(lx, cmd.channel_id).await;
+        let base_ctx = lx.ctx_for(cmd.user.id.get()).await;
 
         voice_mgr.join_voice(
-            guild_id, voice_channel, voice_channel,
+            base_ctx, guild_id, voice_channel, voice_channel,
             history, Arc::clone(&lx.http),
         ).await?;
 

@@ -129,6 +129,7 @@ impl VoiceManager {
     /// skill tool.
     pub async fn join_voice(
         self: &Arc<Self>,
+        base_ctx: RequestContext,
         guild_id: GuildId,
         voice_channel: ChannelId,
         text_channel: ChannelId,
@@ -139,9 +140,16 @@ impl VoiceManager {
             .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
         let call = songbird.join(guild_id, voice_channel).await?;
 
+        // Stamp the Discord origin onto the session ctx so skill tools called
+        // by the voice agent know "where the conversation is happening".
+        let session_ctx = base_ctx
+            .with_metadata("discord.guild_id", guild_id.get().to_string())
+            .with_metadata("discord.channel_id", text_channel.get().to_string())
+            .with_metadata("discord.voice_channel_id", voice_channel.get().to_string());
+
         let session = simply_daemon::DaemonSession::create(
             self.daemon.clone(),
-            RequestContext::anonymous(),
+            session_ctx,
             CreateSessionOptions {
                 persistence: Some(Persistence::Ephemeral),
                 system_prompt: Some(VOICE_LISTEN_SYSTEM_PROMPT.to_string()),

@@ -106,7 +106,13 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     // 3. Create session with seed and resolved model
     let model_id = resolve_model(lx, msg).await;
     tracing::debug!(seed_count = history.len(), "creating session");
-    let session_ctx = lx.ctx_for(msg.author.id.get()).await;
+    let mut session_ctx = lx.ctx_for(msg.author.id.get()).await;
+    // Stamp the Discord origin so skill tools can act on "where the chat is
+    // happening" without the LLM having to pass guild/channel IDs.
+    session_ctx = session_ctx.with_metadata("discord.channel_id", msg.channel_id.get().to_string());
+    if let Some(gid) = msg.guild_id {
+        session_ctx = session_ctx.with_metadata("discord.guild_id", gid.get().to_string());
+    }
     let mut session = simply_daemon::DaemonSession::create(
         lx.daemon.clone(),
         session_ctx,
