@@ -4,8 +4,10 @@
   import ActivityBar, { type ActivityId } from './lib/ActivityBar.svelte';
   import SidePanel from './lib/SidePanel.svelte';
   import ChatView from './lib/ChatView.svelte';
+  import DocumentView from './lib/DocumentView.svelte';
   import ModelSelector from './lib/ModelSelector.svelte';
   import { chatStore } from './lib/stores/chat.svelte';
+  import { documentsStore } from './lib/stores/documents.svelte';
 
   let active = $state<ActivityId>('conversations');
   let showSettings = $state(false);
@@ -35,7 +37,7 @@
       daemonError = e instanceof Error ? e.message : String(e);
       return;
     }
-    await chatStore.init();
+    await Promise.all([chatStore.init(), documentsStore.init()]);
 
     // Auto-select the most recent conversation if any.
     if (chatStore.conversations.length > 0 && chatStore.currentConversationId == null) {
@@ -71,7 +73,11 @@
   <div class="flex min-w-0 flex-1 flex-col">
     <div class="flex items-center justify-between border-b border-gray-700 bg-background px-4 py-3">
       <h1 class="text-lg font-semibold text-foreground">
-        {chatStore.currentConversation?.name ?? 'Noema'}
+        {#if active === 'conversations'}
+          {chatStore.currentConversation?.name ?? 'Noema'}
+        {:else}
+          {documentsStore.selected?.title ?? 'Noema'}
+        {/if}
       </h1>
 
       {#if daemonStatus === 'ok'}
@@ -92,9 +98,7 @@
     {#if active === 'conversations'}
       <ChatView />
     {:else}
-      <div class="flex flex-1 items-center justify-center">
-        <p class="text-muted">Document view lands here.</p>
-      </div>
+      <DocumentView />
     {/if}
   </div>
 
