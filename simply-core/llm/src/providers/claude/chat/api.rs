@@ -281,11 +281,26 @@ pub(crate) struct Tool {
 
 impl From<&crate::api::ToolDefinition> for Tool {
     fn from(def: &crate::api::ToolDefinition) -> Self {
+        let input_schema = serde_json::to_value(&def.input_schema)
+            .expect("Failed to serialize tool schema");
+
+        // Mirror the Gemini provider: log the exact shape we hand to the
+        // Claude API so schema-validation 400s (`tools.N.custom...`) point
+        // straight at the offending tool.
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            let pretty = serde_json::to_string_pretty(&input_schema).unwrap_or_default();
+            tracing::debug!(
+                tool_name = %def.name,
+                description = def.description.as_deref().unwrap_or(""),
+                schema = %pretty,
+                "claude tool definition",
+            );
+        }
+
         Tool {
             name: def.name.clone(),
             description: def.description.clone(),
-            input_schema: serde_json::to_value(&def.input_schema)
-                .expect("Failed to serialize tool schema"),
+            input_schema,
         }
     }
 }

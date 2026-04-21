@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DAEMON_PORT="${DAEMON_PORT:-9800}"
 ADMIN_DIR="$REPO_ROOT/simply-daemon/admin"
 
-export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_daemon::net=info,simply_daemon::services=debug,simply_daemon::services::registry=debug,simply_daemon::services::tools=debug,simply_daemon::token_store=debug,simply_core=debug,simply_voice=debug,llm::providers::gemini=debug,mcp_gdocs=debug}"
+export RUST_LOG="${RUST_LOG:-simply_daemon=info,simply_daemon::net=info,simply_daemon::services=debug,simply_daemon::services::registry=debug,simply_daemon::services::tools=debug,simply_daemon::token_store=debug,simply_core=debug,simply_voice=debug,llm=debug,mcp_gdocs=debug}"
 export DAEMON_LOG_FILE="${DAEMON_LOG_FILE:-$REPO_ROOT/logs/daemon.log}"
 
 log() { echo "[daemon] $*"; }
