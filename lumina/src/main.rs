@@ -45,6 +45,8 @@ async fn main() -> anyhow::Result<()> {
     // Register skills with daemon (works over WS for both embedded and remote)
     let http = Arc::new(serenity::http::Http::new(&token));
     let discord_skill = mcp::DiscordSkill::new(http);
+    let voice_mgr = Arc::new(voice::VoiceManager::new(daemon.clone(), lumina_cfg.voice.clone()));
+    discord_skill.set_voice_manager(Arc::clone(&voice_mgr));
     register_skills(&daemon, &discord_skill).await?;
 
     // Discord client
@@ -56,18 +58,22 @@ async fn main() -> anyhow::Result<()> {
         | GatewayIntents::GUILD_VOICE_STATES
         | GatewayIntents::MESSAGE_CONTENT;
 
+    // Pre-create songbird so we can inject it into VoiceManager for tool-driven leaves.
+    let songbird = songbird::Songbird::serenity_from_config(
+        SongbirdConfig::default().decode_mode(DecodeMode::Decode(
+            DecodeConfig::new(Channels::Mono, SampleRate::Hz16000)
+        ))
+    );
+    voice_mgr.set_songbird(Arc::clone(&songbird));
+
     let mut client = Client::builder(token, intents)
         .event_handler(Handler {
             guild_ids: lumina_cfg.discord.guild_ids.iter().map(|&id| GuildId::new(id)).collect(),
             status_channel_id: lumina_cfg.discord.status_channel_id.map(ChannelId::new),
         })
-        .register_songbird_from_config(
-            SongbirdConfig::default().decode_mode(DecodeMode::Decode(
-                DecodeConfig::new(Channels::Mono, SampleRate::Hz16000)
-            ))
-        )
-        .type_map_insert::<DaemonKey>(daemon.clone())
-        .type_map_insert::<voice::VoiceManagerKey>(Arc::new(voice::VoiceManager::new(daemon, lumina_cfg.voice.clone())))
+        .register_songbird_with(songbird)
+        .type_map_insert::<DaemonKey>(daemon)
+        .type_map_insert::<voice::VoiceManagerKey>(voice_mgr)
         .type_map_insert::<ConfigKey>(lumina_cfg)
         .type_map_insert::<CommandRegistry>(registry)
         .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new()))

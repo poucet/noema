@@ -12,6 +12,8 @@ use serenity::all::Cache;
 use serenity::http::Http;
 use std::sync::{Arc, OnceLock};
 
+use crate::voice::VoiceManager;
+
 // ---------------------------------------------------------------------------
 // Skill
 // ---------------------------------------------------------------------------
@@ -26,6 +28,7 @@ pub struct DiscordSkill {
 struct DiscordSkillInner {
     http: Arc<Http>,
     cache: OnceLock<Arc<Cache>>,
+    voice_manager: OnceLock<Arc<VoiceManager>>,
     /// Instructions with guild/channel map, refreshed when channels change.
     #[allow(dead_code)]
     instructions: std::sync::RwLock<String>,
@@ -40,6 +43,7 @@ impl DiscordSkill {
         let inner = Arc::new(DiscordSkillInner {
             http,
             cache: OnceLock::new(),
+            voice_manager: OnceLock::new(),
             instructions: std::sync::RwLock::new(Self::BASE_INSTRUCTIONS.to_string()),
         });
         Self { inner }
@@ -50,6 +54,16 @@ impl DiscordSkill {
     pub fn set_cache(&self, cache: Arc<Cache>) {
         let _ = self.inner.cache.set(cache);
         self.refresh_instructions();
+    }
+
+    /// Inject the voice manager so voice-related tools (e.g. leave_voice)
+    /// can act on active sessions.
+    pub fn set_voice_manager(&self, voice_manager: Arc<VoiceManager>) {
+        let _ = self.inner.voice_manager.set(voice_manager);
+    }
+
+    pub(crate) fn voice_manager(&self) -> Option<&Arc<VoiceManager>> {
+        self.inner.voice_manager.get()
     }
 
     /// Rebuild the instructions string from the current gateway cache.

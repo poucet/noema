@@ -11,11 +11,11 @@
 mod receiver;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serenity::model::id::{ChannelId, GuildId};
 use simply_daemon_api::{Daemon, VoiceApi};
-use songbird::Call;
+use songbird::{Call, Songbird};
 use tokio::sync::Mutex;
 
 /// Active voice session for a guild.
@@ -44,6 +44,8 @@ pub struct VoiceManager {
     pub(crate) sessions: Mutex<HashMap<GuildId, VoiceSession>>,
     daemon: Arc<dyn Daemon>,
     config: Mutex<config::VoiceConfig>,
+    /// Songbird handle — set once the serenity client is built.
+    songbird: OnceLock<Arc<Songbird>>,
 }
 
 impl VoiceManager {
@@ -52,11 +54,31 @@ impl VoiceManager {
             sessions: Mutex::new(HashMap::new()),
             daemon,
             config: Mutex::new(voice_config),
+            songbird: OnceLock::new(),
         }
     }
 
     pub fn daemon(&self) -> &Arc<dyn Daemon> {
         &self.daemon
+    }
+
+    /// Inject the songbird manager. Call once after the serenity client is built.
+    pub fn set_songbird(&self, songbird: Arc<Songbird>) {
+        let _ = self.songbird.set(songbird);
+    }
+
+    /// Stop the session and disconnect from the guild's voice channel.
+    /// Returns true if we were connected and left; false otherwise.
+    pub async fn leave_voice(&self, guild_id: GuildId) -> anyhow::Result<bool> {
+        self.stop_session(&guild_id).await;
+        let Some(songbird) = self.songbird.get() else {
+            anyhow::bail!("Songbird not initialized");
+        };
+        match songbird.leave(guild_id).await {
+            Ok(()) => Ok(true),
+            Err(songbird::error::JoinError::NoCall) => Ok(false),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn stt_provider_id(&self) -> Option<String> {

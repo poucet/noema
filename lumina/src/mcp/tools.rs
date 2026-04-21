@@ -322,6 +322,16 @@ impl DiscordSkill {
         }
     }
 
+    /// Disconnect Lumina from a guild's voice channel, ending any active
+    /// voice session (transcribe or listen).
+    #[tool(name = "leave_voice")]
+    async fn leave_voice(&self, Parameters(p): Parameters<GuildIdParams>) -> String {
+        match self.do_leave_voice(p).await {
+            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
     // -- Analytics --
 
     /// Get message statistics for a channel over a time period
@@ -503,6 +513,17 @@ impl DiscordSkill {
             "name": e.name, "id": e.id.get().to_string(), "animated": e.animated, "available": e.available,
         })).collect();
         Ok(list.into())
+    }
+
+    async fn do_leave_voice(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {
+        let voice_mgr = self.voice_manager()
+            .context("voice manager not initialized")?;
+        let left = voice_mgr.leave_voice(p.guild_id.serenity()).await?;
+        Ok(json!({
+            "status": "success",
+            "left": left,
+            "message": if left { "Left voice channel." } else { "Not connected to voice in this guild." },
+        }))
     }
 
     async fn do_get_voice_states(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {

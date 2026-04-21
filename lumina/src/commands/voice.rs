@@ -149,15 +149,9 @@ mod voice {
     #[sub_command(description = "Leave the voice channel")]
     pub async fn leave(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
         let guild_id = cmd.guild_id.ok_or_else(|| anyhow::anyhow!("Not in a guild"))?;
-        let manager = songbird::get(&lx.ctx).await
-            .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
-
-        if let Ok(voice_mgr) = get_voice_manager(lx).await {
-            voice_mgr.stop_session(&guild_id).await;
-        }
-
-        manager.leave(guild_id).await?;
-        lx.reply(cmd, "Left voice channel.").await
+        let voice_mgr = get_voice_manager(lx).await?;
+        let left = voice_mgr.leave_voice(guild_id).await?;
+        lx.reply(cmd, if left { "Left voice channel." } else { "Not in a voice channel." }).await
     }
 
     #[sub_command(description = "Set STT or TTS provider")]
