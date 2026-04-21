@@ -47,6 +47,7 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     model: Arc<ModelService>,
     asset: Arc<AssetService<S>>,
     document: Arc<DocumentService<S>>,
+    entity: Arc<EntityService<S>>,
     voice: Arc<VoiceService>,
     core: Arc<CoreService>,
     search: Arc<SearchService<S>>,
@@ -66,6 +67,7 @@ where
         model: Arc<ModelService>,
         asset: Arc<AssetService<S>>,
         document: Arc<DocumentService<S>>,
+        entity: Arc<EntityService<S>>,
         voice: Arc<VoiceService>,
         core: Arc<CoreService>,
         search: Arc<SearchService<S>>,
@@ -80,6 +82,7 @@ where
             model,
             asset,
             document,
+            entity,
             voice,
             core,
             search,
@@ -97,6 +100,7 @@ where
     pub fn model_service(&self) -> Arc<ModelService> { Arc::clone(&self.model) }
     pub fn asset_service(&self) -> Arc<AssetService<S>> { Arc::clone(&self.asset) }
     pub fn document_service(&self) -> Arc<DocumentService<S>> { Arc::clone(&self.document) }
+    pub fn entity_service(&self) -> Arc<EntityService<S>> { Arc::clone(&self.entity) }
     pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
     pub fn core_service(&self) -> Arc<CoreService> { Arc::clone(&self.core) }
     pub fn search_service(&self) -> Arc<SearchService<S>> { Arc::clone(&self.search) }
@@ -411,6 +415,7 @@ where S::Document: DocumentResolver,
     fn session(&self) -> &dyn SessionApi { self }
     fn conversation(&self) -> &dyn ConversationApi { self }
     fn document(&self) -> &dyn DocumentApi { &*self.document }
+    fn entity(&self) -> &dyn EntityApi { &*self.entity }
     fn mcp(&self) -> &dyn McpApi { &*self.tools }
     fn oauth(&self) -> &dyn OAuthApi { &*self.mcp }
     fn model(&self) -> &dyn ModelApi { &*self.model }

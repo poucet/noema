@@ -159,6 +159,14 @@ where
                 )
                 .with_user_email_cache(Arc::clone(&user_email_cache))
         );
+        let entity = Arc::new(
+            EntityService::new(
+                Arc::clone(&self.coordinator),
+                Arc::clone(&self.stores),
+            )
+                .with_embedding(embedding_queue.clone() as Arc<dyn EmbeddingQueue>)
+                .with_user_email_cache(Arc::clone(&user_email_cache))
+        );
         let core = Arc::new(CoreService::new(kill_tx));
         let user_svc = Arc::new(UserService::new(Arc::clone(&self.stores)));
         let search = Arc::new(SearchService::new(
@@ -175,6 +183,7 @@ where
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
                 .register(<dyn DocumentApi>::service(document.clone()))
+                .register(<dyn EntityApi>::service(entity.clone()))
                 .register(<dyn ModelApi>::service(model.clone()))
                 .register(<dyn CoreApi>::service(core.clone()))
                 .register(<dyn OAuthApi>::service(mcp.clone()))
@@ -200,6 +209,7 @@ where
             model,
             asset,
             document,
+            entity,
             voice,
             core,
             search,

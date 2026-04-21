@@ -12,6 +12,7 @@
 #[macro_use] mod conversation;
 #[macro_use] mod asset;
 #[macro_use] mod document;
+#[macro_use] mod entity;
 #[macro_use] mod mcp;
 #[macro_use] mod oauth;
 #[macro_use] mod model;
@@ -30,6 +31,7 @@ pub use session::*;
 pub use conversation::*;
 pub use asset::*;
 pub use document::*;
+pub use entity::*;
 pub use mcp::*;
 pub use oauth::*;
 pub use model::*;
@@ -74,6 +76,7 @@ pub trait Daemon: Send + Sync {
     fn session(&self) -> &dyn SessionApi;
     fn conversation(&self) -> &dyn ConversationApi;
     fn document(&self) -> &dyn DocumentApi;
+    fn entity(&self) -> &dyn EntityApi;
     fn mcp(&self) -> &dyn McpApi;
     fn oauth(&self) -> &dyn OAuthApi;
     fn model(&self) -> &dyn ModelApi;
@@ -177,6 +180,13 @@ mod ts_export {
         CreateDocumentRequest::export_all().expect("CreateDocumentRequest");
         CreateTabRequest::export_all().expect("CreateTabRequest");
         UpdateTabRequest::export_all().expect("UpdateTabRequest");
+        EntitySummary::export_all().expect("EntitySummary");
+        ChildEntity::export_all().expect("ChildEntity");
+        EntityContent::export_all().expect("EntityContent");
+        CreateEntityRequest::export_all().expect("CreateEntityRequest");
+        UpdateEntityContentRequest::export_all().expect("UpdateEntityContentRequest");
+        AddChildRequest::export_all().expect("AddChildRequest");
+        MoveChildRequest::export_all().expect("MoveChildRequest");
         McpServerInfo::export_all().expect("McpServerInfo");
         AddMcpServerRequest::export_all().expect("AddMcpServerRequest");
         UpdateMcpServerRequest::export_all().expect("UpdateMcpServerRequest");
