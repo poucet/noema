@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-export RUST_LOG="${RUST_LOG:-lumina=debug,simply_daemon=info,simply_daemon::services::registry=debug,simply_daemon::services::tools=debug,simply_core=debug,llm=debug,mcp_gdocs=debug,songbird=debug}"
+export RUST_LOG="${RUST_LOG:-lumina=debug,simply_daemon=info,simply_daemon::services::registry=debug,simply_daemon::services::tools=debug,mcp_gdocs=debug,songbird=debug}"
 export LUMINA_LOG_FILE="$REPO_ROOT/logs/lumina.log"
 
 # Start Lumina (auto-connects to existing daemon or starts embedded)

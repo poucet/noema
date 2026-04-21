@@ -186,7 +186,13 @@ impl From<&crate::api::ContentBlock> for Content {
             crate::api::ContentBlock::ToolCall(call) => Content::ToolUse {
                 id: call.id.clone(),
                 name: call.name.clone(),
-                input: call.arguments.clone(),
+                // Claude requires `input` to be a JSON object. If the LLM
+                // called a zero-arg tool we may have a null/string instead;
+                // normalise to an empty object so the request validates.
+                input: match &call.arguments {
+                    serde_json::Value::Object(_) => call.arguments.clone(),
+                    _ => serde_json::Value::Object(Default::default()),
+                },
             },
             crate::api::ContentBlock::ToolResult(result) => {
                 // Convert multimodal tool result content to Claude format
