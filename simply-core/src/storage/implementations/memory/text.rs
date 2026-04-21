@@ -55,6 +55,20 @@ impl TextStore for MemoryTextStore {
         Ok(blocks.get(id).map(|b| b.text().to_string()))
     }
 
+    async fn get_texts(
+        &self,
+        ids: &[ContentBlockId],
+    ) -> Result<std::collections::HashMap<ContentBlockId, String>> {
+        let blocks = self.blocks.lock().unwrap();
+        let mut out = std::collections::HashMap::with_capacity(ids.len());
+        for id in ids {
+            if let Some(b) = blocks.get(id) {
+                out.insert(id.clone(), b.text().to_string());
+            }
+        }
+        Ok(out)
+    }
+
     async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
         Ok(self.blocks.lock().unwrap().contains_key(id))
     }

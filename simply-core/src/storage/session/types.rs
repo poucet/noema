@@ -1,14 +1,14 @@
 //! Session types for the new DB-agnostic session abstraction
 //!
 //! Key types:
-//! - `ResolvedContent` - Content with text resolved, assets/docs cached lazily
+//! - `ResolvedContent` - Content with text resolved, assets/entities cached lazily
 //! - `ResolvedMessage` - A message with resolved content
 
 use serde::{Deserialize, Serialize};
 
 use llm::{ContentBlock, Role, ToolCall, ToolResult};
 
-use crate::storage::ids::{AssetId, DocumentId, TurnId};
+use crate::storage::ids::{AssetId, EntityId, TurnId};
 use crate::storage::types::{BlobHash};
 
 // ============================================================================
@@ -57,9 +57,11 @@ pub enum ResolvedContent {
         resolved: Option<ContentBlock>,
     },
 
-    /// Document reference with lazy LLM resolution
-    Document {
-        document_id: DocumentId,
+    /// Entity reference with lazy LLM resolution. The `EntityResolver`
+    /// expands this into a formatted ContentBlock (title, kind, body)
+    /// before the message reaches an LLM provider.
+    Entity {
+        entity_id: EntityId,
         /// Cached formatted ContentBlock for LLM - populated on first use
         resolved: Option<ContentBlock>,
     },
@@ -92,10 +94,10 @@ impl ResolvedContent {
         }
     }
 
-    /// Create a document reference (unresolved)
-    pub fn document(document_id: impl Into<DocumentId>) -> Self {
-        Self::Document {
-            document_id: document_id.into(),
+    /// Create an entity reference (unresolved)
+    pub fn entity(entity_id: impl Into<EntityId>) -> Self {
+        Self::Entity {
+            entity_id: entity_id.into(),
             resolved: None,
         }
     }
@@ -114,16 +116,16 @@ impl ResolvedContent {
     pub fn needs_resolution(&self) -> bool {
         match self {
             Self::Asset { resolved, .. } => resolved.is_none(),
-            Self::Document { resolved, .. } => resolved.is_none(),
+            Self::Entity { resolved, .. } => resolved.is_none(),
             _ => false,
         }
     }
 
-    /// Get the cached ContentBlock if available (for assets/documents)
+    /// Get the cached ContentBlock if available (for assets/entities).
     pub fn cached_block(&self) -> Option<&ContentBlock> {
         match self {
             Self::Asset { resolved, .. } => resolved.as_ref(),
-            Self::Document { resolved, .. } => resolved.as_ref(),
+            Self::Entity { resolved, .. } => resolved.as_ref(),
             _ => None,
         }
     }
@@ -157,8 +159,8 @@ mod tests {
     }
 
     #[test]
-    fn test_resolved_content_document_unresolved() {
-        let content = ResolvedContent::document("doc-456");
+    fn test_resolved_content_entity_unresolved() {
+        let content = ResolvedContent::entity("entity-456");
         assert!(content.needs_resolution());
         assert!(content.cached_block().is_none());
     }

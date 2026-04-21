@@ -120,8 +120,10 @@ pub enum ContentBlock {
     Text { text: String },
     Image { data: String, mime_type: String },
     Audio { data: String, mime_type: String },
-    /// Reference to a document - stored as-is, resolved to full content before sending to LLM
-    DocumentRef { id: String },
+    /// Reference to an entity (by id). Stored as-is; an `EntityResolver`
+    /// expands it to formatted text (title, kind, body / tabs) before the
+    /// message reaches an LLM provider.
+    EntityRef { id: String },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
 }
@@ -136,10 +138,10 @@ impl ContentBlock {
         }
     }
 
-    /// Extract the DocumentRef id, if any
-    pub fn document_ref(&self) -> Option<&str> {
+    /// Extract the EntityRef id, if any.
+    pub fn entity_ref(&self) -> Option<&str> {
         match self {
-            ContentBlock::DocumentRef { id } => Some(id.as_str()),
+            ContentBlock::EntityRef { id } => Some(id.as_str()),
             _ => None,
         }
     }
@@ -180,11 +182,11 @@ impl ChatPayload {
         ChatPayload { content }
     }
 
-    /// Get all document IDs referenced in this payload
-    pub fn get_document_refs(&self) -> Vec<&str> {
+    /// Get all entity IDs referenced in this payload
+    pub fn get_entity_refs(&self) -> Vec<&str> {
         self.content
             .iter()
-            .filter_map(|block| block.document_ref())
+            .filter_map(|block| block.entity_ref())
             .collect()
     }
 
@@ -324,8 +326,8 @@ impl ChatMessage {
         self.payload.get_text()
     }
     
-    pub fn get_document_refs(&self) -> Vec<&str> {
-        self.payload.get_document_refs()
+    pub fn get_entity_refs(&self) -> Vec<&str> {
+        self.payload.get_entity_refs()
     }
 
     pub fn get_tool_calls(&self) -> Vec<&ToolCall> {
@@ -419,11 +421,11 @@ impl ChatRequest {
     }
 
 
-    /// Get all document IDs referenced in this request
-    pub fn get_document_refs(&self) -> Vec<&str> {
+    /// Get all entity IDs referenced in this request
+    pub fn get_entity_refs(&self) -> Vec<&str> {
         self.messages
             .iter()
-            .flat_map(|msg| msg.get_document_refs())
+            .flat_map(|msg| msg.get_entity_refs())
             .collect()
     }
 }

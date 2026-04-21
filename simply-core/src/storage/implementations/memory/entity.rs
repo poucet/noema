@@ -112,6 +112,14 @@ impl EntityStore for MemoryEntityStore {
         Ok(entities.get(id.as_str()).map(|e| e.to_stored()))
     }
 
+    async fn get_entities(&self, ids: &[EntityId]) -> Result<Vec<StoredEntity>> {
+        let entities = self.entities.lock().unwrap();
+        Ok(ids
+            .iter()
+            .filter_map(|id| entities.get(id.as_str()).map(|e| e.to_stored()))
+            .collect())
+    }
+
     async fn get_entity_by_origin(
         &self,
         user_id: &UserId,

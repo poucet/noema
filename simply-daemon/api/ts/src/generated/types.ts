@@ -59,7 +59,7 @@ export type Role = "user" | "assistant" | "system";
 
 export type InputContent =
   | { type: "text"; text: string }
-  | { type: "documentRef"; id: string }
+  | { type: "entityRef"; id: string }
   | { type: "image"; data: string; mimeType: string }
   | { type: "audio"; data: string; mimeType: string }
   | { type: "assetRef"; assetId: string; mimeType: string };
@@ -88,7 +88,7 @@ export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mime_type: string }
   | { type: "audio"; data: string; mime_type: string }
-  | { type: "document_ref"; id: string }
+  | { type: "entity_ref"; id: string }
   | { type: "tool_call"; id: string; name: string; arguments: unknown; extra?: unknown }
   | { type: "tool_result"; tool_call_id: string; content: ToolResultContent[] };
 

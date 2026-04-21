@@ -244,9 +244,9 @@ impl From<&crate::api::ContentBlock> for Content {
                     text: "[Audio]".to_string(),
                 }
             }
-            crate::api::ContentBlock::DocumentRef { .. } => {
-                // DocumentRef should be resolved before sending to LLM
-                unreachable!("DocumentRef should be resolved before sending to provider")
+            crate::api::ContentBlock::EntityRef { .. } => {
+                // EntityRef should be resolved before sending to LLM
+                unreachable!("EntityRef should be resolved before sending to provider")
             }
         }
     }

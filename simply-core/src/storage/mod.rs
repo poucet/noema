@@ -49,8 +49,8 @@ pub mod session;
 // Implementations
 pub mod implementations;
 
-// Document resolution for RAG
-pub mod document_resolver;
+// Entity resolution for chat @mentions / RAG-style expansion.
+pub mod entity_resolver;
 
 // ============================================================================
 // Re-exports for convenience
@@ -100,5 +100,7 @@ pub use implementations::memory::{
     MemoryUserStore,
 };
 
-// Document resolution
-pub use document_resolver::{DocumentFormatter, DocumentResolver, ResolvedDocument};
+// Entity resolution
+pub use entity_resolver::{
+    EntityFormatter, EntityResolver, ResolvedEntity, StoreEntityResolver,
+};

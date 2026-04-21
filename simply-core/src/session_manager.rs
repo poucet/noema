@@ -20,7 +20,7 @@ use crate::storage::coordinator::StorageCoordinator;
 use crate::storage::ids::ConversationId;
 use crate::storage::session::Session;
 use crate::storage::traits::StorageTypes;
-use crate::storage::DocumentResolver;
+use crate::storage::EntityResolver;
 
 // ============================================================================
 // Persistence
@@ -86,7 +86,7 @@ impl SessionManager {
         context: C,
         model: Arc<dyn ChatModel + Send + Sync>,
         tools: Arc<dyn ToolService>,
-        document_resolver: Arc<dyn DocumentResolver>,
+        entity_resolver: Arc<dyn EntityResolver>,
         execution_context: ExecutionContext,
         event_tx: SessionEventSender,
     ) -> Self {
@@ -98,7 +98,7 @@ impl SessionManager {
             context: Mutex::new(context),
             model: Mutex::new(model),
             tools,
-            document_resolver,
+            entity_resolver,
             execution_context,
             event_tx,
         });
@@ -120,7 +120,7 @@ impl SessionManager {
         model: Arc<dyn ChatModel + Send + Sync>,
         tools: Arc<dyn ToolService>,
         coordinator: Arc<StorageCoordinator<S>>,
-        document_resolver: Arc<dyn DocumentResolver>,
+        entity_resolver: Arc<dyn EntityResolver>,
         execution_context: ExecutionContext,
         event_tx: SessionEventSender,
     ) -> anyhow::Result<Self> {
@@ -133,14 +133,14 @@ impl SessionManager {
                 for msg in seed {
                     ctx.add(msg);
                 }
-                Ok(Self::new(session_id, ctx, model, tools, document_resolver, execution_context, event_tx))
+                Ok(Self::new(session_id, ctx, model, tools, entity_resolver, execution_context, event_tx))
             }
             Persistence::Persistent { conversation_id } => {
                 let mut ctx = Session::open(coordinator, conversation_id).await?;
                 for msg in seed {
                     ctx.add(msg);
                 }
-                Ok(Self::new(session_id, ctx, model, tools, document_resolver, execution_context, event_tx))
+                Ok(Self::new(session_id, ctx, model, tools, entity_resolver, execution_context, event_tx))
             }
         }
     }
@@ -167,7 +167,7 @@ struct Inner<C: ConversationContext> {
     context: Mutex<C>,
     model: Mutex<Arc<dyn ChatModel + Send + Sync>>,
     tools: Arc<dyn ToolService>,
-    document_resolver: Arc<dyn DocumentResolver>,
+    entity_resolver: Arc<dyn EntityResolver>,
     execution_context: ExecutionContext,
     event_tx: SessionEventSender,
 }
@@ -231,7 +231,7 @@ impl<C: ConversationContext + 'static> Inner<C> {
         let agent = ToolAgent::new(
             Arc::clone(&self.tools),
             10,
-            Arc::clone(&self.document_resolver),
+            Arc::clone(&self.entity_resolver),
             self.execution_context.clone(),
         )
         .with_stream_sink(stream_tx);

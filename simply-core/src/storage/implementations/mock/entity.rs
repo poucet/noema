@@ -18,6 +18,9 @@ impl EntityStore for MockEntityStore {
     async fn get_entity(&self, _: &EntityId) -> Result<Option<StoredEntity>> {
         unimplemented!()
     }
+    async fn get_entities(&self, _: &[EntityId]) -> Result<Vec<StoredEntity>> {
+        unimplemented!()
+    }
     async fn get_entity_by_origin(&self, _: &UserId, _: &str) -> Result<Option<StoredEntity>> {
         unimplemented!()
     }

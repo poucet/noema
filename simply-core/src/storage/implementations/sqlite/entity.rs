@@ -158,6 +158,33 @@ impl EntityStore for SqliteStore {
         }
     }
 
+    async fn get_entities(&self, ids: &[EntityId]) -> Result<Vec<StoredEntity>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn().lock().unwrap();
+        let placeholders = std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT {ENTITY_SELECT_COLUMNS} FROM entities WHERE id IN ({placeholders})"
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let found: std::collections::HashMap<String, StoredEntity> = stmt
+            .query_map(
+                rusqlite::params_from_iter(ids.iter().map(|id| id.as_str())),
+                parse_entity_row,
+            )?
+            .filter_map(|r| r.ok())
+            .map(|e| (e.id.as_str().to_string(), e))
+            .collect();
+
+        // Preserve caller's input order; drop missing ids.
+        Ok(ids
+            .iter()
+            .filter_map(|id| found.get(id.as_str()).cloned())
+            .collect())
+    }
+
     async fn get_entity_by_origin(
         &self,
         user_id: &UserId,

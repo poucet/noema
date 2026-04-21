@@ -157,9 +157,9 @@ impl From<&ChatMessage> for Message {
                 crate::api::ContentBlock::ToolCall(_) | crate::api::ContentBlock::ToolResult(_) => {
                     None // Handled separately
                 }
-                crate::api::ContentBlock::DocumentRef { .. } => {
-                    // DocumentRef should be resolved before sending to LLM
-                    unreachable!("DocumentRef should be resolved before sending to provider")
+                crate::api::ContentBlock::EntityRef { .. } => {
+                    // EntityRef should be resolved before sending to LLM
+                    unreachable!("EntityRef should be resolved before sending to provider")
                 }
             })
             .collect();

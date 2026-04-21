@@ -304,9 +304,9 @@ fn content_block_to_parts(block: &crate::api::ContentBlock) -> Vec<Part> {
             }),
             extra: None,
         }],
-        crate::api::ContentBlock::DocumentRef { id } => {
-            // DocumentRef should be resolved before sending to LLM
-            panic!("DocumentRef (id={}) was not resolved before sending to provider. Ensure DocumentResolver is configured.", id)
+        crate::api::ContentBlock::EntityRef { id } => {
+            // EntityRef should be resolved before sending to LLM
+            panic!("EntityRef (id={}) was not resolved before sending to provider. Ensure EntityResolver is configured.", id)
         }
     }
 }

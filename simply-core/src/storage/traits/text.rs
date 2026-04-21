@@ -25,6 +25,15 @@ pub trait TextStore: Send + Sync {
     /// Get just the text content by ID (lightweight)
     async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>>;
 
+    /// Batch-fetch text by a set of content-block IDs. Returns a map of
+    /// id → text for ids that have non-null text; missing ids are dropped.
+    /// Implementations should use a single underlying query (e.g. sqlite
+    /// `WHERE id IN (…)`) to avoid N round-trips.
+    async fn get_texts(
+        &self,
+        ids: &[ContentBlockId],
+    ) -> Result<std::collections::HashMap<ContentBlockId, String>>;
+
     /// Check if a content block exists
     async fn exists(&self, id: &ContentBlockId) -> Result<bool>;
 }

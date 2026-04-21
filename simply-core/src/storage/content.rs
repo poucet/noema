@@ -4,7 +4,9 @@
 //! All content is stored as references:
 //! - Text → reference to content_blocks table
 //! - Images/Audio → reference to blob/asset storage
-//! - Documents → reference to documents table
+//! - Entities → reference to entities table (used for `@mention` style
+//!   document / note / tabbed-doc references that get expanded before the
+//!   LLM sees them)
 //! - Tool calls/results → inline JSON (no binary content)
 //!
 //! To convert refs back to full content for LLM/UI, use the `resolve()` method
@@ -16,7 +18,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use llm::{ContentBlock, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 
-use crate::storage::ids::{AssetId, ContentBlockId, DocumentId};
+use crate::storage::ids::{AssetId, ContentBlockId, EntityId};
 
 // ============================================================================
 // ContentResolver Trait
@@ -60,11 +62,12 @@ pub enum StoredContent {
         mime_type: String,
     },
 
-    /// Reference to a document (for RAG) - displayed as chip in UI,
-    /// content injected to LLM separately via DocumentFormatter.
-    /// Title is looked up from documents table during resolution.
-    DocumentRef {
-        document_id: DocumentId,
+    /// Reference to an entity (for @mention / RAG) — rendered as a chip
+    /// in UI; an `EntityResolver` expands it to formatted text before the
+    /// message reaches an LLM provider. The entity's title and body live
+    /// in the entities / content_blocks tables.
+    EntityRef {
+        entity_id: EntityId,
     },
 
     /// Tool call - stored as structured JSON
@@ -121,10 +124,10 @@ impl StoredContent {
         }
     }
 
-    /// Create a document reference
-    pub fn document_ref(document_id: impl Into<DocumentId>) -> Self {
-        StoredContent::DocumentRef {
-            document_id: document_id.into() ,
+    /// Create an entity reference
+    pub fn entity_ref(entity_id: impl Into<EntityId>) -> Self {
+        StoredContent::EntityRef {
+            entity_id: entity_id.into(),
         }
     }
 
@@ -164,9 +167,9 @@ impl StoredContent {
                     })
                 }
             }
-            StoredContent::DocumentRef { document_id } => {
-                Ok(ContentBlock::DocumentRef {
-                    id: document_id.to_string(),
+            StoredContent::EntityRef { entity_id } => {
+                Ok(ContentBlock::EntityRef {
+                    id: entity_id.to_string(),
                 })
             }
             StoredContent::ToolCall(call) => Ok(ContentBlock::ToolCall(call.clone())),
@@ -194,10 +197,10 @@ impl StoredContent {
                 asset_id: asset_id.clone(),
                 mime_type: mime_type.clone(),
             }),
-            StoredContent::DocumentRef { document_id } => {
-                // Document title is looked up separately by UI
-                Ok(ResolvedContent::DocumentRef {
-                    document_id: document_id.clone(),
+            StoredContent::EntityRef { entity_id } => {
+                // Entity title/kind are looked up separately by UI.
+                Ok(ResolvedContent::EntityRef {
+                    entity_id: entity_id.clone(),
                 })
             }
             StoredContent::ToolCall(call) => Ok(ResolvedContent::ToolCall(call.clone())),
@@ -225,8 +228,8 @@ pub enum ResolvedContent {
         asset_id: AssetId,
         mime_type: String,
     },
-    DocumentRef {
-        document_id: DocumentId,
+    EntityRef {
+        entity_id: EntityId,
     },
     ToolCall(ToolCall),
     ToolResult(ToolResult),
@@ -247,8 +250,10 @@ pub enum ResolvedContent {
 pub enum InputContent {
     /// Plain text to be stored
     Text { text: String },
-    /// Reference to an existing document
-    DocumentRef { id: DocumentId },
+    /// Reference to an existing entity (document, note, tabbed doc, …).
+    /// The resolver expands this to formatted text before the message
+    /// reaches an LLM provider.
+    EntityRef { id: EntityId },
     /// Base64-encoded image data to be stored
     Image {
         data: String,
@@ -282,7 +287,7 @@ impl InputContent {
             InputContent::Text { text } => Some(ContentBlock::Text { text }),
             InputContent::Image { data, mime_type } => Some(ContentBlock::Image { data, mime_type }),
             InputContent::Audio { data, mime_type } => Some(ContentBlock::Audio { data, mime_type }),
-            InputContent::DocumentRef { id } => Some(ContentBlock::DocumentRef { id: id.to_string() }),
+            InputContent::EntityRef { id } => Some(ContentBlock::EntityRef { id: id.to_string() }),
             InputContent::ToolCall(call) => Some(ContentBlock::ToolCall(call)),
             InputContent::ToolResult(result) => Some(ContentBlock::ToolResult(result)),
             InputContent::AssetRef { .. } => None, // Requires storage to resolve
@@ -301,7 +306,7 @@ impl InputContent {
             InputContent::Text { text } => Ok(ContentBlock::Text { text }),
             InputContent::Image { data, mime_type } => Ok(ContentBlock::Image { data, mime_type }),
             InputContent::Audio { data, mime_type } => Ok(ContentBlock::Audio { data, mime_type }),
-            InputContent::DocumentRef { id } => Ok(ContentBlock::DocumentRef {
+            InputContent::EntityRef { id } => Ok(ContentBlock::EntityRef {
                 id: id.to_string(),
             }),
             InputContent::ToolCall(call) => Ok(ContentBlock::ToolCall(call)),

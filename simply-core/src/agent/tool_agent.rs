@@ -3,8 +3,8 @@
 use super::context::ConversationContext;
 use super::tool_service::ToolService;
 use super::{Agent, ExecutionContext};
-use crate::storage::document_resolver::{DocumentFormatter, DocumentResolver};
-use crate::storage::ids::DocumentId;
+use crate::storage::entity_resolver::{EntityFormatter, EntityResolver};
+use crate::storage::ids::EntityId;
 use crate::traffic_log;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -38,8 +38,8 @@ pub type AgentStreamSink = mpsc::UnboundedSender<AgentStreamEvent>;
 pub struct ToolAgent {
     tools: Arc<dyn ToolService>,
     max_iterations: usize,
-    document_resolver: Arc<dyn DocumentResolver>,
-    document_formatter: DocumentFormatter,
+    entity_resolver: Arc<dyn EntityResolver>,
+    entity_formatter: EntityFormatter,
     execution_context: ExecutionContext,
     stream_sink: Option<AgentStreamSink>,
 }
@@ -48,14 +48,14 @@ impl ToolAgent {
     pub fn new(
         tools: Arc<dyn ToolService>,
         max_iterations: usize,
-        document_resolver: Arc<dyn DocumentResolver>,
+        entity_resolver: Arc<dyn EntityResolver>,
         execution_context: ExecutionContext,
     ) -> Self {
         Self {
             tools,
             max_iterations,
-            document_resolver,
-            document_formatter: DocumentFormatter,
+            entity_resolver,
+            entity_formatter: EntityFormatter,
             execution_context,
             stream_sink: None,
         }
@@ -81,19 +81,19 @@ impl ToolAgent {
         }
     }
 
-    async fn resolve_documents(&self, request: &mut ChatRequest) {
-        let doc_ids: Vec<DocumentId> = request
-            .get_document_refs()
+    async fn resolve_entities(&self, request: &mut ChatRequest) {
+        let entity_ids: Vec<EntityId> = request
+            .get_entity_refs()
             .into_iter()
-            .map(DocumentId::from)
+            .map(EntityId::from_string)
             .collect();
 
-        if doc_ids.is_empty() {
+        if entity_ids.is_empty() {
             return;
         }
 
-        let resolved = self.document_resolver.resolve_documents(&doc_ids).await;
-        self.document_formatter.inject_documents(request, &resolved);
+        let resolved = self.entity_resolver.resolve_entities(&entity_ids).await;
+        self.entity_formatter.inject(request, &resolved);
     }
 
     /// Process a single tool call via the tool service.
@@ -170,7 +170,7 @@ impl Agent for ToolAgent {
                 ChatRequest::with_tools(all_messages.iter(), tool_definitions)
             };
 
-            self.resolve_documents(&mut request).await;
+            self.resolve_entities(&mut request).await;
 
             // Log what we're sending to the LLM
             tracing::info!(

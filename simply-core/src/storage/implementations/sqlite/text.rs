@@ -128,6 +128,44 @@ impl TextStore for SqliteStore {
         }
     }
 
+    async fn get_texts(
+        &self,
+        ids: &[ContentBlockId],
+    ) -> Result<std::collections::HashMap<ContentBlockId, String>> {
+        use std::collections::HashMap;
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let conn = self.conn().lock().unwrap();
+        let placeholders = std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, text FROM content_blocks WHERE id IN ({placeholders})"
+        );
+
+        let mut stmt = conn
+            .prepare(&sql)
+            .context("Failed to prepare get_texts query")?;
+        let rows = stmt
+            .query_map(
+                rusqlite::params_from_iter(ids.iter().map(|id| id.as_str())),
+                |row| {
+                    let id: String = row.get(0)?;
+                    let text: Option<String> = row.get(1)?;
+                    Ok((id, text))
+                },
+            )
+            .context("Failed to query content_blocks")?;
+
+        let mut out = HashMap::with_capacity(ids.len());
+        for row in rows {
+            let (id, text) = row?;
+            if let Some(t) = text {
+                out.insert(ContentBlockId::from_string(id), t);
+            }
+        }
+        Ok(out)
+    }
+
     async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
         let conn = self.conn().lock().unwrap();
 

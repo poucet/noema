@@ -16,7 +16,7 @@ use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::ids::ConversationId;
 use simply_core::storage::session::ResolvedMessage;
 use simply_core::storage::traits::{StorageTypes, Stores};
-use simply_core::storage::DocumentResolver;
+use simply_core::storage::{EntityResolver, StoreEntityResolver};
 use simply_core::{
     Persistence, SessionEvent, SessionEventSender, SessionManager, ToolService,
 };
@@ -56,8 +56,6 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
 }
 
 impl<S: StorageTypes> EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
 {
     /// Assemble from pre-built services. Use `DaemonBuilder` to construct.
     pub(crate) fn assemble(
@@ -232,8 +230,6 @@ where
 
 #[async_trait]
 impl<S: StorageTypes> SessionApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
 {
     async fn create_session(
         &self,
@@ -266,7 +262,10 @@ where
         // origin metadata (e.g. discord.guild_id) and augments with any
         // stored OAuth tokens for the user.
         let tools: Arc<dyn ToolService> = self.tools.for_ctx(ctx.clone()).await;
-        let document_resolver: Arc<dyn DocumentResolver> = self.stores.document();
+        let entity_resolver: Arc<dyn EntityResolver> = Arc::new(StoreEntityResolver::new(
+            self.stores.entity(),
+            self.stores.text(),
+        ));
         let evt_tx = Self::spawn_event_forwarder(&session_id, &broadcast_tx);
 
         let manager = SessionManager::create(
@@ -277,7 +276,7 @@ where
             model,
             tools,
             Arc::clone(&self.coordinator),
-            document_resolver,
+            entity_resolver,
             simply_core::ExecutionContext::default(),
             evt_tx,
         ).await?;
@@ -348,8 +347,6 @@ where
 
 #[async_trait]
 impl<S: StorageTypes> ConversationApi for EmbeddedDaemon<S>
-where
-    S::Document: DocumentResolver,
 {
     async fn create_conversation(&self, ctx: &simply_rpc::RequestContext, name: Option<String>) -> anyhow::Result<ConversationId> {
         let user_id = self.require_user(ctx)?;
@@ -410,7 +407,6 @@ where
 
 #[async_trait]
 impl<S: StorageTypes> Daemon for EmbeddedDaemon<S>
-where S::Document: DocumentResolver,
 {
     fn session(&self) -> &dyn SessionApi { self }
     fn conversation(&self) -> &dyn ConversationApi { self }

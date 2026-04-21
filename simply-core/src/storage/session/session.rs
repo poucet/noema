@@ -119,9 +119,9 @@ fn resolved_message_to_chat_message(msg: &ResolvedMessage) -> ChatMessage {
                     ContentBlock::Text { text: format!("[Asset: {} ({})]", asset_id, mime_type) }
                 })
             }
-            ResolvedContent::Document { document_id, resolved } => {
+            ResolvedContent::Entity { entity_id, resolved } => {
                 resolved.clone().unwrap_or_else(|| {
-                    ContentBlock::Text { text: format!("[Document: {}]", document_id) }
+                    ContentBlock::EntityRef { id: entity_id.to_string() }
                 })
             }
             ResolvedContent::ToolCall(call) => ContentBlock::ToolCall(call.clone()),

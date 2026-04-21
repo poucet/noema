@@ -37,6 +37,11 @@ pub trait EntityStore: Send + Sync {
     /// Get an entity by ID
     async fn get_entity(&self, id: &EntityId) -> Result<Option<StoredEntity>>;
 
+    /// Batch-fetch entities by a set of IDs. Missing ids are silently
+    /// dropped. Implementations should use a single underlying query
+    /// (e.g. sqlite `WHERE id IN (…)`) to avoid N round-trips.
+    async fn get_entities(&self, ids: &[EntityId]) -> Result<Vec<StoredEntity>>;
+
     /// Look up an entity by exact origin string (e.g. `"google_drive:gdoc-abc"`).
     /// Used by import skills to find the existing imported version of an
     /// external resource.

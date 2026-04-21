@@ -60,6 +60,20 @@ impl TextStore for MockTextStore {
         Ok(blocks.get(id.as_str()).cloned())
     }
 
+    async fn get_texts(
+        &self,
+        ids: &[ContentBlockId],
+    ) -> Result<std::collections::HashMap<ContentBlockId, String>> {
+        let blocks = self.blocks.lock().unwrap();
+        let mut out = std::collections::HashMap::with_capacity(ids.len());
+        for id in ids {
+            if let Some(t) = blocks.get(id.as_str()) {
+                out.insert(id.clone(), t.clone());
+            }
+        }
+        Ok(out)
+    }
+
     async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
         Ok(self.blocks.lock().unwrap().contains_key(id.as_str()))
     }

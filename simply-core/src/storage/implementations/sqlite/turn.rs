@@ -9,7 +9,7 @@ use super::SqliteStore;
 use crate::storage::content::StoredContent;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{
-    AssetId, ContentBlockId, ConversationId, DocumentId, MessageContentId, MessageId, SpanId, TurnId,
+    AssetId, ContentBlockId, ConversationId, EntityId, MessageContentId, MessageId, SpanId, TurnId,
 };
 use crate::storage::traits::{StoredMessage, StoredSpan, StoredTurn, TurnStore};
 use crate::storage::types::{stored, Message, MessageWithContent, Span, Turn, TurnWithContent};
@@ -50,14 +50,14 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
             sequence_number INTEGER NOT NULL,
-            content_type TEXT CHECK(content_type IN ('text', 'asset_ref', 'document_ref', 'tool_call', 'tool_result')) NOT NULL,
+            content_type TEXT CHECK(content_type IN ('text', 'asset_ref', 'entity_ref', 'tool_call', 'tool_result')) NOT NULL,
             -- For text: reference to content_blocks
             content_block_id TEXT REFERENCES content_blocks(id),
             -- For asset_ref: reference to blob storage
             asset_id TEXT,
             mime_type TEXT,
-            -- For document_ref: reference to document
-            document_id TEXT,
+            -- For entity_ref: reference to entities(id)
+            entity_id TEXT,
             -- For tool_call/tool_result: structured JSON
             tool_data TEXT
         );
@@ -90,7 +90,7 @@ fn load_message_content(
     message_id: &MessageId,
 ) -> Result<Vec<StoredContent>> {
     let mut stmt = conn.prepare(
-        "SELECT content_type, content_block_id, asset_id, mime_type, document_id, tool_data
+        "SELECT content_type, content_block_id, asset_id, mime_type, entity_id, tool_data
          FROM message_content WHERE message_id = ?1
          ORDER BY sequence_number",
     )?;
@@ -101,19 +101,19 @@ fn load_message_content(
             let content_block_id: Option<ContentBlockId> = row.get(1)?;
             let asset_id: Option<AssetId> = row.get(2)?;
             let mime_type: Option<String> = row.get(3)?;
-            let document_id: Option<DocumentId> = row.get(4)?;
+            let entity_id: Option<EntityId> = row.get(4)?;
             let tool_data: Option<String> = row.get(5)?;
-            Ok((content_type, content_block_id, asset_id, mime_type, document_id, tool_data))
+            Ok((content_type, content_block_id, asset_id, mime_type, entity_id, tool_data))
         })?
         .filter_map(|r| r.ok())
-        .filter_map(|(content_type, content_block_id, asset_id, mime_type, document_id, tool_data)| {
+        .filter_map(|(content_type, content_block_id, asset_id, mime_type, entity_id, tool_data)| {
             match content_type.as_str() {
                 "text" => Some(StoredContent::TextRef { content_block_id: content_block_id? }),
                 "asset_ref" => Some(StoredContent::AssetRef {
                     asset_id: asset_id?,
                     mime_type: mime_type?,
                 }),
-                "document_ref" => Some(StoredContent::DocumentRef { document_id: document_id? }),
+                "entity_ref" => Some(StoredContent::EntityRef { entity_id: entity_id? }),
                 "tool_call" => {
                     let call: llm::ToolCall = serde_json::from_str(&tool_data?).ok()?;
                     Some(StoredContent::ToolCall(call))
@@ -583,16 +583,16 @@ fn insert_message_content(
                         mime_type                    ],
                 )?;
             }
-            StoredContent::DocumentRef { document_id } => {
+            StoredContent::EntityRef { entity_id } => {
                 conn.execute(
-                    "INSERT INTO message_content (id, message_id, sequence_number, content_type, document_id)
+                    "INSERT INTO message_content (id, message_id, sequence_number, content_type, entity_id)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         content_id,
                         message_id,
                         content_seq as i32,
-                        "document_ref",
-                        document_id
+                        "entity_ref",
+                        entity_id
                     ],
                 )?;
             }

@@ -1,0 +1,13 @@
+{% for e in entities -%}
+<entity id="{{ e.id }}" kind="{{ e.kind }}">
+# {{ e.title }}
+
+{% if !e.body.is_empty() -%}
+{{ e.body }}
+
+{% endif -%}
+</entity>
+{% if !loop.last %}
+
+{% endif -%}
+{% endfor -%}

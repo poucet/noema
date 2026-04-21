@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use simply_core::storage::traits::{StorageTypes, Stores, UserStore};
 use simply_core::storage::coordinator::StorageCoordinator;
-use simply_core::storage::DocumentResolver;
 use simply_rpc::{ServiceRouter, RpcService};
 
 use crate::api::*;
@@ -37,7 +36,6 @@ pub struct DaemonHandle<S: StorageTypes> {
 
 impl<S: StorageTypes> DaemonHandle<S>
 where
-    S::Document: DocumentResolver,
     S::User: simply_core::storage::traits::UserStore,
 {
     /// Start the HTTP/WS server and block until shutdown (Ctrl+C, SIGTERM, or /daemon/kill).
@@ -101,7 +99,6 @@ async fn shutdown_signal() {
 
 impl<S: StorageTypes> DaemonBuilder<S>
 where
-    S::Document: DocumentResolver,
     S::User: simply_core::storage::traits::UserStore,
 {
     /// Build the daemon and return a handle for serving.
@@ -234,13 +231,18 @@ where
 
 /// Build the ServiceRouter from a daemon.
 ///
-/// All services are registered once in the builder's daemon_tools.
-/// This just adds SessionApi + ConversationApi (implemented directly by the daemon).
+/// Two categories of services are registered:
+/// - **Directly-on-daemon APIs** (`SessionApi`, `ConversationApi`,
+///   `McpApi`, `SkillsApi`): implemented on `EmbeddedDaemon` itself, so
+///   they're added here.
+/// - **Split-out services** (`EntityApi`, `DocumentApi`, `AssetApi`,
+///   `ModelApi`, `OAuthApi`, `VoiceApi`, `SearchApi`, `UserApi`,
+///   `CoreApi`): each has its own struct registered into the daemon's
+///   `DaemonToolService` at build time; this loop re-registers them with
+///   the `ServiceRouter` via `daemon_tool_services()`.
 pub fn build_service_router<S: StorageTypes>(
     daemon: &Arc<EmbeddedDaemon<S>>,
 ) -> Arc<ServiceRouter>
-where
-    S::Document: DocumentResolver,
 {
     let session_svc: Arc<dyn SessionApi> = daemon.clone();
     let conversation_svc: Arc<dyn ConversationApi> = daemon.clone();

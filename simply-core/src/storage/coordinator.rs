@@ -6,7 +6,9 @@
 //! - Content resolution (text + asset + blob stores)
 //!
 //! For single-store operations, access stores directly via `Stores` trait.
-//! Implements `ContentResolver` and `DocumentResolver` for resolving refs.
+//! Implements `ContentResolver` for resolving text and asset refs. Entity
+//! refs (`@mention`s in chat) are resolved separately by `EntityResolver`
+//! in `storage::entity_resolver`.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -81,7 +83,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     ///
     /// - Text is stored in content_blocks and converted to TextRef
     /// - Inline images/audio are stored in blob/assets and converted to AssetRef
-    /// - DocumentRef, ToolCall, ToolResult pass through
+    /// - EntityRef, ToolCall, ToolResult pass through
     pub async fn store_content_block(
         &self,
         block: ContentBlock,
@@ -102,7 +104,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                 let asset_id = self.store_asset(&data, &mime_type).await?;
                 Ok(StoredContent::asset_ref(asset_id, mime_type))
             }
-            ContentBlock::DocumentRef { id, .. } => Ok(StoredContent::document_ref(id)),
+            ContentBlock::EntityRef { id, .. } => Ok(StoredContent::entity_ref(id)),
             ContentBlock::ToolCall(call) => Ok(StoredContent::ToolCall(call)),
             ContentBlock::ToolResult(result) => Ok(StoredContent::ToolResult(result)),
         }
@@ -112,7 +114,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     ///
     /// - Text is stored in content_blocks → TextRef
     /// - Image/Audio base64 data is stored in blob/assets → AssetRef
-    /// - DocumentRef passes through
+    /// - EntityRef passes through
     /// - AssetRef passes through (already stored)
     pub async fn store_input_content(
         &self,
@@ -137,7 +139,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                     let asset_id = self.store_asset(&data, &mime_type).await?;
                     StoredContent::asset_ref(asset_id, mime_type)
                 }
-                InputContent::DocumentRef { id } => StoredContent::document_ref(id),
+                InputContent::EntityRef { id } => StoredContent::entity_ref(id),
                 InputContent::AssetRef { asset_id, mime_type } => {
                     StoredContent::asset_ref(asset_id, mime_type)
                 }
@@ -643,8 +645,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
                         resolved_block,
                     )
                 }
-                StoredContent::DocumentRef { document_id } => {
-                    ResolvedContent::document(document_id.clone())
+                StoredContent::EntityRef { entity_id } => {
+                    ResolvedContent::entity(entity_id.clone())
                 }
                 StoredContent::ToolCall(call) => ResolvedContent::tool_call(call.clone()),
                 StoredContent::ToolResult(result) => ResolvedContent::tool_result(result.clone()),

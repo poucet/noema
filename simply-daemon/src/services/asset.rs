@@ -7,7 +7,6 @@ use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::traits::{StorageTypes, Stores};
 use simply_rpc::RequestContext;
 use crate::api::*;
-use simply_core::storage::DocumentResolver;
 
 pub struct AssetService<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
@@ -22,8 +21,6 @@ impl<S: StorageTypes> AssetService<S> {
 
 #[async_trait]
 impl<S: StorageTypes> AssetApi for AssetService<S>
-where
-    S::Document: DocumentResolver,
 {
     async fn store_asset(&self, _ctx: &RequestContext, upload: simply_rpc::BinaryUpload) -> anyhow::Result<AssetInfo> {
         use base64::{engine::general_purpose::STANDARD, Engine};
