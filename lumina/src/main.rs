@@ -203,6 +203,70 @@ impl EventHandler for Handler {
         if let Some(mcp) = data.get::<McpServerKey>() { mcp.refresh_instructions(); }
     }
 
+    /// Mirror the bot's real voice presence into the VoiceManager session map.
+    ///
+    /// - Bot disconnected (by admin, kick, or any non-/voice path) → end session.
+    /// - Bot pulled into a voice channel (admin drag, `Invite to voice`) → start
+    ///   a Listen session in that channel automatically.
+    /// - Bot moved between channels → end the old session, start one in the new channel.
+    ///
+    /// A short debounce lets our own `/voice join` flow reach the sessions map
+    /// before this handler observes the bot's state change and tries to react.
+    async fn voice_state_update(
+        &self,
+        ctx: Context,
+        old: Option<serenity::model::voice::VoiceState>,
+        new: serenity::model::voice::VoiceState,
+    ) {
+        let bot_id = ctx.cache.current_user().id;
+        if new.user_id != bot_id { return; }
+        let Some(guild_id) = new.guild_id else { return; };
+
+        let old_channel = old.and_then(|s| s.channel_id);
+        let new_channel = new.channel_id;
+        if old_channel == new_channel { return; }
+
+        // Debounce: /voice join races this event (songbird dispatches the voice
+        // state update before our command handler finishes inserting the
+        // session). 500ms is enough slack for the session insert to land.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let data = ctx.data.read().await;
+        let Some(voice_mgr) = data.get::<voice::VoiceManagerKey>().cloned() else { return };
+        drop(data);
+
+        match (old_channel, new_channel) {
+            (_, None) => {
+                if voice_mgr.has_session(&guild_id).await {
+                    tracing::info!(guild_id = %guild_id, "bot disconnected from voice; ending session");
+                    voice_mgr.stop_session(&guild_id).await;
+                }
+            }
+            (Some(old_ch), Some(new_ch)) if old_ch != new_ch => {
+                tracing::info!(guild_id = %guild_id, from = %old_ch, to = %new_ch, "bot moved voice channels; restarting session");
+                voice_mgr.stop_session(&guild_id).await;
+                let base_ctx = simply_rpc::RequestContext::anonymous();
+                if let Err(e) = voice_mgr.join_voice(
+                    base_ctx, guild_id, new_ch, new_ch, Vec::new(), Arc::clone(&ctx.http),
+                ).await {
+                    tracing::warn!(guild_id = %guild_id, error = %e, "auto-join after move failed");
+                }
+            }
+            (None, Some(ch)) => {
+                if !voice_mgr.has_session(&guild_id).await {
+                    tracing::info!(guild_id = %guild_id, voice_channel = %ch, "bot pulled into voice externally; starting session");
+                    let base_ctx = simply_rpc::RequestContext::anonymous();
+                    if let Err(e) = voice_mgr.join_voice(
+                        base_ctx, guild_id, ch, ch, Vec::new(), Arc::clone(&ctx.http),
+                    ).await {
+                        tracing::warn!(guild_id = %guild_id, error = %e, "auto-join failed");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     async fn message(&self, ctx: Context, msg: serenity::model::channel::Message) {
         if msg.author.bot { return; }
 
