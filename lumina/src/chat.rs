@@ -215,27 +215,41 @@ async fn build_rag_context(
         return (String::new(), vec![]);
     }
 
-    // Resolve each hit to a RagHit by fetching the entity + body. Hits
-    // with missing entities (deleted since indexing) are dropped.
-    let mut rag_hits: Vec<RagHit> = Vec::with_capacity(hits.len());
-    for hit in hits {
-        let entity = match lx.daemon.entity().get_entity(&ctx, &hit.entity_id).await {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let body = match lx.daemon.entity().get_entity_content(&ctx, &hit.entity_id).await {
-            Ok(c) => c.content_markdown.unwrap_or_default(),
-            Err(_) => String::new(),
-        };
+    // One batch fetch for all entities + their bodies instead of 2×N
+    // round-trips. Hits whose entity was deleted since indexing fall
+    // out naturally (missing from the response); score order preserved
+    // via a small id→score lookup.
+    let score_by_id: std::collections::HashMap<String, (String, f32)> = hits
+        .iter()
+        .map(|h| (h.entity_id.clone(), (h.entity_kind.clone(), h.score)))
+        .collect();
+    let entities = match lx.daemon.entity().get_entities(&ctx, GetEntitiesRequest {
+        ids: hits.iter().map(|h| h.entity_id.clone()).collect(),
+        include_content: true,
+    }).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(error = %e, "RAG batch fetch failed, skipping context");
+            return (String::new(), vec![]);
+        }
+    };
+
+    let mut rag_hits: Vec<RagHit> = Vec::with_capacity(entities.len());
+    for ewc in entities {
+        let Some((kind, score)) = score_by_id.get(&ewc.summary.id).cloned() else { continue };
+        let body = ewc.content.and_then(|c| c.content_markdown).unwrap_or_default();
         if body.trim().is_empty() { continue; }
         rag_hits.push(RagHit {
-            entity_id: hit.entity_id,
-            entity_kind: hit.entity_kind,
-            title: entity.title.unwrap_or_else(|| "(untitled)".to_string()),
+            entity_id: ewc.summary.id,
+            entity_kind: kind,
+            title: ewc.summary.title.unwrap_or_else(|| "(untitled)".to_string()),
             body,
-            score: hit.score,
+            score,
         });
     }
+    // Search dedupes by content block, so sorting here just restores
+    // score-descending after the batch fetch re-orders us.
+    rag_hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
     if rag_hits.is_empty() {
         return (String::new(), vec![]);

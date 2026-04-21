@@ -174,8 +174,10 @@ mod ts_export {
         EntitySummary::export_all().expect("EntitySummary");
         RelatedEntity::export_all().expect("RelatedEntity");
         EntityContent::export_all().expect("EntityContent");
+        EntityWithContent::export_all().expect("EntityWithContent");
         CreateEntityRequest::export_all().expect("CreateEntityRequest");
         UpdateEntityContentRequest::export_all().expect("UpdateEntityContentRequest");
+        GetEntitiesRequest::export_all().expect("GetEntitiesRequest");
         AddRelationRequest::export_all().expect("AddRelationRequest");
         MoveRelationRequest::export_all().expect("MoveRelationRequest");
         McpServerInfo::export_all().expect("McpServerInfo");

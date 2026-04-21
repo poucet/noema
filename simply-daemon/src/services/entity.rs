@@ -12,7 +12,7 @@ use async_trait::async_trait;
 
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::ids::{AssetId as CoreAssetId, EntityId};
-use simply_core::storage::traits::{EntityStore, StorageTypes, Stores, StoredEntity};
+use simply_core::storage::traits::{EntityStore, StorageTypes, Stores, StoredEntity, TextStore};
 use simply_core::storage::types::entity::origin_scheme;
 use simply_core::storage::types::{ContentOrigin, EntityType, RelationType};
 use simply_rpc::RequestContext;
@@ -276,6 +276,69 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             Some(e) => Ok(Some(self.to_summary(e).await?)),
             None => Ok(None),
         }
+    }
+
+    async fn get_entities(
+        &self,
+        ctx: &RequestContext,
+        request: GetEntitiesRequest,
+    ) -> anyhow::Result<Vec<EntityWithContent>> {
+        let user_id = Self::require_user(ctx)?;
+        if request.ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let entity_ids: Vec<EntityId> = request
+            .ids
+            .iter()
+            .map(|id| EntityId::from_string(id.as_str()))
+            .collect();
+
+        // Single batch query for the entity rows. Access filtering
+        // happens here rather than per-row so a forbidden id is simply
+        // dropped (not surfaced as an error).
+        let entities = self.stores.entity().get_entities(&entity_ids).await?;
+        let accessible: Vec<_> = entities
+            .into_iter()
+            .filter(|e| match e.user_id.as_ref() {
+                Some(uid) => uid == &user_id || !e.is_private,
+                None => true,
+            })
+            .collect();
+
+        // If content was requested, batch-fetch all content blocks once.
+        let text_by_block = if request.include_content {
+            let block_ids: Vec<_> = accessible
+                .iter()
+                .filter_map(|e| e.content_block_id.clone())
+                .collect();
+            self.stores.text().get_texts(&block_ids).await?
+        } else {
+            std::collections::HashMap::new()
+        };
+
+        let mut out = Vec::with_capacity(accessible.len());
+        for entity in accessible {
+            let content = if request.include_content {
+                entity.content_block_id.as_ref().map(|block_id| {
+                    let body = text_by_block.get(block_id).cloned().unwrap_or_default();
+                    EntityContent {
+                        entity_id: entity.id.to_string(),
+                        content_markdown: Some(body),
+                        // referenced_assets are not fetched in bulk yet;
+                        // callers that need them can still use the
+                        // per-entity get_entity_content endpoint.
+                        referenced_assets: Vec::new(),
+                    }
+                })
+            } else {
+                None
+            };
+
+            let summary = self.to_summary(entity).await?;
+            out.push(EntityWithContent { summary, content });
+        }
+
+        Ok(out)
     }
 
     async fn create_entity(

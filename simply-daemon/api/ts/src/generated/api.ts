@@ -48,11 +48,13 @@ export const coreApi = (t: Transport) => ({
 // EntityApi
 export const entityApi = (t: Transport) => ({
   /** List all entities for the authenticated user. Filter by `type_prefix` for `LIKE 'prefix%'` matching — e.g. `"document::"` for all document kinds. If `root_of_relation` is set (e.g. `"structure::contained_in"`), returns only entities with no outgoing edge of that relation — i.e. the roots of that relation's forest. Useful for top-level document listings that should skip tabs/nested children. */
-  listEntities: (typePrefix: string | null, rootOfRelation: string | null) => t.rpc<T.EntitySummary[]>('entity.list_entities', 'GET', '/api/entity', { typePrefix, rootOfRelation }),
+  listEntities: (typePrefix: string | null, rootOfRelation: string | null) => t.rpc<T.EntitySummary[]>('entity.list_entities', 'GET', '/api/entity', { type_prefix: typePrefix, root_of_relation: rootOfRelation }),
   /** Search entities by title (case-insensitive). Optional `type_prefix` and `root_of_relation` filters apply the same way as for [`Self::list_entities`]. */
-  searchEntities: (query: string, typePrefix: string | null, rootOfRelation: string | null) => t.rpc<T.EntitySummary[]>('entity.search_entities', 'GET', `/api/entity/search/${query}`, { typePrefix, rootOfRelation }),
+  searchEntities: (query: string, typePrefix: string | null, rootOfRelation: string | null) => t.rpc<T.EntitySummary[]>('entity.search_entities', 'GET', `/api/entity/search/${query}`, { type_prefix: typePrefix, root_of_relation: rootOfRelation }),
   /** Get an entity's summary (no content). */
   getEntity: (entityId: string) => t.rpc<T.EntitySummary>('entity.get_entity', 'GET', `/api/entity/${entityId}`),
+  /** Batch-fetch entities by id, optionally bundling each entity's resolved content body. Missing ids are silently dropped — the returned list contains at most `request.ids.len()` entries. One round-trip regardless of `ids.len()`; RAG + UI list views should prefer this over N calls to `get_entity(+_content)`. */
+  getEntities: (request: T.GetEntitiesRequest) => t.rpc<T.EntityWithContent[]>('entity.get_entities', 'POST', '/api/entity/batch', request),
   /** Look up an entity by its `"<scheme>:<id>"` origin string. Returns `None` if no entity matches. Used by import skills to detect whether an external document already has a local entity so they can re-import (new version first, then delete the stale one). */
   getEntityByOrigin: (origin: string) => t.rpc<T.EntitySummary | null>('entity.get_entity_by_origin', 'GET', `/api/entity/by_origin/${origin}`),
   /** Create a new entity, optionally with initial content. */
@@ -60,7 +62,7 @@ export const entityApi = (t: Transport) => ({
   /** Rename an entity. */
   renameEntity: (entityId: string, name: string) => t.rpc<void>('entity.rename_entity', 'PUT', `/api/entity/${entityId}`, { name }),
   /** Change an entity's kind (e.g. `document::note` → `document::todo`). Restricted to kinds in the `document::` namespace so UI callers can't accidentally convert entities into conversations, directories, etc. */
-  changeEntityKind: (entityId: string, newKind: string) => t.rpc<void>('entity.change_entity_kind', 'PUT', `/api/entity/${entityId}/kind`, { newKind }),
+  changeEntityKind: (entityId: string, newKind: string) => t.rpc<void>('entity.change_entity_kind', 'PUT', `/api/entity/${entityId}/kind`, { new_kind: newKind }),
   /** Delete an entity and its descendants via `structure::contained_in`. */
   deleteEntity: (entityId: string) => t.rpc<void>('entity.delete_entity', 'DELETE', `/api/entity/${entityId}`),
   /** Fetch an entity's live content (lazy). Returns `content_markdown = None` if the entity has no content block. */
@@ -151,7 +153,7 @@ export const searchApi = (t: Transport) => ({
 export const sessionApi = (t: Transport) => ({
   listSessions: () => t.rpc<T.SessionInfo[]>('session.list_sessions', 'GET', '/api/session'),
   sendMessage: (sessionId: string, message: T.UserMessage) => t.rpc<void>('session.send_message', 'POST', `/api/session/${sessionId}/message`, { message }),
-  setModel: (sessionId: string, modelId: string) => t.rpc<void>('session.set_model', 'PUT', `/api/session/${sessionId}/model`, { modelId }),
+  setModel: (sessionId: string, modelId: string) => t.rpc<void>('session.set_model', 'PUT', `/api/session/${sessionId}/model`, { model_id: modelId }),
   closeSession: (sessionId: string) => t.rpc<void>('session.close_session', 'DELETE', `/api/session/${sessionId}`),
   closeAllSessions: () => t.rpc<void>('session.close_all_sessions', 'DELETE', '/api/session'),
   pushEvent: (event: T.InboundEvent) => t.rpc<void>('session.push_event', 'POST', '/api/session/event', event),
@@ -180,7 +182,7 @@ export const voiceApi = (t: Transport) => ({
   /** List available voice providers. */
   listVoiceProviders: () => t.rpc<T.VoiceProviderInfo[]>('voice.list_voice_providers', 'GET', '/api/voice/provider'),
   /** Synthesize text to speech. Returns audio data. */
-  synthesize: (text: string, providerId: string, voice: string) => t.rpc<T.Audio>('voice.synthesize', 'POST', '/api/voice/tts', { text, providerId, voice }),
+  synthesize: (text: string, providerId: string, voice: string) => t.rpc<T.Audio>('voice.synthesize', 'POST', '/api/voice/tts', { text, provider_id: providerId, voice }),
   /** List available TTS voices for a provider. */
   listVoices: (providerId: string) => t.rpc<T.Voice[]>('voice.list_voices', 'GET', `/api/voice/tts/voices/${providerId}`),
   /** Disconnect a voice stream. */

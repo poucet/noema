@@ -642,39 +642,6 @@ async fn handle_stream_ws(
     tracing::debug!(path, "stream WS disconnected");
 }
 
-/// Convert a camelCase or PascalCase identifier to snake_case. Leaves
-/// already-snake-case strings unchanged.
-fn camel_to_snake(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    for (i, c) in s.chars().enumerate() {
-        if c.is_ascii_uppercase() {
-            if i > 0 { out.push('_'); }
-            out.push(c.to_ascii_lowercase());
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-/// For an object body, snake_case the top-level keys so method-param lookup
-/// works regardless of whether the client sent camelCase (TS) or snake_case
-/// (internal Rust clients). Nested values are untouched — they deserialize
-/// into their own structs via serde, which typically uses
-/// `#[serde(rename_all = "camelCase")]` and expects the original casing.
-fn snake_top_level_keys(v: serde_json::Value) -> serde_json::Value {
-    match v {
-        serde_json::Value::Object(map) => {
-            let mut out = serde_json::Map::with_capacity(map.len());
-            for (k, v) in map {
-                out.insert(camel_to_snake(&k), v);
-            }
-            serde_json::Value::Object(out)
-        }
-        other => other,
-    }
-}
-
 async fn rest_handler(
     state: AppState,
     req: axum::extract::Request,
@@ -732,16 +699,19 @@ async fn rest_handler(
         serde_json::to_value(simply_rpc::BinaryUpload::new(raw_bytes.to_vec(), content_type))
             .unwrap_or(serde_json::Value::Null)
     } else if !raw_bytes.is_empty() {
-        // POST/PUT — body is the JSON payload.
-        let parsed: serde_json::Value = serde_json::from_slice(&raw_bytes).unwrap_or(serde_json::Value::Null);
-        snake_top_level_keys(parsed)
+        // POST/PUT — body is the JSON payload. Keys stay as-is: the
+        // macro's per-field extraction looks up both snake_case and
+        // camelCase variants, and struct-body endpoints deserialize via
+        // their own serde config (typically `rename_all = "camelCase"`).
+        serde_json::from_slice(&raw_bytes).unwrap_or(serde_json::Value::Null)
     } else if matches!(http_method, HttpMethod::Get | HttpMethod::Delete) && !query_str.is_empty() {
         // GET/DELETE — query string becomes the JSON param object so the
         // dispatcher can deserialize it into the trait's param struct.
-        // Absent keys remain missing (deserialize as None for Option<T>).
+        // Keep query keys as-sent; the macro tries both camelCase and
+        // snake_case when extracting named params.
         let mut obj = serde_json::Map::new();
         for (k, v) in url::form_urlencoded::parse(query_str.as_bytes()) {
-            obj.insert(camel_to_snake(&k), serde_json::Value::String(v.into_owned()));
+            obj.insert(k.into_owned(), serde_json::Value::String(v.into_owned()));
         }
         serde_json::Value::Object(obj)
     } else {

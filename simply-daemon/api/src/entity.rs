@@ -222,6 +222,18 @@ pub trait EntityApi: Send + Sync {
         entity_id: &str,
     ) -> anyhow::Result<EntitySummary>;
 
+    /// Batch-fetch entities by id, optionally bundling each entity's
+    /// resolved content body. Missing ids are silently dropped — the
+    /// returned list contains at most `request.ids.len()` entries.
+    /// One round-trip regardless of `ids.len()`; RAG + UI list views
+    /// should prefer this over N calls to `get_entity(+_content)`.
+    #[rpc(post = "/entity/batch", no_tool)]
+    async fn get_entities(
+        &self,
+        ctx: &RequestContext,
+        request: GetEntitiesRequest,
+    ) -> anyhow::Result<Vec<EntityWithContent>>;
+
     /// Look up an entity by its `"<scheme>:<id>"` origin string. Returns
     /// `None` if no entity matches. Used by import skills to detect whether
     /// an external document already has a local entity so they can re-import

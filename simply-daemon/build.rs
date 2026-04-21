@@ -235,7 +235,11 @@ fn generate_service_client(prefix: &str, trait_item: &syn::ItemTrait) -> String 
         let return_type = parse_return_type_ts(&method.sig.output);
 
         let mut ts_params = Vec::new();
-        let mut body_params = Vec::new();
+        // (snake_case_key, tsCamelCaseArg) pairs for every param that
+        // isn't a path param. We always emit `{ snake_case: tsCamel }`
+        // on the wire so the keys match the Rust-side param names that
+        // the macro dispatcher looks up.
+        let mut body_pairs: Vec<(String, String)> = Vec::new();
 
         for (name, ty) in &params {
             // Skip params handled by the transport layer (e.g. RequestContext → header)
@@ -243,23 +247,40 @@ fn generate_service_client(prefix: &str, trait_item: &syn::ItemTrait) -> String 
             if TRANSPORT_PARAMS.contains(&bare_type) { continue; }
 
             let ts_type = rust_type_to_ts_from_str(ty);
-            ts_params.push(format!("{}: {ts_type}", to_camel_case(name)));
+            let ts_name = to_camel_case(name);
+            ts_params.push(format!("{ts_name}: {ts_type}"));
             if !path_params.contains(name) {
-                body_params.push(to_camel_case(name));
+                body_pairs.push((name.clone(), ts_name));
             }
         }
 
         let params_str = ts_params.join(", ");
         let url = build_ts_url(prefix, path_only, &path_params);
 
-        let body = if body_params.is_empty() {
+        let body = if body_pairs.is_empty() {
             None
-        } else if body_params.len() == 1 && path_params.is_empty() {
-            // Single body param, no path params → send directly
-            Some(body_params[0].clone())
+        } else if body_pairs.len() == 1 && path_params.is_empty() {
+            // Single wire param, no path params → the whole body *is*
+            // that param. Pass the TS argument directly; for struct
+            // params this preserves the struct's serde shape (typically
+            // camelCase via ts-rs `rename_all`).
+            Some(body_pairs[0].1.clone())
         } else {
-            // Mix of path + body params → wrap body params in object
-            Some(format!("{{ {} }}", body_params.join(", ")))
+            // Mix of path + body params, or multiple wire params → build
+            // an object whose keys are the Rust param names (snake_case)
+            // so the macro's per-field lookup finds them. Values are
+            // the camelCase TS arguments.
+            let entries: Vec<String> = body_pairs
+                .iter()
+                .map(|(snake, camel)| {
+                    if snake == camel {
+                        format!("{snake}")
+                    } else {
+                        format!("{snake}: {camel}")
+                    }
+                })
+                .collect();
+            Some(format!("{{ {} }}", entries.join(", ")))
         };
 
         if let Some(ref doc) = doc {
