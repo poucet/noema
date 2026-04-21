@@ -316,8 +316,11 @@ pub(crate) struct MessagesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) stream: Option<bool>,
 
+    // Claude expects `system` as a list of content blocks, not a single
+    // object — recent API versions reject the scalar form with
+    // "system: Input should be a valid list".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) system: Option<SystemPrompt>,
+    pub(crate) system: Option<Vec<SystemPrompt>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tools: Option<Vec<Tool>>,
@@ -356,10 +359,10 @@ impl MessagesRequest {
             // TODO: Don't hardcode
             max_tokens: 32000,
             stream: Some(stream),
-            system: if system_instruction.len() == 0 {
+            system: if system_instruction.is_empty() {
                 None
             } else {
-                Some(SystemPrompt::new(&system_instruction))
+                Some(vec![SystemPrompt::new(&system_instruction)])
             },
             tools,
         }
