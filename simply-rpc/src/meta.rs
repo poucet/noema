@@ -23,7 +23,9 @@ pub struct RouteMeta {
     pub kind: RouteKind,
     /// Path template, e.g. `"/session/{session_id}/message"`.
     pub path_template: &'static str,
-    /// The RPC method name (e.g. `"session__send_message"`).
+    /// The RPC method name (e.g. `"session.send_message"`). When exposed as an
+    /// LLM tool, the dot is rewritten to `__` (see
+    /// `DaemonToolService::sanitize_tool_name`) to satisfy provider name rules.
     pub method_name: &'static str,
     /// Doc comment for tool description.
     pub description: Option<&'static str>,

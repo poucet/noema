@@ -73,6 +73,18 @@ impl DaemonToolService {
     }
 }
 
+/// Convert an internal RPC method name (`prefix.method`) to an LLM-facing tool
+/// name. Anthropic and other providers reject tool names that don't match
+/// `^[a-zA-Z0-9_-]+$`, so we rewrite the dot to a double underscore. Inverse
+/// is `desanitize_tool_name`.
+fn sanitize_tool_name(method_name: &str) -> String {
+    method_name.replace('.', "__")
+}
+
+fn desanitize_tool_name(tool_name: &str) -> String {
+    tool_name.replace("__", ".")
+}
+
 #[async_trait]
 impl ToolService for DaemonToolService {
     async fn get_definitions(&self) -> Vec<ToolDefinition> {
@@ -82,7 +94,7 @@ impl ToolService for DaemonToolService {
                 svc.meta().routes.iter().filter_map(|rm| {
                     if rm.no_tool || !rm.is_rest() { return None; }
                     Some(ToolDefinition {
-                        name: rm.method_name.to_string(),
+                        name: sanitize_tool_name(rm.method_name),
                         description: rm.description.map(|s| s.to_string()),
                         input_schema: (rm.tool_schema)().cloned()
                             .unwrap_or_else(empty_object_schema),
@@ -97,10 +109,11 @@ impl ToolService for DaemonToolService {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<Vec<ToolResultContent>> {
+        let method_name = desanitize_tool_name(name);
         for svc in &self.services {
-            let route = svc.meta().routes.iter().find(|rm| rm.method_name == name);
+            let route = svc.meta().routes.iter().find(|rm| rm.method_name == method_name);
             if let Some(rm) = route {
-                if let Some(result) = svc.rest_dispatch_by_name(name, &self.ctx, arguments.clone()).await {
+                if let Some(result) = svc.rest_dispatch_by_name(&method_name, &self.ctx, arguments.clone()).await {
                     let value = result?;
                     return Ok(value_to_tool_result(value, rm.binary_response));
                 }

@@ -259,6 +259,9 @@ fn generate_service_client(prefix: &str, trait_item: &syn::ItemTrait) -> String 
         }
 
         let fn_name = to_camel_case(&method_name);
+        // Must match simply-rpc-macros' method-name format (`{prefix}.{method}`).
+        // REST paths dispatch by HTTP method + path, but the WS server dispatches
+        // by this name — mismatch → "unknown method" at the WS layer.
         let rpc_name = format!("{prefix}.{method_name}");
         match body {
             None => out.push_str(&format!(
