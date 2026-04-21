@@ -8,12 +8,18 @@
   onMount(async () => {
     try {
       users = await api.getUsers();
-      // Auto-select first user if none selected
-      if (users.length > 0 && !getCurrentUser()) {
+      // Validate the stored selection against the current users list —
+      // after a DB nuke + reimport the localStorage id no longer exists,
+      // and every `create_entity` would fail with a FK constraint error.
+      const stored = getCurrentUser();
+      const storedValid = stored != null && users.some(u => u.id === stored);
+      if (storedValid) {
+        selected = stored;
+      } else if (users.length > 0) {
         selected = users[0].id;
         setCurrentUser(selected);
       } else {
-        selected = getCurrentUser();
+        setCurrentUser(null);
       }
     } catch (e) {
       console.error('Failed to load users:', e);
