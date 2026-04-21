@@ -65,7 +65,7 @@ mod model {
         crate::paginator::send_paginated(lx, cmd, &pages, std::time::Duration::from_secs(120)).await
     }
 
-    #[sub_command(description = "Show current model for this channel")]
+    #[sub_command(description = "Show the model that will be used here, and where it came from")]
     pub async fn current(
         lx: &LuminaContext,
         cmd: &CommandInteraction,
@@ -73,14 +73,24 @@ mod model {
         let channel_id = cmd.channel_id;
         let channel_model = crate::commands::chat::get_topic_tag(lx, channel_id, "model");
         let config_default = lx.config.discord.model_id.as_deref().filter(|s| !s.is_empty());
+        let daemon_default = lx.daemon.model().default_model_id().await;
 
         let (source, model) = match (&channel_model, config_default) {
-            (Some(m), _) => ("channel", m.as_str()),
-            (None, Some(m)) => ("config default", m),
+            (Some(m), _) => ("channel topic tag", m.as_str()),
+            (None, Some(m)) => ("lumina.toml config default", m),
+            (None, None) if !daemon_default.is_empty() => ("daemon default", daemon_default.as_str()),
             (None, None) => ("daemon default", "(not set)"),
         };
 
-        reply_ephemeral(lx, cmd, &format!("Current model: `{model}` (source: {source})")).await
+        reply_ephemeral(
+            lx,
+            cmd,
+            &format!(
+                "Current model: `{model}` (source: {source})\n\
+                 Daemon default: `{daemon}`",
+                daemon = if daemon_default.is_empty() { "(not set)" } else { daemon_default.as_str() },
+            ),
+        ).await
     }
 
     #[sub_command(description = "List available providers")]
