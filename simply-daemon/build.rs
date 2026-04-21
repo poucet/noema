@@ -76,7 +76,7 @@ fn run_or_panic(cmd: &str, args: &[&str], dir: &PathBuf, msg: &str) {
 const STRING_TYPES: &[&str] = &[
     "SessionId", "ConversationId", "DocumentId", "AssetId", "BlobHash",
     "TabId", "TurnId", "SpanId", "EntityId", "UserId", "RevisionId",
-    "ChunkId", "CollectionId",
+    "ChunkId",
 ];
 
 /// Parameter types handled by the transport layer, not the client.

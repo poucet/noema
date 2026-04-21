@@ -122,15 +122,6 @@ define_id!(RevisionId, "Unique identifier for a tab revision");
 // Vector chunks (embedding/RAG)
 define_id!(ChunkId, "Unique identifier for an embedding vector chunk");
 
-// Collections
-define_id!(CollectionId, "Unique identifier for a collection");
-define_id!(CollectionItemId, "Unique identifier for a collection item");
-define_id!(CollectionViewId, "Unique identifier for a collection view");
-define_id!(ItemFieldId, "Unique identifier for a field on a collection item");
-
-// References
-define_id!(ReferenceId, "Unique identifier for a cross-reference");
-
 // Users
 define_id!(UserId, "Unique identifier for a user");
 

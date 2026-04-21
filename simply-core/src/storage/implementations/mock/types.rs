@@ -3,8 +3,8 @@
 use crate::storage::traits::StorageTypes;
 
 use super::{
-    MockAssetStore, MockBlobStore, MockCollectionStore, MockDocumentStore, MockEntityStore,
-    MockReferenceStore, MockTextStore, MockTurnStore, MockUserStore,
+    MockAssetStore, MockBlobStore, MockDocumentStore, MockEntityStore,
+    MockTextStore, MockTurnStore, MockUserStore,
 };
 
 /// Mock storage types bundled together for coordinator tests
@@ -18,6 +18,4 @@ impl StorageTypes for MockStorage {
     type User = MockUserStore;
     type Document = MockDocumentStore;
     type Entity = MockEntityStore;
-    type Reference = MockReferenceStore;
-    type Collection = MockCollectionStore;
 }

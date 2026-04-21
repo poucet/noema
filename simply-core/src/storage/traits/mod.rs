@@ -4,21 +4,17 @@
 
 mod asset;
 mod blob;
-mod collection;
 // conversation module removed - use EntityStore instead
 mod document;
 mod entity;
-mod reference;
 mod text;
 mod turn;
 mod user;
 
 pub use asset::{AssetStore, StoredAsset};
 pub use blob::BlobStore;
-pub use collection::{CollectionStore, ItemField, StoredCollection, StoredCollectionItem, StoredCollectionView, StoredItemField};
 pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use entity::{EntityStore, StoredEntity};
-pub use reference::{ReferenceStore, StoredReference};
 pub use text::{TextStore, StoredTextBlock};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage};
 pub use user::{StoredUser, UserStore};
@@ -56,12 +52,11 @@ pub trait StorageTypes: Send + Sync + 'static {
     type User: UserStore + Send + Sync;
     /// Document storage
     type Document: DocumentStore + Send + Sync;
-    /// Entity storage (unified addressable layer for conversations, documents, assets)
+    /// Entity storage (unified addressable layer for conversations, documents, assets).
+    /// Also carries `entity_relations` (replaces the legacy dedicated ReferenceStore) and
+    /// `entity_assets` mappings; generic tree/graph structure lives here instead of a
+    /// dedicated CollectionStore.
     type Entity: EntityStore + Send + Sync;
-    /// Reference storage (cross-references between entities)
-    type Reference: ReferenceStore + Send + Sync;
-    /// Collection storage (organizing entities into collections)
-    type Collection: CollectionStore + Send + Sync;
 }
 
 use std::sync::Arc;
@@ -94,10 +89,6 @@ pub trait Stores<S: StorageTypes>: Send + Sync {
     fn blob(&self) -> Arc<S::Blob>;
     fn asset(&self) -> Arc<S::Asset>;
     fn text(&self) -> Arc<S::Text>;
-    /// Unified entity storage (conversations, documents, assets)
+    /// Unified entity storage (conversations, documents, entity_relations, entity_assets)
     fn entity(&self) -> Arc<S::Entity>;
-    /// Cross-reference storage
-    fn reference(&self) -> Arc<S::Reference>;
-    /// Collection storage
-    fn collection(&self) -> Arc<S::Collection>;
 }

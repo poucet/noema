@@ -58,7 +58,7 @@ pub mod document_resolver;
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, DocumentStore, EntityStore, ReferenceStore, StorageTypes,
+    AssetStore, BlobStore, DocumentStore, EntityStore, StorageTypes,
     StoredEntity, StoredUser, Stores, TextStore, TurnStore, UserStore,
 };
 
@@ -95,8 +95,8 @@ pub use implementations::fs::FsBlobStore;
 
 // Memory implementations (for testing)
 pub use implementations::memory::{
-    MemoryAssetStore, MemoryBlobStore, MemoryCollectionStore, MemoryDocumentStore,
-    MemoryEntityStore, MemoryReferenceStore, MemoryStorage, MemoryTextStore, MemoryTurnStore,
+    MemoryAssetStore, MemoryBlobStore, MemoryDocumentStore,
+    MemoryEntityStore, MemoryStorage, MemoryTextStore, MemoryTurnStore,
     MemoryUserStore,
 };
 

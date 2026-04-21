@@ -25,8 +25,6 @@ impl StorageTypes for SqliteStorage {
     type User = SqliteStore;
     type Document = SqliteStore;
     type Entity = SqliteStore;
-    type Reference = SqliteStore;
-    type Collection = SqliteStore;
 }
 
 /// Store instances for SQLite storage. Shares a single connection pool
@@ -74,6 +72,4 @@ impl Stores<SqliteStorage> for SqliteStores {
     fn asset(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
     fn text(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
     fn entity(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn reference(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn collection(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 }

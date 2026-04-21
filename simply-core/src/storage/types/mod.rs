@@ -4,12 +4,10 @@
 
 pub mod asset;
 pub mod blob;
-pub mod collection;
 pub mod content_block;
 pub mod conversation;
 pub mod document;
 pub mod entity;
-pub mod reference;
 pub mod stored;
 pub mod temporal;
 pub mod user;
@@ -21,11 +19,6 @@ pub use content_block::{ContentBlock, ContentOrigin, ContentType, OriginKind};
 pub use conversation::{Message, MessageWithContent, Span, Turn, TurnWithContent};
 pub use document::{Document, DocumentRevision, DocumentSource, DocumentTab, DocumentType};
 pub use entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
-pub use collection::{
-    Collection, CollectionItem, CollectionView, FieldDefinition, FieldType,
-    ItemTarget, ViewConfig, ViewType,
-};
-pub use reference::{EntityRef, Reference};
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
 pub use temporal::ActivitySummary;
 pub use user::User;

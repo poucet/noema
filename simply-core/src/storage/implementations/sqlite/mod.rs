@@ -6,10 +6,10 @@
 //!
 //! All trait implementations are in submodules:
 //! - `asset` - AssetStore impl
-//! - `text` - TextStore impl
+//! - `text` - TextStore impl (content_blocks)
 //! - `turn` - TurnStore impl
 //! - `document` - DocumentStore impl
-//! - `entity` - EntityStore impl
+//! - `entity` - EntityStore impl (entities + entity_relations + entity_assets)
 //! - `user` - UserStore impl
 
 use anyhow::Result;
@@ -19,10 +19,8 @@ use std::sync::{Arc, Mutex};
 
 // Submodules with trait implementations
 mod asset;
-mod collection;
 mod document;
 mod entity;
-mod reference;
 mod temporal;
 mod text;
 mod turn;
@@ -31,10 +29,8 @@ mod vector;
 
 // Re-export init_schema functions for use in SqliteStore::init_schema
 pub(crate) use asset::init_schema as init_asset_schema;
-pub(crate) use collection::init_schema as init_collection_schema;
 pub(crate) use document::init_schema as init_document_schema;
 pub(crate) use entity::init_schema as init_entity_schema;
-pub(crate) use reference::init_schema as init_reference_schema;
 pub(crate) use temporal::init_schema as init_temporal_schema;
 pub(crate) use text::init_schema as init_text_schema;
 pub(crate) use turn::init_schema as init_turn_schema;
@@ -88,13 +84,11 @@ impl SqliteStore {
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         init_user_schema(&conn)?;
+        init_text_schema(&conn)?;
         init_entity_schema(&conn)?;
         init_turn_schema(&conn)?;
         init_asset_schema(&conn)?;
         init_document_schema(&conn)?;
-        init_text_schema(&conn)?;
-        init_reference_schema(&conn)?;
-        init_collection_schema(&conn)?;
         init_temporal_schema(&conn)?;
         init_vector_schema(&conn)?;
         Ok(())
