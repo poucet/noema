@@ -63,6 +63,17 @@ impl VoiceEventHandler for VoiceReceiver {
     }
 }
 
+/// Truncate a string to `max_chars` characters, respecting char boundaries.
+fn truncate_preview(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max_chars).collect();
+        out.push_str("…");
+        out
+    }
+}
+
 /// Spawn a task that processes STT events and acts on them.
 pub fn spawn_event_handler(
     guild_id: GuildId,
@@ -105,12 +116,25 @@ pub fn spawn_event_handler(
                                             tracing::error!(error = %e, "failed to send to session");
                                             None
                                         } else {
-                                            // Collect the response
+                                            // Collect the response, surfacing tool activity to the text channel.
                                             let mut response_text = String::new();
                                             loop {
                                                 match daemon_session.recv().await {
                                                     Ok(simply_daemon_api::DaemonEvent::TextDelta(delta)) => {
                                                         response_text.push_str(&delta);
+                                                    }
+                                                    Ok(simply_daemon_api::DaemonEvent::ToolCall { name, arguments, .. }) => {
+                                                        tracing::info!(tool = %name, "voice tool call");
+                                                        let args_preview = serde_json::to_string(&arguments)
+                                                            .unwrap_or_default();
+                                                        let args_preview = truncate_preview(&args_preview, 200);
+                                                        let _ = text_channel.say(&http, format!("🔧 `{name}` {args_preview}")).await;
+                                                    }
+                                                    Ok(simply_daemon_api::DaemonEvent::ToolResult { result, .. }) => {
+                                                        let result_preview = serde_json::to_string(&result)
+                                                            .unwrap_or_default();
+                                                        let result_preview = truncate_preview(&result_preview, 400);
+                                                        let _ = text_channel.say(&http, format!("✅ {result_preview}")).await;
                                                     }
                                                     Ok(simply_daemon_api::DaemonEvent::TurnComplete) => break,
                                                     Ok(simply_daemon_api::DaemonEvent::Error(e)) => {
@@ -118,7 +142,7 @@ pub fn spawn_event_handler(
                                                         break;
                                                     }
                                                     Err(_) => break,
-                                                    _ => {} // skip tool calls etc
+                                                    _ => {}
                                                 }
                                             }
                                             if response_text.trim().is_empty() { None } else { Some(response_text) }

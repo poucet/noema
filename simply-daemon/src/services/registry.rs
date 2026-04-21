@@ -1,7 +1,9 @@
 //! ToolRegistry — unified dispatch across all tool providers.
 //!
-//! Replaces the old CompositeToolService. Just a list of ToolProviders
-//! (MCP servers, WS skills, embedded skills) + daemon REST tools.
+//! Replaces the old CompositeToolService. Daemon REST tools + a list of
+//! non-MCP ToolProviders (WS skills, embedded skills) + MCP servers looked
+//! up dynamically from `McpService` so newly-connected servers are picked
+//! up automatically.
 //! Also implements McpApi by delegating management to McpService.
 
 use std::sync::Arc;
@@ -10,6 +12,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use llm::{ToolDefinition, ToolResultContent};
 use rmcp::model::{CallToolRequestParams, CallToolResult, Tool};
+use simply_core::mcp::McpToolCaller;
 use simply_rpc::{RequestContext, RestService};
 use tokio::sync::RwLock;
 
@@ -24,7 +27,8 @@ use super::tools::DaemonToolService;
 pub struct ToolRegistry {
     /// Daemon's own REST API methods exposed as tools.
     daemon_tools: Arc<DaemonToolService>,
-    /// All registered tool providers (MCP servers, WS skills, embedded skills).
+    /// Non-MCP tool providers (WS skills, embedded skills). MCP servers are
+    /// sourced live from `McpService` so async (re)connects are reflected.
     providers: RwLock<Vec<Arc<dyn ToolProvider>>>,
     /// Token store for populating RequestContext.tokens.
     token_store: Arc<super::token_store::TransientTokenStore>,
@@ -117,50 +121,91 @@ impl ToolRegistry {
         ctx
     }
 
-    /// Get a user-scoped ToolService for a session (daemon tools + all providers).
+    /// Get a user-scoped ToolService for a session (daemon tools + all providers +
+    /// live MCP tools sourced from `McpService`).
     pub async fn for_user(
-        &self,
+        self: &Arc<Self>,
         user_id: &simply_core::storage::ids::UserId,
     ) -> Arc<dyn ToolService> {
         let ctx = self.ctx_with_tokens(user_id).await;
         let scoped_daemon = Arc::new(self.daemon_tools.with_context(ctx.clone()));
-        let providers = self.providers.read().await.clone();
-        Arc::new(UserScopedTools { daemon_tools: scoped_daemon, providers, ctx })
+        Arc::new(UserScopedTools { registry: Arc::clone(self), scoped_daemon, ctx })
     }
-}
 
-// ---------------------------------------------------------------------------
-// ToolService — dispatches across daemon REST tools + providers
-// ---------------------------------------------------------------------------
+    /// Snapshot of currently-connected MCP tools: (tool, caller) pairs.
+    ///
+    /// Queried live so servers that connect (or reconnect) after startup
+    /// are picked up automatically — mirrors how skills/WS providers are
+    /// mutated at runtime via `register`/`unregister`.
+    async fn mcp_tools_snapshot(&self) -> Vec<(Tool, McpToolCaller)> {
+        let registry = self.mcp.registry().lock().await;
+        let mut out = Vec::new();
+        for (_id, conn) in registry.connected_servers() {
+            let caller = conn.tool_caller();
+            for tool in &conn.tools {
+                out.push((tool.clone(), caller.clone()));
+            }
+        }
+        out
+    }
 
-#[async_trait]
-impl ToolService for ToolRegistry {
-    async fn get_definitions(&self) -> Vec<ToolDefinition> {
-        let mut defs = self.daemon_tools.get_definitions().await;
+    /// List all tool definitions — daemon tools + registered providers + live MCP.
+    async fn list_definitions(&self, daemon_tools: &DaemonToolService) -> Vec<ToolDefinition> {
+        let mut defs = daemon_tools.get_definitions().await;
         for provider in self.providers.read().await.iter() {
             for tool in provider.tools().await {
                 defs.push(mcp_tool_to_definition(&tool));
             }
         }
+        for (tool, _) in self.mcp_tools_snapshot().await {
+            defs.push(mcp_tool_to_definition(&tool));
+        }
         defs
     }
 
-    async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<Vec<ToolResultContent>> {
-        // Daemon REST tools
-        if self.daemon_tools.get_definitions().await.iter().any(|d| d.name == name) {
-            return self.daemon_tools.call_tool(name, arguments).await;
+    /// Dispatch a tool call against daemon tools, static providers, then live MCP.
+    async fn dispatch(
+        &self,
+        daemon_tools: &DaemonToolService,
+        name: &str,
+        arguments: serde_json::Value,
+        ctx: &RequestContext,
+    ) -> Result<Vec<ToolResultContent>> {
+        if daemon_tools.get_definitions().await.iter().any(|d| d.name == name) {
+            return daemon_tools.call_tool(name, arguments).await;
         }
-        // Providers (anonymous context)
-        let ctx = RequestContext::anonymous();
         let request = CallToolRequestParams::new(name.to_string())
             .with_arguments(arguments.as_object().cloned().unwrap_or_default());
         for provider in self.providers.read().await.iter() {
             if provider.tools().await.iter().any(|t| t.name.as_ref() == name) {
-                let result = provider.call_tool(request, &ctx).await?;
+                let result = provider.call_tool(request.clone(), ctx).await?;
+                return Ok(call_result_to_content(result));
+            }
+        }
+        for (tool, caller) in self.mcp_tools_snapshot().await {
+            if tool.name.as_ref() == name {
+                let args = arguments.as_object().cloned();
+                let result = caller.call_tool(name.to_string(), args).await?;
                 return Ok(call_result_to_content(result));
             }
         }
         anyhow::bail!("tool not found: {name}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ToolService — dispatches across daemon REST tools + providers + live MCP
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl ToolService for ToolRegistry {
+    async fn get_definitions(&self) -> Vec<ToolDefinition> {
+        self.list_definitions(&self.daemon_tools).await
+    }
+
+    async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<Vec<ToolResultContent>> {
+        let ctx = RequestContext::anonymous();
+        self.dispatch(&self.daemon_tools, name, arguments, &ctx).await
     }
 }
 
@@ -201,14 +246,16 @@ impl McpApi for ToolRegistry {
             "call_tool_direct: dispatching"
         );
 
-        // Get user-scoped or global tool service
-        let content = if let Some(ref user_id) = ctx.scope.user_id {
+        // Build a scoped context (populates OAuth tokens) if user_id is present,
+        // otherwise dispatch with the caller's ctx as-is.
+        let scoped_ctx = if let Some(ref user_id) = ctx.scope.user_id {
             let uid = simply_core::storage::ids::UserId::from_string(user_id);
-            let scoped = self.for_user(&uid).await;
-            scoped.call_tool(name, args).await?
+            self.ctx_with_tokens(&uid).await
         } else {
-            self.call_tool(name, args).await?
+            ctx.clone()
         };
+        let scoped_daemon = self.daemon_tools.with_context(scoped_ctx.clone());
+        let content = self.dispatch(&scoped_daemon, name, args, &scoped_ctx).await?;
 
         let mcp_content: Vec<rmcp::model::Content> = content.into_iter().map(|c| {
             match c {
@@ -223,42 +270,23 @@ impl McpApi for ToolRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// UserScopedTools — per-session tool service
+// UserScopedTools — per-session wrapper over ToolRegistry with user context
 // ---------------------------------------------------------------------------
 
 struct UserScopedTools {
-    daemon_tools: Arc<DaemonToolService>,
-    providers: Vec<Arc<dyn ToolProvider>>,
+    registry: Arc<ToolRegistry>,
+    scoped_daemon: Arc<DaemonToolService>,
     ctx: RequestContext,
 }
 
 #[async_trait]
 impl ToolService for UserScopedTools {
     async fn get_definitions(&self) -> Vec<ToolDefinition> {
-        let mut defs = self.daemon_tools.get_definitions().await;
-        for provider in &self.providers {
-            for tool in provider.tools().await {
-                defs.push(mcp_tool_to_definition(&tool));
-            }
-        }
-        defs
+        self.registry.list_definitions(&self.scoped_daemon).await
     }
 
     async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> Result<Vec<ToolResultContent>> {
-        // Daemon REST tools (user-scoped)
-        if self.daemon_tools.get_definitions().await.iter().any(|d| d.name == name) {
-            return self.daemon_tools.call_tool(name, arguments).await;
-        }
-        // Providers (with user tokens)
-        let request = CallToolRequestParams::new(name.to_string())
-            .with_arguments(arguments.as_object().cloned().unwrap_or_default());
-        for provider in &self.providers {
-            if provider.tools().await.iter().any(|t| t.name.as_ref() == name) {
-                let result = provider.call_tool(request, &self.ctx).await?;
-                return Ok(call_result_to_content(result));
-            }
-        }
-        anyhow::bail!("tool not found: {name}")
+        self.registry.dispatch(&self.scoped_daemon, name, arguments, &self.ctx).await
     }
 }
 

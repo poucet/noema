@@ -188,20 +188,10 @@ where
             Arc::clone(&token_store),
             Arc::clone(&mcp),
         ));
-
-        // Register MCP servers as ToolProviders
-        {
-            let registry = mcp.registry().lock().await;
-            for (id, connected) in registry.connected_servers() {
-                let provider = Arc::new(crate::services::providers::McpToolProvider::shared(
-                    id.to_string(),
-                    connected.config.name.clone(),
-                    connected.tools.clone(),
-                    connected.tool_caller(),
-                ));
-                tools.register(provider).await;
-            }
-        }
+        // MCP servers are sourced live from McpService on every
+        // get_definitions/call_tool — no startup snapshot is needed,
+        // so servers that connect asynchronously (or later, at runtime)
+        // are picked up automatically.
 
         let daemon = EmbeddedDaemon::assemble(
             self.coordinator,
