@@ -23,7 +23,6 @@ impl StorageTypes for SqliteStorage {
     type Text = SqliteStore;
     type Turn = SqliteStore;
     type User = SqliteStore;
-    type Document = SqliteStore;
     type Entity = SqliteStore;
 }
 
@@ -67,7 +66,6 @@ impl SqliteStores {
 impl Stores<SqliteStorage> for SqliteStores {
     fn turn(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
     fn user(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-    fn document(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
     fn blob(&self) -> Arc<FsBlobStore> { self.blob.clone() }
     fn asset(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
     fn text(&self) -> Arc<SqliteStore> { self.sqlite.clone() }

@@ -1,12 +1,18 @@
-//! SQLite-vec implementation of VectorStore
+//! SQLite-vec implementation of VectorStore.
+//!
+//! Chunks key on `content_block_id`; `entity_id` + `entity_kind` + `title`
+//! are denormalised so filters (e.g. `entity_kind LIKE 'document::%'`)
+//! are a single predicate with no joins.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::{params, Connection};
 
 use super::SqliteStore;
-use crate::embedding::{SearchFilter, SearchQuery, SearchResult, VectorChunk, VectorStore};
-use crate::storage::ids::{ChunkId, DocumentId, TabId, UserId};
+use crate::embedding::{
+    EntityFilter, EntityTypeMatcher, SearchQuery, SearchResult, VectorChunk, VectorStore,
+};
+use crate::storage::ids::{ChunkId, ContentBlockId, EntityId};
 
 /// Register sqlite-vec as an auto-extension. Call once before opening any connections.
 pub fn register_sqlite_vec() {
@@ -17,31 +23,27 @@ pub fn register_sqlite_vec() {
     }
 }
 
-// Note: if sqlite_vec::sqlite3_vec_init doesn't exist, the crate may export
-// it differently. Check the sqlite-vec crate docs for the exact symbol name.
-// The pattern above follows https://alexgarcia.xyz/sqlite-vec/rust.html
-
 pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
-
     conn.execute_batch(
         r#"
+        -- Chunk metadata. Only fields that feed the SQL filter
+        -- (entity_kind) or index identity (entity_id / content_block_id)
+        -- live here. Title, user/owner, access rules, chunk text — all
+        -- resolved from the entity's current state at query time, so
+        -- renames, visibility flips, or policy changes don't need a
+        -- reindex.
         CREATE TABLE IF NOT EXISTS vector_chunks (
             id TEXT PRIMARY KEY,
-            document_id TEXT NOT NULL,
-            tab_id TEXT NOT NULL,
-            document_type TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            chunk_index INTEGER NOT NULL,
-            text TEXT NOT NULL,
+            content_block_id TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            entity_kind TEXT NOT NULL,
             model_id TEXT NOT NULL,
-            embedded_at INTEGER NOT NULL,
-            UNIQUE(tab_id, chunk_index)
+            embedded_at INTEGER NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_chunks_type ON vector_chunks(document_type);
-        CREATE INDEX IF NOT EXISTS idx_chunks_user ON vector_chunks(user_id);
-        CREATE INDEX IF NOT EXISTS idx_chunks_doc ON vector_chunks(document_id);
-        CREATE INDEX IF NOT EXISTS idx_chunks_tab ON vector_chunks(tab_id);
+        CREATE INDEX IF NOT EXISTS idx_chunks_kind   ON vector_chunks(entity_kind);
+        CREATE INDEX IF NOT EXISTS idx_chunks_entity ON vector_chunks(entity_id);
+        CREATE INDEX IF NOT EXISTS idx_chunks_block  ON vector_chunks(content_block_id);
         "#,
     )
     .context("Failed to initialize vector_chunks schema")?;
@@ -64,14 +66,57 @@ pub(crate) fn ensure_vec_table(conn: &Connection, dimensions: usize) -> Result<(
 fn parse_chunk(row: &rusqlite::Row<'_>) -> rusqlite::Result<VectorChunk> {
     Ok(VectorChunk {
         id: ChunkId::from_string(row.get::<_, String>(0)?),
-        document_id: DocumentId::from_string(row.get::<_, String>(1)?),
-        tab_id: TabId::from_string(row.get::<_, String>(2)?),
-        document_type: row.get(3)?,
-        user_id: UserId::from_string(row.get::<_, String>(4)?),
-        chunk_index: row.get(5)?,
-        text: row.get(6)?,
+        content_block_id: ContentBlockId::from_string(row.get::<_, String>(1)?),
+        entity_id: EntityId::from_string(row.get::<_, String>(2)?),
+        entity_kind: row.get(3)?,
         embedding: vec![], // not loaded from metadata table
     })
+}
+
+/// Build a SQL `WHERE`-fragment (without the `WHERE` keyword) that
+/// encodes an `EntityFilter` against the `entity_kind` column, plus the
+/// positional parameters it needs. Returns `(sql_fragment, params)`.
+///
+/// Examples:
+/// - `include: [Prefix("document::")], exclude: [Exact("document::system_prompt")]`
+///   → `(entity_kind LIKE ?) AND NOT (entity_kind = ?)`
+/// - `include: [], exclude: [Exact("conversation")]`
+///   → `NOT (entity_kind = ?)`
+fn filter_sql(filter: &EntityFilter) -> (String, Vec<String>) {
+    let mut params: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+
+    if !filter.include.is_empty() {
+        let inc: Vec<String> = filter
+            .include
+            .iter()
+            .map(|m| matcher_predicate(m, &mut params))
+            .collect();
+        parts.push(format!("({})", inc.join(" OR ")));
+    }
+    if !filter.exclude.is_empty() {
+        let exc: Vec<String> = filter
+            .exclude
+            .iter()
+            .map(|m| matcher_predicate(m, &mut params))
+            .collect();
+        parts.push(format!("NOT ({})", exc.join(" OR ")));
+    }
+
+    (parts.join(" AND "), params)
+}
+
+fn matcher_predicate(m: &EntityTypeMatcher, params: &mut Vec<String>) -> String {
+    match m {
+        EntityTypeMatcher::Exact(k) => {
+            params.push(k.clone());
+            "entity_kind = ?".to_string()
+        }
+        EntityTypeMatcher::Prefix(p) => {
+            params.push(format!("{p}%"));
+            "entity_kind LIKE ?".to_string()
+        }
+    }
 }
 
 #[async_trait]
@@ -90,24 +135,20 @@ impl VectorStore for SqliteStore {
         let now = crate::storage::helper::unix_timestamp();
 
         for chunk in chunks {
-            // Insert metadata
             conn.execute(
-                "INSERT OR REPLACE INTO vector_chunks (id, document_id, tab_id, document_type, user_id, chunk_index, text, model_id, embedded_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT OR REPLACE INTO vector_chunks \
+                 (id, content_block_id, entity_id, entity_kind, model_id, embedded_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     chunk.id.as_str(),
-                    chunk.document_id.as_str(),
-                    chunk.tab_id.as_str(),
-                    &chunk.document_type,
-                    chunk.user_id.as_str(),
-                    chunk.chunk_index,
-                    &chunk.text,
+                    chunk.content_block_id.as_str(),
+                    chunk.entity_id.as_str(),
+                    &chunk.entity_kind,
                     "", // model_id set by caller
                     now,
                 ],
             )?;
 
-            // Insert vector
             let embedding_bytes: Vec<u8> = chunk
                 .embedding
                 .iter()
@@ -132,7 +173,8 @@ impl VectorStore for SqliteStore {
             .flat_map(|f| f.to_le_bytes())
             .collect();
 
-        // KNN search via vec0
+        // KNN search via vec0. The filter predicate is applied after the
+        // metadata fetch; sqlite-vec's MATCH doesn't see our columns.
         let mut stmt = conn.prepare(
             "SELECT v.id, v.distance
              FROM vector_chunks_vec v
@@ -148,94 +190,86 @@ impl VectorStore for SqliteStore {
             .filter_map(|r| r.ok())
             .collect();
 
-        // Now fetch metadata and apply filters
-        let mut results = Vec::new();
+        // Walk matches, apply user + entity-kind filters, and dedupe by
+        // `content_block_id` keeping the best score. Two chunks from the
+        // same block shouldn't turn into two hits — callers inject the
+        // full block either way.
+        let mut seen_blocks: std::collections::HashMap<String, SearchResult> =
+            std::collections::HashMap::new();
         for (chunk_id, distance) in candidates {
-            let chunk = conn.query_row(
-                "SELECT id, document_id, tab_id, document_type, user_id, chunk_index, text
+            let chunk = match conn.query_row(
+                "SELECT id, content_block_id, entity_id, entity_kind
                  FROM vector_chunks WHERE id = ?1",
                 params![&chunk_id],
                 parse_chunk,
-            );
-
-            let chunk = match chunk {
+            ) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
 
-            // Apply filters
             if let Some(ref filter) = query.filter {
-                if let Some(ref doc_type) = filter.document_type {
-                    if &chunk.document_type != doc_type {
-                        continue;
-                    }
-                }
-                if let Some(ref user_id) = filter.user_id {
-                    if &chunk.user_id != user_id {
+                if let Some(ref ef) = filter.entity_filter {
+                    if !ef.matches(&chunk.entity_kind) {
                         continue;
                     }
                 }
             }
 
-            // Convert L2 distance to similarity score (0-1)
             let score = 1.0 / (1.0 + distance as f32);
-            results.push(SearchResult { chunk, score });
+            let block_key = chunk.content_block_id.as_str().to_string();
+            match seen_blocks.get(&block_key) {
+                Some(existing) if existing.score >= score => { /* keep existing */ }
+                _ => { seen_blocks.insert(block_key, SearchResult { chunk, score }); }
+            }
         }
 
+        let mut results: Vec<SearchResult> = seen_blocks.into_values().collect();
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         Ok(results)
     }
 
-    async fn delete_by_tab(&self, tab_id: &TabId) -> Result<()> {
+    async fn delete_by_content_block(&self, content_block_id: &ContentBlockId) -> Result<()> {
         let conn = self.conn().lock().unwrap();
-
-        // Get chunk IDs first for vec table cleanup
-        let ids: Vec<String> = {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM vector_chunks WHERE tab_id = ?1",
-            )?;
-            let ids = stmt.query_map(params![tab_id.as_str()], |row| row.get(0))?
-                .filter_map(|r| r.ok())
-                .collect();
-            ids
-        };
-
+        let mut stmt = conn.prepare(
+            "SELECT id FROM vector_chunks WHERE content_block_id = ?1",
+        )?;
+        let ids: Vec<String> = stmt
+            .query_map(params![content_block_id.as_str()], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
         for id in &ids {
             let _ = conn.execute(
                 "DELETE FROM vector_chunks_vec WHERE id = ?1",
                 params![id],
             );
         }
-
         conn.execute(
-            "DELETE FROM vector_chunks WHERE tab_id = ?1",
-            params![tab_id.as_str()],
+            "DELETE FROM vector_chunks WHERE content_block_id = ?1",
+            params![content_block_id.as_str()],
         )?;
         Ok(())
     }
 
-    async fn delete_by_document(&self, document_id: &DocumentId) -> Result<()> {
+    async fn delete_by_entity(&self, entity_id: &EntityId) -> Result<()> {
         let conn = self.conn().lock().unwrap();
-
-        let ids: Vec<String> = {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM vector_chunks WHERE document_id = ?1",
-            )?;
-            let ids = stmt.query_map(params![document_id.as_str()], |row| row.get(0))?
-                .filter_map(|r| r.ok())
-                .collect();
-            ids
-        };
-
+        let mut stmt = conn.prepare(
+            "SELECT id FROM vector_chunks WHERE entity_id = ?1",
+        )?;
+        let ids: Vec<String> = stmt
+            .query_map(params![entity_id.as_str()], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
         for id in &ids {
             let _ = conn.execute(
                 "DELETE FROM vector_chunks_vec WHERE id = ?1",
                 params![id],
             );
         }
-
         conn.execute(
-            "DELETE FROM vector_chunks WHERE document_id = ?1",
-            params![document_id.as_str()],
+            "DELETE FROM vector_chunks WHERE entity_id = ?1",
+            params![entity_id.as_str()],
         )?;
         Ok(())
     }
@@ -245,5 +279,38 @@ impl VectorStore for SqliteStore {
         conn.execute("DELETE FROM vector_chunks_vec", [])?;
         conn.execute("DELETE FROM vector_chunks", [])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entity_filter_matches_include_empty() {
+        let f = EntityFilter::default();
+        assert!(f.matches("document::note"));
+        assert!(f.matches("conversation"));
+    }
+
+    #[test]
+    fn entity_filter_matches_prefix_include() {
+        let f = EntityFilter {
+            include: vec![EntityTypeMatcher::Prefix("document::".to_string())],
+            exclude: vec![],
+        };
+        assert!(f.matches("document::note"));
+        assert!(f.matches("document::tab"));
+        assert!(!f.matches("conversation"));
+    }
+
+    #[test]
+    fn entity_filter_excludes_override_includes() {
+        let f = EntityFilter {
+            include: vec![EntityTypeMatcher::Prefix("document::".to_string())],
+            exclude: vec![EntityTypeMatcher::Exact("document::system_prompt".to_string())],
+        };
+        assert!(f.matches("document::note"));
+        assert!(!f.matches("document::system_prompt"));
     }
 }

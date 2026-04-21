@@ -4,9 +4,6 @@
 // Admin-only types (not part of RPC services) are defined here.
 
 import {
-  type DocumentInfo,
-  type DocumentDetail,
-  type TabInfo,
   type SearchHit,
   type ReindexStatus,
   type EmbeddingQueueStatus,
@@ -97,28 +94,6 @@ export const api = {
 
   killDaemon: () =>
     t().rpc('daemon.kill', 'POST', '/api/daemon/kill'),
-
-  // Documents (via /api prefix for RPC routes)
-  listDocuments: () =>
-    t().rpc<DocumentInfo[]>('document.list_all_documents', 'GET', '/api/document/all'),
-  searchDocuments: (query: string) =>
-    t().rpc<DocumentInfo[]>('document.search_documents', 'GET', `/api/document/search?q=${encodeURIComponent(query)}`),
-  getDocument: (id: string) =>
-    t().rpc<DocumentDetail>('document.get_document', 'GET', `/api/document/${id}`),
-  createDocument: (title: string, content?: string) =>
-    t().rpc<DocumentInfo>('document.create_document', 'POST', '/api/document', { title, content }),
-  renameDocument: (id: string, title: string) =>
-    t().rpc('document.rename_document', 'PUT', `/api/document/${id}`, { title }),
-  deleteDocument: (id: string) =>
-    t().rpc('document.delete_document', 'DELETE', `/api/document/${id}`),
-  getTab: (id: string) =>
-    t().rpc<TabInfo>('document.get_tab', 'GET', `/api/document/tab/${id}`),
-  updateTab: (id: string, content: string) =>
-    t().rpc('document.update_tab', 'PUT', `/api/document/tab/${id}`, { request: { content, referencedAssets: [] } }),
-  createTab: (documentId: string, title: string, content?: string) =>
-    t().rpc<TabInfo>('document.create_tab', 'POST', `/api/document/${documentId}/tab`, { request: { title, content, referencedAssets: [] } }),
-  deleteTab: (id: string) =>
-    t().rpc('document.delete_tab', 'DELETE', `/api/document/tab/${id}`),
 
   // Entities (UCM-unified) — admin uses the generated `entityApi` client
   // directly via @simply/client; nothing in this wrapper needs to proxy it.

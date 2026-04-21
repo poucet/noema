@@ -2,7 +2,6 @@
 
 mod model;
 mod asset;
-mod document;
 mod entity;
 mod voice;
 mod core;
@@ -17,7 +16,6 @@ pub mod token_store;
 
 pub use model::ModelService;
 pub use asset::AssetService;
-pub use document::DocumentService;
 pub use entity::EntityService;
 pub use voice::VoiceService;
 pub use self::core::CoreService;

@@ -170,18 +170,36 @@ impl<S: StorageTypes> EntityService<S> {
         Ok(out)
     }
 
-    /// Enqueue a content-bearing entity for embedding. The owning document
-    /// plumbing from the legacy DocumentService goes through tab/doc ids; the
-    /// entity world will be wired up by the RAG pivot (Commit 8). For now
-    /// embedding triggered from this service is a no-op until that work lands.
-    fn enqueue_embedding(
+    /// Enqueue a content-bearing entity for embedding. Skips silently if
+    /// the entity has no live `content_block_id` (container-only
+    /// entities like `document::tabbed`) or if no embedding queue is
+    /// wired. Frontmatter is left empty here — incremental per-write
+    /// jobs embed raw text; the reindex path assembles richer
+    /// frontmatter (title / kind / ancestry).
+    async fn enqueue_embedding(
         &self,
-        _entity_id: &EntityId,
-        _kind: &EntityType,
-        _user_id: &simply_core::storage::ids::UserId,
-        _text: &str,
+        entity_id: &EntityId,
+        kind: &EntityType,
+        text: &str,
     ) {
-        // Intentionally empty until Commit 8 pivots EmbedJob onto content_block_id.
+        let Some(queue) = self.embedding_queue.as_ref() else { return; };
+        let Some(content_block_id) = self
+            .stores
+            .entity()
+            .get_entity(entity_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|e| e.content_block_id.clone())
+        else { return };
+
+        queue.enqueue(crate::services::embedding_queue::EmbedJob {
+            content_block_id,
+            entity_id: entity_id.clone(),
+            entity_kind: kind.as_str().to_string(),
+            frontmatter: None,
+            text: text.to_string(),
+        }).await;
     }
 }
 
@@ -308,9 +326,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             self.coordinator.set_entity_assets(&entity_id, &core_assets).await?;
         }
 
-        // Kick off embedding for content-bearing entities (no-op until Commit 8).
+        // Kick off embedding for content-bearing entities.
         if let Some(text) = request.content.as_deref() {
-            self.enqueue_embedding(&entity_id, &kind, &user_id, text);
+            self.enqueue_embedding(&entity_id, &kind, text).await;
         }
 
         let entity = self.stores.entity().get_entity(&entity_id).await?
@@ -429,19 +447,21 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             .collect();
         self.coordinator.set_entity_assets(&id, &core_assets).await?;
 
-        self.enqueue_embedding(&id, &entity.entity_type, &user_id, &request.content);
+        self.enqueue_embedding(&id, &entity.entity_type, &request.content).await;
         Ok(())
     }
 
     async fn flush_entity_embedding(
         &self,
-        _ctx: &RequestContext,
-        _entity_id: &str,
+        ctx: &RequestContext,
+        entity_id: &str,
     ) -> anyhow::Result<()> {
-        // Embedding flush is a no-op on the entity path until Commit 8 rewires
-        // EmbedJob onto content_block_id. Callers invoking this today should
-        // continue using the legacy DocumentApi flush endpoint for tab-backed
-        // data; flat entities don't yet participate in embeddings.
+        let user_id = Self::require_user(ctx)?;
+        let id = EntityId::from_string(entity_id);
+        let entity = self.verify_access(&user_id, &id).await?;
+        let Some(queue) = self.embedding_queue.as_ref() else { return Ok(()); };
+        let Some(block_id) = entity.content_block_id.as_ref() else { return Ok(()); };
+        queue.flush(block_id.as_str()).await;
         Ok(())
     }
 

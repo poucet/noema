@@ -1,14 +1,13 @@
 //! SQLite storage backend
 //!
 //! Provides `SqliteStore` - a shared SQLite connection wrapper that
-//! implements all storage traits for conversation, asset, document,
-//! content block, and user management.
+//! implements all storage traits for conversation, asset, content block,
+//! entity, and user management.
 //!
 //! All trait implementations are in submodules:
 //! - `asset` - AssetStore impl
 //! - `text` - TextStore impl (content_blocks)
 //! - `turn` - TurnStore impl
-//! - `document` - DocumentStore impl
 //! - `entity` - EntityStore impl (entities + entity_relations + entity_assets)
 //! - `user` - UserStore impl
 
@@ -19,7 +18,6 @@ use std::sync::{Arc, Mutex};
 
 // Submodules with trait implementations
 mod asset;
-mod document;
 mod entity;
 mod temporal;
 mod text;
@@ -29,7 +27,6 @@ mod vector;
 
 // Re-export init_schema functions for use in SqliteStore::init_schema
 pub(crate) use asset::init_schema as init_asset_schema;
-pub(crate) use document::init_schema as init_document_schema;
 pub(crate) use entity::init_schema as init_entity_schema;
 pub(crate) use temporal::init_schema as init_temporal_schema;
 pub(crate) use text::init_schema as init_text_schema;
@@ -44,10 +41,9 @@ pub(crate) use vector::init_schema as init_vector_schema;
 ///
 /// Implements all storage traits:
 /// - `TurnStore` - Turn/Span/Message conversation storage
-/// - `EntityStore` - Unified addressable layer (conversations, documents, assets)
+/// - `EntityStore` - Unified addressable layer (conversations, documents, …)
 /// - `TextStore` - Content-addressed text storage
 /// - `AssetStore` - Asset metadata storage
-/// - `DocumentStore` - Document, tab, and revision storage
 /// - `UserStore` - User account management
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
@@ -88,7 +84,6 @@ impl SqliteStore {
         init_entity_schema(&conn)?;
         init_turn_schema(&conn)?;
         init_asset_schema(&conn)?;
-        init_document_schema(&conn)?;
         init_temporal_schema(&conn)?;
         init_vector_schema(&conn)?;
         Ok(())

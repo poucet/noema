@@ -114,11 +114,6 @@ define_id!(SpanId, "Unique identifier for a span (alternative response)");
 define_id!(MessageId, "Unique identifier for a message within a span");
 define_id!(MessageContentId, "Unique identifier for a content item within a message");
 
-// Documents
-define_id!(DocumentId, "Unique identifier for a document");
-define_id!(TabId, "Unique identifier for a document tab");
-define_id!(RevisionId, "Unique identifier for a tab revision");
-
 // Vector chunks (embedding/RAG)
 define_id!(ChunkId, "Unique identifier for an embedding vector chunk");
 
@@ -150,11 +145,11 @@ mod tests {
 
     #[test]
     fn test_id_serde() {
-        let id = DocumentId::from_string("doc-123");
+        let id = EntityId::from_string("ent-123");
         let json = serde_json::to_string(&id).unwrap();
-        assert_eq!(json, "\"doc-123\"");
+        assert_eq!(json, "\"ent-123\"");
 
-        let parsed: DocumentId = serde_json::from_str(&json).unwrap();
+        let parsed: EntityId = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, id);
     }
 }

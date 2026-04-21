@@ -4,8 +4,6 @@
 
 mod asset;
 mod blob;
-// conversation module removed - use EntityStore instead
-mod document;
 mod entity;
 mod text;
 mod turn;
@@ -13,7 +11,6 @@ mod user;
 
 pub use asset::{AssetStore, StoredAsset};
 pub use blob::BlobStore;
-pub use document::{DocumentStore, StoredDocument, StoredTab, StoredRevision};
 pub use entity::{EntityStore, StoredEntity};
 pub use text::{TextStore, StoredTextBlock};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage};
@@ -31,7 +28,6 @@ pub use user::{StoredUser, UserStore};
 ///     type Asset = SqliteStore;
 ///     type Text = SqliteStore;
 ///     type User = SqliteStore;
-///     type Document = SqliteStore;
 ///     type Entity = SqliteStore;
 /// }
 ///
@@ -50,12 +46,9 @@ pub trait StorageTypes: Send + Sync + 'static {
     type Turn: TurnStore + Send + Sync;
     /// User storage
     type User: UserStore + Send + Sync;
-    /// Document storage
-    type Document: DocumentStore + Send + Sync;
-    /// Entity storage (unified addressable layer for conversations, documents, assets).
-    /// Also carries `entity_relations` (replaces the legacy dedicated ReferenceStore) and
-    /// `entity_assets` mappings; generic tree/graph structure lives here instead of a
-    /// dedicated CollectionStore.
+    /// Entity storage (unified addressable layer for conversations,
+    /// documents, notes, tabs, assets). Also carries `entity_relations`
+    /// and `entity_assets`.
     type Entity: EntityStore + Send + Sync;
 }
 
@@ -77,7 +70,6 @@ use std::sync::Arc;
 ///     fn entity(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 ///     fn turn(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 ///     fn user(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
-///     fn document(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 ///     fn blob(&self) -> Arc<FsBlobStore> { self.blob.clone() }
 ///     // ... other stores
 /// }
@@ -85,7 +77,6 @@ use std::sync::Arc;
 pub trait Stores<S: StorageTypes>: Send + Sync {
     fn turn(&self) -> Arc<S::Turn>;
     fn user(&self) -> Arc<S::User>;
-    fn document(&self) -> Arc<S::Document>;
     fn blob(&self) -> Arc<S::Blob>;
     fn asset(&self) -> Arc<S::Asset>;
     fn text(&self) -> Arc<S::Text>;

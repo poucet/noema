@@ -11,7 +11,6 @@
 #[macro_use] mod session;
 #[macro_use] mod conversation;
 #[macro_use] mod asset;
-#[macro_use] mod document;
 #[macro_use] mod entity;
 #[macro_use] mod mcp;
 #[macro_use] mod oauth;
@@ -30,7 +29,6 @@ pub mod types;
 pub use session::*;
 pub use conversation::*;
 pub use asset::*;
-pub use document::*;
 pub use entity::*;
 pub use mcp::*;
 pub use oauth::*;
@@ -75,7 +73,6 @@ pub type ToolCallHandler = Arc<
 pub trait Daemon: Send + Sync {
     fn session(&self) -> &dyn SessionApi;
     fn conversation(&self) -> &dyn ConversationApi;
-    fn document(&self) -> &dyn DocumentApi;
     fn entity(&self) -> &dyn EntityApi;
     fn mcp(&self) -> &dyn McpApi;
     fn oauth(&self) -> &dyn OAuthApi;
@@ -174,12 +171,6 @@ mod ts_export {
         CreateSessionOptions::export_all().expect("CreateSessionOptions");
         UserMessage::export_all().expect("UserMessage");
         SeedMessage::export_all().expect("SeedMessage");
-        DocumentInfo::export_all().expect("DocumentInfo");
-        DocumentDetail::export_all().expect("DocumentDetail");
-        TabInfo::export_all().expect("TabInfo");
-        CreateDocumentRequest::export_all().expect("CreateDocumentRequest");
-        CreateTabRequest::export_all().expect("CreateTabRequest");
-        UpdateTabRequest::export_all().expect("UpdateTabRequest");
         EntitySummary::export_all().expect("EntitySummary");
         RelatedEntity::export_all().expect("RelatedEntity");
         EntityContent::export_all().expect("EntityContent");

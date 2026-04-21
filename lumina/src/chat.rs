@@ -94,11 +94,11 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
         // Show debug embed if channel has [rag-debug] topic tag
         if crate::commands::chat::has_topic_tag(lx, msg.channel_id, "rag-debug") {
             let desc = rag_hits.iter()
-                .map(|h| format!("`{}` ({}) — {:.0}%", h.document_title, h.document_type, h.score * 100.0))
+                .map(|h| format!("`{}` ({}) — {:.0}%", h.title, h.entity_kind, h.score * 100.0))
                 .collect::<Vec<_>>()
                 .join("\n");
             let embed = CreateEmbed::new()
-                .title(format!("RAG: {} docs injected", rag_hits.len()))
+                .title(format!("RAG: {} entities injected", rag_hits.len()))
                 .description(desc)
                 .color(0x9B59B6);
             let _ = msg.channel_id.send_message(&lx.http, serenity::builder::CreateMessage::new().embed(embed)).await;
@@ -142,14 +142,45 @@ async fn process_chat(lx: &LuminaContext, msg: &Message) -> anyhow::Result<()> {
     stream_response(lx, msg, &mut session).await
 }
 
-/// Build RAG context by searching for relevant documents based on recent messages.
-/// Returns (context_string, hits) so callers can use the hits for debug display.
-async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMessage]) -> (String, Vec<SearchHit>) {
-    // Build query from the current message + last N user messages from history
-    let mut query_parts: Vec<&str> = Vec::new();
+/// A RAG hit joined with its resolved entity metadata + body. We do the
+/// join here (search returns only (entity_id, entity_kind, score)) so
+/// the caller can both render a debug embed and inject the full block
+/// into the prompt in a single pass.
+pub struct RagHit {
+    pub entity_id: String,
+    pub entity_kind: String,
+    pub title: String,
+    pub body: String,
+    pub score: f32,
+}
 
-    // Add recent user messages from history (last N)
-    let user_messages: Vec<&str> = history.iter()
+/// Default entity-kind filter for Lumina's chat RAG: pull from
+/// user-authored documents (notes, knowledge, tabs, …) but never from
+/// system prompts, access rules, or MCP-server config notes.
+fn default_chat_entity_filter() -> EntityFilter {
+    EntityFilter {
+        include: vec![
+            EntityTypeMatcher::Prefix("document::".to_string()),
+        ],
+        exclude: vec![
+            EntityTypeMatcher::Exact("document::system_prompt".to_string()),
+            EntityTypeMatcher::Exact("document::access_rule".to_string()),
+            EntityTypeMatcher::Exact("document::mcp_server".to_string()),
+        ],
+    }
+}
+
+/// Build RAG context by searching for relevant entities based on recent
+/// messages. Returns `(context_string, hits)` so the caller can render
+/// a debug embed.
+async fn build_rag_context(
+    lx: &LuminaContext,
+    msg: &Message,
+    history: &[SeedMessage],
+) -> (String, Vec<RagHit>) {
+    let mut query_parts: Vec<&str> = Vec::new();
+    let user_messages: Vec<&str> = history
+        .iter()
         .rev()
         .filter(|m| matches!(m.role, Role::User))
         .take(RAG_QUERY_MESSAGES)
@@ -159,8 +190,6 @@ async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMes
         }))
         .collect();
     query_parts.extend(user_messages.iter().rev());
-
-    // Add the current message
     query_parts.push(&msg.content);
 
     let query = query_parts.join("\n");
@@ -168,31 +197,61 @@ async fn build_rag_context(lx: &LuminaContext, msg: &Message, history: &[SeedMes
         return (String::new(), vec![]);
     }
 
-    // Search for relevant documents
-    let search_request = SearchRequest {
+    let request = SearchRequest {
         query,
-        document_type: None,
         top_k: Some(5),
+        entity_filter: Some(default_chat_entity_filter()),
     };
     let ctx = lx.ctx_for(msg.author.id.get()).await;
-    match lx.daemon.search().search(&ctx, search_request).await {
-        Ok(hits) if !hits.is_empty() => {
-            let mut context = String::from("## Relevant knowledge\nThe following documents may be relevant to this conversation:\n");
-            for hit in &hits {
-                context.push_str(&format!(
-                    "\n---\ndocument_id: {}\ntab_id: {}\ntitle: {}\ntype: {}\n---\n{}\n",
-                    hit.document_id, hit.tab_id, hit.document_title, hit.document_type, hit.chunk_text,
-                ));
-            }
-            tracing::info!(hits = hits.len(), "RAG context injected");
-            (context, hits)
-        }
-        Ok(_) => (String::new(), vec![]),
+
+    let hits = match lx.daemon.search().search(&ctx, request).await {
+        Ok(h) => h,
         Err(e) => {
             tracing::warn!(error = %e, "RAG search failed, continuing without context");
-            (String::new(), vec![])
+            return (String::new(), vec![]);
         }
+    };
+    if hits.is_empty() {
+        return (String::new(), vec![]);
     }
+
+    // Resolve each hit to a RagHit by fetching the entity + body. Hits
+    // with missing entities (deleted since indexing) are dropped.
+    let mut rag_hits: Vec<RagHit> = Vec::with_capacity(hits.len());
+    for hit in hits {
+        let entity = match lx.daemon.entity().get_entity(&ctx, &hit.entity_id).await {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let body = match lx.daemon.entity().get_entity_content(&ctx, &hit.entity_id).await {
+            Ok(c) => c.content_markdown.unwrap_or_default(),
+            Err(_) => String::new(),
+        };
+        if body.trim().is_empty() { continue; }
+        rag_hits.push(RagHit {
+            entity_id: hit.entity_id,
+            entity_kind: hit.entity_kind,
+            title: entity.title.unwrap_or_else(|| "(untitled)".to_string()),
+            body,
+            score: hit.score,
+        });
+    }
+
+    if rag_hits.is_empty() {
+        return (String::new(), vec![]);
+    }
+
+    let mut context =
+        String::from("## Relevant knowledge\nThe following entities may be relevant to this conversation:\n");
+    for h in &rag_hits {
+        context.push_str(&format!(
+            "\n---\nentity_id: {}\ntitle: {}\nkind: {}\n---\n{}\n",
+            h.entity_id, h.title, h.entity_kind, h.body,
+        ));
+    }
+
+    tracing::info!(hits = rag_hits.len(), "RAG context injected");
+    (context, rag_hits)
 }
 
 /// Load recent channel messages and convert to seed messages for the daemon.

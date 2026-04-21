@@ -1,7 +1,8 @@
 //! Background embedding queue.
 //!
-//! Processes document tab writes asynchronously: chunks text, calls the
-//! embedding provider, stores vectors. Debounces rapid edits to the same tab.
+//! Processes entity content writes asynchronously: chunks text, calls the
+//! embedding provider, stores vectors keyed on `content_block_id`. Debounces
+//! rapid edits to the same block.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -13,32 +14,42 @@ use tokio::time::{Duration, Instant};
 use async_trait::async_trait;
 use llm::EmbeddingProvider;
 use simply_core::embedding::{Chunker, VectorChunk, VectorStore};
-use simply_core::storage::ids::{ChunkId, DocumentId, TabId, UserId};
+use simply_core::storage::ids::{ChunkId, ContentBlockId, EntityId};
 
-/// A job to embed a document tab's content.
+/// A job to embed an entity's content.
+///
+/// Keyed on `content_block_id` — that's the immutable content record that
+/// backs the entity. When an entity's text is replaced the content block
+/// id changes, so debouncing by `content_block_id` naturally groups
+/// updates to the same write, not the same entity.
 #[derive(Debug, Clone)]
 pub struct EmbedJob {
-    pub tab_id: TabId,
-    pub document_id: DocumentId,
-    pub document_type: String,
-    pub user_id: UserId,
+    pub content_block_id: ContentBlockId,
+    pub entity_id: EntityId,
+    /// Namespaced entity kind (e.g. `"document::note"`). The only
+    /// denormalised field stored on each chunk — needed for filter
+    /// predicates at query time. Title / owner / access are all
+    /// re-resolved from the live entity when hits come back.
+    pub entity_kind: String,
+    /// Optional frontmatter prepended to `text` before chunking so that
+    /// per-chunk embeddings carry contextual signal (title, kind,
+    /// ancestry). Not persisted.
+    pub frontmatter: Option<String>,
     pub text: String,
 }
 
 pub use simply_daemon_api::EmbeddingQueueStatus;
 
 /// Trait for submitting embedding jobs.
-///
-/// The default implementation uses an in-memory channel. Future implementations
-/// could back this with persistent storage (e.g. a SQLite queue table).
 #[async_trait]
 pub trait EmbeddingQueue: Send + Sync {
-    /// Enqueue a tab for embedding (debounced).
+    /// Enqueue an entity's content for embedding (debounced).
     async fn enqueue(&self, job: EmbedJob);
 
-    /// Flush a specific tab — process its pending embedding immediately,
-    /// bypassing the debounce. Called on tab switch / page unload.
-    async fn flush(&self, tab_id: &str);
+    /// Flush a specific content block — process its pending embedding
+    /// immediately, bypassing the debounce. Called on page unload / tab
+    /// switch so edits don't linger unindexed.
+    async fn flush(&self, content_block_id: &str);
 
     /// Get the current queue status.
     async fn status(&self) -> EmbeddingQueueStatus;
@@ -91,8 +102,8 @@ impl EmbeddingQueue for ChannelEmbeddingQueue {
         }
     }
 
-    async fn flush(&self, tab_id: &str) {
-        let _ = self.flush_tx.send(tab_id.to_string());
+    async fn flush(&self, content_block_id: &str) {
+        let _ = self.flush_tx.send(content_block_id.to_string());
     }
 
     async fn status(&self) -> EmbeddingQueueStatus {
@@ -105,9 +116,10 @@ impl EmbeddingQueue for ChannelEmbeddingQueue {
     }
 }
 
-/// Debounce delay — if another edit to the same tab arrives within this window,
-/// the previous job is replaced (only the latest content gets embedded).
-/// Set high enough that active typing doesn't trigger re-embedding.
+/// Debounce delay — if another edit to the same content block arrives
+/// within this window, the previous job is replaced (only the latest
+/// content gets embedded). Set high enough that active typing doesn't
+/// trigger re-embedding.
 const DEBOUNCE_MS: u64 = 15_000; // 15 seconds of idle before embedding
 
 async fn embedding_worker(
@@ -118,39 +130,35 @@ async fn embedding_worker(
     vector_store: Arc<dyn VectorStore>,
     stats: Arc<QueueStats>,
 ) {
-    // Debounce buffer: tab_id -> (job, received_at)
+    // Debounce buffer: content_block_id -> (job, received_at)
     let mut pending: HashMap<String, (EmbedJob, Instant)> = HashMap::new();
-    // Content hash cache: tab_id -> hash of last embedded chunks (skip if unchanged)
+    // Content hash cache: content_block_id -> hash of last embedded chunks
+    // (skip re-embed if unchanged, even if the block id churned).
     let content_hashes: tokio::sync::Mutex<HashMap<String, u64>> = tokio::sync::Mutex::new(HashMap::new());
 
     loop {
-        // Drain all available jobs and flush signals
         let job = if pending.is_empty() {
-            // Nothing pending — block until a job arrives
             tokio::select! {
                 job = rx.recv() => job,
                 flush_id = flush_rx.recv() => {
-                    // Flush with nothing pending — ignore
                     if let Some(id) = flush_id {
-                        tracing::debug!(tab_id = %id, "flush signal with nothing pending");
+                        tracing::debug!(content_block_id = %id, "flush signal with nothing pending");
                     }
                     continue;
                 }
             }
         } else {
-            // Jobs pending — check for new ones or flush signals
             tokio::select! {
                 job = rx.recv() => job,
                 flush_id = flush_rx.recv() => {
-                    // Flush: immediately process the named tab if pending
                     if let Some(id) = flush_id {
                         if let Some((job, _)) = pending.remove(&id) {
-                            tracing::info!(tab_id = %id, "flush: processing immediately");
+                            tracing::info!(content_block_id = %id, "flush: processing immediately");
                             stats.pending.fetch_sub(1, Ordering::Relaxed);
                             stats.processing.fetch_add(1, Ordering::Relaxed);
                             if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store, &content_hashes).await {
                                 stats.failed.fetch_add(1, Ordering::Relaxed);
-                                tracing::error!(tab_id = %id, error = %e, "flush embedding failed");
+                                tracing::error!(content_block_id = %id, error = %e, "flush embedding failed");
                             } else {
                                 stats.completed.fetch_add(1, Ordering::Relaxed);
                             }
@@ -164,21 +172,18 @@ async fn embedding_worker(
         };
 
         if let Some(job) = job {
-            // Insert/replace in debounce buffer
-            pending.insert(job.tab_id.as_str().to_string(), (job, Instant::now()));
+            pending.insert(job.content_block_id.as_str().to_string(), (job, Instant::now()));
 
-            // Keep draining any immediately available jobs
             while let Ok(job) = rx.try_recv() {
-                pending.insert(job.tab_id.as_str().to_string(), (job, Instant::now()));
+                pending.insert(job.content_block_id.as_str().to_string(), (job, Instant::now()));
             }
         }
 
-        // Also drain any flush signals
         while let Ok(id) = flush_rx.try_recv() {
             if let Some((job, _)) = pending.remove(&id) {
                 stats.pending.fetch_sub(1, Ordering::Relaxed);
                 stats.processing.fetch_add(1, Ordering::Relaxed);
-                if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store, &content_hashes).await {
+                if let Err(_e) = process_job(&job, &*provider, &*chunker, &*vector_store, &content_hashes).await {
                     stats.failed.fetch_add(1, Ordering::Relaxed);
                 } else {
                     stats.completed.fetch_add(1, Ordering::Relaxed);
@@ -196,7 +201,7 @@ async fn embedding_worker(
             .collect();
 
         for job in &ready {
-            pending.remove(job.tab_id.as_str());
+            pending.remove(job.content_block_id.as_str());
         }
 
         for job in ready {
@@ -206,8 +211,8 @@ async fn embedding_worker(
             if let Err(e) = process_job(&job, &*provider, &*chunker, &*vector_store, &content_hashes).await {
                 stats.failed.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(
-                    tab_id = %job.tab_id,
-                    document_id = %job.document_id,
+                    content_block_id = %job.content_block_id,
+                    entity_id = %job.entity_id,
                     error = %e,
                     "embedding failed"
                 );
@@ -220,7 +225,8 @@ async fn embedding_worker(
     }
 }
 
-/// Compute a fast hash of chunk texts to detect if content meaningfully changed.
+/// Compute a fast hash of chunk texts to detect if content meaningfully
+/// changed.
 fn chunk_content_hash(chunks: &[simply_core::embedding::Chunk]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -237,23 +243,27 @@ async fn process_job(
     vector_store: &dyn VectorStore,
     content_hashes: &tokio::sync::Mutex<HashMap<String, u64>>,
 ) -> anyhow::Result<()> {
-    // 1. Chunk the text
-    let chunks = chunker.chunk(&job.text).await?;
+    // Prepend frontmatter if any — gives each chunk contextual signal
+    // (title, kind, ancestry) without storing that signal redundantly.
+    let text_for_chunking: String = match job.frontmatter.as_deref() {
+        Some(fm) if !fm.is_empty() => format!("{fm}\n\n{}", job.text),
+        _ => job.text.clone(),
+    };
+
+    let chunks = chunker.chunk(&text_for_chunking).await?;
     if chunks.is_empty() {
-        // Content is empty — delete existing chunks
-        vector_store.delete_by_tab(&job.tab_id).await?;
-        content_hashes.lock().await.remove(job.tab_id.as_str());
+        vector_store.delete_by_content_block(&job.content_block_id).await?;
+        content_hashes.lock().await.remove(job.content_block_id.as_str());
         return Ok(());
     }
 
-    // 2. Check if chunks changed since last embedding
     let new_hash = chunk_content_hash(&chunks);
     {
         let hashes = content_hashes.lock().await;
-        if let Some(&old_hash) = hashes.get(job.tab_id.as_str()) {
+        if let Some(&old_hash) = hashes.get(job.content_block_id.as_str()) {
             if old_hash == new_hash {
                 tracing::debug!(
-                    tab_id = %job.tab_id,
+                    content_block_id = %job.content_block_id,
                     "skipping embedding — content unchanged"
                 );
                 return Ok(());
@@ -262,47 +272,43 @@ async fn process_job(
     }
 
     tracing::info!(
-        tab_id = %job.tab_id,
-        document_id = %job.document_id,
+        content_block_id = %job.content_block_id,
+        entity_id = %job.entity_id,
+        entity_kind = %job.entity_kind,
         text_len = job.text.len(),
         chunks = chunks.len(),
-        "embedding tab"
+        "embedding content"
     );
 
-    // 3. Delete existing chunks for this tab
-    vector_store.delete_by_tab(&job.tab_id).await?;
+    // Replace existing chunks for this content block.
+    vector_store.delete_by_content_block(&job.content_block_id).await?;
 
-    // 4. Embed all chunks in one batch
     let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
     let embeddings = provider.embed(&texts).await?;
 
-    // 5. Build VectorChunks and store
     let vector_chunks: Vec<VectorChunk> = chunks
         .iter()
         .zip(embeddings.into_iter())
-        .map(|(chunk, embedding)| VectorChunk {
+        .map(|(_, embedding)| VectorChunk {
             id: ChunkId::new(),
-            document_id: job.document_id.clone(),
-            tab_id: job.tab_id.clone(),
-            document_type: job.document_type.clone(),
-            user_id: job.user_id.clone(),
-            chunk_index: chunk.index,
-            text: chunk.text.clone(),
+            content_block_id: job.content_block_id.clone(),
+            entity_id: job.entity_id.clone(),
+            entity_kind: job.entity_kind.clone(),
             embedding: embedding.vector,
         })
         .collect();
 
+    let chunks_written = vector_chunks.len();
     vector_store.upsert(&vector_chunks).await?;
 
-    // 6. Remember the hash for next time
     content_hashes.lock().await.insert(
-        job.tab_id.as_str().to_string(),
+        job.content_block_id.as_str().to_string(),
         new_hash,
     );
 
     tracing::info!(
-        tab_id = %job.tab_id,
-        chunks = vector_chunks.len(),
+        content_block_id = %job.content_block_id,
+        chunks = chunks_written,
         "embedding complete"
     );
 

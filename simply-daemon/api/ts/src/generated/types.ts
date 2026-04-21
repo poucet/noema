@@ -97,58 +97,6 @@ export type ToolResultContent =
   | { type: "image"; data: string; mime_type: string }
   | { type: "audio"; data: string; mime_type: string };
 
-export interface DocumentInfo {
-  id: string;
-  userId: string;
-  title: string;
-  documentType: string;
-  source: string;
-  sourceId: string | null;
-  tabCount: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface DocumentDetail {
-  id: string;
-  title: string;
-  documentType: string;
-  source: string;
-  sourceId: string | null;
-  tabs: TabInfo[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface TabInfo {
-  id: string;
-  title: string;
-  icon: string | null;
-  parentTabId: string | null;
-  tabIndex: number;
-  contentMarkdown: string | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface CreateDocumentRequest {
-  title: string;
-  documentType: string | null;
-  content: string | null;
-  sourceId: string | null;
-}
-
-export interface CreateTabRequest {
-  title: string;
-  content: string | null;
-  parentTabId: string | null;
-  tabIndex: number | null;
-}
-
-export interface UpdateTabRequest {
-  content: string;
-}
-
 // --- Entity API (UCM-unified) ---
 
 export interface EntitySummary {
@@ -264,25 +212,31 @@ export interface AssetInfo {
   sizeBytes: number;
 }
 
+export type EntityTypeMatcher =
+  | { kind: "exact"; value: string }
+  | { kind: "prefix"; value: string };
+
+export interface EntityFilter {
+  include: EntityTypeMatcher[];
+  exclude: EntityTypeMatcher[];
+}
+
 export interface SearchHit {
-  documentId: string;
-  documentTitle: string;
-  documentType: string;
-  tabId: string;
-  chunkText: string;
-  chunkIndex: number;
+  contentBlockId: string;
+  entityId: string;
+  entityKind: string;
   score: number;
 }
 
 export interface SearchRequest {
   query: string;
-  documentType: string | null;
   topK: number | null;
+  entityFilter: EntityFilter | null;
 }
 
 export interface ReindexStatus {
   message: string;
-  tabsQueued: number;
+  entitiesQueued: number;
 }
 
 export interface EmbeddingQueueStatus {

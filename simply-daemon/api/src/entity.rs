@@ -1,9 +1,6 @@
-//! Entity CRUD API — generic entity/relation/content surface that replaces
-//! the document-shaped `DocumentApi` incrementally.
-//!
-//! The daemon exposes this alongside `DocumentApi` during the UCM transition;
-//! clients (gdocs skill, admin UI, Noema UI) migrate one at a time and the
-//! legacy surface is removed once there are no callers.
+//! Entity CRUD API — generic entity/relation/content surface. The sole
+//! API for text-bearing records in the system (documents, notes, tabs,
+//! directories, …); import skills (e.g. gdocs) talk to this directly.
 //!
 //! Relations in UCM are directed edges in a graph — not a tree. Every edge has
 //! a `from` endpoint and a `to` endpoint under a named relation. The API
@@ -123,6 +120,32 @@ pub struct UpdateEntityContentRequest {
     pub content: String,
     #[serde(default)]
     pub referenced_assets: Vec<AssetId>,
+}
+
+/// Request a batch of entities by id. Set `include_content = true` to
+/// bundle each entity's resolved content body in the response (one
+/// round-trip instead of N summary + N content fetches).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
+pub struct GetEntitiesRequest {
+    pub ids: Vec<String>,
+    #[serde(default)]
+    pub include_content: bool,
+}
+
+/// An entity summary optionally bundled with its resolved content body.
+/// Returned by [`EntityApi::get_entities`].
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(TS))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
+pub struct EntityWithContent {
+    pub summary: EntitySummary,
+    /// `None` when the request didn't ask for content or the entity has
+    /// no live content block.
+    pub content: Option<EntityContent>,
 }
 
 /// Request to add a relation edge `from_id → to_id` under a named relation.

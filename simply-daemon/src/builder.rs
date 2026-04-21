@@ -159,14 +159,6 @@ where
         );
 
         let user_email_cache = Arc::new(crate::services::user::UserEmailCache::new());
-        let document = Arc::new(
-            DocumentService::new(Arc::clone(&self.stores))
-                .with_embedding(
-                    embedding_queue.clone() as Arc<dyn EmbeddingQueue>,
-                    Arc::clone(&self.vector_store),
-                )
-                .with_user_email_cache(Arc::clone(&user_email_cache))
-        );
         let entity = Arc::new(
             EntityService::new(
                 Arc::clone(&self.coordinator),
@@ -190,7 +182,6 @@ where
         let daemon_tools = Arc::new(
             DaemonToolService::new()
                 .register(<dyn AssetApi>::service(asset.clone()))
-                .register(<dyn DocumentApi>::service(document.clone()))
                 .register(<dyn EntityApi>::service(entity.clone()))
                 .register(<dyn ModelApi>::service(model.clone()))
                 .register(<dyn CoreApi>::service(core.clone()))
@@ -216,7 +207,6 @@ where
             mcp,
             model,
             asset,
-            document,
             entity,
             voice,
             core,
@@ -235,9 +225,9 @@ where
 /// - **Directly-on-daemon APIs** (`SessionApi`, `ConversationApi`,
 ///   `McpApi`, `SkillsApi`): implemented on `EmbeddedDaemon` itself, so
 ///   they're added here.
-/// - **Split-out services** (`EntityApi`, `DocumentApi`, `AssetApi`,
-///   `ModelApi`, `OAuthApi`, `VoiceApi`, `SearchApi`, `UserApi`,
-///   `CoreApi`): each has its own struct registered into the daemon's
+/// - **Split-out services** (`EntityApi`, `AssetApi`, `ModelApi`,
+///   `OAuthApi`, `VoiceApi`, `SearchApi`, `UserApi`, `CoreApi`): each
+///   has its own struct registered into the daemon's
 ///   `DaemonToolService` at build time; this loop re-registers them with
 ///   the `ServiceRouter` via `daemon_tool_services()`.
 pub fn build_service_router<S: StorageTypes>(

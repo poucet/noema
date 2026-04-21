@@ -57,7 +57,7 @@ pub trait TurnStore: Send + Sync {
     /// Each StoredContent item is stored in message_content:
     /// - Text → stored in content_blocks, referenced by content_block_id
     /// - AssetRef → stored directly (asset_id, mime_type, filename)
-    /// - DocumentRef → stored directly (document_id, title)
+    /// - EntityRef → stored directly (entity_id)
     /// - ToolCall/ToolResult → stored as JSON in tool_data
     async fn add_message(
         &self,

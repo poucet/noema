@@ -9,4 +9,7 @@ mod vector_store;
 
 pub use chunker::{Chunk, Chunker, RecursiveCharacterChunker};
 pub use crate::storage::ids::ChunkId;
-pub use vector_store::{SearchFilter, SearchQuery, SearchResult, VectorChunk, VectorStore};
+pub use vector_store::{
+    EntityFilter, EntityTypeMatcher, SearchFilter, SearchQuery, SearchResult, VectorChunk,
+    VectorStore,
+};

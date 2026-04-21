@@ -46,7 +46,6 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     mcp: Arc<McpService>,
     model: Arc<ModelService>,
     asset: Arc<AssetService<S>>,
-    document: Arc<DocumentService<S>>,
     entity: Arc<EntityService<S>>,
     voice: Arc<VoiceService>,
     core: Arc<CoreService>,
@@ -64,7 +63,6 @@ impl<S: StorageTypes> EmbeddedDaemon<S>
         mcp: Arc<McpService>,
         model: Arc<ModelService>,
         asset: Arc<AssetService<S>>,
-        document: Arc<DocumentService<S>>,
         entity: Arc<EntityService<S>>,
         voice: Arc<VoiceService>,
         core: Arc<CoreService>,
@@ -79,7 +77,6 @@ impl<S: StorageTypes> EmbeddedDaemon<S>
             mcp,
             model,
             asset,
-            document,
             entity,
             voice,
             core,
@@ -97,7 +94,6 @@ impl<S: StorageTypes> EmbeddedDaemon<S>
     pub fn oauth_service(&self) -> Arc<dyn OAuthApi> { self.mcp.clone() }
     pub fn model_service(&self) -> Arc<ModelService> { Arc::clone(&self.model) }
     pub fn asset_service(&self) -> Arc<AssetService<S>> { Arc::clone(&self.asset) }
-    pub fn document_service(&self) -> Arc<DocumentService<S>> { Arc::clone(&self.document) }
     pub fn entity_service(&self) -> Arc<EntityService<S>> { Arc::clone(&self.entity) }
     pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
     pub fn core_service(&self) -> Arc<CoreService> { Arc::clone(&self.core) }
@@ -410,7 +406,6 @@ impl<S: StorageTypes> Daemon for EmbeddedDaemon<S>
 {
     fn session(&self) -> &dyn SessionApi { self }
     fn conversation(&self) -> &dyn ConversationApi { self }
-    fn document(&self) -> &dyn DocumentApi { &*self.document }
     fn entity(&self) -> &dyn EntityApi { &*self.entity }
     fn mcp(&self) -> &dyn McpApi { &*self.tools }
     fn oauth(&self) -> &dyn OAuthApi { &*self.mcp }

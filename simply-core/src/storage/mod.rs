@@ -1,7 +1,8 @@
 //! Storage abstractions for conversation persistence
 //!
-//! This module provides traits and implementations for storing conversations,
-//! documents, users, and assets.
+//! This module provides traits and implementations for storing
+//! conversations, entities (documents, notes, tabs, assets, …), users,
+//! and the content that backs them.
 //!
 //! ## Module Structure
 //!
@@ -13,18 +14,20 @@
 //! ## Storage Traits
 //!
 //! - `TurnStore` - Turn/Span/Message conversation storage
-//! - `EntityStore` - Unified CRUD for conversations, documents, assets
-//! - `TextStore` - Content-addressed text storage
+//! - `EntityStore` - Unified CRUD for entities (conversations, documents,
+//!   notes, tabs, …) and `entity_relations`
+//! - `TextStore` - Content-addressed text storage (`content_blocks`)
 //! - `AssetStore` - Asset metadata storage
 //! - `BlobStore` - Content-addressable binary storage
-//! - `DocumentStore` - Document, tab, and revision storage
 //! - `UserStore` - User account management
 //!
 //! ## Session API
 //!
-//! - `Session<T: TurnStore, C: TextStore>` - DB-agnostic session with lazy content resolution
+//! - `Session<T: TurnStore, C: TextStore>` - DB-agnostic session with
+//!   lazy content resolution
 //! - `ResolvedContent` / `ResolvedMessage` - Cached resolved content
-//! - `AssetResolver` - Resolution trait for assets and documents
+//! - `AssetResolver` - Resolution trait for assets and entities
+//! - `EntityResolver` - Expand `EntityRef { id }` chat refs to markdown
 
 pub(crate) mod helper;
 
@@ -58,7 +61,7 @@ pub mod entity_resolver;
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, DocumentStore, EntityStore, StorageTypes,
+    AssetStore, BlobStore, EntityStore, StorageTypes,
     StoredEntity, StoredUser, Stores, TextStore, TurnStore, UserStore,
 };
 
@@ -70,8 +73,6 @@ pub use types::{
     ContentBlock, ContentOrigin, ContentType, OriginKind,
     // Conversation structure (turns, spans, messages)
     Message, MessageWithContent, Span, Turn, TurnWithContent,
-    // Document
-    Document, DocumentRevision, DocumentSource, DocumentTab,
     // Entity
     Entity, EntityRelation, EntityType, RelationType,
     // Stored wrappers
@@ -95,7 +96,7 @@ pub use implementations::fs::FsBlobStore;
 
 // Memory implementations (for testing)
 pub use implementations::memory::{
-    MemoryAssetStore, MemoryBlobStore, MemoryDocumentStore,
+    MemoryAssetStore, MemoryBlobStore,
     MemoryEntityStore, MemoryStorage, MemoryTextStore, MemoryTurnStore,
     MemoryUserStore,
 };

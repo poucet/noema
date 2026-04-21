@@ -11,7 +11,7 @@ use ts_rs::TS;
 // ---------------------------------------------------------------------------
 
 pub use simply_core::storage::ids::{
-    AssetId, ConversationId, DocumentId, EntityId, RevisionId, SpanId, TabId, TurnId, UserId,
+    AssetId, ConversationId, EntityId, SpanId, TurnId, UserId,
 };
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,6 @@ pub use simply_core::storage::ids::{
 
 pub use simply_core::storage::{
     InputContent, ResolvedContent, ResolvedMessage,
-    DocumentSource,
 };
 pub use simply_core::storage::types::BlobHash;
 

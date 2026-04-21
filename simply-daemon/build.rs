@@ -83,9 +83,8 @@ fn run_or_panic(cmd: &str, args: &[&str], dir: &PathBuf, msg: &str) {
 
 /// Known types that serialize as plain strings (ID newtypes, etc.)
 const STRING_TYPES: &[&str] = &[
-    "SessionId", "ConversationId", "DocumentId", "AssetId", "BlobHash",
-    "TabId", "TurnId", "SpanId", "EntityId", "UserId", "RevisionId",
-    "ChunkId",
+    "SessionId", "ConversationId", "AssetId", "BlobHash",
+    "TurnId", "SpanId", "EntityId", "UserId", "ContentBlockId", "ChunkId",
 ];
 
 /// Parameter types handled by the transport layer, not the client.

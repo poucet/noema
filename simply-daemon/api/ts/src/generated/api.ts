@@ -45,34 +45,6 @@ export const coreApi = (t: Transport) => ({
   publicUrl: () => t.rpc<string>('daemon.public_url', 'GET', '/api/daemon/public-url'),
 });
 
-// DocumentApi
-export const documentApi = (t: Transport) => ({
-  /** List all documents for the authenticated user. */
-  listDocuments: () => t.rpc<T.DocumentInfo[]>('document.list_documents', 'GET', '/api/document'),
-  /** List all documents across all users (admin). */
-  listAllDocuments: () => t.rpc<T.DocumentInfo[]>('document.list_all_documents', 'GET', '/api/document/all'),
-  /** Search documents by title. */
-  searchDocuments: (query: string) => t.rpc<T.DocumentInfo[]>('document.search_documents', 'GET', `/api/document/search/${query}`),
-  /** Get a document with all its tabs. */
-  getDocument: (documentId: string) => t.rpc<T.DocumentDetail>('document.get_document', 'GET', `/api/document/${documentId}`),
-  /** Create a new document (with optional initial content). */
-  createDocument: (request: T.CreateDocumentRequest) => t.rpc<T.DocumentInfo>('document.create_document', 'POST', '/api/document', request),
-  /** Update a document's title. */
-  renameDocument: (documentId: string, title: string) => t.rpc<void>('document.rename_document', 'PUT', `/api/document/${documentId}`, { title }),
-  /** Delete a document and all its tabs. */
-  deleteDocument: (documentId: string) => t.rpc<void>('document.delete_document', 'DELETE', `/api/document/${documentId}`),
-  /** Create a tab in a document. */
-  createTab: (documentId: string, request: T.CreateTabRequest) => t.rpc<T.TabInfo>('document.create_tab', 'POST', `/api/document/${documentId}/tab`, { request }),
-  /** Get a tab's content. */
-  getTab: (tabId: string) => t.rpc<T.TabInfo>('document.get_tab', 'GET', `/api/document/tab/${tabId}`),
-  /** Update a tab's content. */
-  updateTab: (tabId: string, request: T.UpdateTabRequest) => t.rpc<void>('document.update_tab', 'PUT', `/api/document/tab/${tabId}`, { request }),
-  /** Delete a tab. */
-  deleteTab: (tabId: string) => t.rpc<void>('document.delete_tab', 'DELETE', `/api/document/tab/${tabId}`),
-  /** Flush pending embedding for a tab (process immediately, bypass debounce). Called on tab switch / page unload to ensure edits are embedded promptly. */
-  flushTabEmbedding: (tabId: string) => t.rpc<void>('document.flush_tab_embedding', 'POST', `/api/document/tab/${tabId}/flush`),
-});
-
 // EntityApi
 export const entityApi = (t: Transport) => ({
   /** List all entities for the authenticated user. Filter by `type_prefix` for `LIKE 'prefix%'` matching — e.g. `"document::"` for all document kinds. If `root_of_relation` is set (e.g. `"structure::contained_in"`), returns only entities with no outgoing edge of that relation — i.e. the roots of that relation's forest. Useful for top-level document listings that should skip tabs/nested children. */
@@ -167,9 +139,9 @@ export const oAuthApi = (t: Transport) => ({
 
 // SearchApi
 export const searchApi = (t: Transport) => ({
-  /** Semantic search over embedded documents. */
+  /** Semantic search over embedded entity content. */
   search: (request: T.SearchRequest) => t.rpc<T.SearchHit[]>('search.search', 'POST', '/api/search', request),
-  /** Re-embed all documents. Runs in the background; returns immediately. */
+  /** Re-embed all content-bearing entities. Runs in the background; returns immediately with a count of jobs queued. */
   reindex: () => t.rpc<T.ReindexStatus>('search.reindex', 'POST', '/api/search/reindex'),
   /** Get embedding queue status. */
   queueStatus: () => t.rpc<T.EmbeddingQueueStatus>('search.queue_status', 'GET', '/api/search/status'),

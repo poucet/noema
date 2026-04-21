@@ -5,7 +5,6 @@
 
 mod asset;
 mod blob;
-mod document;
 mod entity;
 mod text;
 mod turn;
@@ -14,7 +13,6 @@ mod user;
 
 pub use asset::MockAssetStore;
 pub use blob::MockBlobStore;
-pub use document::MockDocumentStore;
 pub use entity::MockEntityStore;
 pub use text::MockTextStore;
 pub use turn::MockTurnStore;

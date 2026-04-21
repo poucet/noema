@@ -4,9 +4,8 @@ pub use simply_daemon_api::*;
 
 // Implementation-specific re-exports for this crate's internal use.
 pub use simply_core::storage::{
-    Entity, EntityType,
-    Document, DocumentSource, DocumentTab, StoredEditable,
-    DocumentStore, Stores, UserStore,
+    Entity, EntityType, StoredEditable,
+    Stores, UserStore,
     FsBlobStore, SqliteStore,
 };
 pub use simply_core::storage::coordinator::StorageCoordinator;

@@ -154,8 +154,8 @@ impl<T> DerefMut for Timestamped<T> {
 /// # Examples
 ///
 /// ```ignore
-/// // For documents that can be edited
-/// type StoredDocument = Keyed<DocumentId, Stored<Editable<Document>>>;
+/// // For entities that can be edited (renamed, re-bodied, etc.)
+/// type StoredEntity = Keyed<EntityId, Stored<Editable<Entity>>>;
 /// ```
 #[derive(Clone, Debug)]
 pub struct Editable<T> {
