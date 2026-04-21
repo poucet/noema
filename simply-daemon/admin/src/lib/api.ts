@@ -114,9 +114,9 @@ export const api = {
   getTab: (id: string) =>
     t().rpc<TabInfo>('document.get_tab', 'GET', `/api/document/tab/${id}`),
   updateTab: (id: string, content: string) =>
-    t().rpc('document.update_tab', 'PUT', `/api/document/tab/${id}`, { request: { content } }),
+    t().rpc('document.update_tab', 'PUT', `/api/document/tab/${id}`, { request: { content, referencedAssets: [] } }),
   createTab: (documentId: string, title: string, content?: string) =>
-    t().rpc<TabInfo>('document.create_tab', 'POST', `/api/document/${documentId}/tab`, { request: { title, content } }),
+    t().rpc<TabInfo>('document.create_tab', 'POST', `/api/document/${documentId}/tab`, { request: { title, content, referencedAssets: [] } }),
   deleteTab: (id: string) =>
     t().rpc('document.delete_tab', 'DELETE', `/api/document/tab/${id}`),
 

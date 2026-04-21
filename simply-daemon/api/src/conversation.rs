@@ -12,7 +12,7 @@ use crate::types::{ConversationId, ConversationInfo, ResolvedMessage};
 #[async_trait]
 pub trait ConversationApi: Send + Sync {
     /// Create a new conversation. Returns the conversation ID.
-    #[rpc(post = "/conversation")]
+    #[rpc(post = "/conversation",)]
     async fn create_conversation(&self, ctx: &RequestContext, name: Option<String>) -> anyhow::Result<ConversationId>;
 
     /// List all conversations for the current user.

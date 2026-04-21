@@ -15,7 +15,7 @@ use serde::Deserialize;
 use tracing::info;
 
 use simply_daemon_api::{
-    Daemon, Skill,
+    Daemon, Skill, AssetId,
     CreateDocumentRequest, CreateTabRequest,
 };
 use simply_rpc::RequestContext;
@@ -69,8 +69,9 @@ impl GDocsSkill {
             source_id: Some(args.doc_id.clone()),
         }).await?;
 
-        // Store images as assets via daemon API
-        let mut image_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        // Store images as assets via daemon API. Keep both AssetId (for GC refs)
+        // and BlobHash (for content URLs) per Google object_id.
+        let mut image_map: std::collections::HashMap<String, (AssetId, String)> = std::collections::HashMap::new();
         for image in &extracted.images {
             // `BinaryUpload.data` is `Vec<u8>` — raw bytes. Don't pre-encode;
             // serde handles base64 for the wire via #[serde(with = "base64_bytes")].
@@ -81,7 +82,7 @@ impl GDocsSkill {
                     mime_type: image.mime_type.clone(),
                 },
             ).await?;
-            image_id_map.insert(image.object_id.clone(), info.blob_hash.as_str().to_string());
+            image_map.insert(image.object_id.clone(), (info.id, info.blob_hash.as_str().to_string()));
         }
 
         // Topological sort: parents first
@@ -100,9 +101,16 @@ impl GDocsSkill {
                     .and_then(|pid| id_map.get(pid))
                     .cloned();
 
+                // Substitute object refs with blob URLs, and collect AssetIds for
+                // images that actually appear in this tab's content.
                 let mut content = tab.content_markdown.clone();
-                for (oid, hash) in &image_id_map {
-                    content = content.replace(&format!("object:{oid}"), &format!("/api/blob/{hash}"));
+                let mut referenced_assets: Vec<AssetId> = Vec::new();
+                for (oid, (asset_id, hash)) in &image_map {
+                    let needle = format!("object:{oid}");
+                    if content.contains(&needle) {
+                        referenced_assets.push(asset_id.clone());
+                        content = content.replace(&needle, &format!("/api/blob/{hash}"));
+                    }
                 }
 
                 let title = match &tab.icon {
@@ -115,6 +123,7 @@ impl GDocsSkill {
                     content: Some(content),
                     parent_tab_id: parent_tab_id,
                     tab_index: Some(tab.tab_index),
+                    referenced_assets,
                 }).await?;
 
                 id_map.insert(tab.source_tab_id.clone(), created_tab.id.clone());
@@ -122,10 +131,10 @@ impl GDocsSkill {
             pending = deferred;
         }
 
-        info!(tabs = id_map.len(), images = image_id_map.len(), "gdocs_import: done");
+        info!(tabs = id_map.len(), images = image_map.len(), "gdocs_import: done");
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Imported '{}' with {} tabs and {} images (doc_id: {})",
-            extracted.title, id_map.len(), image_id_map.len(), doc.id,
+            extracted.title, id_map.len(), image_map.len(), doc.id,
         ))]))
     }
 

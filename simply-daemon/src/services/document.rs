@@ -264,7 +264,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
             &request.title,
             None,
             request.content.as_deref(),
-            &[],
+            &request.referenced_assets,
             None,
         ).await?;
 
@@ -318,7 +318,7 @@ impl<S: StorageTypes> DocumentApi for DocumentService<S> {
         let user_id = Self::require_user(ctx)?;
         let tid = TabId::from_string(tab_id);
         self.verify_tab_access(&user_id, &tid, true).await?;
-        self.stores.document().update_document_tab_content(&tid, &request.content, &[]).await?;
+        self.stores.document().update_document_tab_content(&tid, &request.content, &request.referenced_assets).await?;
 
         // Re-embed updated content
         let tab = self.stores.document().get_document_tab(&tid).await?;
