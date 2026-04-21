@@ -14,9 +14,17 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use serenity::model::id::{ChannelId, GuildId};
-use simply_daemon_api::{Daemon, VoiceApi};
+use simply_daemon_api::{
+    CreateSessionOptions, Daemon, Persistence, SeedMessage, VoiceApi,
+};
+use simply_rpc::RequestContext;
 use songbird::{Call, Songbird};
 use tokio::sync::Mutex;
+
+/// System prompt used when an agent joins voice in Listen mode.
+/// Kept in a separate markdown file so it can be edited without recompiling
+/// the command layout.
+const VOICE_LISTEN_SYSTEM_PROMPT: &str = include_str!("system_prompt.md");
 
 /// Active voice session for a guild.
 pub struct VoiceSession {
@@ -111,6 +119,43 @@ impl VoiceManager {
     pub async fn save_config(&self, lumina_cfg: &mut config::LuminaConfig) -> Result<(), String> {
         lumina_cfg.voice = self.config.lock().await.clone();
         lumina_cfg.save()
+    }
+
+    /// Connect to a guild's voice channel and start a Listen-mode conversation.
+    ///
+    /// Connects via songbird, creates a daemon session (seeded with `seed` and
+    /// the shared voice system prompt), and wires up the STT/LLM/TTS pipeline
+    /// via `start_session`. Used by both `/voice join` and the `join_voice`
+    /// skill tool.
+    pub async fn join_voice(
+        self: &Arc<Self>,
+        guild_id: GuildId,
+        voice_channel: ChannelId,
+        text_channel: ChannelId,
+        seed: Vec<SeedMessage>,
+        http: Arc<serenity::http::Http>,
+    ) -> anyhow::Result<()> {
+        let songbird = self.songbird.get()
+            .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
+        let call = songbird.join(guild_id, voice_channel).await?;
+
+        let session = simply_daemon::DaemonSession::create(
+            self.daemon.clone(),
+            RequestContext::anonymous(),
+            CreateSessionOptions {
+                persistence: Some(Persistence::Ephemeral),
+                system_prompt: Some(VOICE_LISTEN_SYSTEM_PROMPT.to_string()),
+                model_id: None,
+                seed,
+            },
+        ).await?;
+        tracing::info!(session_id = %session.id(), guild_id = %guild_id, "voice listen session created");
+
+        self.start_session(
+            guild_id, voice_channel, text_channel,
+            VoiceMode::Listen, Some(session),
+            call, http,
+        ).await
     }
 
     /// Start a voice session and register the audio receive handler on the songbird Call.

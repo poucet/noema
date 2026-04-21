@@ -191,34 +191,10 @@ pub struct GuildIdParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ChannelStatsParams {
-    pub channel_id: ChannelId,
-    /// Time period in hours (default 24)
-    pub hours: Option<u64>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ChannelPeakParams {
-    pub channel_id: ChannelId,
-    /// Time period in days (default 7)
-    pub days: Option<u64>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct TrendingParams {
+pub struct JoinVoiceParams {
     pub guild_id: GuildId,
-    /// Time period in hours (default 24)
-    pub hours: Option<u64>,
-    /// Minimum reactions to count as trending (default 1)
-    pub min_reactions: Option<u64>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct UserActivityParams {
-    pub guild_id: GuildId,
-    pub user_id: UserId,
-    /// Time period in days (default 7)
-    pub days: Option<u64>,
+    /// Voice channel to join. If omitted, joins the first voice channel in the guild.
+    pub voice_channel_id: Option<ChannelId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -327,53 +303,6 @@ impl DiscordSkill {
     #[tool(name = "leave_voice")]
     async fn leave_voice(&self, Parameters(p): Parameters<GuildIdParams>) -> String {
         match self.do_leave_voice(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    // -- Analytics --
-
-    /// Get message statistics for a channel over a time period
-    #[tool(name = "get_message_stats")]
-    async fn get_message_stats(&self, Parameters(p): Parameters<ChannelStatsParams>) -> String {
-        match self.do_get_message_stats(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    /// Get the most active hours for a channel
-    #[tool(name = "get_channel_peak_hours")]
-    async fn get_channel_peak_hours(&self, Parameters(p): Parameters<ChannelPeakParams>) -> String {
-        match self.do_get_channel_peak_hours(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    /// Get trending messages and reactions in a guild
-    #[tool(name = "get_trending_content")]
-    async fn get_trending_content(&self, Parameters(p): Parameters<TrendingParams>) -> String {
-        match self.do_get_trending_content(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    /// Get active threads in a guild
-    #[tool(name = "get_active_threads")]
-    async fn get_active_threads(&self, Parameters(p): Parameters<GuildIdParams>) -> String {
-        match self.do_get_active_threads(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
-            Err(e) => format!("Error: {e}"),
-        }
-    }
-
-    /// Get activity statistics for a specific user in a guild
-    #[tool(name = "get_user_activity")]
-    async fn get_user_activity(&self, Parameters(p): Parameters<UserActivityParams>) -> String {
-        match self.do_get_user_activity(p).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
             Err(e) => format!("Error: {e}"),
         }
@@ -544,138 +473,5 @@ impl DiscordSkill {
         }).collect();
         let total: usize = states.iter().filter_map(|s| s["member_count"].as_u64()).sum::<u64>() as usize;
         Ok(json!({ "status": "success", "voice_states": states, "total_voice_users": total }))
-    }
-
-    async fn do_get_message_stats(&self, p: ChannelStatsParams) -> anyhow::Result<serde_json::Value> {
-        let hours = p.hours.unwrap_or(24);
-        let messages = fetch_messages_since(self.http(), p.channel_id.serenity(), snowflake_hours_ago(hours), 10_000).await?;
-        let mut authors = std::collections::HashSet::new();
-        let (mut reactions, mut attachments, mut embeds) = (0u64, 0u64, 0u64);
-        for msg in &messages {
-            authors.insert(msg.author.id);
-            reactions += msg.reactions.iter().map(|r| r.count).sum::<u64>();
-            attachments += msg.attachments.len() as u64;
-            embeds += msg.embeds.len() as u64;
-        }
-        Ok(json!({ "status": "success", "stats": {
-            "time_period_hours": hours, "total_messages": messages.len(),
-            "unique_authors": authors.len(), "reactions": reactions,
-            "attachments": attachments, "embeds": embeds,
-            "messages_per_hour": if hours > 0 { messages.len() as f64 / hours as f64 } else { 0.0 },
-        }}))
-    }
-
-    async fn do_get_channel_peak_hours(&self, p: ChannelPeakParams) -> anyhow::Result<serde_json::Value> {
-        let days = p.days.unwrap_or(7);
-        let messages = fetch_messages_since(self.http(), p.channel_id.serenity(), snowflake_hours_ago(days * 24), 50_000).await?;
-        let mut hourly: HashMap<u32, u64> = HashMap::new();
-        let mut daily: HashMap<String, u64> = HashMap::new();
-        for msg in &messages {
-            let ts = msg.timestamp;
-            let hour = (ts.unix_timestamp() % 86400 / 3600) as u32;
-            let weekday = match (ts.unix_timestamp() / 86400 + 4) % 7 {
-                0 => "Sunday", 1 => "Monday", 2 => "Tuesday", 3 => "Wednesday",
-                4 => "Thursday", 5 => "Friday", _ => "Saturday",
-            };
-            *hourly.entry(hour).or_default() += 1;
-            *daily.entry(weekday.to_string()).or_default() += 1;
-        }
-        let mut hourly_stats: Vec<serde_json::Value> = hourly.iter()
-            .map(|(&h, &c)| json!({"hour": h, "messages": c})).collect();
-        hourly_stats.sort_by_key(|v| v["hour"].as_u64().unwrap_or(0));
-        let avg = if days > 0 { messages.len() as f64 / (24.0 * days as f64) } else { 0.0 };
-        let peak_hours: Vec<u32> = hourly.iter()
-            .filter(|(_, &count)| (count as f64 / days as f64) > avg)
-            .map(|(&hour, _)| hour).collect();
-        Ok(json!({ "status": "success", "stats": {
-            "time_period_days": days, "total_messages": messages.len(),
-            "hourly_activity": hourly_stats, "daily_activity": daily, "peak_hours": peak_hours,
-        }}))
-    }
-
-    async fn do_get_trending_content(&self, p: TrendingParams) -> anyhow::Result<serde_json::Value> {
-        let text_channels: Vec<SerenityChannelId> = {
-            let cache = self.cache().context("gateway cache not available yet")?;
-            let guild_ref = cache.guild(p.guild_id.serenity()).context("guild not in cache")?;
-            guild_ref.channels.values()
-                .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Text)
-                .map(|ch| ch.id).collect()
-        };
-        let hours = p.hours.unwrap_or(24);
-        let min_reactions = p.min_reactions.unwrap_or(1);
-        let after = snowflake_hours_ago(hours);
-        let mut trending = Vec::new();
-        let mut emoji_counts: HashMap<String, u64> = HashMap::new();
-        for ch_id in text_channels {
-            let messages = fetch_messages_since(self.http(), ch_id, after, 1000).await.unwrap_or_default();
-            for msg in &messages {
-                let total: u64 = msg.reactions.iter().map(|r| r.count).sum();
-                for r in &msg.reactions { *emoji_counts.entry(r.reaction_type.to_string()).or_default() += r.count; }
-                if total >= min_reactions {
-                    trending.push(json!({
-                        "content": if msg.content.len() > 200 { format!("{}...", &msg.content[..197]) } else { msg.content.clone() },
-                        "author": msg.author.name, "channel_id": msg.channel_id.get().to_string(),
-                        "reactions": total, "timestamp": msg.timestamp.to_string(),
-                    }));
-                }
-            }
-        }
-        trending.sort_by(|a, b| b["reactions"].as_u64().cmp(&a["reactions"].as_u64()));
-        trending.truncate(10);
-        let mut popular_emojis: Vec<serde_json::Value> = emoji_counts.iter()
-            .map(|(e, c)| json!({"emoji": e, "count": c})).collect();
-        popular_emojis.sort_by(|a, b| b["count"].as_u64().cmp(&a["count"].as_u64()));
-        popular_emojis.truncate(10);
-        Ok(json!({ "status": "success", "trending": {
-            "time_period_hours": hours, "messages": trending,
-            "popular_emojis": popular_emojis, "total_trending_messages": trending.len(),
-        }}))
-    }
-
-    async fn do_get_active_threads(&self, p: GuildIdParams) -> anyhow::Result<serde_json::Value> {
-        let threads_data = p.guild_id.serenity().get_active_threads(self.http()).await?;
-        let threads: Vec<serde_json::Value> = threads_data.threads.iter().map(|t| json!({
-            "name": t.name, "id": t.id.get().to_string(), "parent_id": t.parent_id.map(|p| p.get().to_string()),
-            "member_count": t.member_count, "message_count": t.message_count,
-            "owner_id": t.owner_id.map(|o| o.get().to_string()),
-        })).collect();
-        Ok(threads.into())
-    }
-
-    async fn do_get_user_activity(&self, p: UserActivityParams) -> anyhow::Result<serde_json::Value> {
-        let (text_channels, member_name) = {
-            let cache = self.cache().context("gateway cache not available yet")?;
-            let guild_ref = cache.guild(p.guild_id.serenity()).context("guild not in cache")?;
-            let channels: Vec<SerenityChannelId> = guild_ref.channels.values()
-                .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Text)
-                .map(|ch| ch.id).collect();
-            let name = guild_ref.members.get(&p.user_id.serenity())
-                .map(|m| m.display_name().to_string())
-                .unwrap_or_else(|| format!("User {}", p.user_id.0));
-            (channels, name)
-        };
-        let days = p.days.unwrap_or(7);
-        let after = snowflake_hours_ago(days * 24);
-        let target = p.user_id.serenity();
-        let mut total_messages: u64 = 0;
-        let mut channel_activity: HashMap<String, u64> = HashMap::new();
-        for ch_id in text_channels {
-            let messages = fetch_messages_since(self.http(), ch_id, after, 5000).await.unwrap_or_default();
-            let count = messages.iter().filter(|m| m.author.id == target).count() as u64;
-            if count > 0 {
-                let ch_name = self.cache()
-                    .and_then(|c| c.guild(p.guild_id.serenity()))
-                    .and_then(|g| g.channels.get(&ch_id).map(|c| c.name.clone()))
-                    .unwrap_or_else(|| ch_id.get().to_string());
-                channel_activity.insert(ch_name, count);
-                total_messages += count;
-            }
-        }
-        Ok(json!({ "status": "success", "activity": {
-            "user_name": member_name, "time_period_days": days,
-            "total_messages": total_messages,
-            "messages_per_day": if days > 0 { total_messages as f64 / days as f64 } else { 0.0 },
-            "channel_activity": channel_activity,
-        }}))
     }
 }

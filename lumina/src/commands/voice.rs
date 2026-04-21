@@ -41,50 +41,17 @@ mod voice {
         lx.reply(cmd, "Joined voice. Transcribing to the voice channel...").await
     }
 
-    #[sub_command(description = "Join your voice channel for a voice conversation")]
-    pub async fn listen(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
-        let (guild_id, voice_channel) = join_user_channel(lx, cmd).await
+    #[sub_command(description = "Join a voice channel for a voice conversation")]
+    pub async fn join(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
+        let (guild_id, voice_channel) = resolve_voice_channel(lx, cmd)
             .map_err(|e| anyhow::anyhow!(e))?;
 
         let voice_mgr = get_voice_manager(lx).await?;
-        let origin_channel = cmd.channel_id;
+        let history = load_channel_seed(lx, cmd.channel_id).await;
 
-        // Seed from the channel where /voice listen was called
-        let history = load_channel_seed(lx, origin_channel).await;
-
-        let system_prompt = format!(
-            "You are Lumina, an AI assistant in a live voice conversation on Discord.\n\
-             Guild: {}\n\n\
-             Keep responses concise — they will be spoken aloud via TTS.\n\
-             Do not use markdown formatting, emojis, or special characters — plain text only.",
-            guild_id,
-        );
-
-        // Post transcripts to the voice channel's text chat, not the originating channel
-        let text_channel = voice_channel;
-
-        let session = simply_daemon::DaemonSession::create(
-            voice_mgr.daemon().clone(),
-            RequestContext::anonymous(),
-            CreateSessionOptions {
-                persistence: Some(Persistence::Ephemeral),
-                system_prompt: Some(system_prompt),
-                model_id: None,
-                seed: history,
-            },
-        ).await?;
-
-        tracing::info!(session_id = %session.id(), "voice listen session created");
-
-        let manager = songbird::get(&lx.ctx).await
-            .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
-        let call = manager.get(guild_id)
-            .ok_or_else(|| anyhow::anyhow!("Not in voice channel"))?;
-
-        voice_mgr.start_session(
-            guild_id, voice_channel, text_channel,
-            VoiceMode::Listen, Some(session),
-            call, Arc::clone(&lx.http),
+        voice_mgr.join_voice(
+            guild_id, voice_channel, voice_channel,
+            history, Arc::clone(&lx.http),
         ).await?;
 
         lx.reply(cmd, "Joined voice. Listening for conversation...").await
@@ -304,31 +271,39 @@ async fn get_voice_manager(lx: &LuminaContext) -> anyhow::Result<Arc<crate::voic
     mgr
 }
 
+/// Determine which voice channel `/voice` should act on without connecting to it.
+///
+/// Prefers the channel the invoking user is currently in; falls back to the
+/// first voice channel in the guild (lowest position) so slash commands work
+/// even when invoked from a text channel.
+fn resolve_voice_channel(
+    lx: &LuminaContext,
+    cmd: &CommandInteraction,
+) -> Result<(serenity::model::id::GuildId, serenity::model::id::ChannelId), String> {
+    let guild_id = cmd.guild_id.ok_or("Not in a guild")?;
+    let guild = lx.cache.guild(guild_id).ok_or("Guild not found")?;
+    let voice_channel = guild.voice_states.get(&cmd.user.id)
+        .and_then(|vs| vs.channel_id)
+        .or_else(|| {
+            let mut voice_channels: Vec<_> = guild.channels.values()
+                .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Voice)
+                .collect();
+            voice_channels.sort_by_key(|ch| ch.position);
+            voice_channels.first().map(|ch| ch.id)
+        })
+        .ok_or("No voice channels in this guild")?;
+    Ok((guild_id, voice_channel))
+}
+
+/// Resolve the target voice channel and connect songbird to it. Used by
+/// `/voice transcribe` and `/voice say` where the voice_mgr doesn't own
+/// session creation.
 async fn join_user_channel(
     lx: &LuminaContext,
     cmd: &CommandInteraction,
 ) -> Result<(serenity::model::id::GuildId, serenity::model::id::ChannelId), String> {
-    tracing::debug!("join_user_channel: start");
-    let guild_id = cmd.guild_id.ok_or("Not in a guild")?;
-    let voice_channel = {
-        let guild = lx.cache.guild(guild_id).ok_or("Guild not found")?;
-        // Prefer the channel the user is currently in; otherwise fall back to
-        // the first voice channel in the guild (lowest position) so /voice
-        // listen still works when invoked from a text channel.
-        guild.voice_states.get(&cmd.user.id)
-            .and_then(|vs| vs.channel_id)
-            .or_else(|| {
-                let mut voice_channels: Vec<_> = guild.channels.values()
-                    .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Voice)
-                    .collect();
-                voice_channels.sort_by_key(|ch| ch.position);
-                voice_channels.first().map(|ch| ch.id)
-            })
-            .ok_or("No voice channels in this guild")?
-    };
-    tracing::debug!("join_user_channel: getting songbird");
+    let (guild_id, voice_channel) = resolve_voice_channel(lx, cmd)?;
     let manager = songbird::get(&lx.ctx).await.ok_or("Songbird not initialized")?;
-    tracing::debug!("join_user_channel: calling join");
     manager.join(guild_id, voice_channel).await
         .map_err(|e| format!("Failed to join voice: {e}"))?;
     tracing::info!(guild_id = %guild_id, voice_channel = %voice_channel, "joined voice channel");
