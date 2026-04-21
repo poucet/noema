@@ -323,8 +323,9 @@ async fn stream_response(
             }
             Ok(DaemonEvent::TurnComplete) => {
                 if !text_buffer.is_empty() {
-                    let content = truncate_for_discord(&text_buffer);
-                    msg.channel_id.say(&lx.http, &content).await?;
+                    for page in crate::tool_render::paginate_tool_output(&text_buffer, 2000) {
+                        msg.channel_id.say(&lx.http, &page).await?;
+                    }
                 }
                 break;
             }
