@@ -68,7 +68,7 @@ impl super::SlashCommand for Tool {
                 CreateCommandOption::new(CommandOptionType::SubCommand, "sources", "List where tools come from (daemon, skills, MCP servers)")
             )
             .add_option(
-                CreateCommandOption::new(CommandOptionType::SubCommand, "connect", "Connect an MCP server")
+                CreateCommandOption::new(CommandOptionType::SubCommand, "mcp_connect", "Connect an MCP server")
                     .add_sub_option(
                         CreateCommandOption::new(CommandOptionType::String, "id", "Server id")
                             .required(true)
@@ -76,7 +76,7 @@ impl super::SlashCommand for Tool {
                     ),
             )
             .add_option(
-                CreateCommandOption::new(CommandOptionType::SubCommand, "disconnect", "Disconnect an MCP server")
+                CreateCommandOption::new(CommandOptionType::SubCommand, "mcp_disconnect", "Disconnect an MCP server")
                     .add_sub_option(
                         CreateCommandOption::new(CommandOptionType::String, "id", "Server id")
                             .required(true)
@@ -84,7 +84,7 @@ impl super::SlashCommand for Tool {
                     ),
             )
             .add_option(
-                CreateCommandOption::new(CommandOptionType::SubCommand, "add", "Add a new MCP server")
+                CreateCommandOption::new(CommandOptionType::SubCommand, "mcp_add", "Add a new MCP server")
                     .add_sub_option(
                         CreateCommandOption::new(CommandOptionType::String, "id", "Server id (also used as display name)")
                             .required(true),
@@ -99,7 +99,7 @@ impl super::SlashCommand for Tool {
                     ),
             )
             .add_option(
-                CreateCommandOption::new(CommandOptionType::SubCommand, "remove", "Remove an MCP server")
+                CreateCommandOption::new(CommandOptionType::SubCommand, "mcp_remove", "Remove an MCP server")
                     .add_sub_option(
                         CreateCommandOption::new(CommandOptionType::String, "id", "Server id")
                             .required(true)
@@ -125,17 +125,17 @@ impl super::SlashCommand for Tool {
                 cmd_call(lx, cmd, tool_name).await
             }
             "sources" => cmd_sources(lx, cmd).await,
-            "connect" => {
+            "mcp_connect" => {
                 let id = sub_string_arg(&sub.value, "id")
                     .ok_or_else(|| anyhow::anyhow!("missing server id"))?;
                 cmd_connect(lx, cmd, id).await
             }
-            "disconnect" => {
+            "mcp_disconnect" => {
                 let id = sub_string_arg(&sub.value, "id")
                     .ok_or_else(|| anyhow::anyhow!("missing server id"))?;
                 cmd_disconnect(lx, cmd, id).await
             }
-            "add" => {
+            "mcp_add" => {
                 let id = sub_string_arg(&sub.value, "id")
                     .ok_or_else(|| anyhow::anyhow!("missing id"))?;
                 let url = sub_string_arg(&sub.value, "url")
@@ -143,7 +143,7 @@ impl super::SlashCommand for Tool {
                 let auth_type = sub_string_arg(&sub.value, "auth_type");
                 cmd_add(lx, cmd, id, url, auth_type).await
             }
-            "remove" => {
+            "mcp_remove" => {
                 let id = sub_string_arg(&sub.value, "id")
                     .ok_or_else(|| anyhow::anyhow!("missing server id"))?;
                 cmd_remove(lx, cmd, id).await
@@ -176,7 +176,7 @@ impl super::SlashCommand for Tool {
             }
             // MCP-server-id autocomplete: all configured servers; the label
             // shows status so the user doesn't have to guess.
-            "connect" | "disconnect" | "remove" => {
+            "mcp_connect" | "mcp_disconnect" | "mcp_remove" => {
                 let servers = lx.daemon.mcp().list_mcp_servers().await.unwrap_or_default();
                 servers.into_iter()
                     .filter(|s| partial.is_empty() || s.id.to_lowercase().contains(&partial))
