@@ -318,9 +318,19 @@ async fn join_user_channel(
     let guild_id = cmd.guild_id.ok_or("Not in a guild")?;
     let voice_channel = {
         let guild = lx.cache.guild(guild_id).ok_or("Guild not found")?;
+        // Prefer the channel the user is currently in; otherwise fall back to
+        // the first voice channel in the guild (lowest position) so /voice
+        // listen still works when invoked from a text channel.
         guild.voice_states.get(&cmd.user.id)
             .and_then(|vs| vs.channel_id)
-            .ok_or("You're not in a voice channel")?
+            .or_else(|| {
+                let mut voice_channels: Vec<_> = guild.channels.values()
+                    .filter(|ch| ch.kind == serenity::model::channel::ChannelType::Voice)
+                    .collect();
+                voice_channels.sort_by_key(|ch| ch.position);
+                voice_channels.first().map(|ch| ch.id)
+            })
+            .ok_or("No voice channels in this guild")?
     };
     tracing::debug!("join_user_channel: getting songbird");
     let manager = songbird::get(&lx.ctx).await.ok_or("Songbird not initialized")?;
