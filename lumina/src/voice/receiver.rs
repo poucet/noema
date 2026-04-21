@@ -200,9 +200,16 @@ pub fn spawn_event_handler(
     http: Arc<serenity::http::Http>,
     voice_mgr: Arc<super::VoiceManager>,
     call: Arc<Mutex<songbird::Call>>,
+    tts: Option<super::TtsBinding>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         tracing::info!(guild_id = %guild_id, mode = ?mode, "voice event handler started");
+
+        if let Some(binding) = tts.as_ref() {
+            if let Err(e) = voice_mgr.play_tts(&call, binding, "Hi, I'm Lumina, ready to help.").await {
+                tracing::warn!(error = %e, "welcome TTS failed");
+            }
+        }
 
         while let Some(event) = stt_events.recv().await {
             match event {
@@ -242,26 +249,19 @@ pub fn spawn_event_handler(
                             }
 
                             if let Some(response_text) = response {
-                                // TTS → play in voice channel (with retry + fallback)
-                                let tts_ok = match voice_mgr.synthesize_for_discord(&response_text).await {
-                                    Ok(stereo) => {
-                                        let wav = super::build_wav_f32(&stereo, 48_000, 2);
-                                        let cursor = std::io::Cursor::new(wav);
-                                        let input = songbird::input::Input::Live(
-                                            songbird::input::LiveInput::Raw(
-                                                songbird::input::AudioStream { input: Box::new(cursor) },
-                                            ),
-                                            None,
-                                        );
-                                        let mut handler = call.lock().await;
-                                        handler.play_input(input);
-                                        tracing::info!("TTS response playing in voice channel");
-                                        true
+                                let tts_ok = if let Some(binding) = tts.as_ref() {
+                                    match voice_mgr.play_tts(&call, binding, &response_text).await {
+                                        Ok(()) => {
+                                            tracing::info!("TTS response playing in voice channel");
+                                            true
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(error = %e, "TTS failed, falling back to text");
+                                            false
+                                        }
                                     }
-                                    Err(e) => {
-                                        tracing::warn!(error = %e, "TTS failed, falling back to text");
-                                        false
-                                    }
+                                } else {
+                                    false
                                 };
 
                                 // Always post text — as primary if TTS failed, as supplement if TTS worked

@@ -32,7 +32,7 @@ mod voice {
 
         voice_mgr.start_session(
             guild_id, voice_channel, text_channel,
-            VoiceMode::Transcribe, None,
+            VoiceMode::Transcribe, None, None,
             call, Arc::clone(&lx.http),
         ).await?;
 

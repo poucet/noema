@@ -33,6 +33,16 @@ pub enum JoinOutcome {
     AlreadyJoined { voice_channel: ChannelId },
 }
 
+/// Resolved TTS provider + voice for a session. Fixed at join time so
+/// per-utterance synthesis doesn't re-query the daemon for the provider
+/// list and voice list on every turn. A config change to provider/voice
+/// takes effect on the next rejoin.
+#[derive(Clone)]
+pub struct TtsBinding {
+    pub provider_id: String,
+    pub voice_id: String,
+}
+
 /// Active voice session for a guild.
 pub struct VoiceSession {
     /// The text channel where transcripts are posted.
@@ -43,6 +53,9 @@ pub struct VoiceSession {
     pub mode: VoiceMode,
     /// Daemon conversation session (for listen mode — persistent across utterances).
     pub daemon_session: Option<simply_daemon::DaemonSession>,
+    /// TTS binding fixed at join time. `None` in transcribe-only mode or
+    /// when no TTS provider is configured (responses fall back to text).
+    pub tts: Option<TtsBinding>,
     /// Handle on the receiver task — aborted when the session is stopped so
     /// we don't leave a zombie consumer of a stale STT event stream hanging
     /// around after `leave_voice`. Without this, a subsequent `/voice join`
@@ -175,6 +188,7 @@ impl VoiceManager {
                 voice_channel,
                 mode: VoiceMode::Listen,
                 daemon_session: None,
+                tts: None,
                 receiver_task: None,
             });
         }
@@ -219,9 +233,20 @@ impl VoiceManager {
         ).await?;
         tracing::info!(session_id = %session.id(), guild_id = %guild_id, "voice listen session created");
 
+        // Resolve TTS binding once at join — fixes provider/voice for the
+        // lifetime of this session. Soft-fail: a Listen session with no TTS
+        // is degraded to text-only responses rather than failing to join.
+        let tts = match self.resolve_tts_binding().await {
+            Ok(b) => Some(b),
+            Err(e) => {
+                tracing::warn!(error = %e, "voice: no TTS available, responses will be text-only");
+                None
+            }
+        };
+
         self.start_session(
             guild_id, voice_channel, text_channel,
-            VoiceMode::Listen, Some(session),
+            VoiceMode::Listen, Some(session), tts,
             call, http,
         ).await
     }
@@ -234,6 +259,7 @@ impl VoiceManager {
         text_channel: ChannelId,
         mode: VoiceMode,
         daemon_session: Option<simply_daemon::DaemonSession>,
+        tts: Option<TtsBinding>,
         call: Arc<Mutex<Call>>,
         http: Arc<serenity::http::Http>,
     ) -> anyhow::Result<()> {
@@ -272,6 +298,7 @@ impl VoiceManager {
             http,
             Arc::clone(self),
             call.clone(),
+            tts.clone(),
         );
 
         let session = VoiceSession {
@@ -279,6 +306,7 @@ impl VoiceManager {
             voice_channel,
             mode,
             daemon_session,
+            tts,
             receiver_task: Some(receiver_task),
         };
         self.sessions.lock().await.insert(guild_id, session);
@@ -312,17 +340,15 @@ impl VoiceManager {
         self.sessions.lock().await.get(guild_id).map(|s| s.mode)
     }
 
-    /// Synthesize text and return audio ready for songbird (interleaved stereo f32 48kHz).
-    pub async fn synthesize_for_discord(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        tracing::info!(text_len = text.len(), "TTS: starting synthesis");
-
-        // Use configured TTS provider or first available
-        let tts_provider_id = match self.tts_provider_id().await {
+    /// Resolve the TTS provider + voice the session should use. Falls back
+    /// to the first provider/voice available when the user hasn't configured
+    /// one. Called once per session at join time — the result is stored on
+    /// `VoiceSession.tts` so subsequent TTS calls skip the daemon round-trips.
+    pub async fn resolve_tts_binding(&self) -> anyhow::Result<TtsBinding> {
+        let provider_id = match self.tts_provider_id().await {
             Some(id) => id,
             None => {
-                tracing::debug!("TTS: no configured provider, fetching list");
                 let providers = self.daemon.voice().list_voice_providers().await?;
-                tracing::debug!(count = providers.len(), "TTS: got providers");
                 providers.iter()
                     .find(|p| p.capabilities.contains(&"tts".to_string()))
                     .map(|p| p.id.clone())
@@ -330,41 +356,41 @@ impl VoiceManager {
             }
         };
 
-        // Use configured voice or first available
         let voice_id = match self.tts_voice_id().await {
             Some(id) => id,
-            None => {
-                tracing::debug!(provider = %tts_provider_id, "TTS: no configured voice, fetching list");
-                match self.daemon.voice().list_voices(&tts_provider_id).await {
-                    Ok(voices) if !voices.is_empty() => {
-                        use rand::Rng;
-                        let idx = rand::rng().random_range(0..voices.len());
-                        tracing::info!(count = voices.len(), picked = %voices[idx].name, "TTS: picked random voice");
-                        voices[idx].id.clone()
-                    }
-                    _ => String::new(),
+            None => match self.daemon.voice().list_voices(&provider_id).await {
+                Ok(voices) if !voices.is_empty() => {
+                    use rand::Rng;
+                    let idx = rand::rng().random_range(0..voices.len());
+                    tracing::info!(count = voices.len(), picked = %voices[idx].name, "TTS: picked random voice");
+                    voices[idx].id.clone()
                 }
-            }
+                _ => String::new(),
+            },
         };
 
-        tracing::info!(provider = %tts_provider_id, voice = %voice_id, "TTS: calling synthesize");
-        let audio = self.daemon.voice().synthesize(text, &tts_provider_id, &voice_id).await?;
-        let mono = audio.to_f32_samples();
+        tracing::info!(provider = %provider_id, voice = %voice_id, "TTS binding resolved");
+        Ok(TtsBinding { provider_id, voice_id })
+    }
 
+    /// Synthesize text and return audio ready for songbird (interleaved stereo f32 48kHz).
+    pub async fn synthesize_for_discord(&self, text: &str, binding: &TtsBinding) -> anyhow::Result<Vec<f32>> {
+        let audio = self.daemon.voice().synthesize(text, &binding.provider_id, &binding.voice_id).await?;
+        let mono = audio.to_f32_samples();
         tracing::info!(
+            text_len = text.len(),
             samples = mono.len(),
             source_rate = audio.format.sample_rate,
-            tts_provider = %tts_provider_id,
-            voice = %voice_id,
+            provider = %binding.provider_id,
+            voice = %binding.voice_id,
             "TTS synthesized for Discord"
         );
-
         Ok(resample_mono_to_stereo_48k(&mono, audio.format.sample_rate))
     }
 
     /// Play TTS audio in the voice channel.
-    pub async fn play_tts(&self, call: &Arc<Mutex<Call>>, text: &str) -> anyhow::Result<()> {
-        let stereo = self.synthesize_for_discord(text).await?;
+    pub async fn play_tts(&self, call: &Arc<Mutex<Call>>, binding: &TtsBinding, text: &str) -> anyhow::Result<()> {
+        let stereo = self.synthesize_for_discord(text, binding).await?;
         let bytes: Vec<u8> = stereo.iter().flat_map(|s| s.to_le_bytes()).collect();
         let input = songbird::input::RawAdapter::new(
             std::io::Cursor::new(bytes),
@@ -382,33 +408,6 @@ pub struct VoiceManagerKey;
 
 impl serenity::prelude::TypeMapKey for VoiceManagerKey {
     type Value = Arc<VoiceManager>;
-}
-
-/// Build a WAV file in memory from f32 interleaved samples.
-pub(crate) fn build_wav_f32(samples: &[f32], sample_rate: u32, channels: u16) -> Vec<u8> {
-    let bits_per_sample: u16 = 32;
-    let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
-    let block_align = channels * bits_per_sample / 8;
-    let data_len = (samples.len() * 4) as u32;
-
-    let mut buf = Vec::with_capacity(44 + data_len as usize);
-    buf.extend_from_slice(b"RIFF");
-    buf.extend_from_slice(&(36 + data_len).to_le_bytes());
-    buf.extend_from_slice(b"WAVE");
-    buf.extend_from_slice(b"fmt ");
-    buf.extend_from_slice(&16u32.to_le_bytes());
-    buf.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
-    buf.extend_from_slice(&channels.to_le_bytes());
-    buf.extend_from_slice(&sample_rate.to_le_bytes());
-    buf.extend_from_slice(&byte_rate.to_le_bytes());
-    buf.extend_from_slice(&block_align.to_le_bytes());
-    buf.extend_from_slice(&bits_per_sample.to_le_bytes());
-    buf.extend_from_slice(b"data");
-    buf.extend_from_slice(&data_len.to_le_bytes());
-    for &s in samples {
-        buf.extend_from_slice(&s.to_le_bytes());
-    }
-    buf
 }
 
 /// Resample mono audio to interleaved stereo 48kHz.
