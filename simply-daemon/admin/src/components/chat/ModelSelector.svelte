@@ -1,6 +1,6 @@
 <script lang="ts">
   import { chatStore } from '../../lib/stores/chat.svelte';
-  import type { ModelInfo } from '../../lib/generated/types';
+  import type { ModelInfo } from '@simply/client';
 
   let open = $state(false);
   let search = $state('');

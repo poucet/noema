@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport } from '../lib/transport';
-  import { skillsApi } from '../lib/generated/api';
-  import type { SkillInfo, McpTool } from '../lib/generated/types';
+  import { getTransport, skillsApi, type SkillInfo, type McpTool } from '@simply/client';
 
   const skills = skillsApi(getTransport());
 

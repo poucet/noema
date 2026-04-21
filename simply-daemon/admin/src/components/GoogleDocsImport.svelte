@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport } from '../lib/transport';
-  import { mcpApi, oAuthApi } from '../lib/generated/api';
-  import type { McpServerInfo } from '../lib/generated/types';
+  import { getTransport, mcpApi, oAuthApi, type McpServerInfo } from '@simply/client';
 
   const t = getTransport();
   const mcp = mcpApi(t);

@@ -9,7 +9,7 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct OAuthFlowInfo {
     /// The authorization URL the user should open in their browser.
     pub auth_url: String,
@@ -46,7 +46,7 @@ pub struct RegisterOAuthProviderRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct OAuthProviderInfo {
     pub id: String,
     pub display_name: String,

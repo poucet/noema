@@ -10,7 +10,7 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct DocumentInfo {
     pub id: String,
     pub user_id: String,
@@ -28,7 +28,7 @@ pub struct DocumentInfo {
 /// Full document with tabs.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct DocumentDetail {
     pub id: String,
     pub title: String,
@@ -43,7 +43,7 @@ pub struct DocumentDetail {
 /// Tab within a document.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct TabInfo {
     pub id: String,
     pub title: String,
@@ -58,7 +58,7 @@ pub struct TabInfo {
 /// Request to create a document.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct CreateDocumentRequest {
     pub title: String,
     /// Document type (e.g. "note", "todo", "knowledge"). Defaults to "document".
@@ -73,7 +73,7 @@ pub struct CreateDocumentRequest {
 /// Request to create a tab.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct CreateTabRequest {
     pub title: String,
     pub content: Option<String>,
@@ -84,7 +84,7 @@ pub struct CreateTabRequest {
 /// Request to update a tab's content.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct UpdateTabRequest {
     pub content: String,
 }

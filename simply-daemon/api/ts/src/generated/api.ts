@@ -176,4 +176,3 @@ export const voiceApi = (t: Transport) => ({
   /** Disconnect a voice stream. */
   voiceDisconnect: (sessionId: string) => t.rpc<void>('voice.voice_disconnect', 'DELETE', `/api/voice/${sessionId}`),
 });
-

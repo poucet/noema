@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../lib/api';
-  import { getTransport } from '../lib/transport';
-  import { modelApi } from '../lib/generated/api';
-  import type { ModelInfo } from '../lib/generated/types';
+  import { getTransport, modelApi, type ModelInfo } from '@simply/client';
 
   const t = getTransport();
   const model = modelApi(t);

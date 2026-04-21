@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getTransport, getBaseUrl } from '../../lib/transport';
-  import { voiceApi } from '../../lib/generated/api';
-  import type { VoiceProviderInfo } from '../../lib/generated/types';
+  import { getTransport, getBaseUrl, voiceApi, type VoiceProviderInfo } from '@simply/client';
 
   interface Props {
     onTranscription: (text: string) => void;

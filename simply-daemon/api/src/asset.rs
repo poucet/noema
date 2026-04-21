@@ -10,7 +10,7 @@ use crate::types::{AssetId, BlobHash};
 /// Asset metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 #[serde(rename_all = "camelCase")]
 pub struct AssetInfo {
     pub id: AssetId,

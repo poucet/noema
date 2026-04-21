@@ -1,0 +1,8 @@
+{
+  "name": "simply-workspace",
+  "private": true,
+  "workspaces": [
+    "simply-daemon/api/ts",
+    "simply-daemon/admin"
+  ]
+}

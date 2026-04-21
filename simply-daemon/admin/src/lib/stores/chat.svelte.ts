@@ -1,18 +1,21 @@
 // Chat store — reactive state for conversation UI.
 // Uses .svelte.ts extension so Svelte 5 runes ($state) are available.
 
-import { getTransport } from '../transport';
-import { conversationApi, sessionApi, modelApi } from '../generated/api';
-import type {
-  ConversationInfo,
-  ResolvedMessage,
-  ResolvedContent,
-  SessionInfo,
-  ModelInfo,
-  DaemonEvent,
-  ContentBlock,
-} from '../generated/types';
-import type { Transport, Unsubscribe } from '../transport';
+import {
+  getTransport,
+  conversationApi,
+  sessionApi,
+  modelApi,
+  type ConversationInfo,
+  type ResolvedMessage,
+  type ResolvedContent,
+  type SessionInfo,
+  type ModelInfo,
+  type DaemonEvent,
+  type ContentBlock,
+  type Transport,
+  type Unsubscribe,
+} from '@simply/client';
 
 // ---------------------------------------------------------------------------
 // Display types (presentation layer over ResolvedMessage)

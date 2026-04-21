@@ -15,7 +15,7 @@ use crate::McpTool;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(TS))]
-#[cfg_attr(feature = "ts", ts(export, export_to = "../admin/src/lib/generated/types/"))]
+#[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct SkillInfo {
     /// Skill ID — the name declared by `Skill::name()`.
     pub id: String,

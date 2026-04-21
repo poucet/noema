@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { DisplayMessage } from '../../lib/stores/chat.svelte';
-  import type { ResolvedContent } from '../../lib/generated/types';
+  import type { ResolvedContent } from '@simply/client';
 
   interface Props {
     message: DisplayMessage;

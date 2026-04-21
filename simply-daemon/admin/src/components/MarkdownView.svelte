@@ -2,7 +2,7 @@
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import katex from 'katex';
-  import { getBaseUrl } from '../lib/transport';
+  import { getBaseUrl } from '@simply/client';
   // katex/dist/katex.min.css is imported from Base.astro (Astro handles static CSS;
   // importing from inside Svelte breaks SSR because Node can't import .css).
 

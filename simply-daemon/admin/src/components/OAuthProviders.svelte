@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport } from '../lib/transport';
-  import { oAuthApi } from '../lib/generated/api';
+  import { getTransport, oAuthApi } from '@simply/client';
 
   const oauth = oAuthApi(getTransport());
 

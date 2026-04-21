@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { api } from '../lib/api';
-  import { getTransport } from '../lib/transport';
-  import type { DocumentInfo, DocumentDetail, TabInfo } from '../lib/generated/types';
+  import { getTransport, type DocumentInfo, type DocumentDetail, type TabInfo } from '@simply/client';
   import DocumentEditor from './DocumentEditor.svelte';
   import MarkdownView from './MarkdownView.svelte';
 

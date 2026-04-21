@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport } from '../lib/transport';
-  import { modelApi } from '../lib/generated/api';
-  import type { ModelInfo } from '../lib/generated/types';
+  import { getTransport, modelApi, type ModelInfo } from '@simply/client';
 
   let models = $state<ModelInfo[]>([]);
   let currentModelId = $state('');

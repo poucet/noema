@@ -3,21 +3,18 @@
 // RPC service types are imported from generated types (ts-rs + build.rs).
 // Admin-only types (not part of RPC services) are defined here.
 
-import type {
-  DocumentInfo,
-  DocumentDetail,
-  TabInfo,
-  SearchHit,
-  ReindexStatus,
-  EmbeddingQueueStatus,
-} from './generated/types';
-
 import {
+  type DocumentInfo,
+  type DocumentDetail,
+  type TabInfo,
+  type SearchHit,
+  type ReindexStatus,
+  type EmbeddingQueueStatus,
   type Transport,
   createTransport,
   getCurrentUser,
   setCurrentUser,
-} from './transport';
+} from '@simply/client';
 
 // Re-export user context functions for existing consumers
 export { getCurrentUser, setCurrentUser };
