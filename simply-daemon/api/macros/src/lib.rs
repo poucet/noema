@@ -9,8 +9,10 @@
 //!
 //! Handler signatures may take any combination (in any order, after `&self`) of:
 //! - `Parameters<T>` — deserialized tool arguments
-//! - `&RequestContext` — the caller's request context (user id + tokens +
-//!   origin metadata); forwarded as-is from whoever invoked `call_tool`
+//! - `RequestContext` (by value) — the caller's request context (user id +
+//!   tokens + origin metadata); the dispatcher clones it from whoever
+//!   invoked `call_tool`. Taking it by value keeps rmcp's async rewrite
+//!   happy (it otherwise ties every reference's lifetime to `&self`).
 //!
 //! Works with any return type supported by rmcp's `IntoCallToolResult`: `String`,
 //! `impl IntoContents`, `Result<T, E>`, `Json<T>`, `CallToolResult`, etc.
@@ -92,7 +94,7 @@ pub fn skill_router(attr: TokenStream, item: TokenStream) -> TokenStream {
             HandlerArg::Params => quote! {
                 ::simply_daemon_api::__private::rmcp::handler::server::wrapper::Parameters(parsed)
             },
-            HandlerArg::Ctx => quote! { _ctx },
+            HandlerArg::Ctx => quote! { _ctx.clone() },
         }).collect();
 
         quote! {
@@ -227,7 +229,8 @@ fn extract_tool_name(attr: &syn::Attribute) -> Option<String> {
 ///
 /// Recognised argument shapes (skipping `&self`):
 /// - `Parameters<T>` (any path ending in `Parameters`): deserialized args
-/// - `&RequestContext` (any path ending in `RequestContext`): caller ctx
+/// - `RequestContext` (any path ending in `RequestContext`, owned — not a
+///   reference): caller ctx, forwarded as a clone
 ///
 /// Other arg shapes are ignored — the generated call site only forwards
 /// what it knows how to supply.
@@ -238,7 +241,7 @@ fn plan_handler_args(sig: &syn::Signature) -> ArgPlan {
         if let Some(inner) = match_parameters_inner(&pat_type.ty) {
             plan.params_ty = Some(inner);
             plan.order.push(HandlerArg::Params);
-        } else if is_request_context_ref(&pat_type.ty) {
+        } else if is_request_context(&pat_type.ty) {
             plan.order.push(HandlerArg::Ctx);
         }
     }
@@ -256,8 +259,7 @@ fn match_parameters_inner(ty: &Type) -> Option<syn::Type> {
     }
 }
 
-fn is_request_context_ref(ty: &Type) -> bool {
-    let Type::Reference(r) = ty else { return false };
-    let Type::Path(tp) = &*r.elem else { return false };
+fn is_request_context(ty: &Type) -> bool {
+    let Type::Path(tp) = ty else { return false };
     tp.path.segments.last().map(|s| s.ident == "RequestContext").unwrap_or(false)
 }

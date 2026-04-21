@@ -264,8 +264,8 @@ impl DiscordSkill {
 
     /// List all channels in the current server
     #[tool(name = "list_channels")]
-    async fn list_channels(&self, ctx: &RequestContext) -> String {
-        match self.do_list_channels(ctx).await {
+    async fn list_channels(&self, ctx: RequestContext) -> String {
+        match self.do_list_channels(&ctx).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
             Err(e) => format!("Error: {e}"),
         }
@@ -273,8 +273,8 @@ impl DiscordSkill {
 
     /// Get custom emojis in the current server
     #[tool(name = "get_emoji_list")]
-    async fn get_emoji_list(&self, ctx: &RequestContext) -> String {
-        match self.do_get_emoji_list(ctx).await {
+    async fn get_emoji_list(&self, ctx: RequestContext) -> String {
+        match self.do_get_emoji_list(&ctx).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
             Err(e) => format!("Error: {e}"),
         }
@@ -283,19 +283,19 @@ impl DiscordSkill {
     /// Get users currently in voice channels in the current server
     /// (requires active gateway)
     #[tool(name = "get_voice_states")]
-    async fn get_voice_states(&self, ctx: &RequestContext) -> String {
-        match self.do_get_voice_states(ctx).await {
+    async fn get_voice_states(&self, ctx: RequestContext) -> String {
+        match self.do_get_voice_states(&ctx).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
             Err(e) => format!("Error: {e}"),
         }
     }
 
     /// Join a voice channel in the current server and start a live voice
-    /// conversation. If no voice channel is specified by the user, picks
-    /// the first voice channel in the guild.
+    /// conversation. No-op (returns success) if already in a voice channel
+    /// in this server.
     #[tool(name = "join_voice")]
-    async fn join_voice(&self, ctx: &RequestContext) -> String {
-        match self.do_join_voice(ctx).await {
+    async fn join_voice(&self, ctx: RequestContext) -> String {
+        match self.do_join_voice(&ctx).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
             Err(e) => format!("Error: {e}"),
         }
@@ -304,8 +304,8 @@ impl DiscordSkill {
     /// Disconnect Lumina from the current server's voice channel, ending
     /// any active voice session (transcribe or listen).
     #[tool(name = "leave_voice")]
-    async fn leave_voice(&self, ctx: &RequestContext) -> String {
-        match self.do_leave_voice(ctx).await {
+    async fn leave_voice(&self, ctx: RequestContext) -> String {
+        match self.do_leave_voice(&ctx).await {
             Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
             Err(e) => format!("Error: {e}"),
         }
