@@ -283,9 +283,11 @@ pub fn create_voice_service() -> VoiceService {
 
     if let Some(key) = settings.get_api_key("google")
         .or_else(|| std::env::var("GOOGLE_API_KEY").ok()) {
-        let gemini = Arc::new(simply_voice::GeminiRealtimeProvider::new(key));
-        voice = voice.register_realtime("gemini", "Gemini Realtime", gemini);
-        tracing::info!("gemini realtime registered");
+        let gemini = Arc::new(simply_voice::GeminiProvider::new(key));
+        voice = voice
+            .register_stt("gemini", "Gemini (STT)", gemini.clone())
+            .register_tts("gemini", "Gemini (TTS)", gemini);
+        tracing::info!("gemini STT + TTS registered");
     }
 
     voice
