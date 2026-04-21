@@ -1,8 +1,8 @@
 # Unified Content Model
 
-**Status:** Draft → Revised
+**Status:** Revised — entity-first
 **Created:** 2026-01-10
-**Updated:** 2026-01-15
+**Updated:** 2026-04-21
 **Related:** IDEAS #1, #2, #3
 
 ---
@@ -10,29 +10,40 @@
 ## Three-Layer Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    ADDRESSABLE LAYER                        │
-│  Unified identity, naming, and relationships                │
-│  - entities (id, type, name, slug, user, privacy, archive) │
-│  - entity_relations (from, to, relation, metadata)          │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                      ADDRESSABLE LAYER                            │
+│  Every addressable thing is an entity. Hierarchy, ordering, and   │
+│  cross-references live in entity_relations.                       │
+│  - entities (id, type, name, slug, user, privacy, archive,        │
+│              content_block_id, origin, metadata)                  │
+│  - entity_relations (from, to, relation, position, metadata)      │
+│  - entity_assets (entity_id, asset_id)  — image/asset GC joins    │
+└───────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    STRUCTURE LAYER                          │
-│  Domain-specific internal organization                      │
-│  - views → view_selections → turns → spans → messages      │
-│  - documents → tabs → tab_content                          │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                      STRUCTURE LAYER                              │
+│  There is no dedicated document/tab schema. Structure is an       │
+│  interpretation of entities + their relations:                    │
+│  - Conversations: views + view_selections + turns + spans         │
+│  - Documents-with-tabs: entity composition —                      │
+│      document::tabbed ── structure::contained_in ──> document::tab│
+│  - Flat notes/todos/prompts: one entity, one content_block        │
+│  - Directories: entity composition with `structure::contained_in` │
+└───────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     CONTENT LAYER                           │
-│  Shared content storage (NOT deduplicated by hash)         │
-│  - content_blocks (text with origin tracking)              │
-│  - assets + blobs (binary files)                           │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                       CONTENT LAYER                               │
+│  One substrate for all text and binary payloads.                  │
+│  - content_blocks (text with origin tracking; at most one per     │
+│    entity, referenced via entities.content_block_id)              │
+│  - assets + blobs (binary files; joined to entities via           │
+│    entity_assets)                                                 │
+└───────────────────────────────────────────────────────────────────┘
 ```
+
+**One design principle.** The only part of the system that knows "a Google Doc becomes a `document::tabbed` entity with child `document::tab` entities linked by `structure::contained_in`" is the import skill. Everything else — daemon APIs, admin UI, Noema UI, RAG — deals in entities, relations, and content blocks. UI renders per entity capability (has content? has `structure::contained_in` children?), not per hardcoded type.
 
 ### Key Insight: Views Are Conversations
 
@@ -56,54 +67,31 @@ This means:
 | 3 | Parallel models + chaining | Multiple models respond, user selects, chain continues |
 | 4 | Fork conversation | Branch from any point, paths diverge |
 | 5 | Edit & splice | Edit mid-conversation, optionally keep subsequent messages |
-| 6 | Versioned documents | Markdown/typst docs with revision history |
-| 7 | Cross-reference | Same content appears in conversation AND as document |
-| 8 | Structured data | Ordered lists, trees, tagged items, table views |
+| 6 | Cross-reference | Same content appears in conversation AND as document |
+| 7 | Structured data | Ordered lists, trees, tagged items, table views |
 
 ---
 
 ## Core Principle
 
-**Separate content (heavy, immutable) from structure (lightweight, mutable) from identity (addressable, organizational).**
+**Separate identity (addressable, organizational) from content (the text/binary payload).** Structure is not a separate layer — it is the shape that emerges when you interpret an entity's relations.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   ADDRESSABLE LAYER                         │
-│  Unified identity: name, slug (@mention), tags, privacy    │
-│  Relationships: forked_from, references, grouped_with      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    STRUCTURE LAYER                          │
-│                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   Views +   │  │  Version    │  │   Tree +    │         │
-│  │   Spans     │  │   Chain     │  │  Ordering   │         │
-│  │             │  │             │  │             │         │
-│  │Conversations│  │  Documents  │  │ Collections │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     CONTENT LAYER                           │
-│  Immutable content with origin tracking                     │
-│  - ContentBlocks: text (NOT deduplicated - each has unique │
-│    origin metadata even if text is identical)              │
-│  - Assets/Blobs: binary (content-addressed, deduplicated)  │
-└─────────────────────────────────────────────────────────────┘
-```
+An entity carries:
+- **Identity**: id, type, name, slug, privacy, archive, user, timestamps.
+- **Content**: at most one `content_block_id` (its markdown text, if any) plus its `entity_assets` (images it references).
+- **Provenance**: a single `origin` string like `"google_drive:<gdoc_id>"`.
+
+Everything else — tabs inside a document, files in a folder, citations across a knowledge graph — is expressed as `entity_relations` rows.
 
 ---
 
 ## Content Layer
 
-Two storage types: **text content** (searchable, referenceable) and **binary assets** (opaque blobs).
+Two storage types: **text content** (searchable, referenceable) and **binary assets** (opaque blobs). Every entity that carries text points at one `content_blocks` row via its own `content_block_id` column.
 
 ### ContentBlock (Text)
 
-All textual content: messages, documents, structured text.
+All textual content: messages, documents, tabs, notes, todos, prompts, structured text — everything flows through `content_blocks`. No entity stores its text inline; it references a block.
 
 ```
 ContentBlock {
@@ -132,11 +120,14 @@ ContentOrigin {
 
 The hash is computed and stored for integrity checking, not for deduplication.
 
+**At most one block per entity.** An entity holds a single `content_block_id` at a time. Updating the content creates a new block and swaps the pointer; the old block is orphaned and becomes a candidate for the orchestrator's GC.
+
 **What goes in ContentBlock:**
 - User messages (text)
 - Assistant responses (text)
 - Document content (markdown, typst)
 - Imported documents (converted to text)
+- Flat notes, todos, prompts, knowledge, system prompts, ...
 
 **ContentBlock enables:**
 - Full-text search across all text
@@ -146,7 +137,17 @@ The hash is computed and stored for integrity checking, not for deduplication.
 
 ### Asset (Binary)
 
-Binary content: images, audio, PDF, video. Stored in BlobStore (CAS).
+Binary content: images, audio, PDF, video. Stored in BlobStore (CAS) and tracked in the `assets` table. Entities that reference an asset (e.g. a tab's markdown includes an imported image) record the linkage in the `entity_assets` mapping:
+
+```
+entity_assets {
+    entity_id: EntityId  → entities(id)
+    asset_id:  AssetId   → assets(id)
+    PRIMARY KEY (entity_id, asset_id)
+}
+```
+
+This enables blob GC via a direct join: an asset with no `entity_assets` row is eligible for deletion.
 
 ```
 Asset {
@@ -187,51 +188,68 @@ The addressable layer provides unified identity, naming, and relationships for a
 
 ### Entity Table
 
-Every addressable thing (view, document, asset) is an entity:
+Every addressable thing is an entity — conversations, documents, tabs, notes, todos, prompts, directories, labels, … The `entity_type` column is a namespaced string; new kinds are added without schema changes.
 
 ```sql
 CREATE TABLE entities (
-    id TEXT PRIMARY KEY,
-    entity_type TEXT NOT NULL,  -- 'view', 'document', 'asset'
-    user_id TEXT REFERENCES users(id),
-    name TEXT,                  -- display name
-    slug TEXT UNIQUE,           -- for @mentions (user-assigned)
-    is_private INTEGER DEFAULT 0,
-    is_archived INTEGER DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    id                TEXT PRIMARY KEY,
+    entity_type       TEXT NOT NULL,   -- 'conversation', 'document::tabbed', 'document::note',
+                                       -- 'document::tab', 'system::directory', 'system::label', ...
+    user_id           TEXT REFERENCES users(id),
+    name              TEXT,            -- display name / title
+    slug              TEXT UNIQUE,     -- for @mentions (user-assigned)
+    is_private        INTEGER DEFAULT 0,
+    is_archived       INTEGER DEFAULT 0,
+    content_block_id  TEXT REFERENCES content_blocks(id),  -- at most one block per entity
+    origin            TEXT,            -- "<scheme>:<id>" e.g. "google_drive:abc123"; NULL for local
+    metadata          TEXT,            -- JSON bag for type-specific extras (icon, etc.)
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
 );
 
-CREATE INDEX idx_entities_user ON entities(user_id);
-CREATE INDEX idx_entities_type ON entities(entity_type, user_id);
-CREATE INDEX idx_entities_slug ON entities(slug) WHERE slug IS NOT NULL;
+CREATE INDEX idx_entities_user         ON entities(user_id);
+CREATE INDEX idx_entities_type         ON entities(entity_type, user_id);
+CREATE INDEX idx_entities_slug         ON entities(slug) WHERE slug IS NOT NULL;
+CREATE INDEX idx_entities_origin       ON entities(user_id, origin) WHERE origin IS NOT NULL;
+CREATE INDEX idx_entities_has_content  ON entities(content_block_id) WHERE content_block_id IS NOT NULL;
 ```
+
+**Origin column.** `origin` is a single URI-like string that combines the source system and its id (`"google_drive:gdoc-abc123"`, `"ai_generated:msg-xyz"`). Well-known schemes live in a small `origin_scheme` constants module; new schemes are added without code changes. Lookups use either exact match (`WHERE origin = 'google_drive:gdoc-abc123'`) or prefix (`WHERE origin LIKE 'google_drive:%'`).
 
 ### Entity Relations
 
-Relationships between entities (fork ancestry, references, grouping):
+Relationships between entities — hierarchy, cross-references, grouping, tags, … all live in the same table. The `position` column gives ordered children first-class support (tab order, collection item order).
 
 ```sql
 CREATE TABLE entity_relations (
-    from_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    to_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    relation TEXT NOT NULL,     -- 'forked_from', 'references', 'grouped_with'
-    metadata TEXT,              -- JSON (e.g., {at_turn_id: "..."} for forks)
-    created_at INTEGER NOT NULL,
+    from_id      TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    to_id        TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    relation     TEXT NOT NULL,   -- 'structure::contained_in', 'reference::to', ...
+    position     INTEGER,         -- optional; first-class order across siblings (e.g. tab_index)
+    metadata     TEXT,            -- optional JSON for relation-specific extras (fork-point, citation context)
     PRIMARY KEY (from_id, to_id, relation)
 );
 
-CREATE INDEX idx_entity_relations_to ON entity_relations(to_id, relation);
+CREATE INDEX idx_entity_relations_to            ON entity_relations(to_id, relation);
+CREATE INDEX idx_entity_relations_ordered       ON entity_relations(to_id, relation, position);
 ```
+
+The primary key is `(from_id, to_id, relation)`, so the same pair can coexist under multiple relation types (entity A can be both `structure::contained_in` B and `references` B — two rows, different semantics).
 
 ### Relation Types
 
-| Relation | From | To | Metadata | Use Case |
-|----------|------|-----|----------|----------|
-| `forked_from` | View | View | `{at_turn_id}` | Fork ancestry |
-| `references` | Any | Any | `{context}` | Cross-references, citations |
-| `derived_from` | Document | Document | `{revision_id}` | Document lineage |
-| `grouped_with` | Any | Any | - | Manual grouping |
+Relation names are namespaced with `::` — same convention as entity types. The namespace groups relations by family (`structure::`, `reference::`, `label::`, `conversation::`, `collection::`), making it easy to add new relations within a family and grep for all uses of a family.
+
+| Relation                          | Semantic                         | Cardinality (convention)  | Uses `position`        | Orchestrator cascades delete?  | UI |
+|-----------------------------------|----------------------------------|---------------------------|------------------------|--------------------------------|-------------|
+| `structure::contained_in`         | Child lives inside parent        | singular parent           | yes (sibling order)    | yes (folder → contents)        | tree nav |
+| `reference::to`                   | A has a cross-reference to B     | many-to-many              | no                     | no                             | backlinks / graph |
+| `label::tagged_with`              | Entity is tagged with a label    | many-to-many              | no                     | no                             | filter facets |
+| `conversation::forked_from`       | View forked from another view    | many-to-many              | no                     | no                             | lineage |
+| `conversation::spawned_from`      | Subconversation spawned from     | many-to-many              | no                     | no                             | parent nav |
+| `collection::grouped_with`        | Manual grouping                  | many-to-many              | no                     | no                             | collections |
+
+All of these live in the same `entity_relations` table. Structure emerges from how code and UI interpret them.
 
 ### Key Benefits
 
@@ -240,6 +258,34 @@ CREATE INDEX idx_entity_relations_to ON entity_relations(to_id, relation);
 3. **Independent lifecycle**: Deleting one view doesn't affect its forks
 4. **Flexible organization**: Tags, grouping without rigid hierarchy
 5. **Consistent metadata**: name, privacy, archive across all types
+
+### Namespaced entity types
+
+Well-known types used by the system. New types can be added without schema changes — `entity_type` is a free-form string.
+
+| Type | Shape | Notes |
+|---|---|---|
+| `conversation` | view + turns + spans + messages | Existing conversation substructure. |
+| `document::tabbed` | entity with no content; children via `structure::contained_in` | Imported Google Docs, multi-section documents. |
+| `document::note` | flat content | Free-form note. |
+| `document::todo` | flat content | TODO list. |
+| `document::prompt` | flat content | Reusable prompt / intent template. |
+| `document::knowledge` | flat content | Knowledge-base entry. |
+| `document::context` | flat content | Context document injected by agents. |
+| `document::intent` | flat content | Event-compiled intent definition. |
+| `document::system_prompt` | flat content | System prompt for a model. |
+| `document::access_rule` | flat content | Access control rule document. |
+| `document::tab` | entity with content; always a child via `structure::contained_in` of a `document::tabbed` or another `document::tab` | The only kind that has tabs. |
+| `system::directory` | entity, no content; children via `structure::contained_in` | Filing/folder structure. |
+| `system::label` | entity, no content; subjects point at it via `label::tagged_with` | Cross-cutting tags. |
+
+Assets are **not** entities. They live in the `assets` table (with mime_type, blob_hash, size_bytes) and are referenced from entities via the `entity_assets` mapping. Making them entities would require a side-table FK with no benefit — the `assets` row already carries everything an asset needs.
+
+Filter queries:
+- "All my documents (any kind)" → `WHERE entity_type LIKE 'document::%'`.
+- "All my notes specifically" → `WHERE entity_type = 'document::note'`.
+- "Everything with text content" → `WHERE content_block_id IS NOT NULL`.
+- "Everything imported from Google" → `WHERE origin LIKE 'google_drive:%'`.
 
 ### Views Replace Conversations
 
@@ -258,15 +304,189 @@ The old `conversations` table is eliminated. Its responsibilities move to:
 
 ## Structure Layer
 
-### Three Structure Types
+Structure is emergent, not schematic — every shape the system supports is expressed as entities plus their `entity_relations`. There are no `documents` / `document_tabs` tables; there is no dedicated collection schema beyond entity relations. Keeping structure derived from the same two tables means directories, knowledge-graph edges, labels, tabs, and any future composition need no further migrations.
 
-| Type | Abstraction | Used for |
-|------|-------------|----------|
-| **Sequence + Spans** | Ordered positions, each with spans; views select path | Conversations |
-| **Version Chain** | Revisions with parent links, linear with branches | Documents |
-| **Tree + Ordering** | Nested items with position | Collections |
+### How common shapes map to the model
 
-All three reference the same content layer. Cross-references link between any entities.
+| Shape | Entity types involved | Relations used |
+|---|---|---|
+| Conversation | `conversation` (view) + turns + spans + messages | `view_selections` + `forked_from` / `spawned_from` |
+| Tabbed document | `document::tabbed` + `document::tab` | `structure::contained_in` (position = tab_index), nested tabs use the same relation |
+| Flat note / todo / prompt | `document::note` / `::todo` / `::prompt` | content lives directly on the entity |
+| Directory / folder | `system::directory` | `structure::contained_in` to a parent directory |
+| Labels | `system::label` | `label::tagged_with` from the labelled entity |
+| Knowledge graph | any kinds | `references` (many-to-many, may cycle) |
+| Collection item | any kinds | `structure::contained_in` to a collection entity; `position` for order |
+
+Conversations keep their own substructure (turns/spans/messages) because multi-model responses and view-selection semantics don't map cleanly onto flat relation rows. Everything else collapses to entities + relations.
+
+---
+
+## Worked examples
+
+Concrete tables showing how the model expresses different shapes. Ids shortened (`e1`, `cb-1`, …) for readability.
+
+### Example 1 — Tabbed document with nested tabs
+
+```
+entities
+┌─────┬──────────────────┬────────────────────┬──────────────────┬────────────────────────────┐
+│ id  │ entity_type      │ name               │ content_block_id │ origin                     │
+├─────┼──────────────────┼────────────────────┼──────────────────┼────────────────────────────┤
+│ e1  │ document::tabbed │ Project Plan       │ —                │ google_drive:gdoc-abc123   │
+│ e2  │ document::tab     │ Overview           │ cb-1             │ —                          │
+│ e3  │ document::tab     │ Timeline           │ cb-2             │ —                          │
+│ e4  │ document::tab     │ Q1 Milestones      │ cb-3             │ —                          │
+│ e5  │ document::tab     │ Q2 Milestones      │ cb-4             │ —                          │
+└─────┴──────────────────┴────────────────────┴──────────────────┴────────────────────────────┘
+
+entity_relations
+┌────────┬─────────┬──────────────┬──────────┐
+│ from   │ to      │ relation     │ position │
+├────────┼─────────┼──────────────┼──────────┤
+│ e2     │ e1      │ contained_in │ 0        │   Overview is tab #0 of Project Plan
+│ e3     │ e1      │ contained_in │ 1        │   Timeline is tab #1
+│ e4     │ e3      │ contained_in │ 0        │   Q1 Milestones nested under Timeline
+│ e5     │ e3      │ contained_in │ 1        │   Q2 Milestones likewise
+└────────┴─────────┴──────────────┴──────────┘
+```
+
+Tree:
+```
+Project Plan (document::tabbed)      — no content itself; content lives in tabs
+├── Overview                         — cb-1 (markdown)
+└── Timeline                         — cb-2
+    ├── Q1 Milestones                — cb-3
+    └── Q2 Milestones                — cb-4
+```
+
+### Example 2 — Directory structure with mixed contents
+
+```
+entities
+┌──────┬──────────────────┬──────────────────────┬──────────────────┐
+│ id   │ entity_type      │ name                 │ content_block_id │
+├──────┼──────────────────┼──────────────────────┼──────────────────┤
+│ d1   │ system::directory│ Research             │ —                │
+│ d2   │ system::directory│ Papers               │ —                │
+│ d3   │ system::directory│ Meetings             │ —                │
+│ n1   │ document::note   │ ICML paper           │ cb-5             │
+│ n2   │ document::note   │ NeurIPS paper        │ cb-6             │
+│ n3   │ document::note   │ 2026-01-15 meeting   │ cb-7             │
+│ doc1 │ document::tabbed │ Transformer Survey   │ —                │
+└──────┴──────────────────┴──────────────────────┴──────────────────┘
+
+entity_relations
+┌────────┬─────────┬──────────────┬──────────┐
+│ from   │ to      │ relation     │ position │
+├────────┼─────────┼──────────────┼──────────┤
+│ d2     │ d1      │ contained_in │ 0        │
+│ d3     │ d1      │ contained_in │ 1        │
+│ n1     │ d2      │ contained_in │ 0        │
+│ n2     │ d2      │ contained_in │ 1        │
+│ n3     │ d3      │ contained_in │ 0        │
+│ doc1   │ d2      │ contained_in │ 2        │
+└────────┴─────────┴──────────────┴──────────┘
+```
+
+```
+Research
+├── Papers
+│   ├── ICML paper
+│   ├── NeurIPS paper
+│   └── Transformer Survey       (tabbed doc — its tabs expand with another contained_in query)
+└── Meetings
+    └── 2026-01-15 meeting
+```
+
+Directories and tabs reuse the same relation. A folder view walks `structure::contained_in` uniformly; when it reaches a `document::tabbed` it keeps drilling with the same query.
+
+### Example 3 — Labels on entities
+
+Labels are entities of type `system::label`. Tagging uses `label::tagged_with`.
+
+```
+entities
+┌──────┬──────────────────┬───────────────┐
+│ id   │ entity_type      │ name          │
+├──────┼──────────────────┼───────────────┤
+│ n1   │ document::note   │ ICML paper    │
+│ n2   │ document::note   │ NeurIPS paper │
+│ l1   │ system::label    │ ml            │
+│ l2   │ system::label    │ transformers  │
+│ l3   │ system::label    │ rl            │
+└──────┴──────────────────┴───────────────┘
+
+entity_relations
+┌──────┬─────┬──────────────┐
+│ from │ to  │ relation     │
+├──────┼─────┼──────────────┤
+│ n1   │ l1  │ tagged_with  │
+│ n1   │ l2  │ tagged_with  │
+│ n2   │ l1  │ tagged_with  │
+│ n2   │ l3  │ tagged_with  │
+└──────┴─────┴──────────────┘
+```
+
+"All my `ml`-labelled entities" is `get_relations_to(l1, "tagged_with")` → `[n1, n2]`. Labels are themselves entities, so they can nest, cross-reference, or carry content for free.
+
+### Example 4 — Knowledge graph (cross-references)
+
+Notes citing each other, tab cited from a note, bidirectional links.
+
+```
+entities
+┌──────┬──────────────────┬────────────────────┐
+│ id   │ entity_type      │ name               │
+├──────┼──────────────────┼────────────────────┤
+│ k1   │ document::note   │ Transformers       │
+│ k2   │ document::note   │ Attention          │
+│ k3   │ document::note   │ Backpropagation    │
+│ k4   │ document::note   │ RLHF               │
+│ e3   │ document::tab     │ Timeline           │   (from Example 1)
+└──────┴──────────────────┴────────────────────┘
+
+entity_relations
+┌──────┬─────┬────────────┬──────────────────────────────────┐
+│ from │ to  │ relation   │ metadata                         │
+├──────┼─────┼────────────┼──────────────────────────────────┤
+│ k1   │ k2  │ references │ {"context": "see: attention"}    │
+│ k1   │ k3  │ references │ null                             │
+│ k4   │ k1  │ references │ null                             │
+│ k4   │ k3  │ references │ null                             │
+│ k2   │ k1  │ references │ null                             │   bidirectional
+│ k4   │ e3  │ references │ {"context": "deadline milestone"}│   cross-links target tabs too
+└──────┴─────┴────────────┴──────────────────────────────────┘
+```
+
+Graph:
+```
+     Transformers ──references──> Attention
+         │    ⇐────references────     │
+         ↓ references       references ↓
+     Backprop  ⇐──references──    RLHF ──references──> Timeline (a tab in a tabbed doc)
+```
+
+- Backlinks to `k1`: `get_relations_to(k1, "references")` → `[k4, k2]`.
+- Forward links from `k4`: `get_relations_from(k4, "references")` → `[k1, k3, e3]`.
+- Cycles (`k1 → k2 → k1`) are fine at the storage layer; traversal code is responsible for loop detection if it recurses.
+
+### Example 5 — One entity, many simultaneous relations
+
+```
+entity_relations
+┌──────┬─────┬──────────────┬──────────┐
+│ from │ to  │ relation     │ position │
+├──────┼─────┼──────────────┼──────────┤
+│ n1   │ d1  │ contained_in │ 0        │   filed in Research folder
+│ n1   │ l1  │ tagged_with  │ —        │   tagged "ml"
+│ n1   │ l2  │ tagged_with  │ —        │   tagged "to-summarize"
+│ n1   │ n2  │ references   │ —        │   cites another note
+│ n2   │ n1  │ references   │ —        │   cited back
+└──────┴─────┴──────────────┴──────────┘
+```
+
+Five different relations around `n1` coexist cleanly — `PRIMARY KEY (from_id, to_id, relation)` lets the same pair carry multiple semantic links (`n1` both references `n2` and is referenced by `n2`). The UI rendering `n1`'s metadata panel runs a handful of relation queries and gets backlinks, labels, folder context, and citations for free.
 
 ---
 
@@ -323,25 +543,33 @@ This enables splice: edit turn 3, but keep turn 4 from original.
 
 ---
 
-## Structure Type 2: Version Chain (Documents)
+## Structure Type 2: Documents (entity composition)
+
+Documents are not a dedicated schema. They are entities whose behaviour is determined by their `entity_type`:
+
+- **`document::tabbed`** — a tabbed document. Its text lives in its child tabs (via `structure::contained_in` with `position = tab_index`). Tabs can nest arbitrarily using the same relation. The tabbed doc itself has no `content_block_id`.
+- **Flat document kinds** — `document::note`, `document::todo`, `document::prompt`, `document::knowledge`, `document::context`, `document::intent`, `document::system_prompt`, `document::access_rule`. Each is an entity whose markdown text lives directly in its own `content_block_id`. No tabs.
 
 ### Model
 
 ```
-Document
-  └── Revision → ContentBlock
-        └── parent_revision (forms DAG)
-```
+document::tabbed ── structure::contained_in (pos) ──> document::tab
+                                          ── structure::contained_in (pos) ──> document::tab (nested)
+                                                │
+                                                └─ content_block_id → content_blocks
 
-Linear history with optional branching. Current revision pointer.
+document::note   ── content_block_id → content_blocks
+```
 
 ### Operations
 
 | Operation | Description |
 |-----------|-------------|
-| `commit(content)` | New revision, parent is current |
-| `branch(revision)` | New revision with different parent |
-| `checkout(revision)` | Move current pointer |
+| `create_tabbed_doc(user, title, origin?)` | Create a `document::tabbed` entity. No content_block. |
+| `create_flat_doc(user, kind, title, content, origin?)` | Create a flat entity with its content block wired up. |
+| `create_tab(doc_or_tab_id, position, title, icon, content)` | Create a `document::tab` entity; add `structure::contained_in` relation with position. |
+| `update_entity_content(entity_id, text)` | New content block; swap `content_block_id`; orphan old block. |
+| `delete_document(id)` | Orchestrator walks `structure::contained_in` subtree, deletes entities, GCs orphan content blocks. |
 
 ---
 
@@ -517,33 +745,14 @@ The original T4, T5 are reused because spans are shared across views.
 
 ---
 
-### 6. Versioned Documents
-
-Linear revision history with optional branching.
-
-```
-Doc: v1 → v2 → v3 (current)
-           │
-           └→ v2a → v2b (branch)
-```
-
-**Structure:** Version chain. Each revision → ContentBlock.
-
-**Operations:**
-- `commit(content)` → new revision
-- `branch(revision)` → new revision from old point
-- `checkout(revision)` → move current pointer
-
----
-
-### 7. Cross-Reference
+### 6. Cross-Reference
 
 Any entity can reference any other entity. References are first-class.
 
 ```
 Referenceable entities:
   - ContentBlock
-  - Document (or specific Revision)
+  - Document or Tab
   - Conversation (or specific Turn/Span)
   - Collection (or specific Item)
 
@@ -578,7 +787,7 @@ Examples:
 
 ---
 
-### 8. Structured Data
+### 7. Structured Data
 
 Organize entities into trees/lists with metadata.
 
@@ -644,10 +853,10 @@ Collection "Research" (tree)
 | Structure | Core abstraction | Key operation |
 |-----------|------------------|---------------|
 | Conversation | Turns + spans + views | View selects path through spans |
-| Document | Revision chain | Commit creates version |
+| Document | Entity + `structure::contained_in` children | Tabs compose; flat docs carry content directly |
 | Collection | Tree + ordering + tags | Items reference anything |
-| Content | Immutable blocks | Shared across structures |
-| Links | Cross-references | Connect any entities |
+| Content | Immutable blocks | One per entity via `content_block_id` |
+| Links | Cross-references | `reference::to` connects any entities |
 
 ### Spans Contain Multiple Messages
 
@@ -676,46 +885,65 @@ Detailed implementation requirements derived from use cases and ROADMAP features
 
 ### FR-0: Addressable Layer (Entity System)
 
-**Use Cases:** All - provides unified identity and relationships
+**Use Cases:** All - provides unified identity, content linkage, and relationships
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-0.1 | All addressable things (views, documents, assets) are entities | P0 |
-| FR-0.2 | Entities have: id, type, name, slug, user, privacy, archive status | P0 |
+| FR-0.1 | Every addressable thing is an entity (conversations, documents, tabs, notes, directories, labels). Assets stay in their own table. | P0 |
+| FR-0.2 | Entities have: id, type (namespaced string), name, slug, user, privacy, archive | P0 |
 | FR-0.3 | Slug enables @mentions (`@project-planning`) | P1 |
-| FR-0.4 | Entity relations track: forked_from, references, derived_from | P0 |
-| FR-0.5 | Deleting entity doesn't cascade to related entities | P0 |
-| FR-0.6 | Views replace conversations - view IS the conversation | P0 |
+| FR-0.4 | Entities carry at most one `content_block_id` (their text) | P0 |
+| FR-0.5 | Entities carry a single URI-like `origin` column (`"<scheme>:<id>"`) — no separate source/source_id | P0 |
+| FR-0.6 | `entity_relations.position` gives first-class ordering for sibling children | P0 |
+| FR-0.7 | `entity_assets (entity_id, asset_id)` maps entity → referenced binary assets | P0 |
+| FR-0.8 | Entity relations track: `structure::contained_in`, `reference::to`, `label::tagged_with`, `conversation::forked_from`, `conversation::spawned_from`, `collection::grouped_with` | P0 |
+| FR-0.9 | Deleting entity doesn't DB-cascade to related entities; orchestrator owns transitive cleanup | P0 |
+| FR-0.10 | Views replace conversations - view IS the conversation | P0 |
 
 **Schema:**
 
 ```sql
 CREATE TABLE entities (
-    id TEXT PRIMARY KEY,
-    entity_type TEXT NOT NULL,     -- 'view', 'document', 'asset'
-    user_id TEXT REFERENCES users(id),
-    name TEXT,
-    slug TEXT UNIQUE,              -- for @mentions
-    is_private INTEGER DEFAULT 0,
-    is_archived INTEGER DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    id                TEXT PRIMARY KEY,
+    entity_type       TEXT NOT NULL,
+    user_id           TEXT REFERENCES users(id),
+    name              TEXT,
+    slug              TEXT UNIQUE,
+    is_private        INTEGER DEFAULT 0,
+    is_archived       INTEGER DEFAULT 0,
+    content_block_id  TEXT REFERENCES content_blocks(id),
+    origin            TEXT,
+    metadata          TEXT,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
 );
 
-CREATE INDEX idx_entities_user ON entities(user_id);
-CREATE INDEX idx_entities_type ON entities(entity_type, user_id);
-CREATE INDEX idx_entities_slug ON entities(slug) WHERE slug IS NOT NULL;
+CREATE INDEX idx_entities_user         ON entities(user_id);
+CREATE INDEX idx_entities_type         ON entities(entity_type, user_id);
+CREATE INDEX idx_entities_slug         ON entities(slug) WHERE slug IS NOT NULL;
+CREATE INDEX idx_entities_origin       ON entities(user_id, origin) WHERE origin IS NOT NULL;
+CREATE INDEX idx_entities_has_content  ON entities(content_block_id) WHERE content_block_id IS NOT NULL;
 
 CREATE TABLE entity_relations (
-    from_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    to_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    relation TEXT NOT NULL,        -- 'forked_from', 'references', 'derived_from'
-    metadata TEXT,                 -- JSON (e.g., {at_turn_id: "..."})
-    created_at INTEGER NOT NULL,
+    from_id     TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    to_id       TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    relation    TEXT NOT NULL,
+    position    INTEGER,
+    metadata    TEXT,
+    created_at  INTEGER NOT NULL,
     PRIMARY KEY (from_id, to_id, relation)
 );
 
-CREATE INDEX idx_entity_relations_to ON entity_relations(to_id, relation);
+CREATE INDEX idx_entity_relations_to      ON entity_relations(to_id, relation);
+CREATE INDEX idx_entity_relations_ordered ON entity_relations(to_id, relation, position);
+
+CREATE TABLE entity_assets (
+    entity_id   TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    asset_id    TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    PRIMARY KEY (entity_id, asset_id)
+);
+
+CREATE INDEX idx_entity_assets_asset ON entity_assets(asset_id);
 ```
 
 **Operations:**
@@ -759,6 +987,9 @@ trait EntityStore {
 | FR-1.4 | ContentBlocks NOT deduplicated - each block unique for provenance | P0 |
 | FR-1.5 | Assets stored separately in BlobStore (content-addressed, deduplicated) | P0 |
 | FR-1.6 | Full-text search across ContentBlocks | P1 |
+| FR-1.7 | Every text-bearing entity references at most one ContentBlock via `entities.content_block_id` | P0 |
+| FR-1.8 | Entity→asset linkage lives in `entity_assets (entity_id, asset_id)` for GC joins | P0 |
+| FR-1.9 | Updating an entity's content creates a new block and swaps the pointer — content blocks are never mutated | P0 |
 
 **Note:** ContentBlocks are NOT deduplicated because identical text may have different origins, timestamps, and privacy settings. The hash is computed for integrity checking only.
 
@@ -917,45 +1148,27 @@ trait ConversationStore {
 
 **Use Cases:** 6, 7 (versioned documents, cross-reference)
 
+Documents are entity compositions, not a dedicated schema. There is no `documents` or `document_tabs` table — the shape is expressed with `entities` + `entity_relations` (see FR-0).
+
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-3.1 | Documents have ordered revisions (DAG) | P0 |
-| FR-3.2 | Each revision references a ContentBlock | P0 |
-| FR-3.3 | Current revision pointer tracks head | P0 |
-| FR-3.4 | Branch creates revision with different parent | P1 |
-| FR-3.5 | Documents referenceable from conversations/collections | P0 |
+| FR-3.1 | `document::tabbed` entity holds no content itself; its tabs are child entities linked via `structure::contained_in` with `position = tab_index` | P0 |
+| FR-3.2 | Tabs can nest: a `document::tab` can itself be a `structure::contained_in` parent of further tabs | P0 |
+| FR-3.3 | Each tab / flat document stores its live markdown via its own `content_block_id` | P0 |
+| FR-3.4 | Flat document kinds (`document::note`, `::todo`, `::prompt`, `::knowledge`, …) have content directly; no tabs | P0 |
+| FR-3.5 | Documents referenceable from conversations/collections via `reference::to` | P0 |
+| FR-3.6 | Imported docs carry `origin = "google_drive:<gdoc_id>"` (or future schemes); only the import skill encodes that mapping | P0 |
 
-**Schema:**
+**Schema:** none beyond FR-0. Queries:
 
-```sql
-CREATE TABLE documents (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    current_revision_id TEXT,
-    source TEXT NOT NULL,          -- user_created, ai_generated, google_drive, import
-    source_id TEXT,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE revisions (
-    id TEXT PRIMARY KEY,
-    document_id TEXT NOT NULL,
-    content_id TEXT NOT NULL,
-    parent_revision_id TEXT,
-    revision_number INTEGER NOT NULL,
-    created_at INTEGER NOT NULL,
-    FOREIGN KEY (document_id) REFERENCES documents(id),
-    FOREIGN KEY (content_id) REFERENCES content_blocks(id)
-);
-```
+- List tabs of a tabbed doc: `SELECT e.* FROM entity_relations r JOIN entities e ON e.id = r.from_id WHERE r.to_id = ? AND r.relation = 'structure::contained_in' ORDER BY r.position`.
+- Find imported version of a gdoc: `SELECT * FROM entities WHERE origin = 'google_drive:<gdoc_id>' AND user_id = ?`.
 
 **Acceptance Criteria:**
-- [ ] Create document with initial content
-- [ ] Commit creates new revision
-- [ ] Branch from non-head revision
-- [ ] Checkout moves current pointer
-- [ ] Diff between revisions
+- [ ] Import a Google Doc — result is one `document::tabbed` with child `document::tab` entities carrying content blocks, all reachable via a single `structure::contained_in` walk.
+- [ ] Create a `document::note` from the UI — stores text in its own content_block; no tab entities involved.
+- [ ] Edit a note — creates a new content_block and swaps the entity's `content_block_id`.
+- [ ] Delete: orchestrator walks `structure::contained_in` subtree, removes entities, GCs orphan blocks.
 
 ---
 
@@ -1217,7 +1430,7 @@ ALTER TABLE views ADD COLUMN context_strategy_id TEXT;
 | View | Path through turns/spans | Select span at turn |
 | Turn | Position in conversation | Add span alternatives |
 | Span | One response (sequence of messages) | Compare, select |
-| Document | Revision chain | Commit, checkout |
+| Document | Entity + tab tree | Compose tabs via `structure::contained_in` |
 | Collection | Tree of references | Organize anything |
 | ContentBlock | Immutable text with origin | Store once, reference many |
 | Asset | Binary blob (deduplicated) | Content-addressed storage |
