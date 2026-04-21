@@ -1,15 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport, setCurrentUser, coreApi } from '@simply/client';
+  import { getTransport, getCurrentUser, setCurrentUser, coreApi } from '@simply/client';
   import ActivityBar, { type ActivityId } from './lib/ActivityBar.svelte';
   import SidePanel from './lib/SidePanel.svelte';
   import ChatView from './lib/ChatView.svelte';
   import DocumentView from './lib/DocumentView.svelte';
   import ModelSelector from './lib/ModelSelector.svelte';
+  import UserPicker from './lib/UserPicker.svelte';
   import { chatStore } from './lib/stores/chat.svelte';
   import { documentsStore } from './lib/stores/documents.svelte';
 
-  let active = $state<ActivityId>('conversations');
+  // Active activity persists across reloads — otherwise a UserPicker switch
+  // (which full-page-reloads) always snaps back to conversations.
+  const ACTIVE_KEY = 'noema-active-activity';
+  function loadActive(): ActivityId {
+    const stored = localStorage.getItem(ACTIVE_KEY);
+    return stored === 'documents' ? 'documents' : 'conversations';
+  }
+  let active = $state<ActivityId>(loadActive());
+  $effect(() => {
+    localStorage.setItem(ACTIVE_KEY, active);
+  });
   let showSettings = $state(false);
 
   let daemonStatus = $state<'checking' | 'ok' | 'error'>('checking');
@@ -17,6 +28,9 @@
   let daemonError = $state<string | null>(null);
 
   async function syncAdminUserId() {
+    // Respect an explicit UserPicker choice across reloads — only seed the
+    // user id from the Tauri host on first boot (when localStorage is empty).
+    if (getCurrentUser()) return;
     const internals = (window as any).__TAURI_INTERNALS__;
     if (!internals || typeof internals.invoke !== 'function') return;
     try {
@@ -80,19 +94,22 @@
         {/if}
       </h1>
 
-      {#if daemonStatus === 'ok'}
-        {#if active === 'conversations'}
-          <ModelSelector />
-        {:else}
-          <span class="rounded bg-elevated px-2 py-1 text-xs text-teal-300">
-            daemon v{daemonVersion}
+      <div class="flex items-center gap-2">
+        {#if daemonStatus === 'ok'}
+          {#if active === 'conversations'}
+            <ModelSelector />
+          {:else}
+            <span class="rounded bg-elevated px-2 py-1 text-xs text-teal-300">
+              daemon v{daemonVersion}
+            </span>
+          {/if}
+          <UserPicker />
+        {:else if daemonStatus === 'error'}
+          <span class="rounded bg-red-900/50 px-2 py-1 text-xs text-red-200" title={daemonError}>
+            daemon unreachable
           </span>
         {/if}
-      {:else if daemonStatus === 'error'}
-        <span class="rounded bg-red-900/50 px-2 py-1 text-xs text-red-200" title={daemonError}>
-          daemon unreachable
-        </span>
-      {/if}
+      </div>
     </div>
 
     {#if active === 'conversations'}
