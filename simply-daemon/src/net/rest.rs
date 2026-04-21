@@ -131,8 +131,10 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     // over HTTP on loopback.
     let cors = CorsLayer::new()
         .allow_origin([
-            "http://localhost:4321".parse().unwrap(),  // Astro dev
+            "http://localhost:4321".parse().unwrap(),  // Astro dev (admin)
             "http://127.0.0.1:4321".parse().unwrap(),
+            "http://localhost:5173".parse().unwrap(),  // Vite dev (noema/ui)
+            "http://127.0.0.1:5173".parse().unwrap(),
             "http://localhost:9800".parse().unwrap(),  // same-origin
             "http://127.0.0.1:9800".parse().unwrap(),
             "tauri://localhost".parse().unwrap(),      // Tauri (macOS/Linux)

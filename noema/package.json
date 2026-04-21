@@ -1,11 +1,11 @@
 {
-  "name": "noema_ui",
+  "name": "noema-shell",
   "private": true,
   "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "dev": "cd ../simply-daemon/admin && npm run dev",
-    "build": "cd ../simply-daemon/admin && npm run build",
+    "dev": "cd ui && npm run dev",
+    "build": "cd ui && npm run build",
     "tauri": "tauri"
   },
   "devDependencies": {

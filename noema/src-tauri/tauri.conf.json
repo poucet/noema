@@ -5,9 +5,9 @@
   "identifier": "com.chris.noema",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:4321/noema",
+    "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../../simply-daemon/admin/dist"
+    "frontendDist": "../ui/dist"
   },
   "app": {
     "withGlobalTauri": true,
