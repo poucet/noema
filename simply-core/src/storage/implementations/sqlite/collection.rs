@@ -830,7 +830,7 @@ mod tests {
         let collection_id = store.create_collection(&user_id, "Test", None, None).await.unwrap();
 
         // Create an entity to reference
-        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
 
         let item_id = store
             .add_item(&collection_id, &ItemTarget::entity(entity_id.clone()), None, 0, Some("Doc"))
@@ -850,7 +850,7 @@ mod tests {
         let (store, user_id) = setup_store_with_user().await;
 
         let collection_id = store.create_collection(&user_id, "Tree", None, None).await.unwrap();
-        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
 
         // Create root item
         let root_id = store
@@ -877,7 +877,7 @@ mod tests {
         let (store, user_id) = setup_store_with_user().await;
 
         let collection_id = store.create_collection(&user_id, "Move", None, None).await.unwrap();
-        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
 
         let item_id = store
             .add_item(&collection_id, &ItemTarget::entity(entity_id), None, 0, None)
@@ -895,7 +895,7 @@ mod tests {
         let (store, user_id) = setup_store_with_user().await;
 
         let collection_id = store.create_collection(&user_id, "Fields", None, None).await.unwrap();
-        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
 
         let item_id = store
             .add_item(&collection_id, &ItemTarget::entity(entity_id), None, 0, None)
@@ -925,7 +925,7 @@ mod tests {
         let (store, user_id) = setup_store_with_user().await;
 
         let collection_id = store.create_collection(&user_id, "Tags", None, None).await.unwrap();
-        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
 
         let item_id = store
             .add_item(&collection_id, &ItemTarget::entity(entity_id), None, 0, None)
@@ -975,7 +975,7 @@ mod tests {
         let (store, user_id) = setup_store_with_user().await;
 
         let collection_id = store.create_collection(&user_id, "Find", None, None).await.unwrap();
-        let entity_id = store.create_entity(EntityType::document(), None).await.unwrap();
+        let entity_id = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
 
         // Add same entity to collection twice
         store.add_item(&collection_id, &ItemTarget::entity(entity_id.clone()), None, 0, None).await.unwrap();

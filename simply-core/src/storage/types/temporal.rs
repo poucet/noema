@@ -70,9 +70,9 @@ mod tests {
             entity_type,
             user_id: None,
             name: None,
-            slug: None,
             is_private: true,
-            is_archived: false,
+            content_block_id: None,
+            origin: None,
             metadata: None,
         };
         stored_editable(EntityId::new(), entity, 1000, 1000)
@@ -99,14 +99,14 @@ mod tests {
         let entities = vec![
             make_entity(EntityType::conversation()),
             make_entity(EntityType::conversation()),
-            make_entity(EntityType::document()),
+            make_entity(EntityType::document_tabbed()),
         ];
 
         let summary = ActivitySummary::from_entities(&entities, 1000, 2000);
 
         assert_eq!(summary.total_entities, 3);
         assert_eq!(summary.entity_counts.get(&EntityType::conversation()), Some(&2));
-        assert_eq!(summary.entity_counts.get(&EntityType::document()), Some(&1));
-        assert_eq!(summary.entity_counts.get(&EntityType::asset()), None);
+        assert_eq!(summary.entity_counts.get(&EntityType::document_tabbed()), Some(&1));
+        assert_eq!(summary.entity_counts.get(&EntityType::document_note()), None);
     }
 }

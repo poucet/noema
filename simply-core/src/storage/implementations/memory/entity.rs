@@ -2,10 +2,10 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-use crate::storage::ids::{EntityId, UserId};
+use crate::storage::ids::{AssetId, ContentBlockId, EntityId, UserId};
 use crate::storage::traits::{EntityStore, StoredEntity};
 use crate::storage::types::entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 use crate::storage::types::stored_editable;
@@ -24,9 +24,9 @@ struct EntityEntry {
     entity_type: EntityType,
     user_id: Option<UserId>,
     name: Option<String>,
-    slug: Option<String>,
     is_private: bool,
-    is_archived: bool,
+    content_block_id: Option<ContentBlockId>,
+    origin: Option<String>,
     metadata: Option<serde_json::Value>,
     created_at: i64,
     updated_at: i64,
@@ -38,9 +38,9 @@ impl EntityEntry {
             entity_type: self.entity_type.clone(),
             user_id: self.user_id.clone(),
             name: self.name.clone(),
-            slug: self.slug.clone(),
             is_private: self.is_private,
-            is_archived: self.is_archived,
+            content_block_id: self.content_block_id.clone(),
+            origin: self.origin.clone(),
             metadata: self.metadata.clone(),
         };
         stored_editable(self.id.clone(), entity, self.created_at, self.updated_at)
@@ -61,16 +61,16 @@ struct RelationEntry {
     from_id: EntityId,
     to_id: EntityId,
     relation: RelationType,
+    position: Option<i64>,
     metadata: Option<serde_json::Value>,
-    created_at: i64,
 }
 
 /// In-memory entity store for testing
 #[derive(Debug, Default)]
 pub struct MemoryEntityStore {
     entities: Mutex<HashMap<String, EntityEntry>>,
-    slugs: Mutex<HashMap<String, String>>, // slug -> entity_id
     relations: Mutex<HashMap<RelationKey, RelationEntry>>,
+    entity_assets: Mutex<HashMap<String, HashSet<String>>>, // entity_id -> set of asset_id
 }
 
 impl MemoryEntityStore {
@@ -93,9 +93,9 @@ impl EntityStore for MemoryEntityStore {
             entity_type,
             user_id: user_id.cloned(),
             name: None,
-            slug: None,
             is_private: true,
-            is_archived: false,
+            content_block_id: None,
+            origin: None,
             metadata: None,
             created_at: now,
             updated_at: now,
@@ -112,16 +112,17 @@ impl EntityStore for MemoryEntityStore {
         Ok(entities.get(id.as_str()).map(|e| e.to_stored()))
     }
 
-    async fn get_entity_by_slug(&self, slug: &str) -> Result<Option<StoredEntity>> {
-        let slugs = self.slugs.lock().unwrap();
-        let entity_id = match slugs.get(slug) {
-            Some(id) => id.clone(),
-            None => return Ok(None),
-        };
-        drop(slugs);
-
+    async fn get_entity_by_origin(
+        &self,
+        user_id: &UserId,
+        origin: &str,
+    ) -> Result<Option<StoredEntity>> {
         let entities = self.entities.lock().unwrap();
-        Ok(entities.get(&entity_id).map(|e| e.to_stored()))
+        let found = entities
+            .values()
+            .find(|e| e.user_id.as_ref() == Some(user_id) && e.origin.as_deref() == Some(origin))
+            .map(|e| e.to_stored());
+        Ok(found)
     }
 
     async fn list_entities(
@@ -133,8 +134,23 @@ impl EntityStore for MemoryEntityStore {
         let mut result: Vec<_> = entities
             .values()
             .filter(|e| e.user_id.as_ref() == Some(user_id))
-            .filter(|e| !e.is_archived)
             .filter(|e| entity_type.map_or(true, |t| &e.entity_type == t))
+            .map(|e| e.to_stored())
+            .collect();
+        result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(result)
+    }
+
+    async fn list_entities_by_type_prefix(
+        &self,
+        user_id: &UserId,
+        prefix: &str,
+    ) -> Result<Vec<StoredEntity>> {
+        let entities = self.entities.lock().unwrap();
+        let mut result: Vec<_> = entities
+            .values()
+            .filter(|e| e.user_id.as_ref() == Some(user_id))
+            .filter(|e| e.entity_type.as_str().starts_with(prefix))
             .map(|e| e.to_stored())
             .collect();
         result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -150,7 +166,6 @@ impl EntityStore for MemoryEntityStore {
         let mut result: Vec<_> = entities
             .values()
             .filter(|e| e.user_id.as_ref() == Some(user_id))
-            .filter(|e| !e.is_archived)
             .filter(|e| {
                 query.entity_types.as_ref().map_or(true, |types| {
                     types.iter().any(|t| &e.entity_type == t)
@@ -169,51 +184,27 @@ impl EntityStore for MemoryEntityStore {
     async fn update_entity(&self, id: &EntityId, entity: &Entity) -> Result<()> {
         let mut entities = self.entities.lock().unwrap();
         if let Some(entry) = entities.get_mut(id.as_str()) {
-            // Update slug index
-            if entry.slug != entity.slug {
-                let mut slugs = self.slugs.lock().unwrap();
-                if let Some(old_slug) = &entry.slug {
-                    slugs.remove(old_slug);
-                }
-                if let Some(new_slug) = &entity.slug {
-                    slugs.insert(new_slug.clone(), id.as_str().to_string());
-                }
-            }
-
             entry.name = entity.name.clone();
-            entry.slug = entity.slug.clone();
             entry.is_private = entity.is_private;
-            entry.is_archived = entity.is_archived;
+            entry.content_block_id = entity.content_block_id.clone();
+            entry.origin = entity.origin.clone();
             entry.metadata = entity.metadata.clone();
             entry.updated_at = now();
         }
         Ok(())
     }
 
-    async fn archive_entity(&self, id: &EntityId) -> Result<()> {
-        let mut entities = self.entities.lock().unwrap();
-        if let Some(entry) = entities.get_mut(id.as_str()) {
-            entry.is_archived = true;
-            entry.updated_at = now();
-        }
-        Ok(())
-    }
-
     async fn delete_entity(&self, id: &EntityId) -> Result<()> {
-        // Remove slug index
-        {
-            let entities = self.entities.lock().unwrap();
-            if let Some(entry) = entities.get(id.as_str()) {
-                if let Some(slug) = &entry.slug {
-                    self.slugs.lock().unwrap().remove(slug);
-                }
-            }
-        }
-
         // Remove relations
         {
             let mut relations = self.relations.lock().unwrap();
             relations.retain(|k, _| k.from_id != id.as_str() && k.to_id != id.as_str());
+        }
+
+        // Remove asset mappings
+        {
+            let mut mappings = self.entity_assets.lock().unwrap();
+            mappings.remove(id.as_str());
         }
 
         // Remove entity
@@ -226,6 +217,7 @@ impl EntityStore for MemoryEntityStore {
         from_id: &EntityId,
         to_id: &EntityId,
         relation: RelationType,
+        position: Option<i64>,
         metadata: Option<serde_json::Value>,
     ) -> Result<()> {
         let key = RelationKey {
@@ -237,8 +229,8 @@ impl EntityStore for MemoryEntityStore {
             from_id: from_id.clone(),
             to_id: to_id.clone(),
             relation,
+            position,
             metadata,
-            created_at: now(),
         };
         self.relations.lock().unwrap().insert(key, entry);
         Ok(())
@@ -250,7 +242,7 @@ impl EntityStore for MemoryEntityStore {
         relation_type: Option<&RelationType>,
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
         let relations = self.relations.lock().unwrap();
-        let mut result: Vec<_> = relations
+        let result: Vec<_> = relations
             .values()
             .filter(|e| e.from_id == *id)
             .filter(|e| relation_type.map_or(true, |t| &e.relation == t))
@@ -259,13 +251,12 @@ impl EntityStore for MemoryEntityStore {
                     e.to_id.clone(),
                     EntityRelation {
                         relation: e.relation.clone(),
+                        position: e.position,
                         metadata: e.metadata.clone(),
-                        created_at: e.created_at,
                     },
                 )
             })
             .collect();
-        result.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
         Ok(result)
     }
 
@@ -275,7 +266,7 @@ impl EntityStore for MemoryEntityStore {
         relation_type: Option<&RelationType>,
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
         let relations = self.relations.lock().unwrap();
-        let mut result: Vec<_> = relations
+        let result: Vec<_> = relations
             .values()
             .filter(|e| e.to_id == *id)
             .filter(|e| relation_type.map_or(true, |t| &e.relation == t))
@@ -284,13 +275,42 @@ impl EntityStore for MemoryEntityStore {
                     e.from_id.clone(),
                     EntityRelation {
                         relation: e.relation.clone(),
+                        position: e.position,
                         metadata: e.metadata.clone(),
-                        created_at: e.created_at,
                     },
                 )
             })
             .collect();
-        result.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
+        Ok(result)
+    }
+
+    async fn list_relations_to_ordered(
+        &self,
+        id: &EntityId,
+        relation_type: &RelationType,
+    ) -> Result<Vec<(EntityId, EntityRelation)>> {
+        let mut result = self.get_relations_to(id, Some(relation_type)).await?;
+        result.sort_by(|a, b| match (a.1.position, b.1.position) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.0.as_str().cmp(b.0.as_str()),
+        });
+        Ok(result)
+    }
+
+    async fn list_relations_from_ordered(
+        &self,
+        id: &EntityId,
+        relation_type: &RelationType,
+    ) -> Result<Vec<(EntityId, EntityRelation)>> {
+        let mut result = self.get_relations_from(id, Some(relation_type)).await?;
+        result.sort_by(|a, b| match (a.1.position, b.1.position) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.0.as_str().cmp(b.0.as_str()),
+        });
         Ok(result)
     }
 
@@ -307,6 +327,33 @@ impl EntityStore for MemoryEntityStore {
         };
         self.relations.lock().unwrap().remove(&key);
         Ok(())
+    }
+
+    async fn set_entity_assets(&self, entity_id: &EntityId, asset_ids: &[AssetId]) -> Result<()> {
+        let mut mappings = self.entity_assets.lock().unwrap();
+        let set: HashSet<String> = asset_ids
+            .iter()
+            .map(|a| a.as_str().to_string())
+            .collect();
+        mappings.insert(entity_id.as_str().to_string(), set);
+        Ok(())
+    }
+
+    async fn get_entity_assets(&self, entity_id: &EntityId) -> Result<Vec<AssetId>> {
+        let mappings = self.entity_assets.lock().unwrap();
+        Ok(mappings
+            .get(entity_id.as_str())
+            .map(|set| set.iter().map(|s| AssetId::from_string(s.clone())).collect())
+            .unwrap_or_default())
+    }
+
+    async fn entities_referencing_asset(&self, asset_id: &AssetId) -> Result<Vec<EntityId>> {
+        let mappings = self.entity_assets.lock().unwrap();
+        Ok(mappings
+            .iter()
+            .filter(|(_, assets)| assets.contains(asset_id.as_str()))
+            .map(|(entity_id, _)| EntityId::from_string(entity_id.clone()))
+            .collect())
     }
 }
 
@@ -330,21 +377,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_entities_by_type() {
+    async fn test_list_entities_by_type_prefix() {
         let store = MemoryEntityStore::new();
         let user_id = UserId::new();
 
+        store.create_entity(EntityType::document_tabbed(), Some(&user_id)).await.unwrap();
+        store.create_entity(EntityType::document_note(), Some(&user_id)).await.unwrap();
         store.create_entity(EntityType::conversation(), Some(&user_id)).await.unwrap();
-        store.create_entity(EntityType::conversation(), Some(&user_id)).await.unwrap();
-        store.create_entity(EntityType::document(), Some(&user_id)).await.unwrap();
 
-        let conversations = store
-            .list_entities(&user_id, Some(&EntityType::conversation()))
+        let docs = store
+            .list_entities_by_type_prefix(&user_id, "document::")
             .await
             .unwrap();
-        assert_eq!(conversations.len(), 2);
+        assert_eq!(docs.len(), 2);
+    }
 
-        let all = store.list_entities(&user_id, None).await.unwrap();
-        assert_eq!(all.len(), 3);
+    #[tokio::test]
+    async fn test_ordered_relations() {
+        let store = MemoryEntityStore::new();
+        let parent = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
+        let a = store.create_entity(EntityType::document_tab(), None).await.unwrap();
+        let b = store.create_entity(EntityType::document_tab(), None).await.unwrap();
+
+        store.add_relation(&b, &parent, RelationType::structure_contained_in(), Some(1), None).await.unwrap();
+        store.add_relation(&a, &parent, RelationType::structure_contained_in(), Some(0), None).await.unwrap();
+
+        let children = store
+            .list_relations_to_ordered(&parent, &RelationType::structure_contained_in())
+            .await
+            .unwrap();
+        let ids: Vec<_> = children.iter().map(|(id, _)| id.clone()).collect();
+        assert_eq!(ids, vec![a, b]);
     }
 }

@@ -326,7 +326,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             .add_relation(
                 &new_conversation_id,
                 conversation_id,
-                RelationType::forked_from(),
+                RelationType::conversation_forked_from(),
+                None,
                 Some(serde_json::json!({
                     "at_turn_id": at_turn_id.as_str()
                 })),
@@ -344,7 +345,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         use crate::storage::types::RelationType;
 
         let relations = self.entity_store
-            .get_relations_to(conversation_id, Some(&RelationType::forked_from()))
+            .get_relations_to(conversation_id, Some(&RelationType::conversation_forked_from()))
             .await?;
 
         let mut result = Vec::new();
@@ -366,7 +367,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
     /// Spawn a subconversation linked to a parent conversation.
     ///
     /// Creates a new conversation entity and links it to the parent via
-    /// entity_relations with RelationType::spawned_from(). The metadata
+    /// entity_relations with RelationType::conversation_spawned_from(). The metadata
     /// records which turn in the parent triggered the spawn.
     ///
     /// # Arguments
@@ -404,7 +405,8 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             .add_relation(
                 &sub_conversation_id,
                 parent_conversation_id,
-                RelationType::spawned_from(),
+                RelationType::conversation_spawned_from(),
+                None,
                 Some(metadata),
             )
             .await?;
@@ -422,7 +424,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         use crate::storage::types::RelationType;
 
         let relations = self.entity_store
-            .get_relations_from(conversation_id, Some(&RelationType::spawned_from()))
+            .get_relations_from(conversation_id, Some(&RelationType::conversation_spawned_from()))
             .await?;
 
         if let Some((parent_id, relation)) = relations.into_iter().next() {
@@ -453,7 +455,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         use crate::storage::types::RelationType;
 
         let relations = self.entity_store
-            .get_relations_to(parent_conversation_id, Some(&RelationType::spawned_from()))
+            .get_relations_to(parent_conversation_id, Some(&RelationType::conversation_spawned_from()))
             .await?;
 
         let mut result = Vec::new();

@@ -3,7 +3,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::storage::ids::{EntityId, UserId};
+use crate::storage::ids::{AssetId, EntityId, UserId};
 use crate::storage::traits::{EntityStore, StoredEntity};
 use crate::storage::types::entity::{EntityRangeQuery, EntityRelation, EntityType, RelationType};
 
@@ -18,19 +18,19 @@ impl EntityStore for MockEntityStore {
     async fn get_entity(&self, _: &EntityId) -> Result<Option<StoredEntity>> {
         unimplemented!()
     }
-    async fn get_entity_by_slug(&self, _: &str) -> Result<Option<StoredEntity>> {
+    async fn get_entity_by_origin(&self, _: &UserId, _: &str) -> Result<Option<StoredEntity>> {
         unimplemented!()
     }
     async fn list_entities(&self, _: &UserId, _: Option<&EntityType>) -> Result<Vec<StoredEntity>> {
+        unimplemented!()
+    }
+    async fn list_entities_by_type_prefix(&self, _: &UserId, _: &str) -> Result<Vec<StoredEntity>> {
         unimplemented!()
     }
     async fn list_entities_in_range(&self, _: &UserId, _: &EntityRangeQuery) -> Result<Vec<StoredEntity>> {
         unimplemented!()
     }
     async fn update_entity(&self, _: &EntityId, _: &crate::storage::types::Entity) -> Result<()> {
-        unimplemented!()
-    }
-    async fn archive_entity(&self, _: &EntityId) -> Result<()> {
         unimplemented!()
     }
     async fn delete_entity(&self, _: &EntityId) -> Result<()> {
@@ -41,6 +41,7 @@ impl EntityStore for MockEntityStore {
         _: &EntityId,
         _: &EntityId,
         _: RelationType,
+        _: Option<i64>,
         _: Option<serde_json::Value>,
     ) -> Result<()> {
         unimplemented!()
@@ -59,7 +60,30 @@ impl EntityStore for MockEntityStore {
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
         unimplemented!()
     }
+    async fn list_relations_to_ordered(
+        &self,
+        _: &EntityId,
+        _: &RelationType,
+    ) -> Result<Vec<(EntityId, EntityRelation)>> {
+        unimplemented!()
+    }
+    async fn list_relations_from_ordered(
+        &self,
+        _: &EntityId,
+        _: &RelationType,
+    ) -> Result<Vec<(EntityId, EntityRelation)>> {
+        unimplemented!()
+    }
     async fn remove_relation(&self, _: &EntityId, _: &EntityId, _: &RelationType) -> Result<()> {
+        unimplemented!()
+    }
+    async fn set_entity_assets(&self, _: &EntityId, _: &[AssetId]) -> Result<()> {
+        unimplemented!()
+    }
+    async fn get_entity_assets(&self, _: &EntityId) -> Result<Vec<AssetId>> {
+        unimplemented!()
+    }
+    async fn entities_referencing_asset(&self, _: &AssetId) -> Result<Vec<EntityId>> {
         unimplemented!()
     }
 }

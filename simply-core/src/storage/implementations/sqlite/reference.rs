@@ -226,11 +226,11 @@ mod tests {
             .await
             .unwrap();
         let entity_b = store
-            .create_entity(EntityType::document(), None)
+            .create_entity(EntityType::document_tabbed(), None)
             .await
             .unwrap();
         let entity_c = store
-            .create_entity(EntityType::asset(), None)
+            .create_entity(EntityType::document_note(), None)
             .await
             .unwrap();
 
@@ -245,13 +245,13 @@ mod tests {
             .create_reference(
                 &entity_a,
                 &entity_b,
-                Some(&RelationType::new("cites")),
+                Some(&RelationType::reference_cites()),
                 Some("See document for details"),
             )
             .await
             .unwrap();
 
-        assert!(store.reference_exists(&entity_a, &entity_b, Some(&RelationType::new("cites"))).await.unwrap());
+        assert!(store.reference_exists(&entity_a, &entity_b, Some(&RelationType::reference_cites())).await.unwrap());
         assert!(!ref_id.as_str().is_empty());
     }
 
@@ -286,19 +286,19 @@ mod tests {
 
         // Create multiple references between same entities
         store
-            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::reference_cites()), None)
             .await
             .unwrap();
         store
-            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("mentions")), None)
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::reference_mentions()), None)
             .await
             .unwrap();
 
         let deleted = store.delete_references_between(&entity_a, &entity_b).await.unwrap();
         assert_eq!(deleted, 2);
 
-        assert!(!store.reference_exists(&entity_a, &entity_b, Some(&RelationType::new("cites"))).await.unwrap());
-        assert!(!store.reference_exists(&entity_a, &entity_b, Some(&RelationType::new("mentions"))).await.unwrap());
+        assert!(!store.reference_exists(&entity_a, &entity_b, Some(&RelationType::reference_cites())).await.unwrap());
+        assert!(!store.reference_exists(&entity_a, &entity_b, Some(&RelationType::reference_mentions())).await.unwrap());
     }
 
     #[tokio::test]
@@ -307,11 +307,11 @@ mod tests {
 
         // A references B and C
         store
-            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::reference_cites()), None)
             .await
             .unwrap();
         store
-            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("mentions")), None)
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::reference_mentions()), None)
             .await
             .unwrap();
 
@@ -324,16 +324,16 @@ mod tests {
         let (store, entity_a, entity_b, entity_c) = setup_store_with_entities().await;
 
         store
-            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::reference_cites()), None)
             .await
             .unwrap();
         store
-            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("mentions")), None)
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::reference_mentions()), None)
             .await
             .unwrap();
 
         let cites_only = store
-            .get_outgoing_by_type(&entity_a, &RelationType::new("cites"))
+            .get_outgoing_by_type(&entity_a, &RelationType::reference_cites())
             .await
             .unwrap();
         assert_eq!(cites_only.len(), 1);
@@ -346,11 +346,11 @@ mod tests {
 
         // A and B both reference C
         store
-            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("cites")), None)
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::reference_cites()), None)
             .await
             .unwrap();
         store
-            .create_reference(&entity_b, &entity_c, Some(&RelationType::new("mentions")), None)
+            .create_reference(&entity_b, &entity_c, Some(&RelationType::reference_mentions()), None)
             .await
             .unwrap();
 
@@ -363,16 +363,16 @@ mod tests {
         let (store, entity_a, entity_b, entity_c) = setup_store_with_entities().await;
 
         store
-            .create_reference(&entity_a, &entity_c, Some(&RelationType::new("cites")), None)
+            .create_reference(&entity_a, &entity_c, Some(&RelationType::reference_cites()), None)
             .await
             .unwrap();
         store
-            .create_reference(&entity_b, &entity_c, Some(&RelationType::new("mentions")), None)
+            .create_reference(&entity_b, &entity_c, Some(&RelationType::reference_mentions()), None)
             .await
             .unwrap();
 
         let cites_only = store
-            .get_backlinks_by_type(&entity_c, &RelationType::new("cites"))
+            .get_backlinks_by_type(&entity_c, &RelationType::reference_cites())
             .await
             .unwrap();
         assert_eq!(cites_only.len(), 1);
@@ -387,7 +387,7 @@ mod tests {
             .create_reference(
                 &entity_a,
                 &entity_b,
-                Some(&RelationType::new("mentions")),
+                Some(&RelationType::reference_mentions()),
                 Some("@api-design"),
             )
             .await
@@ -404,13 +404,13 @@ mod tests {
 
         // First reference succeeds
         store
-            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::reference_cites()), None)
             .await
             .unwrap();
 
         // Duplicate reference should fail
         let result = store
-            .create_reference(&entity_a, &entity_b, Some(&RelationType::new("cites")), None)
+            .create_reference(&entity_a, &entity_b, Some(&RelationType::reference_cites()), None)
             .await;
         assert!(result.is_err());
     }

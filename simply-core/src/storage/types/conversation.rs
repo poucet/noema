@@ -159,7 +159,7 @@ pub struct TurnWithContent {
 // - Entity.entity_type = EntityType::conversation()
 // - Entity.name, Entity.is_private, etc. for common fields
 // - Selections stored in conversation_selections table
-// - Forks tracked via entity_relations with RelationType::forked_from()
+// - Forks tracked via entity_relations with RelationType::conversation_forked_from()
 //
 // See EntityStore for CRUD operations.
 

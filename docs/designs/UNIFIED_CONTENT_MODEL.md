@@ -197,9 +197,7 @@ CREATE TABLE entities (
                                        -- 'document::tab', 'system::directory', 'system::label', ...
     user_id           TEXT REFERENCES users(id),
     name              TEXT,            -- display name / title
-    slug              TEXT UNIQUE,     -- for @mentions (user-assigned)
     is_private        INTEGER DEFAULT 0,
-    is_archived       INTEGER DEFAULT 0,
     content_block_id  TEXT REFERENCES content_blocks(id),  -- at most one block per entity
     origin            TEXT,            -- "<scheme>:<id>" e.g. "google_drive:abc123"; NULL for local
     metadata          TEXT,            -- JSON bag for type-specific extras (icon, etc.)
@@ -209,7 +207,6 @@ CREATE TABLE entities (
 
 CREATE INDEX idx_entities_user         ON entities(user_id);
 CREATE INDEX idx_entities_type         ON entities(entity_type, user_id);
-CREATE INDEX idx_entities_slug         ON entities(slug) WHERE slug IS NOT NULL;
 CREATE INDEX idx_entities_origin       ON entities(user_id, origin) WHERE origin IS NOT NULL;
 CREATE INDEX idx_entities_has_content  ON entities(content_block_id) WHERE content_block_id IS NOT NULL;
 ```
@@ -890,8 +887,8 @@ Detailed implementation requirements derived from use cases and ROADMAP features
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-0.1 | Every addressable thing is an entity (conversations, documents, tabs, notes, directories, labels). Assets stay in their own table. | P0 |
-| FR-0.2 | Entities have: id, type (namespaced string), name, slug, user, privacy, archive | P0 |
-| FR-0.3 | Slug enables @mentions (`@project-planning`) | P1 |
+| FR-0.2 | Entities have: id, type (namespaced string), name, user, privacy | P0 |
+| FR-0.3 | @mentions resolve to an entity by name; the stored reference is a structured ref (entity_id), not a string handle | P1 |
 | FR-0.4 | Entities carry at most one `content_block_id` (their text) | P0 |
 | FR-0.5 | Entities carry a single URI-like `origin` column (`"<scheme>:<id>"`) — no separate source/source_id | P0 |
 | FR-0.6 | `entity_relations.position` gives first-class ordering for sibling children | P0 |
@@ -908,9 +905,7 @@ CREATE TABLE entities (
     entity_type       TEXT NOT NULL,
     user_id           TEXT REFERENCES users(id),
     name              TEXT,
-    slug              TEXT UNIQUE,
     is_private        INTEGER DEFAULT 0,
-    is_archived       INTEGER DEFAULT 0,
     content_block_id  TEXT REFERENCES content_blocks(id),
     origin            TEXT,
     metadata          TEXT,
@@ -920,7 +915,6 @@ CREATE TABLE entities (
 
 CREATE INDEX idx_entities_user         ON entities(user_id);
 CREATE INDEX idx_entities_type         ON entities(entity_type, user_id);
-CREATE INDEX idx_entities_slug         ON entities(slug) WHERE slug IS NOT NULL;
 CREATE INDEX idx_entities_origin       ON entities(user_id, origin) WHERE origin IS NOT NULL;
 CREATE INDEX idx_entities_has_content  ON entities(content_block_id) WHERE content_block_id IS NOT NULL;
 
@@ -930,7 +924,6 @@ CREATE TABLE entity_relations (
     relation    TEXT NOT NULL,
     position    INTEGER,
     metadata    TEXT,
-    created_at  INTEGER NOT NULL,
     PRIMARY KEY (from_id, to_id, relation)
 );
 
@@ -955,7 +948,6 @@ trait EntityStore {
     async fn get_entity(&self, id: &EntityId) -> Result<Option<StoredEntity>>;
     async fn list_entities(&self, user_id: &UserId, entity_type: Option<&str>) -> Result<Vec<StoredEntity>>;
     async fn update_entity(&self, id: &EntityId, updates: EntityUpdate) -> Result<()>;
-    async fn archive_entity(&self, id: &EntityId) -> Result<()>;
     async fn delete_entity(&self, id: &EntityId) -> Result<()>;
 
     // Relations
@@ -1050,8 +1042,8 @@ CREATE TABLE assets (
 
 ```sql
 -- Addressable layer (see FR-0)
--- entities table provides: id, name, user_id, slug, is_private, is_archived
--- entity_relations provides: forked_from relationships
+-- entities table provides: id, name, user_id, is_private, content_block_id, origin
+-- entity_relations provides: conversation::forked_from relationships
 
 -- Views reference entities (view.id = entity.id)
 CREATE TABLE views (

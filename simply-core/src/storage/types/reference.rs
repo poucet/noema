@@ -38,14 +38,9 @@ impl EntityRef {
         Self::new(EntityType::conversation(), id)
     }
 
-    /// Create a reference to a document
-    pub fn document(id: EntityId) -> Self {
-        Self::new(EntityType::document(), id)
-    }
-
-    /// Create a reference to an asset
-    pub fn asset(id: EntityId) -> Self {
-        Self::new(EntityType::asset(), id)
+    /// Create a reference to a tabbed document
+    pub fn document_tabbed(id: EntityId) -> Self {
+        Self::new(EntityType::document_tabbed(), id)
     }
 }
 
@@ -98,19 +93,14 @@ impl Reference {
 
     /// Create a "cites" reference
     pub fn cites(from: EntityId, to: EntityId) -> Self {
-        Self::new(from, to).with_relation(RelationType::new("cites"))
+        Self::new(from, to).with_relation(RelationType::reference_cites())
     }
 
     /// Create a "mentions" reference (from @mention)
     pub fn mentions(from: EntityId, to: EntityId, mention_text: impl Into<String>) -> Self {
         Self::new(from, to)
-            .with_relation(RelationType::new("mentions"))
+            .with_relation(RelationType::reference_mentions())
             .with_context(mention_text)
-    }
-
-    /// Create a "derived_from" reference
-    pub fn derived_from(from: EntityId, to: EntityId) -> Self {
-        Self::new(from, to).with_relation(RelationType::derived_from())
     }
 }
 
@@ -132,8 +122,7 @@ mod tests {
         let id = EntityId::new();
 
         assert_eq!(EntityRef::conversation(id.clone()).entity_type.as_str(), "conversation");
-        assert_eq!(EntityRef::document(id.clone()).entity_type.as_str(), "document");
-        assert_eq!(EntityRef::asset(id.clone()).entity_type.as_str(), "asset");
+        assert_eq!(EntityRef::document_tabbed(id.clone()).entity_type.as_str(), "document::tabbed");
     }
 
     #[test]
@@ -142,12 +131,12 @@ mod tests {
         let to_id = EntityId::new();
 
         let reference = Reference::new(from_id.clone(), to_id.clone())
-            .with_relation(RelationType::new("cites"))
+            .with_relation(RelationType::reference_cites())
             .with_context("See @api-design for details");
 
         assert_eq!(reference.from_entity_id, from_id);
         assert_eq!(reference.to_entity_id, to_id);
-        assert_eq!(reference.relation_type.as_ref().map(|r| r.as_str()), Some("cites"));
+        assert_eq!(reference.relation_type.as_ref().map(|r| r.as_str()), Some("reference::cites"));
         assert_eq!(reference.context.as_deref(), Some("See @api-design for details"));
     }
 
@@ -157,14 +146,11 @@ mod tests {
         let to_id = EntityId::new();
 
         let cites = Reference::cites(from_id.clone(), to_id.clone());
-        assert_eq!(cites.relation_type.as_ref().map(|r| r.as_str()), Some("cites"));
+        assert_eq!(cites.relation_type.as_ref().map(|r| r.as_str()), Some("reference::cites"));
 
         let mentions = Reference::mentions(from_id.clone(), to_id.clone(), "@api-design");
-        assert_eq!(mentions.relation_type.as_ref().map(|r| r.as_str()), Some("mentions"));
+        assert_eq!(mentions.relation_type.as_ref().map(|r| r.as_str()), Some("reference::mentions"));
         assert_eq!(mentions.context.as_deref(), Some("@api-design"));
-
-        let derived = Reference::derived_from(from_id.clone(), to_id.clone());
-        assert_eq!(derived.relation_type.as_ref().map(|r| r.as_str()), Some("derived_from"));
     }
 
     #[test]
