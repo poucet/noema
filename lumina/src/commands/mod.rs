@@ -31,10 +31,18 @@ use simply_rpc::RequestContext;
 /// User identity is resolved from the daemon on every request — no local
 /// cache, because the discord-id → simply-user mapping can change (e.g. after
 /// `/google auth` links the discord id to an email-based user).
-pub struct SharedState {}
+///
+/// `tool_state` is a Lumina-owned SQLite cache mapping Discord message ids
+/// to the `ToolCall` / `ToolResult` JSON we would otherwise attach to the
+/// message. Keeps the channel UI clean while preserving structured replay.
+pub struct SharedState {
+    pub tool_state: Arc<crate::tool_state::ToolStateStore>,
+}
 
 impl SharedState {
-    pub fn new() -> Self { Self {} }
+    pub fn new(tool_state: Arc<crate::tool_state::ToolStateStore>) -> Self {
+        Self { tool_state }
+    }
 }
 
 impl TypeMapKey for SharedState {

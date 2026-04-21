@@ -130,7 +130,7 @@ pub async fn send_paginated_embeds_to_channel(
     pages: &[String],
     timeout: Duration,
     extra_files: Vec<serenity::builder::CreateAttachment>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<u64> {
     use serenity::builder::{CreateEmbed, CreateMessage, EditMessage};
 
     if pages.is_empty() {
@@ -139,8 +139,8 @@ pub async fn send_paginated_embeds_to_channel(
         for f in extra_files {
             msg = msg.add_file(f);
         }
-        channel_id.send_message(http, msg).await?;
-        return Ok(());
+        let posted = channel_id.send_message(http, msg).await?;
+        return Ok(posted.id.get());
     }
 
     let mut page = 0usize;
@@ -162,9 +162,10 @@ pub async fn send_paginated_embeds_to_channel(
         initial = initial.add_file(f);
     }
     let msg = channel_id.send_message(http, initial).await?;
+    let posted_id = msg.id.get();
 
     if total <= 1 {
-        return Ok(());
+        return Ok(posted_id);
     }
 
     let mut collector = msg
@@ -200,7 +201,7 @@ pub async fn send_paginated_embeds_to_channel(
         EditMessage::new().embed(make_embed(page)).components(vec![]),
     ).await?;
 
-    Ok(())
+    Ok(posted_id)
 }
 
 /// Split text into pages that fit within Discord's 2000 char limit.

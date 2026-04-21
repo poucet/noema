@@ -7,6 +7,7 @@ mod commands;
 pub mod mcp;
 pub mod paginator;
 pub mod tool_render;
+pub mod tool_state;
 pub mod voice;
 
 use std::sync::Arc;
@@ -43,6 +44,15 @@ async fn main() -> anyhow::Result<()> {
     // Connect to daemon — embedded (host or connect) or remote-only
     let daemon = connect_daemon(&settings).await?;
 
+    // Open the Lumina-owned tool-state DB (Discord message id →
+    // structured ToolCall/ToolResult JSON). Separate file under
+    // lumina_data_dir so nuking replay state doesn't touch noema.db.
+    let _ = config::PathManager::ensure_dirs_exist();
+    let tool_state_path = config::PathManager::lumina_tool_state_path()
+        .ok_or_else(|| anyhow::anyhow!("could not determine lumina_tool_state_path"))?;
+    let tool_state = Arc::new(tool_state::ToolStateStore::open(&tool_state_path)?);
+    tracing::info!(path = %tool_state_path.display(), "lumina tool_state ready");
+
     // Register skills with daemon (works over WS for both embedded and remote)
     let http = Arc::new(serenity::http::Http::new(&token));
     let discord_skill = mcp::DiscordSkill::new(http);
@@ -77,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
         .type_map_insert::<voice::VoiceManagerKey>(voice_mgr)
         .type_map_insert::<ConfigKey>(lumina_cfg)
         .type_map_insert::<CommandRegistry>(registry)
-        .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new()))
+        .type_map_insert::<commands::SharedState>(Arc::new(commands::SharedState::new(tool_state)))
         .type_map_insert::<McpServerKey>(discord_skill)
         .await?;
 

@@ -47,6 +47,9 @@ urlencoding = "2"
 # Error handling
 anyhow = { workspace = true }
 
+# Per-message tool-state store (lumina-owned, separate from noema.db)
+rusqlite = { version = "0.34", features = ["bundled"] }
+
 # Auto-registration
 inventory = { workspace = true }
 

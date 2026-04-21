@@ -255,12 +255,21 @@ async fn build_rag_context(
         return (String::new(), vec![]);
     }
 
-    let mut context =
-        String::from("## Relevant knowledge\nThe following entities may be relevant to this conversation:\n");
+    // Inject title + body only — deliberately omit `entity_id` so the
+    // model doesn't pair this context with a `get_entity_content` tool
+    // call to re-fetch what it already has. If the user later refers to
+    // one of these entities by name, the model can still discover it
+    // via the search tool.
+    let mut context = String::from(
+        "## Relevant knowledge\n\
+         The following entity contents have already been looked up and injected \
+         for you — you do NOT need to fetch or re-read them. Treat them as \
+         authoritative context:\n",
+    );
     for h in &rag_hits {
         context.push_str(&format!(
-            "\n---\nentity_id: {}\ntitle: {}\nkind: {}\n---\n{}\n",
-            h.entity_id, h.title, h.entity_kind, h.body,
+            "\n---\ntitle: {}\nkind: {}\n---\n{}\n",
+            h.title, h.entity_kind, h.body,
         ));
     }
 
@@ -296,18 +305,53 @@ async fn load_channel_history(
         all_messages.extend(batch);
     }
 
-    // Discord returns newest-first, we need oldest-first
-    // Skip bot messages that appear before any user message (e.g. welcome messages)
+    // Discord returns newest-first, we need oldest-first.
+    // Skip bot messages that appear before any user message (welcome /
+    // prior-conversation tool turns) — they'd otherwise leak into the
+    // new conversation.
     let ordered: Vec<&Message> = all_messages
         .iter()
         .rev()
-        .skip_while(|m| m.author.id.get() == bot_user_id) // skip leading bot messages
+        .skip_while(|m| m.author.id.get() == bot_user_id)
         .collect();
+
+    // Batch-fetch tool-state for every bot message that carries an
+    // embed — those are the tool-call / tool-result emissions. Non-embed
+    // bot messages are plain text assistant replies; no state stashed.
+    let tool_state_ids: Vec<u64> = ordered
+        .iter()
+        .filter(|m| m.author.id.get() == bot_user_id && !m.embeds.is_empty())
+        .map(|m| m.id.get())
+        .collect();
+    let stash = lx
+        .state
+        .tool_state
+        .get_many(&tool_state_ids)
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "tool_state batch fetch failed");
+            std::collections::HashMap::new()
+        });
 
     let mut seed: Vec<SeedMessage> = Vec::with_capacity(ordered.len());
     for m in ordered {
-        if let Some(msg) = message_to_seed(m, bot_user_id).await {
+        let stash_entry = stash.get(&m.id.get());
+        if let Some(msg) = message_to_seed(m, bot_user_id, stash_entry).await {
             seed.push(msg);
+        }
+    }
+
+    // An LLM given a leading ToolCall or ToolResult with no matching
+    // assistant / user turn before it usually chokes. Drop any such
+    // orphans from the head of the seed until we hit a normal turn.
+    while let Some(first) = seed.first() {
+        let is_orphan_tool = first.content.iter().any(|c| matches!(
+            c,
+            InputContent::ToolCall(_) | InputContent::ToolResult(_)
+        ));
+        if is_orphan_tool {
+            seed.remove(0);
+        } else {
+            break;
         }
     }
 
@@ -321,23 +365,40 @@ async fn load_channel_history(
     Ok(seed)
 }
 
-/// Convert a Discord message to a SeedMessage. Returns `None` if the
-/// message carries nothing we can seed from (e.g. embed-only without
-/// structured attachments).
-async fn message_to_seed(m: &Message, bot_user_id: u64) -> Option<SeedMessage> {
+/// Convert a Discord message to a `SeedMessage`. For bot messages
+/// backed by stashed tool state (`(kind, payload)` from the lumina
+/// tool_state DB), reconstructs the structured `ToolCall` /
+/// `ToolResult` turn; otherwise falls back to text. Returns `None` for
+/// messages that carry nothing we can seed from (e.g. an embed without
+/// matching stash, or an empty user message).
+async fn message_to_seed(
+    m: &Message,
+    bot_user_id: u64,
+    tool_stash: Option<&(String, String)>,
+) -> Option<SeedMessage> {
     let is_bot = m.author.id.get() == bot_user_id;
 
     if is_bot {
-        // Check for structured tool call/result attachments first.
-        if let Some(content) = parse_tool_attachments(m).await {
-            // Tool results are sent as User role in the daemon; tool calls
-            // stay on the assistant turn.
-            let role = if content.iter().any(|c| matches!(c, InputContent::ToolResult(_))) {
-                Role::User
-            } else {
-                Role::Assistant
-            };
-            return Some(SeedMessage { role, content });
+        if let Some((kind, payload)) = tool_stash {
+            match kind.as_str() {
+                crate::tool_state::KIND_TOOL_CALL => {
+                    if let Ok(call) = serde_json::from_str::<ToolCall>(payload) {
+                        return Some(SeedMessage {
+                            role: Role::Assistant,
+                            content: vec![InputContent::ToolCall(call)],
+                        });
+                    }
+                }
+                crate::tool_state::KIND_TOOL_RESULT => {
+                    if let Ok(result) = serde_json::from_str::<ToolResult>(payload) {
+                        return Some(SeedMessage {
+                            role: Role::User,
+                            content: vec![InputContent::ToolResult(result)],
+                        });
+                    }
+                }
+                _ => {}
+            }
         }
 
         if m.content.is_empty() {
@@ -357,60 +418,6 @@ async fn message_to_seed(m: &Message, bot_user_id: u64) -> Option<SeedMessage> {
             content: vec![InputContent::Text { text }],
         })
     }
-}
-
-/// Scan a bot message for `tool_call_<id>.json` / `tool_result_<id>.json`
-/// attachments and decode them into structured `InputContent`. Returns
-/// `None` if no such attachments exist, or if every one fails to
-/// download/parse (caller falls back to text).
-async fn parse_tool_attachments(m: &Message) -> Option<Vec<InputContent>> {
-    let candidates: Vec<&serenity::model::channel::Attachment> = m
-        .attachments
-        .iter()
-        .filter(|a| {
-            a.filename.ends_with(".json")
-                && (a.filename.starts_with("tool_call_") || a.filename.starts_with("tool_result_"))
-        })
-        .collect();
-
-    if candidates.is_empty() {
-        return None;
-    }
-
-    let mut content = Vec::with_capacity(candidates.len());
-    for att in candidates {
-        let bytes = match att.download().await {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(error = %e, file = %att.filename, "tool attachment download failed");
-                continue;
-            }
-        };
-
-        let parsed: Option<InputContent> = if att.filename.starts_with("tool_call_") {
-            match serde_json::from_slice::<ToolCall>(&bytes) {
-                Ok(call) => Some(InputContent::ToolCall(call)),
-                Err(e) => {
-                    tracing::warn!(error = %e, file = %att.filename, "tool_call JSON parse failed");
-                    None
-                }
-            }
-        } else {
-            match serde_json::from_slice::<ToolResult>(&bytes) {
-                Ok(r) => Some(InputContent::ToolResult(r)),
-                Err(e) => {
-                    tracing::warn!(error = %e, file = %att.filename, "tool_result JSON parse failed");
-                    None
-                }
-            }
-        };
-
-        if let Some(c) = parsed {
-            content.push(c);
-        }
-    }
-
-    if content.is_empty() { None } else { Some(content) }
 }
 
 /// Stream daemon events back to Discord.
@@ -473,17 +480,24 @@ async fn stream_response(
                     arguments,
                     extra: serde_json::Value::Null,
                 };
-                let bytes = serde_json::to_vec_pretty(&call).unwrap_or_default();
-                let attachment = serenity::builder::CreateAttachment::bytes(
-                    bytes,
-                    format!("tool_call_{id}.json"),
-                );
-                msg.channel_id
+                let posted = msg.channel_id
                     .send_message(
                         &lx.http,
-                        serenity::builder::CreateMessage::new().embed(embed).add_file(attachment),
+                        serenity::builder::CreateMessage::new().embed(embed),
                     )
                     .await?;
+                // Stash the structured call against the Discord message
+                // id so history replay can rehydrate the turn without
+                // needing a visible attachment.
+                if let Ok(json) = serde_json::to_string(&call) {
+                    if let Err(e) = lx.state.tool_state.put(
+                        posted.id.get(),
+                        crate::tool_state::KIND_TOOL_CALL,
+                        &json,
+                    ) {
+                        tracing::warn!(error = %e, "failed to stash tool_call");
+                    }
+                }
                 tool_names.insert(id, name);
             }
             Ok(DaemonEvent::ToolResult { id, result }) => {
@@ -497,25 +511,33 @@ async fn stream_response(
                     tool_call_id: id.clone(),
                     content: blocks.clone(),
                 };
-                let bytes = serde_json::to_vec_pretty(&tool_result).unwrap_or_default();
-                let attachment = serenity::builder::CreateAttachment::bytes(
-                    bytes,
-                    format!("tool_result_{id}.json"),
-                );
                 let tool_name = tool_names
                     .remove(&id)
                     .unwrap_or_else(|| "\u{1f4e6} Tool result".to_string());
-                if let Err(e) = crate::tool_render::render_tool_result_to_channel(
+                let result_json = serde_json::to_string(&tool_result).ok();
+                let tool_state = lx.state.tool_state.clone();
+                match crate::tool_render::render_tool_result_to_channel(
                     &lx.http,
                     &lx.ctx.shard,
                     msg.channel_id,
                     &tool_name,
                     Ok(blocks),
-                    vec![attachment],
+                    vec![],
                 )
                 .await
                 {
-                    tracing::warn!(tool = %tool_name, error = %e, "failed to render tool result");
+                    Ok(posted_id) => {
+                        if let Some(json) = result_json {
+                            if let Err(e) = tool_state.put(
+                                posted_id,
+                                crate::tool_state::KIND_TOOL_RESULT,
+                                &json,
+                            ) {
+                                tracing::warn!(error = %e, "failed to stash tool_result");
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!(tool = %tool_name, error = %e, "failed to render tool result"),
                 }
             }
             Ok(DaemonEvent::TurnComplete) => {

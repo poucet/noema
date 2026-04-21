@@ -196,10 +196,13 @@ fn pack_blocks(blocks: Vec<String>, max_chars: usize) -> Vec<String> {
 /// pagination, and attachment handling as `/tool call`. Shared between the
 /// `/tool` command path and the voice session receiver.
 ///
-/// `extra_files` are attached to whichever single message this call emits
-/// (the asset-message branch, the error branch, or the paginator's initial
-/// message) so callers can co-locate structured sidecars — e.g. the
-/// `tool_result_<id>.json` used for session-history replay.
+/// Returns the posted message id of the primary message (the first one
+/// carrying the embed or asset bundle) so callers can key stashed
+/// replay state against it. `extra_files` are attached to whichever
+/// single message this call emits (the asset-message branch, the error
+/// branch, or the paginator's initial message) — callers can use this
+/// for co-located sidecars if needed, though the canonical replay path
+/// is now the `ToolStateStore` keyed by the returned id.
 pub async fn render_tool_result_to_channel(
     http: &Arc<Http>,
     shard: &ShardMessenger,
@@ -207,7 +210,7 @@ pub async fn render_tool_result_to_channel(
     tool_name: &str,
     result: anyhow::Result<Vec<ToolResultContent>>,
     extra_files: Vec<CreateAttachment>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<u64> {
     let content = match result {
         Ok(c) => c,
         Err(e) => {
@@ -217,8 +220,8 @@ pub async fn render_tool_result_to_channel(
                 .color(0xE74C3C);
             let mut msg = CreateMessage::new().embed(embed);
             for f in extra_files { msg = msg.add_file(f); }
-            channel_id.send_message(http, msg).await?;
-            return Ok(());
+            let posted = channel_id.send_message(http, msg).await?;
+            return Ok(posted.id.get());
         }
     };
 
@@ -249,8 +252,8 @@ pub async fn render_tool_result_to_channel(
         if !text_parts.is_empty() {
             msg = msg.content(text_parts.join("\n"));
         }
-        channel_id.send_message(http, msg).await?;
-        return Ok(());
+        let posted = channel_id.send_message(http, msg).await?;
+        return Ok(posted.id.get());
     }
 
     let raw_text = text_parts.join("\n");
