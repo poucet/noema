@@ -6,8 +6,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use base64::Engine;
+use serenity::builder::{CreateAttachment, CreateMessage};
 use serenity::model::id::{ChannelId, GuildId};
-use simply_daemon_api::Daemon;
+use simply_daemon_api::{Daemon, ToolResultContent};
 use simply_voice::{AudioChunk, VoiceEvent, VoiceInput};
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler};
 use tokio::sync::{mpsc, Mutex};
@@ -74,29 +76,63 @@ fn truncate_preview(s: &str, max_chars: usize) -> String {
     }
 }
 
-/// Render a `DaemonEvent::ToolResult.result` value into something readable
-/// for the voice-chat text channel.
+/// Post a `DaemonEvent::ToolResult.result` to the text channel, dispatched
+/// by content type.
 ///
-/// The result is typically a JSON array of MCP `Content` blocks
-/// (`[{"type":"text","text":"..."}, ...]`). Dumping that raw to chat leaks
-/// the wire format. Try these in order:
-///
-/// 1. Array of Content-like objects → concatenate the inner `text` fields.
-/// 2. Plain string → pass through.
-/// 3. Anything else → pretty-printed JSON.
-fn render_tool_result(value: &serde_json::Value) -> String {
-    if let Some(arr) = value.as_array() {
-        let texts: Vec<&str> = arr.iter()
-            .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
-            .collect();
-        if !texts.is_empty() {
-            return texts.join("\n");
+/// The daemon ships results as the wire-format `Vec<ToolResultContent>`
+/// (MCP-style blocks). Parse that, then:
+/// - Text   → one `✅ …` text message
+/// - Image  → Discord file attachment (native previews)
+/// - Audio  → Discord file attachment
+/// Falls back to pretty-printing the raw value if it doesn't look like
+/// a Content-block array.
+async fn post_tool_result(
+    result: &serde_json::Value,
+    text_channel: &ChannelId,
+    http: &Arc<serenity::http::Http>,
+) {
+    if let Ok(blocks) = serde_json::from_value::<Vec<ToolResultContent>>(result.clone()) {
+        let mut text_parts: Vec<String> = Vec::new();
+        let mut attachments: Vec<CreateAttachment> = Vec::new();
+
+        for block in blocks {
+            match block {
+                ToolResultContent::Text { text } => text_parts.push(text),
+                ToolResultContent::Image { data, mime_type } => {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
+                        let ext = mime_type.split('/').last().unwrap_or("png");
+                        attachments.push(CreateAttachment::bytes(bytes, format!("image.{ext}")));
+                    }
+                }
+                ToolResultContent::Audio { data, mime_type } => {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
+                        let ext = mime_type.split('/').last().unwrap_or("wav");
+                        attachments.push(CreateAttachment::bytes(bytes, format!("audio.{ext}")));
+                    }
+                }
+            }
         }
+
+        if !text_parts.is_empty() {
+            let body = truncate_preview(&text_parts.join("\n"), 400);
+            let _ = text_channel.say(http, format!("✅ {body}")).await;
+        }
+        if !attachments.is_empty() {
+            let mut msg = CreateMessage::new();
+            for a in attachments { msg = msg.add_file(a); }
+            let _ = text_channel.send_message(http, msg).await;
+        }
+        return;
     }
-    if let Some(s) = value.as_str() {
-        return s.to_string();
-    }
-    serde_json::to_string_pretty(value).unwrap_or_default()
+
+    // Not a Content-block array — fall back to stringifying the raw value.
+    let body = if let Some(s) = result.as_str() {
+        s.to_string()
+    } else {
+        serde_json::to_string_pretty(result).unwrap_or_default()
+    };
+    let preview = truncate_preview(&body, 400);
+    let _ = text_channel.say(http, format!("✅ {preview}")).await;
 }
 
 /// Send one user transcript to the daemon session and collect the LLM response,
@@ -129,8 +165,7 @@ async fn process_llm_turn(
                 let _ = text_channel.say(http, format!("🔧 `{name}` {preview}")).await;
             }
             Ok(simply_daemon_api::DaemonEvent::ToolResult { result, .. }) => {
-                let preview = truncate_preview(&render_tool_result(&result), 400);
-                let _ = text_channel.say(http, format!("✅ {preview}")).await;
+                post_tool_result(&result, text_channel, http).await;
             }
             Ok(simply_daemon_api::DaemonEvent::TurnComplete) => break,
             Ok(simply_daemon_api::DaemonEvent::Error(e)) => {
