@@ -323,6 +323,10 @@ impl From<&crate::api::ContentBlock> for Part {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Content {
     pub(crate) role: Role,
+    // Gemini occasionally returns candidates with a bare `{role: "model"}`
+    // (empty turn, finishReason=STOP). Treat missing `parts` as an empty
+    // content block rather than a parse error.
+    #[serde(default)]
     pub(crate) parts: Vec<Part>,
 }
 

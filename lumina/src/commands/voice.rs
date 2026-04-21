@@ -59,7 +59,7 @@ mod voice {
             crate::voice::JoinOutcome::Joined => "Joined voice. Listening for conversation...",
             crate::voice::JoinOutcome::AlreadyJoined { .. } => "Already in a voice channel here.",
         };
-        lx.reply(cmd, reply).await
+        lx.reply_ephemeral(cmd, reply).await
     }
 
     #[sub_command(description = "Speak text in the voice channel via TTS")]
@@ -123,7 +123,7 @@ mod voice {
         let guild_id = cmd.guild_id.ok_or_else(|| anyhow::anyhow!("Not in a guild"))?;
         let voice_mgr = get_voice_manager(lx).await?;
         let left = voice_mgr.leave_voice(guild_id).await?;
-        lx.reply(cmd, if left { "Left voice channel." } else { "Not in a voice channel." }).await
+        lx.reply_ephemeral(cmd, if left { "Left voice channel." } else { "Not in a voice channel." }).await
     }
 
     #[sub_command(description = "Set STT or TTS provider")]
