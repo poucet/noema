@@ -150,22 +150,51 @@ impl VoiceManager {
         seed: Vec<SeedMessage>,
         http: Arc<serenity::http::Http>,
     ) -> anyhow::Result<JoinOutcome> {
-        // Already in a voice session for this guild — don't create a second one.
-        if let Some(existing) = self.sessions.lock().await.get(&guild_id) {
-            tracing::info!(
-                guild_id = %guild_id,
-                existing_channel = %existing.voice_channel,
-                "voice_manager: already in voice, reusing session"
-            );
-            return Ok(JoinOutcome::AlreadyJoined { voice_channel: existing.voice_channel });
+        // Reserve the slot atomically so two concurrent join_voice calls
+        // (e.g. /voice join racing with the voice_state_update auto-join
+        // handler) can't both run the "create a session" path. The second
+        // caller sees the reservation and returns AlreadyJoined immediately.
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(existing) = sessions.get(&guild_id) {
+                tracing::info!(
+                    guild_id = %guild_id,
+                    existing_channel = %existing.voice_channel,
+                    "voice_manager: already in voice, reusing session"
+                );
+                return Ok(JoinOutcome::AlreadyJoined { voice_channel: existing.voice_channel });
+            }
+            sessions.insert(guild_id, VoiceSession {
+                text_channel,
+                voice_channel,
+                mode: VoiceMode::Listen,
+                daemon_session: None,
+            });
         }
 
+        // From here on, any failure needs to clear the reservation.
+        let result = self.try_connect_and_start(
+            base_ctx, guild_id, voice_channel, text_channel, seed, http,
+        ).await;
+        if result.is_err() {
+            self.sessions.lock().await.remove(&guild_id);
+        }
+        result.map(|_| JoinOutcome::Joined)
+    }
+
+    async fn try_connect_and_start(
+        self: &Arc<Self>,
+        base_ctx: RequestContext,
+        guild_id: GuildId,
+        voice_channel: ChannelId,
+        text_channel: ChannelId,
+        seed: Vec<SeedMessage>,
+        http: Arc<serenity::http::Http>,
+    ) -> anyhow::Result<()> {
         let songbird = self.songbird.get()
             .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
         let call = songbird.join(guild_id, voice_channel).await?;
 
-        // Stamp the Discord origin onto the session ctx so skill tools called
-        // by the voice agent know "where the conversation is happening".
         let session_ctx = base_ctx
             .with_metadata("discord.guild_id", guild_id.get().to_string())
             .with_metadata("discord.channel_id", text_channel.get().to_string())
@@ -187,8 +216,7 @@ impl VoiceManager {
             guild_id, voice_channel, text_channel,
             VoiceMode::Listen, Some(session),
             call, http,
-        ).await?;
-        Ok(JoinOutcome::Joined)
+        ).await
     }
 
     /// Start a voice session and register the audio receive handler on the songbird Call.

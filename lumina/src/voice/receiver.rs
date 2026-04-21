@@ -97,7 +97,18 @@ async fn post_tool_result(
 
         for block in blocks {
             match block {
-                ToolResultContent::Text { text } => text_parts.push(text),
+                ToolResultContent::Text { text } => {
+                    // MCP tool responses are commonly JSON stuffed into a text
+                    // block — pretty-print when it parses so the channel isn't
+                    // a wall of compact one-liner.
+                    let rendered = match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(v) if v.is_object() || v.is_array() => {
+                            serde_json::to_string_pretty(&v).unwrap_or(text)
+                        }
+                        _ => text,
+                    };
+                    text_parts.push(rendered);
+                }
                 ToolResultContent::Image { data, mime_type } => {
                     if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
                         let ext = mime_type.split('/').last().unwrap_or("png");
