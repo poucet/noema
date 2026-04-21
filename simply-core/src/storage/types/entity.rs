@@ -37,81 +37,24 @@ impl EntityType {
     }
 
     /// Does this type belong to the `document::` namespace?
+    /// Used by RAG default filters and admin UI grouping.
     pub fn is_document_like(&self) -> bool {
-        self.0.starts_with("document::") || self.0 == "document::tab"
+        self.0.starts_with("document::")
     }
 
-    // ----- Well-known entity types -----
+    // ----- Well-known top-level entity types -----
+    //
+    // Document subkinds (`document::note`, `::tabbed`, `::tab`, ...) and
+    // system organizational primitives (`system::directory`, `system::label`)
+    // are *not* enumerated here. Clients (admin UI, Noema UI, import skills)
+    // own their own lists of kinds and pass strings directly via
+    // `EntityType::new("document::whatever")`. Keeps the daemon from needing
+    // to ship a new constant every time a client wants a new flavour.
 
     /// Conversation entity (a view + turns + spans + messages).
+    /// First-class daemon concept — owned by `SessionManager`.
     pub fn conversation() -> Self {
         Self::new("conversation")
-    }
-
-    // Document kinds — namespaced as `document::<kind>`.
-
-    /// Tabbed document (Google Docs-style with nested tab tree).
-    /// The only document kind that has child `document::tab` entities.
-    pub fn document_tabbed() -> Self {
-        Self::new("document::tabbed")
-    }
-
-    /// Flat free-form note.
-    pub fn document_note() -> Self {
-        Self::new("document::note")
-    }
-
-    /// Flat TODO list.
-    pub fn document_todo() -> Self {
-        Self::new("document::todo")
-    }
-
-    /// Flat reusable prompt / intent template.
-    pub fn document_prompt() -> Self {
-        Self::new("document::prompt")
-    }
-
-    /// Flat knowledge-base entry.
-    pub fn document_knowledge() -> Self {
-        Self::new("document::knowledge")
-    }
-
-    /// Flat context document injected by agents.
-    pub fn document_context() -> Self {
-        Self::new("document::context")
-    }
-
-    /// Flat event-compiled intent definition.
-    pub fn document_intent() -> Self {
-        Self::new("document::intent")
-    }
-
-    /// Flat system prompt for a model.
-    pub fn document_system_prompt() -> Self {
-        Self::new("document::system_prompt")
-    }
-
-    /// Flat access control rule document.
-    pub fn document_access_rule() -> Self {
-        Self::new("document::access_rule")
-    }
-
-    /// A tab within a `document::tabbed`. Child of the doc (or another tab)
-    /// via the `structure::contained_in` relation; ordered by `position`.
-    pub fn document_tab() -> Self {
-        Self::new("document::tab")
-    }
-
-    // System-provided organizational primitives.
-
-    /// Filing/folder. Children via `structure::contained_in`.
-    pub fn system_directory() -> Self {
-        Self::new("system::directory")
-    }
-
-    /// Label/tag. Subjects point at it via `label::tagged_with`.
-    pub fn system_label() -> Self {
-        Self::new("system::label")
     }
 }
 
@@ -426,28 +369,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_entity_type_wellknown() {
+    fn test_entity_type_conversation() {
         assert_eq!(EntityType::conversation().as_str(), "conversation");
-        assert_eq!(EntityType::document_tabbed().as_str(), "document::tabbed");
-        assert_eq!(EntityType::document_note().as_str(), "document::note");
-        assert_eq!(EntityType::document_tab().as_str(), "document::tab");
-        assert_eq!(EntityType::system_directory().as_str(), "system::directory");
-        assert_eq!(EntityType::system_label().as_str(), "system::label");
     }
 
     #[test]
     fn test_entity_type_custom() {
-        let custom = EntityType::new("my_plugin_type");
-        assert_eq!(custom.as_str(), "my_plugin_type");
+        let custom = EntityType::new("document::note");
+        assert_eq!(custom.as_str(), "document::note");
     }
 
     #[test]
     fn test_is_document_like() {
-        assert!(EntityType::document_tabbed().is_document_like());
-        assert!(EntityType::document_note().is_document_like());
-        assert!(EntityType::document_tab().is_document_like());
+        assert!(EntityType::new("document::tabbed").is_document_like());
+        assert!(EntityType::new("document::note").is_document_like());
+        assert!(EntityType::new("document::tab").is_document_like());
         assert!(!EntityType::conversation().is_document_like());
-        assert!(!EntityType::system_directory().is_document_like());
+        assert!(!EntityType::new("system::directory").is_document_like());
     }
 
     #[test]
@@ -511,7 +449,7 @@ mod tests {
     #[test]
     fn test_entity_with_content_and_origin() {
         let block_id = ContentBlockId::from_string("cb-1");
-        let entity = Entity::new(EntityType::document_tabbed())
+        let entity = Entity::new(EntityType::new("document::tabbed"))
             .with_content_block(block_id.clone())
             .with_origin(origin(origin_scheme::GOOGLE_DRIVE, "gdoc-abc"));
         assert_eq!(entity.content_block_id.as_ref(), Some(&block_id));

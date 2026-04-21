@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use simply_core::storage::traits::{StorageTypes, Stores};
+use simply_core::storage::traits::{StorageTypes, Stores, UserStore};
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::DocumentResolver;
 use simply_rpc::{ServiceRouter, RpcService};
@@ -109,6 +109,17 @@ where
         let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
         let token_store = Arc::clone(&self.token_store);
         let settings = config::Settings::load();
+
+        // On a fresh database the admin UI and clients send X-User-Id for a user
+        // that may not yet exist in `users`, causing FK failures on the first
+        // entity/document insert. If settings specify a `user_email`, ensure a
+        // matching row is present up front.
+        if let Some(email) = settings.user_email.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            match self.stores.user().get_or_create_user_by_email(email).await {
+                Ok(user) => tracing::info!(user_id = %user.id, email = %email, "bootstrapped user from settings"),
+                Err(e) => tracing::warn!(email = %email, error = %e, "failed to bootstrap user from settings"),
+            }
+        }
 
         const FALLBACK_MODEL_ID: &str = "claude/models/claude-sonnet-4-5-20250929";
         let default_model_id = settings.default_model.clone()

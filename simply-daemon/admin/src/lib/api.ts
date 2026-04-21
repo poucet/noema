@@ -10,6 +10,13 @@ import {
   type SearchHit,
   type ReindexStatus,
   type EmbeddingQueueStatus,
+  type EntitySummary,
+  type ChildEntity,
+  type EntityContent,
+  type CreateEntityRequest,
+  type UpdateEntityContentRequest,
+  type AddChildRequest,
+  type MoveChildRequest,
   type Transport,
   createTransport,
   getCurrentUser,
@@ -119,6 +126,40 @@ export const api = {
     t().rpc<TabInfo>('document.create_tab', 'POST', `/api/document/${documentId}/tab`, { request: { title, content, referencedAssets: [] } }),
   deleteTab: (id: string) =>
     t().rpc('document.delete_tab', 'DELETE', `/api/document/tab/${id}`),
+
+  // Entities (UCM-unified; see UNIFIED_CONTENT_MODEL.md)
+  listEntities: (typePrefix?: string) => {
+    const q = typePrefix ? `?type_prefix=${encodeURIComponent(typePrefix)}` : '';
+    return t().rpc<EntitySummary[]>('entity.list_entities', 'GET', `/api/entity${q}`);
+  },
+  searchEntities: (query: string, typePrefix?: string) => {
+    const q = typePrefix ? `?type_prefix=${encodeURIComponent(typePrefix)}` : '';
+    return t().rpc<EntitySummary[]>('entity.search_entities', 'GET', `/api/entity/search/${encodeURIComponent(query)}${q}`);
+  },
+  getEntity: (id: string) =>
+    t().rpc<EntitySummary>('entity.get_entity', 'GET', `/api/entity/${id}`),
+  createEntity: (req: CreateEntityRequest) =>
+    t().rpc<EntitySummary>('entity.create_entity', 'POST', '/api/entity', req),
+  renameEntity: (id: string, name: string) =>
+    t().rpc('entity.rename_entity', 'PUT', `/api/entity/${id}`, { name }),
+  changeEntityKind: (id: string, newKind: string) =>
+    t().rpc('entity.change_entity_kind', 'PUT', `/api/entity/${id}/kind`, { new_kind: newKind }),
+  deleteEntity: (id: string) =>
+    t().rpc('entity.delete_entity', 'DELETE', `/api/entity/${id}`),
+  getEntityContent: (id: string) =>
+    t().rpc<EntityContent>('entity.get_entity_content', 'GET', `/api/entity/${id}/content`),
+  updateEntityContent: (id: string, req: UpdateEntityContentRequest) =>
+    t().rpc('entity.update_entity_content', 'PUT', `/api/entity/${id}/content`, { request: req }),
+  flushEntityEmbedding: (id: string) =>
+    t().rpc('entity.flush_entity_embedding', 'POST', `/api/entity/${id}/flush_embedding`),
+  listChildren: (parentId: string, relation: string) =>
+    t().rpc<ChildEntity[]>('entity.list_children', 'GET', `/api/entity/${parentId}/children/${encodeURIComponent(relation)}`),
+  addChild: (req: AddChildRequest) =>
+    t().rpc('entity.add_child', 'POST', '/api/entity/relation', req),
+  removeChild: (parentId: string, childId: string, relation: string) =>
+    t().rpc('entity.remove_child', 'DELETE', `/api/entity/${parentId}/child/${childId}/${encodeURIComponent(relation)}`),
+  moveChild: (req: MoveChildRequest) =>
+    t().rpc('entity.move_child', 'POST', '/api/entity/move_child', req),
 
   // Search / RAG
   search: (query: string, documentType?: string, topK?: number) =>

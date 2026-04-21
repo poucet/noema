@@ -191,6 +191,17 @@ pub trait EntityApi: Send + Sync {
         name: &str,
     ) -> anyhow::Result<()>;
 
+    /// Change an entity's kind (e.g. `document::note` → `document::todo`).
+    /// Restricted to kinds in the `document::` namespace so UI callers can't
+    /// accidentally convert entities into conversations, directories, etc.
+    #[rpc(put = "/entity/{entity_id}/kind", no_tool)]
+    async fn change_entity_kind(
+        &self,
+        ctx: &RequestContext,
+        entity_id: &str,
+        new_kind: &str,
+    ) -> anyhow::Result<()>;
+
     /// Delete an entity and its descendants via `structure::contained_in`.
     #[rpc(delete = "/entity/{entity_id}", no_tool)]
     async fn delete_entity(

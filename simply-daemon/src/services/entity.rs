@@ -27,6 +27,16 @@ const SUMMARY_COUNT_RELATIONS: &[&str] = &[
     "reference::to",
 ];
 
+/// Kinds callers of the public API are allowed to create or convert entities
+/// into. Restricted to the `document::` namespace so callers can't
+/// accidentally mint `conversation` entities (daemon-owned), `system::*`
+/// organizational primitives, or other future non-document kinds.
+/// Import skills still reach any kind through the same API (they create
+/// `document::tabbed` + `document::tab`), which is fine.
+fn is_user_creatable_kind(kind: &str) -> bool {
+    kind.starts_with("document::")
+}
+
 pub struct EntityService<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
     stores: Arc<dyn Stores<S>>,
@@ -202,6 +212,12 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         request: CreateEntityRequest,
     ) -> anyhow::Result<EntitySummary> {
         let user_id = Self::require_user(ctx)?;
+        if !is_user_creatable_kind(&request.kind) {
+            anyhow::bail!(
+                "entity kind `{}` is not user-creatable (must start with `document::`)",
+                request.kind
+            );
+        }
         let kind = EntityType::new(request.kind);
 
         // Build a ContentOrigin for the new content block (if any).
@@ -259,6 +275,27 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         let mut entity = self.verify_access(&user_id, &id).await?;
         entity.name = Some(name.to_string());
         self.stores.entity().update_entity(&id, &entity).await
+    }
+
+    async fn change_entity_kind(
+        &self,
+        ctx: &RequestContext,
+        entity_id: &str,
+        new_kind: &str,
+    ) -> anyhow::Result<()> {
+        let user_id = Self::require_user(ctx)?;
+        if !is_user_creatable_kind(new_kind) {
+            anyhow::bail!(
+                "entity kind `{}` cannot be set from the public API (must start with `document::`)",
+                new_kind
+            );
+        }
+        let id = EntityId::from_string(entity_id);
+        self.verify_access(&user_id, &id).await?;
+        self.stores
+            .entity()
+            .set_entity_type(&id, EntityType::new(new_kind))
+            .await
     }
 
     async fn delete_entity(

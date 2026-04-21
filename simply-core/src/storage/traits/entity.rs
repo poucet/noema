@@ -74,8 +74,17 @@ pub trait EntityStore: Send + Sync {
     /// Update an entity's mutable fields
     ///
     /// Updates name, is_private, content_block_id, origin, metadata.
-    /// Entity type and user_id cannot be changed.
+    /// Entity type and user_id cannot be changed here — use
+    /// [`set_entity_type`](Self::set_entity_type) for type changes.
     async fn update_entity(&self, id: &EntityId, entity: &Entity) -> Result<()>;
+
+    /// Change an entity's `entity_type` in place.
+    ///
+    /// Carved out of [`update_entity`](Self::update_entity) because it's a
+    /// deliberately loud operation: conversion between kinds (note → todo,
+    /// flat → tabbed) changes how UIs render and how RAG treats the entity.
+    /// The entity id is preserved so inbound relations survive.
+    async fn set_entity_type(&self, id: &EntityId, new_type: EntityType) -> Result<()>;
 
     /// Delete an entity permanently
     ///

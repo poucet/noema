@@ -149,6 +149,60 @@ export interface UpdateTabRequest {
   content: string;
 }
 
+// --- Entity API (UCM-unified) ---
+
+export interface EntitySummary {
+  id: string;
+  kind: string;
+  title: string | null;
+  origin: string | null;
+  userId: string | null;
+  ownerEmail: string | null;
+  isPrivate: boolean;
+  createdAt: number;
+  updatedAt: number;
+  hasContent: boolean;
+  childCounts: Record<string, number>;
+}
+
+export interface ChildEntity {
+  summary: EntitySummary;
+  position: number | null;
+}
+
+export interface EntityContent {
+  entityId: string;
+  contentMarkdown: string | null;
+  referencedAssets: string[];
+}
+
+export interface CreateEntityRequest {
+  kind: string;
+  title: string | null;
+  content: string | null;
+  origin: string | null;
+  referencedAssets: string[];
+}
+
+export interface UpdateEntityContentRequest {
+  content: string;
+  referencedAssets: string[];
+}
+
+export interface AddChildRequest {
+  parentId: string;
+  childId: string;
+  relation: string;
+  position: number | null;
+}
+
+export interface MoveChildRequest {
+  childId: string;
+  newParentId: string;
+  newPosition: number;
+  relation: string;
+}
+
 export interface McpServerInfo {
   id: string;
   name: string;

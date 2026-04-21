@@ -49,7 +49,13 @@
   });
 
   onDestroy(() => {
-    clearTimeout(saveTimeout);
+    // Flush any pending save before tearing down so edits aren't lost when
+    // the user switches from Edit to Rendered mode before the debounce fires.
+    if (saveTimeout !== undefined && view) {
+      clearTimeout(saveTimeout);
+      saveTimeout = undefined;
+      onsave(view.state.doc.toString());
+    }
     view?.destroy();
   });
 

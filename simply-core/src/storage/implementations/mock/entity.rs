@@ -33,6 +33,9 @@ impl EntityStore for MockEntityStore {
     async fn update_entity(&self, _: &EntityId, _: &crate::storage::types::Entity) -> Result<()> {
         unimplemented!()
     }
+    async fn set_entity_type(&self, _: &EntityId, _: EntityType) -> Result<()> {
+        unimplemented!()
+    }
     async fn delete_entity(&self, _: &EntityId) -> Result<()> {
         unimplemented!()
     }

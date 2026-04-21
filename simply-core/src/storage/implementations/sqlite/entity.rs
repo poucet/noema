@@ -315,6 +315,16 @@ impl EntityStore for SqliteStore {
         Ok(())
     }
 
+    async fn set_entity_type(&self, id: &EntityId, new_type: EntityType) -> Result<()> {
+        let conn = self.conn().lock().unwrap();
+        let now = unix_timestamp();
+        conn.execute(
+            "UPDATE entities SET entity_type = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_type.as_str(), now, id.as_str()],
+        )?;
+        Ok(())
+    }
+
     async fn delete_entity(&self, id: &EntityId) -> Result<()> {
         let conn = self.conn().lock().unwrap();
 

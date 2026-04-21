@@ -194,6 +194,15 @@ impl EntityStore for MemoryEntityStore {
         Ok(())
     }
 
+    async fn set_entity_type(&self, id: &EntityId, new_type: EntityType) -> Result<()> {
+        let mut entities = self.entities.lock().unwrap();
+        if let Some(entry) = entities.get_mut(id.as_str()) {
+            entry.entity_type = new_type;
+            entry.updated_at = now();
+        }
+        Ok(())
+    }
+
     async fn delete_entity(&self, id: &EntityId) -> Result<()> {
         // Remove relations
         {
