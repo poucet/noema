@@ -16,9 +16,3 @@ logs/
 tests/results/
 .venv/
 etc/mlx-voice/.venv/
-
-# voice-clone sample outputs
-*.sample.mp3
-*.sample.wav
-sample.mp3
-sample.wav
