@@ -466,16 +466,24 @@ impl DiscordSkill {
             .map(|id| SerenityChannelId::new(id))
             .unwrap_or(voice_channel);
 
-        let base_ctx = ctx.clone();
-        voice_mgr.join_voice(
-            base_ctx, guild_id, voice_channel, text_channel,
+        let outcome = voice_mgr.join_voice(
+            ctx.clone(), guild_id, voice_channel, text_channel,
             Vec::new(), self.http().clone(),
         ).await?;
 
+        let (already, channel_used) = match outcome {
+            crate::voice::JoinOutcome::Joined => (false, voice_channel),
+            crate::voice::JoinOutcome::AlreadyJoined { voice_channel: ch } => (true, ch),
+        };
         Ok(json!({
             "status": "success",
-            "voice_channel_id": voice_channel.get().to_string(),
-            "message": "Joined voice channel and started listening.",
+            "already_in_voice": already,
+            "voice_channel_id": channel_used.get().to_string(),
+            "message": if already {
+                "Already in a voice channel in this server — reusing the existing session."
+            } else {
+                "Joined voice channel and started listening."
+            },
         }))
     }
 

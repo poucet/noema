@@ -26,6 +26,13 @@ use tokio::sync::Mutex;
 /// the command layout.
 const VOICE_LISTEN_SYSTEM_PROMPT: &str = include_str!("system_prompt.md");
 
+/// Result of a `VoiceManager::join_voice` call — tells the caller whether we
+/// actually joined fresh or reused an existing session.
+pub enum JoinOutcome {
+    Joined,
+    AlreadyJoined { voice_channel: ChannelId },
+}
+
 /// Active voice session for a guild.
 pub struct VoiceSession {
     /// The text channel where transcripts are posted.
@@ -121,12 +128,19 @@ impl VoiceManager {
         lumina_cfg.save()
     }
 
+    /// Whether there's an active voice session in this guild.
+    pub async fn has_session(&self, guild_id: &GuildId) -> bool {
+        self.sessions.lock().await.contains_key(guild_id)
+    }
+
     /// Connect to a guild's voice channel and start a Listen-mode conversation.
     ///
-    /// Connects via songbird, creates a daemon session (seeded with `seed` and
-    /// the shared voice system prompt), and wires up the STT/LLM/TTS pipeline
-    /// via `start_session`. Used by both `/voice join` and the `join_voice`
-    /// skill tool.
+    /// Idempotent: if there's already a Listen session in this guild, returns
+    /// `AlreadyJoined` without touching songbird or creating a new daemon
+    /// session. Otherwise connects via songbird, creates a daemon session
+    /// (seeded with `seed` and the shared voice system prompt), and wires up
+    /// the STT/LLM/TTS pipeline via `start_session`. Used by both
+    /// `/voice join` and the `join_voice` skill tool.
     pub async fn join_voice(
         self: &Arc<Self>,
         base_ctx: RequestContext,
@@ -135,7 +149,17 @@ impl VoiceManager {
         text_channel: ChannelId,
         seed: Vec<SeedMessage>,
         http: Arc<serenity::http::Http>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<JoinOutcome> {
+        // Already in a voice session for this guild — don't create a second one.
+        if let Some(existing) = self.sessions.lock().await.get(&guild_id) {
+            tracing::info!(
+                guild_id = %guild_id,
+                existing_channel = %existing.voice_channel,
+                "voice_manager: already in voice, reusing session"
+            );
+            return Ok(JoinOutcome::AlreadyJoined { voice_channel: existing.voice_channel });
+        }
+
         let songbird = self.songbird.get()
             .ok_or_else(|| anyhow::anyhow!("Songbird not initialized"))?;
         let call = songbird.join(guild_id, voice_channel).await?;
@@ -163,7 +187,8 @@ impl VoiceManager {
             guild_id, voice_channel, text_channel,
             VoiceMode::Listen, Some(session),
             call, http,
-        ).await
+        ).await?;
+        Ok(JoinOutcome::Joined)
     }
 
     /// Start a voice session and register the audio receive handler on the songbird Call.

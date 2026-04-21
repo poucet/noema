@@ -50,12 +50,16 @@ mod voice {
         let history = load_channel_seed(lx, cmd.channel_id).await;
         let base_ctx = lx.ctx_for(cmd.user.id.get()).await;
 
-        voice_mgr.join_voice(
+        let outcome = voice_mgr.join_voice(
             base_ctx, guild_id, voice_channel, voice_channel,
             history, Arc::clone(&lx.http),
         ).await?;
 
-        lx.reply(cmd, "Joined voice. Listening for conversation...").await
+        let reply = match outcome {
+            crate::voice::JoinOutcome::Joined => "Joined voice. Listening for conversation...",
+            crate::voice::JoinOutcome::AlreadyJoined { .. } => "Already in a voice channel here.",
+        };
+        lx.reply(cmd, reply).await
     }
 
     #[sub_command(description = "Speak text in the voice channel via TTS")]
