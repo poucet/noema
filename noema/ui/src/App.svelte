@@ -1,8 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport, coreApi } from '@simply/client';
+  import {
+    getTransport,
+    setCurrentUser,
+    coreApi,
+    conversationApi,
+    type ConversationInfo,
+  } from '@simply/client';
   import ActivityBar, { type ActivityId } from './lib/ActivityBar.svelte';
   import SidePanel from './lib/SidePanel.svelte';
+
+  const t = getTransport();
+  const core = coreApi(t);
+  const conversations$api = conversationApi(t);
 
   let active = $state<ActivityId>('conversations');
   let showSettings = $state(false);
@@ -11,15 +21,62 @@
   let daemonVersion = $state<string | null>(null);
   let daemonError = $state<string | null>(null);
 
-  onMount(async () => {
+  let conversations = $state<ConversationInfo[]>([]);
+  let currentConversationId = $state<string | null>(null);
+
+  async function refreshConversations() {
+    conversations = await conversations$api.listConversations();
+  }
+
+  async function syncAdminUserId() {
+    const internals = (window as any).__TAURI_INTERNALS__;
+    if (!internals || typeof internals.invoke !== 'function') return;
     try {
-      daemonVersion = await coreApi(getTransport()).version();
+      const userId = await internals.invoke('admin_user_id');
+      if (typeof userId === 'string' && userId.length > 0) setCurrentUser(userId);
+    } catch (e) {
+      console.warn('[noema] failed to fetch admin user id', e);
+    }
+  }
+
+  onMount(async () => {
+    await syncAdminUserId();
+    try {
+      daemonVersion = await core.version();
       daemonStatus = 'ok';
     } catch (e) {
       daemonStatus = 'error';
       daemonError = e instanceof Error ? e.message : String(e);
+      return;
+    }
+    try {
+      await refreshConversations();
+      if (conversations.length > 0) currentConversationId = conversations[0].id;
+    } catch (e) {
+      console.error('[noema] failed to load conversations', e);
     }
   });
+
+  async function handleNewConversation() {
+    const id = await conversations$api.createConversation(null);
+    await refreshConversations();
+    currentConversationId = id;
+  }
+
+  function handleSelectConversation(id: string) {
+    currentConversationId = id;
+  }
+
+  async function handleRenameConversation(id: string, name: string) {
+    await conversations$api.renameConversation(id, name);
+    await refreshConversations();
+  }
+
+  async function handleDeleteConversation(id: string) {
+    await conversations$api.deleteConversation(id);
+    if (currentConversationId === id) currentConversationId = null;
+    await refreshConversations();
+  }
 </script>
 
 <div class="flex h-screen bg-background">
@@ -29,7 +86,15 @@
     onOpenSettings={() => (showSettings = true)}
   />
 
-  <SidePanel {active} />
+  <SidePanel
+    {active}
+    {conversations}
+    {currentConversationId}
+    onNewConversation={handleNewConversation}
+    onSelectConversation={handleSelectConversation}
+    onRenameConversation={handleRenameConversation}
+    onDeleteConversation={handleDeleteConversation}
+  />
 
   <div class="flex min-w-0 flex-1 flex-col">
     <div class="flex items-center justify-between border-b border-gray-700 bg-background px-4 py-3">
@@ -47,9 +112,15 @@
     </div>
 
     <div class="flex flex-1 items-center justify-center">
-      <p class="text-muted">
-        {active === 'conversations' ? 'Chat area lands here.' : 'Document view lands here.'}
-      </p>
+      {#if active === 'conversations'}
+        {#if currentConversationId}
+          <p class="text-muted">Chat for {currentConversationId} lands here.</p>
+        {:else}
+          <p class="text-muted">Select or create a conversation.</p>
+        {/if}
+      {:else}
+        <p class="text-muted">Document view lands here.</p>
+      {/if}
     </div>
   </div>
 

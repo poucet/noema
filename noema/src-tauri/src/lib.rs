@@ -85,6 +85,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::init::init_app,
             commands::init::daemon_base_url,
+            commands::init::admin_user_id,
             logging::log_debug,
         ])
         .run(tauri::generate_context!())

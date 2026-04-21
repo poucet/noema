@@ -44,6 +44,21 @@ pub async fn init_app(state: State<'_, Arc<AppState>>) -> Result<String, String>
     run_init(state.inner().clone()).await
 }
 
+/// Return the admin user id resolved during init, if any. The webview uses
+/// this to set `localStorage['simply-admin-user-id']` so `@simply/client`
+/// sends the right `X-Request-Context` header on REST calls — matching the
+/// identity embedded-daemon handlers use via `state.admin_ctx`.
+#[tauri::command]
+pub async fn admin_user_id(state: State<'_, Arc<AppState>>) -> Result<Option<String>, String> {
+    for _ in 0..300 {
+        if let Some(ctx) = state.admin_ctx.get() {
+            return Ok(ctx.scope.user_id.clone());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Err("Daemon init timed out".to_string())
+}
+
 async fn do_init(state: Arc<AppState>) -> Result<String, String> {
     log_message("Starting app initialization");
 
@@ -77,15 +92,21 @@ async fn do_init(state: Arc<AppState>) -> Result<String, String> {
         .unwrap_or_else(|_| reqwest::Client::new());
     let _ = state.http_client.set(http_client);
 
-    // Resolve admin identity from settings
-    let admin_external_id = settings.user_email
-        .as_deref()
-        .map(|e| format!("email:{e}"))
-        .unwrap_or_else(|| "noema:admin".to_string());
-    let admin_scope = daemon.user()
-        .resolve_or_create_user(&simply_rpc::RequestContext::anonymous(), admin_external_id)
-        .await
-        .unwrap_or_default();
+    // Resolve admin identity from settings. Prefer the email-based lookup so
+    // we share a user row with admin's "Create user" flow (both go through
+    // `user_store.get_or_create_user_by_email`). Only fall back to the
+    // external-id map when no email is configured yet.
+    let anon = simply_rpc::RequestContext::anonymous();
+    let admin_scope = match settings.user_email.as_deref() {
+        Some(email) => daemon.user()
+            .get_or_create_user_by_email(&anon, email.to_string())
+            .await
+            .unwrap_or_default(),
+        None => daemon.user()
+            .resolve_or_create_user(&anon, "noema:admin".to_string())
+            .await
+            .unwrap_or_default(),
+    };
     let admin_ctx = simply_rpc::RequestContext::with_scope(admin_scope);
     let _ = state.admin_ctx.set(admin_ctx.clone());
 

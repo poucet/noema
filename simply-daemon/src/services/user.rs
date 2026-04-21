@@ -77,5 +77,11 @@ where
         let user = self.stores.user().resolve_or_create_external_user(&external_id).await?;
         Ok(simply_rpc::Scope::user(user.id.as_str()))
     }
+
+    async fn get_or_create_user_by_email(&self, _ctx: &RequestContext, email: String) -> anyhow::Result<simply_rpc::Scope> {
+        use simply_core::storage::traits::UserStore;
+        let user = self.stores.user().get_or_create_user_by_email(&email).await?;
+        Ok(simply_rpc::Scope::user(user.id.as_str()))
+    }
 }
 
