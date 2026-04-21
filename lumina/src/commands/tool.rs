@@ -628,122 +628,11 @@ async fn send_tool_result(
     Ok(())
 }
 
-/// Format a JSON value into a human-readable Discord-friendly string.
-pub fn format_tool_output(text: &str) -> String {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
-        return text.to_string();
-    };
-
-    match &value {
-        serde_json::Value::Array(items) => format_array(items),
-        serde_json::Value::Object(obj) => format_object(obj, 0),
-        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| text.to_string()),
-    }
-}
-
-fn format_array(items: &[serde_json::Value]) -> String {
-    let mut lines = Vec::new();
-    lines.push(format!("**{} items:**", items.len()));
-
-    for (i, item) in items.iter().enumerate() {
-        if let serde_json::Value::Object(obj) = item {
-            // Try to find a good label: name, id, title
-            let label_key = ["name", "title", "id"].iter()
-                .find(|&&k| obj.contains_key(k))
-                .copied();
-
-            let label = label_key.and_then(|k| obj.get(k)).and_then(|v| match v {
-                serde_json::Value::String(s) => Some(s.as_str()),
-                serde_json::Value::Object(inner) => inner.values().find_map(|v| v.as_str()),
-                _ => None,
-            });
-
-            if let Some(label) = label {
-                // Don't wrap in bold if label is a URL or has markdown
-                if label.starts_with("http") || label.contains('[') || label.contains('*') {
-                    lines.push(format!("{}. {}", i + 1, label));
-                } else {
-                    lines.push(format!("{}. **{}**", i + 1, label));
-                }
-            } else {
-                lines.push(format!("{}.", i + 1));
-            }
-
-            // Show key fields inline, skip the one used as label
-            for (key, val) in obj {
-                if label_key == Some(key.as_str()) { continue; }
-                match val {
-                    serde_json::Value::String(s) => {
-                        lines.push(format!("   {key}: {s}"));
-                    }
-                    serde_json::Value::Bool(b) => {
-                        lines.push(format!("   {key}: {b}"));
-                    }
-                    serde_json::Value::Number(n) => {
-                        lines.push(format!("   {key}: {n}"));
-                    }
-                    serde_json::Value::Array(arr) => {
-                        let summary: Vec<String> = arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect();
-                        if !summary.is_empty() {
-                            lines.push(format!("   {key}: {}", summary.join(", ")));
-                        }
-                    }
-                    serde_json::Value::Object(inner) => {
-                        // Flatten simple inner objects (like "id": {"provider": "x", "model": "y"})
-                        let flat: Vec<String> = inner.iter()
-                            .filter_map(|(k, v)| v.as_str().map(|s| format!("{k}: {s}")))
-                            .collect();
-                        if !flat.is_empty() {
-                            lines.push(format!("   {key}: {}", flat.join(", ")));
-                        }
-                    }
-                    serde_json::Value::Null => {}
-                }
-            }
-        } else if let Some(s) = item.as_str() {
-            lines.push(format!("{}. {s}", i + 1));
-        } else {
-            lines.push(format!("{}. {}", i + 1, item));
-        }
-    }
-
-    lines.join("\n")
-}
-
-fn format_object(obj: &serde_json::Map<String, serde_json::Value>, indent: usize) -> String {
-    let prefix = "  ".repeat(indent);
-    let mut lines = Vec::new();
-    for (key, val) in obj {
-        match val {
-            serde_json::Value::String(s) => lines.push(format!("{prefix}**{key}:** {s}")),
-            serde_json::Value::Bool(b) => lines.push(format!("{prefix}**{key}:** {b}")),
-            serde_json::Value::Number(n) => lines.push(format!("{prefix}**{key}:** {n}")),
-            serde_json::Value::Null => lines.push(format!("{prefix}**{key}:** —")),
-            serde_json::Value::Array(arr) if arr.is_empty() => lines.push(format!("{prefix}**{key}:** (empty)")),
-            serde_json::Value::Array(arr) => {
-                let simple: Vec<String> = arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
-                if simple.len() == arr.len() {
-                    lines.push(format!("{prefix}**{key}:** {}", simple.join(", ")));
-                } else {
-                    // Expand arrays of objects inline
-                    lines.push(format!("{prefix}**{key}:**"));
-                    lines.push(format_array(arr));
-                }
-            }
-            serde_json::Value::Object(inner) => {
-                lines.push(format!("{prefix}**{key}:**"));
-                lines.push(format_object(inner, indent + 1));
-            }
-        }
-    }
-    lines.join("\n")
-}
-
 /// Send a ToolService result (Vec<ToolResultContent>) as a Discord response.
+///
+/// Defers the Command target's interaction (tool calls may take time),
+/// then delegates formatting/pagination to `tool_render` so the `/tool`
+/// surface and the voice session receiver render MCP results identically.
 async fn send_tool_result_from_service(
     lx: &LuminaContext,
     target: impl Into<SendTarget<'_>>,
@@ -751,8 +640,6 @@ async fn send_tool_result_from_service(
     result: anyhow::Result<Vec<simply_daemon_api::ToolResultContent>>,
 ) -> anyhow::Result<()> {
     let target = target.into();
-
-    // Defer the response first (tool calls may take time)
     let channel_id = match &target {
         SendTarget::Channel(id) => *id,
         SendTarget::Command(cmd) => {
@@ -763,65 +650,10 @@ async fn send_tool_result_from_service(
         }
     };
 
-    match result {
-        Ok(content) => {
-            use simply_daemon_api::ToolResultContent;
-            use base64::Engine;
+    crate::tool_render::render_tool_result_to_channel(
+        &lx.http, &lx.ctx.shard, channel_id, tool_name, result,
+    ).await?;
 
-            let mut text_parts = Vec::new();
-            let mut attachments: Vec<serenity::builder::CreateAttachment> = Vec::new();
-
-            for c in &content {
-                match c {
-                    ToolResultContent::Text { text } => text_parts.push(text.as_str()),
-                    ToolResultContent::Image { data, mime_type } => {
-                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
-                            let ext = mime_type.split('/').last().unwrap_or("png");
-                            attachments.push(serenity::builder::CreateAttachment::bytes(
-                                bytes, format!("asset.{ext}"),
-                            ));
-                        }
-                    }
-                    ToolResultContent::Audio { data, mime_type } => {
-                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
-                            let ext = mime_type.split('/').last().unwrap_or("wav");
-                            attachments.push(serenity::builder::CreateAttachment::bytes(
-                                bytes, format!("audio.{ext}"),
-                            ));
-                        }
-                    }
-                }
-            }
-
-            if !attachments.is_empty() {
-                let mut msg = CreateMessage::new();
-                for a in attachments {
-                    msg = msg.add_file(a);
-                }
-                if !text_parts.is_empty() {
-                    msg = msg.content(text_parts.join("\n"));
-                }
-                channel_id.send_message(&lx.http, msg).await?;
-            } else {
-                let raw_text = text_parts.join("\n");
-                let formatted = format_tool_output(&raw_text);
-                let pages = crate::paginator::paginate_text(&formatted, 1800);
-
-                crate::paginator::send_paginated_embeds_to_channel(
-                    lx, channel_id, tool_name, &pages, Duration::from_secs(120),
-                ).await?;
-            }
-        }
-        Err(e) => {
-            let embed = CreateEmbed::new()
-                .title(format!("Tool: {tool_name} (error)"))
-                .description(format!("{e}"))
-                .color(0xE74C3C);
-            channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
-        }
-    }
-
-    // Clean up the deferred "thinking" message
     if let SendTarget::Command(cmd) = target {
         cmd.delete_response(&lx.http).await.ok();
     }

@@ -6,6 +6,7 @@ mod chat;
 mod commands;
 pub mod mcp;
 pub mod paginator;
+pub mod tool_render;
 pub mod voice;
 
 use std::sync::Arc;
@@ -169,6 +170,9 @@ impl EventHandler for Handler {
             if let Some(mcp) = data.get::<McpServerKey>() {
                 mcp.set_cache(ctx.cache.clone());
                 tracing::info!("injected gateway cache into lumina MCP server");
+            }
+            if let Some(voice_mgr) = data.get::<voice::VoiceManagerKey>() {
+                voice_mgr.set_shard(ctx.shard.clone());
             }
         }
 

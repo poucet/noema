@@ -313,7 +313,7 @@ async fn stream_response(
             Ok(DaemonEvent::ToolResult { id: _, result }) => {
                 let result_str = serde_json::to_string_pretty(&result).unwrap_or_default();
                 tracing::debug!(result = %truncate(&result_str, 500), "tool result");
-                let formatted = crate::commands::tool::format_tool_output(&result_str);
+                let formatted = crate::tool_render::format_tool_output(&result_str);
                 let display = truncate_for_discord(&formatted);
                 let embed = CreateEmbed::new()
                     .title("\u{1f4e6} Tool result")

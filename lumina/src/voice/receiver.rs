@@ -3,11 +3,10 @@
 //! Songbird is configured to decode to mono i16 16kHz, which matches the daemon
 //! STT format directly — no resampling needed.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base64::Engine;
-use serenity::builder::{CreateAttachment, CreateMessage};
 use serenity::model::id::{ChannelId, GuildId};
 use simply_daemon_api::{Daemon, ToolResultContent};
 use simply_voice::{AudioChunk, VoiceEvent, VoiceInput};
@@ -76,74 +75,37 @@ fn truncate_preview(s: &str, max_chars: usize) -> String {
     }
 }
 
-/// Post a `DaemonEvent::ToolResult.result` to the text channel, dispatched
-/// by content type.
+/// Post a `DaemonEvent::ToolResult.result` to the text channel using the
+/// shared renderer so voice-session tool output looks the same as the
+/// `/tool call` surface (embeds, JSON-aware pagination, attachments).
 ///
-/// The daemon ships results as the wire-format `Vec<ToolResultContent>`
-/// (MCP-style blocks). Parse that, then:
-/// - Text   → one `✅ …` text message
-/// - Image  → Discord file attachment (native previews)
-/// - Audio  → Discord file attachment
-/// Falls back to pretty-printing the raw value if it doesn't look like
-/// a Content-block array.
+/// Falls back to wrapping non-`ToolResultContent` payloads as a single
+/// text block so the renderer can still paginate them.
 async fn post_tool_result(
     result: &serde_json::Value,
-    text_channel: &ChannelId,
+    tool_name: &str,
+    text_channel: ChannelId,
     http: &Arc<serenity::http::Http>,
+    voice_mgr: &Arc<super::VoiceManager>,
 ) {
-    if let Ok(blocks) = serde_json::from_value::<Vec<ToolResultContent>>(result.clone()) {
-        let mut text_parts: Vec<String> = Vec::new();
-        let mut attachments: Vec<CreateAttachment> = Vec::new();
-
-        for block in blocks {
-            match block {
-                ToolResultContent::Text { text } => {
-                    // MCP tool responses are commonly JSON stuffed into a text
-                    // block — pretty-print when it parses so the channel isn't
-                    // a wall of compact one-liner.
-                    let rendered = match serde_json::from_str::<serde_json::Value>(&text) {
-                        Ok(v) if v.is_object() || v.is_array() => {
-                            serde_json::to_string_pretty(&v).unwrap_or(text)
-                        }
-                        _ => text,
-                    };
-                    text_parts.push(rendered);
-                }
-                ToolResultContent::Image { data, mime_type } => {
-                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
-                        let ext = mime_type.split('/').last().unwrap_or("png");
-                        attachments.push(CreateAttachment::bytes(bytes, format!("image.{ext}")));
-                    }
-                }
-                ToolResultContent::Audio { data, mime_type } => {
-                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data) {
-                        let ext = mime_type.split('/').last().unwrap_or("wav");
-                        attachments.push(CreateAttachment::bytes(bytes, format!("audio.{ext}")));
-                    }
-                }
-            }
+    let blocks = match serde_json::from_value::<Vec<ToolResultContent>>(result.clone()) {
+        Ok(b) => b,
+        Err(_) => {
+            let text = result.as_str().map(|s| s.to_string())
+                .unwrap_or_else(|| serde_json::to_string_pretty(result).unwrap_or_default());
+            vec![ToolResultContent::Text { text }]
         }
-
-        if !text_parts.is_empty() {
-            let body = truncate_preview(&text_parts.join("\n"), 400);
-            let _ = text_channel.say(http, format!("✅ {body}")).await;
-        }
-        if !attachments.is_empty() {
-            let mut msg = CreateMessage::new();
-            for a in attachments { msg = msg.add_file(a); }
-            let _ = text_channel.send_message(http, msg).await;
-        }
-        return;
-    }
-
-    // Not a Content-block array — fall back to stringifying the raw value.
-    let body = if let Some(s) = result.as_str() {
-        s.to_string()
-    } else {
-        serde_json::to_string_pretty(result).unwrap_or_default()
     };
-    let preview = truncate_preview(&body, 400);
-    let _ = text_channel.say(http, format!("✅ {preview}")).await;
+
+    let Some(shard) = voice_mgr.shard() else {
+        tracing::warn!("voice: shard not injected yet — tool result dropped");
+        return;
+    };
+    if let Err(e) = crate::tool_render::render_tool_result_to_channel(
+        http, shard, text_channel, tool_name, Ok(blocks),
+    ).await {
+        tracing::warn!(tool = %tool_name, error = %e, "voice: failed to post tool result");
+    }
 }
 
 /// Send one user transcript to the daemon session and collect the LLM response,
@@ -153,8 +115,9 @@ async fn post_tool_result(
 async fn process_llm_turn(
     daemon_session: &mut simply_daemon::DaemonSession,
     user_text: &str,
-    text_channel: &ChannelId,
+    text_channel: ChannelId,
     http: &Arc<serenity::http::Http>,
+    voice_mgr: &Arc<super::VoiceManager>,
 ) -> Option<String> {
     let send_result = daemon_session.send(simply_daemon_api::UserMessage {
         content: vec![simply_daemon_api::InputContent::Text { text: user_text.to_string() }],
@@ -164,19 +127,25 @@ async fn process_llm_turn(
         return None;
     }
 
+    // DaemonEvent::ToolResult only carries the tool-call id; keep the
+    // id→name mapping seen on ToolCall so we can title the result embed
+    // with the tool's name.
+    let mut tool_names: HashMap<String, String> = HashMap::new();
     let mut response_text = String::new();
     loop {
         match daemon_session.recv().await {
             Ok(simply_daemon_api::DaemonEvent::TextDelta(delta)) => {
                 response_text.push_str(&delta);
             }
-            Ok(simply_daemon_api::DaemonEvent::ToolCall { name, arguments, .. }) => {
+            Ok(simply_daemon_api::DaemonEvent::ToolCall { id, name, arguments }) => {
                 tracing::info!(tool = %name, "voice tool call");
                 let preview = truncate_preview(&serde_json::to_string(&arguments).unwrap_or_default(), 200);
                 let _ = text_channel.say(http, format!("🔧 `{name}` {preview}")).await;
+                tool_names.insert(id, name);
             }
-            Ok(simply_daemon_api::DaemonEvent::ToolResult { result, .. }) => {
-                post_tool_result(&result, text_channel, http).await;
+            Ok(simply_daemon_api::DaemonEvent::ToolResult { id, result }) => {
+                let name = tool_names.remove(&id).unwrap_or_else(|| "tool".to_string());
+                post_tool_result(&result, &name, text_channel, http, voice_mgr).await;
             }
             Ok(simply_daemon_api::DaemonEvent::TurnComplete) => break,
             Ok(simply_daemon_api::DaemonEvent::Error(e)) => {
@@ -233,7 +202,7 @@ pub fn spawn_event_handler(
                             };
 
                             let (response, daemon_session) = if let Some(mut ds) = daemon_session {
-                                let response = process_llm_turn(&mut ds, &text, &text_channel, &http).await;
+                                let response = process_llm_turn(&mut ds, &text, text_channel, &http, &voice_mgr).await;
                                 (response, Some(ds))
                             } else {
                                 (None, None)

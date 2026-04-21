@@ -13,6 +13,7 @@ mod receiver;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
+use serenity::all::ShardMessenger;
 use serenity::model::id::{ChannelId, GuildId};
 use simply_daemon_api::{
     CreateSessionOptions, Daemon, Persistence, SeedMessage, VoiceApi,
@@ -80,6 +81,10 @@ pub struct VoiceManager {
     config: Mutex<config::VoiceConfig>,
     /// Songbird handle — set once the serenity client is built.
     songbird: OnceLock<Arc<Songbird>>,
+    /// Gateway shard messenger — injected from the `ready` handler so
+    /// background voice tasks can drive interactive paginator buttons on
+    /// their own tool-result messages without needing a `LuminaContext`.
+    shard: OnceLock<ShardMessenger>,
 }
 
 impl VoiceManager {
@@ -89,6 +94,7 @@ impl VoiceManager {
             daemon,
             config: Mutex::new(voice_config),
             songbird: OnceLock::new(),
+            shard: OnceLock::new(),
         }
     }
 
@@ -99,6 +105,17 @@ impl VoiceManager {
     /// Inject the songbird manager. Call once after the serenity client is built.
     pub fn set_songbird(&self, songbird: Arc<Songbird>) {
         let _ = self.songbird.set(songbird);
+    }
+
+    /// Inject the gateway shard messenger. Call once from the `ready`
+    /// handler — background voice tasks use this to collect pagination
+    /// button interactions on their own tool-result embeds.
+    pub fn set_shard(&self, shard: ShardMessenger) {
+        let _ = self.shard.set(shard);
+    }
+
+    pub fn shard(&self) -> Option<&ShardMessenger> {
+        self.shard.get()
     }
 
     /// Stop the session and disconnect from the guild's voice channel.

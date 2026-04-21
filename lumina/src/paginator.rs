@@ -1,12 +1,15 @@
 //! Discord message paginator with navigation buttons.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use serenity::all::{
     ButtonStyle, CommandInteraction, ComponentInteractionDataKind, CreateActionRow, CreateButton,
     CreateInteractionResponse, CreateInteractionResponseMessage, EditInteractionResponse,
+    ShardMessenger,
 };
 use serenity::futures::StreamExt;
+use serenity::http::Http;
 
 use crate::commands::LuminaContext;
 
@@ -116,7 +119,8 @@ fn nav_buttons(page: usize, total: usize) -> Vec<CreateActionRow> {
 
 /// Send a paginated embed to a channel with prev/next buttons.
 pub async fn send_paginated_embeds_to_channel(
-    lx: &LuminaContext,
+    http: &Arc<Http>,
+    shard: &ShardMessenger,
     channel_id: serenity::model::id::ChannelId,
     title: &str,
     pages: &[String],
@@ -126,7 +130,7 @@ pub async fn send_paginated_embeds_to_channel(
 
     if pages.is_empty() {
         let embed = CreateEmbed::new().title(title).description("(empty)").color(0x2ECC71);
-        channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
+        channel_id.send_message(http, CreateMessage::new().embed(embed)).await?;
         return Ok(());
     }
 
@@ -145,7 +149,7 @@ pub async fn send_paginated_embeds_to_channel(
 
     let components = if total > 1 { nav_buttons(page, total) } else { vec![] };
     let msg = channel_id.send_message(
-        &lx.http,
+        http,
         CreateMessage::new().embed(make_embed(page)).components(components),
     ).await?;
 
@@ -154,7 +158,7 @@ pub async fn send_paginated_embeds_to_channel(
     }
 
     let mut collector = msg
-        .await_component_interactions(&lx.ctx.shard)
+        .await_component_interactions(shard)
         .timeout(timeout)
         .stream();
 
@@ -168,7 +172,7 @@ pub async fn send_paginated_embeds_to_channel(
 
             interaction
                 .create_response(
-                    &lx.http,
+                    http,
                     CreateInteractionResponse::UpdateMessage(
                         CreateInteractionResponseMessage::new()
                             .embed(make_embed(page))
@@ -181,7 +185,7 @@ pub async fn send_paginated_embeds_to_channel(
 
     // Remove buttons after timeout
     msg.channel_id.edit_message(
-        &lx.http,
+        http,
         msg.id,
         EditMessage::new().embed(make_embed(page)).components(vec![]),
     ).await?;
