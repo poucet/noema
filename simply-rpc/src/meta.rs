@@ -23,7 +23,7 @@ pub struct RouteMeta {
     pub kind: RouteKind,
     /// Path template, e.g. `"/session/{session_id}/message"`.
     pub path_template: &'static str,
-    /// The RPC method name (e.g. `"session.send_message"`).
+    /// The RPC method name (e.g. `"session__send_message"`).
     pub method_name: &'static str,
     /// Doc comment for tool description.
     pub description: Option<&'static str>,

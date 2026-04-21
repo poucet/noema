@@ -115,7 +115,14 @@ impl ParsedTrait {
 
             let rpc_attrs = detect_rpc_attrs(&method.attrs);
             let doc_comment = extract_doc_comment(&method.attrs);
-            let method_name = format!("{}.{}", prefix, method.sig.ident);
+            // Use `__` as the prefix/method separator (not `.`) so the name
+            // is usable as-is as an LLM tool name — Anthropic and others
+            // reject names that don't match `^[a-zA-Z0-9_-]{1,128}$`. Double
+            // underscore visually separates prefix from method while keeping
+            // the name schema-valid. The macro is the only place method
+            // names are constructed, so both sides of RPC dispatch stay in
+            // sync.
+            let method_name = format!("{}__{}", prefix, method.sig.ident);
             let params = parse_params(&method.sig)?;
 
             let return_kind = parse_return_type(&method.sig.output, &rpc_attrs.kind)?;
