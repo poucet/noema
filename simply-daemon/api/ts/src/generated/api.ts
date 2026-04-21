@@ -75,12 +75,14 @@ export const documentApi = (t: Transport) => ({
 
 // EntityApi
 export const entityApi = (t: Transport) => ({
-  /** List all entities for the authenticated user. Filter by `type_prefix` for `LIKE 'prefix%'` matching — e.g. `"document::"` for all document kinds. */
-  listEntities: (typePrefix: string | null) => t.rpc<T.EntitySummary[]>('entity.list_entities', 'GET', '/api/entity', typePrefix),
-  /** Search entities by title (case-insensitive). Optionally filter by type prefix. */
-  searchEntities: (query: string, typePrefix: string | null) => t.rpc<T.EntitySummary[]>('entity.search_entities', 'GET', `/api/entity/search/${query}`, { typePrefix }),
+  /** List all entities for the authenticated user. Filter by `type_prefix` for `LIKE 'prefix%'` matching — e.g. `"document::"` for all document kinds. If `root_of_relation` is set (e.g. `"structure::contained_in"`), returns only entities with no outgoing edge of that relation — i.e. the roots of that relation's forest. Useful for top-level document listings that should skip tabs/nested children. */
+  listEntities: (typePrefix: string | null, rootOfRelation: string | null) => t.rpc<T.EntitySummary[]>('entity.list_entities', 'GET', '/api/entity', { typePrefix, rootOfRelation }),
+  /** Search entities by title (case-insensitive). Optional `type_prefix` and `root_of_relation` filters apply the same way as for [`Self::list_entities`]. */
+  searchEntities: (query: string, typePrefix: string | null, rootOfRelation: string | null) => t.rpc<T.EntitySummary[]>('entity.search_entities', 'GET', `/api/entity/search/${query}`, { typePrefix, rootOfRelation }),
   /** Get an entity's summary (no content). */
   getEntity: (entityId: string) => t.rpc<T.EntitySummary>('entity.get_entity', 'GET', `/api/entity/${entityId}`),
+  /** Look up an entity by its `"<scheme>:<id>"` origin string. Returns `None` if no entity matches. Used by import skills to detect whether an external document already has a local entity so they can re-import (new version first, then delete the stale one). */
+  getEntityByOrigin: (origin: string) => t.rpc<T.EntitySummary | null>('entity.get_entity_by_origin', 'GET', `/api/entity/by_origin/${origin}`),
   /** Create a new entity, optionally with initial content. */
   createEntity: (request: T.CreateEntityRequest) => t.rpc<T.EntitySummary>('entity.create_entity', 'POST', '/api/entity', request),
   /** Rename an entity. */

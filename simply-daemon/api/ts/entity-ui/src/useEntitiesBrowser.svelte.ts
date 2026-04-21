@@ -55,9 +55,12 @@ export function createEntitiesBrowser(client: EntityClient | Transport) {
     loading = true;
     try {
       const prefix = typeFilter || null;
+      // `root_of_relation = contained_in` hides entities that live inside
+      // another one (tabs of a tabbed doc, files inside a folder) — they're
+      // reachable by drilling into their container.
       entities = searchQuery
-        ? await api.searchEntities(searchQuery, prefix)
-        : await api.listEntities(prefix);
+        ? await api.searchEntities(searchQuery, prefix, CONTAINED_IN)
+        : await api.listEntities(prefix, CONTAINED_IN);
     } catch (e) {
       console.error('Failed to load entities:', e);
     }

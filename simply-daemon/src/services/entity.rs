@@ -146,6 +146,30 @@ impl<S: StorageTypes> EntityService<S> {
         Ok(out)
     }
 
+    /// If `relation` is set, drop any entity that has an outgoing edge of
+    /// that relation — i.e. keep only the roots of the relation's forest.
+    /// If `relation` is `None`, pass everything through unchanged.
+    async fn filter_roots(
+        &self,
+        entities: Vec<StoredEntity>,
+        relation: Option<&str>,
+    ) -> anyhow::Result<Vec<StoredEntity>> {
+        let Some(rel_name) = relation else { return Ok(entities); };
+        let rel = RelationType::new(rel_name);
+        let mut out = Vec::with_capacity(entities.len());
+        for e in entities {
+            let outgoing = self
+                .stores
+                .entity()
+                .get_relations_from(&e.id, Some(&rel))
+                .await?;
+            if outgoing.is_empty() {
+                out.push(e);
+            }
+        }
+        Ok(out)
+    }
+
     /// Enqueue a content-bearing entity for embedding. The owning document
     /// plumbing from the legacy DocumentService goes through tab/doc ids; the
     /// entity world will be wired up by the RAG pivot (Commit 8). For now
@@ -169,6 +193,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         &self,
         ctx: &RequestContext,
         type_prefix: Option<String>,
+        root_of_relation: Option<String>,
     ) -> anyhow::Result<Vec<EntitySummary>> {
         let user_id = Self::require_user(ctx)?;
         let entities = match type_prefix.as_deref() {
@@ -177,7 +202,8 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             }
             _ => self.stores.entity().list_entities(&user_id, None).await?,
         };
-        self.entities_to_summaries(entities).await
+        let roots = self.filter_roots(entities, root_of_relation.as_deref()).await?;
+        self.entities_to_summaries(roots).await
     }
 
     async fn search_entities(
@@ -185,6 +211,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         query: &str,
         type_prefix: Option<String>,
+        root_of_relation: Option<String>,
     ) -> anyhow::Result<Vec<EntitySummary>> {
         let user_id = Self::require_user(ctx)?;
         let all = match type_prefix.as_deref() {
@@ -199,7 +226,8 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             .filter(|e| e.name.as_deref().map_or(false, |n| n.to_lowercase().contains(&needle)))
             .take(50)
             .collect();
-        self.entities_to_summaries(matching).await
+        let roots = self.filter_roots(matching, root_of_relation.as_deref()).await?;
+        self.entities_to_summaries(roots).await
     }
 
     // ----- Entity CRUD -----------------------------------------------------
@@ -213,6 +241,23 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         let id = EntityId::from_string(entity_id);
         let entity = self.verify_access(&user_id, &id).await?;
         self.to_summary(entity).await
+    }
+
+    async fn get_entity_by_origin(
+        &self,
+        ctx: &RequestContext,
+        origin: &str,
+    ) -> anyhow::Result<Option<EntitySummary>> {
+        let user_id = Self::require_user(ctx)?;
+        let entity = self
+            .stores
+            .entity()
+            .get_entity_by_origin(&user_id, origin)
+            .await?;
+        match entity {
+            Some(e) => Ok(Some(self.to_summary(e).await?)),
+            None => Ok(None),
+        }
     }
 
     async fn create_entity(

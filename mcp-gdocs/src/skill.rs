@@ -10,13 +10,12 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use base64::Engine;
 use serde::Deserialize;
 use tracing::info;
 
 use simply_daemon_api::{
     Daemon, Skill, AssetId,
-    CreateDocumentRequest, CreateTabRequest,
+    AddRelationRequest, CreateEntityRequest,
 };
 use simply_rpc::RequestContext;
 use llm::ToolDefinition;
@@ -54,27 +53,24 @@ impl GDocsSkill {
         let token = Self::get_google_token(ctx)?;
         let client = GoogleDocsClient::new(token);
         let rpc_ctx = ctx.clone();
+        let entity = self.daemon.entity();
 
         info!(doc_id = %args.doc_id, "importing Google Doc");
 
-        // Extract from Google
+        // Fetch from Google first — if this fails we leave any existing
+        // imported copy of this doc alone. Re-imports only swap in the new
+        // version after extraction + upload succeed.
         let extracted = client.extract_document(&args.doc_id).await?;
         info!(title = %extracted.title, tabs = extracted.tabs.len(), images = extracted.images.len(), "extracted");
 
-        // Create document via daemon API
-        let doc = self.daemon.document().create_document(&rpc_ctx, CreateDocumentRequest {
-            title: extracted.title.clone(),
-            document_type: Some("knowledge".to_string()),
-            content: None,
-            source_id: Some(args.doc_id.clone()),
-        }).await?;
+        let origin = format!("google_drive:{}", args.doc_id);
+        let prior = entity.get_entity_by_origin(&rpc_ctx, &origin).await?;
 
-        // Store images as assets via daemon API. Keep both AssetId (for GC refs)
-        // and BlobHash (for content URLs) per Google object_id.
+        // Store images as assets. Keep both AssetId (for GC refs) and BlobHash
+        // (for content URLs) per Google object_id.
         let mut image_map: std::collections::HashMap<String, (AssetId, String)> = std::collections::HashMap::new();
         for image in &extracted.images {
-            // `BinaryUpload.data` is `Vec<u8>` — raw bytes. Don't pre-encode;
-            // serde handles base64 for the wire via #[serde(with = "base64_bytes")].
+            // `BinaryUpload.data` is raw bytes; serde base64s it on the wire.
             let info = self.daemon.asset().store_asset(
                 &rpc_ctx,
                 simply_daemon_api::BinaryUpload {
@@ -85,7 +81,19 @@ impl GDocsSkill {
             image_map.insert(image.object_id.clone(), (info.id, info.blob_hash.as_str().to_string()));
         }
 
-        // Topological sort: parents first
+        // Create the container entity. Child tabs reference it via
+        // `structure::contained_in` — the tab is `from`, the container is `to`.
+        let doc = entity.create_entity(&rpc_ctx, CreateEntityRequest {
+            kind: "document::tabbed".to_string(),
+            title: Some(extracted.title.clone()),
+            content: None,
+            origin: Some(origin.clone()),
+            referenced_assets: Vec::new(),
+        }).await?;
+
+        // Topologically walk the tab tree: parents before children. Tabs with
+        // no `parent_tab_id` hang off the container; nested tabs hang off
+        // another tab.
         let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut pending: Vec<_> = extracted.tabs.into_iter().collect();
         let mut max_passes = pending.len() + 1;
@@ -97,9 +105,9 @@ impl GDocsSkill {
                 if let Some(ref parent) = tab.parent_tab_id {
                     if !id_map.contains_key(parent) { deferred.push(tab); continue; }
                 }
-                let parent_tab_id = tab.parent_tab_id.as_ref()
-                    .and_then(|pid| id_map.get(pid))
-                    .cloned();
+                let container_id = tab.parent_tab_id.as_ref()
+                    .and_then(|pid| id_map.get(pid).cloned())
+                    .unwrap_or_else(|| doc.id.clone());
 
                 // Substitute object refs with blob URLs, and collect AssetIds for
                 // images that actually appear in this tab's content.
@@ -118,22 +126,39 @@ impl GDocsSkill {
                     None => tab.title.clone(),
                 };
 
-                let created_tab = self.daemon.document().create_tab(&rpc_ctx, &doc.id, CreateTabRequest {
-                    title,
+                let tab_entity = entity.create_entity(&rpc_ctx, CreateEntityRequest {
+                    kind: "document::tab".to_string(),
+                    title: Some(title),
                     content: Some(content),
-                    parent_tab_id: parent_tab_id,
-                    tab_index: Some(tab.tab_index),
+                    origin: None,
                     referenced_assets,
                 }).await?;
 
-                id_map.insert(tab.source_tab_id.clone(), created_tab.id.clone());
+                entity.add_relation(&rpc_ctx, AddRelationRequest {
+                    from_id: tab_entity.id.clone(),
+                    to_id: container_id,
+                    relation: "structure::contained_in".to_string(),
+                    position: Some(tab.tab_index as i64),
+                }).await?;
+
+                id_map.insert(tab.source_tab_id.clone(), tab_entity.id);
             }
             pending = deferred;
         }
 
+        // New version is fully written — now it's safe to retire the old one.
+        // If this step fails, both versions briefly coexist at the same
+        // origin; the user's next import will find the newer one (via
+        // `get_entity_by_origin` + the stable id) and clean up.
+        if let Some(old) = prior {
+            if let Err(e) = entity.delete_entity(&rpc_ctx, &old.id).await {
+                info!(old_id = %old.id, error = %e, "gdocs_import: failed to delete prior version (new version is live)");
+            }
+        }
+
         info!(tabs = id_map.len(), images = image_map.len(), "gdocs_import: done");
         Ok(CallToolResult::success(vec![Content::text(format!(
-            "Imported '{}' with {} tabs and {} images (doc_id: {})",
+            "Imported '{}' with {} tabs and {} images (entity_id: {})",
             extracted.title, id_map.len(), image_map.len(), doc.id,
         ))]))
     }

@@ -229,7 +229,10 @@ fn generate_service_client(prefix: &str, trait_item: &syn::ItemTrait) -> String 
         let method_name = method.sig.ident.to_string();
         let doc = extract_doc_comment(&method.attrs);
         let params = parse_method_params(&method.sig);
-        let path_params = extract_path_params(&path_template);
+        // Strip `?{foo}&{bar}` — those are explicit query-param docs, the
+        // transport serialises them from the remaining call args.
+        let path_only = path_template.split('?').next().unwrap_or(&path_template);
+        let path_params = extract_path_params(path_only);
         let return_type = parse_return_type_ts(&method.sig.output);
 
         let mut ts_params = Vec::new();
@@ -248,7 +251,7 @@ fn generate_service_client(prefix: &str, trait_item: &syn::ItemTrait) -> String 
         }
 
         let params_str = ts_params.join(", ");
-        let url = build_ts_url(prefix, &path_template, &path_params);
+        let url = build_ts_url(prefix, path_only, &path_params);
 
         let body = if body_params.is_empty() {
             None

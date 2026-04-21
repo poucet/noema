@@ -219,6 +219,16 @@ export interface McpServerInfo {
   autoRetry: boolean;
 }
 
+export interface SkillInfo {
+  id: string;
+  displayName: string;
+  /** "in-process" or "remote" */
+  kind: string;
+  toolCount: number;
+  isConnected: boolean;
+  oauthProviderIds: string[];
+}
+
 export interface AddMcpServerRequest {
   id: string;
   name: string;

@@ -1,12 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport, mcpApi, oAuthApi, type McpServerInfo } from '@simply/client';
+  import { getTransport, mcpApi, openOAuthFlow } from '@simply/client';
 
   const t = getTransport();
   const mcp = mcpApi(t);
-  const oauth = oAuthApi(t);
 
-  let gdocsServer = $state<McpServerInfo | null>(null);
+  /** The Google OAuth provider id. Hardcoded here because this page is
+   *  Google-specific; the tool itself is dispatched by the daemon. */
+  const GOOGLE_PROVIDER_ID = 'google';
+
+  let hasGdocsImport = $state(false);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let success = $state<string | null>(null);
@@ -17,46 +20,27 @@
   let importing = $state<string | null>(null);
 
   onMount(async () => {
-    await findGdocsServer();
+    await checkToolAvailable();
     loading = false;
-    if (gdocsServer?.isConnected) await listDocs();
+    if (hasGdocsImport) await listDocs();
   });
 
-  async function findGdocsServer() {
+  async function checkToolAvailable() {
     try {
-      const servers = await mcp.listMcpServers();
-      for (const s of servers) {
-        if (s.name.toLowerCase().includes('gdoc') ||
-            s.name.toLowerCase().includes('google') ||
-            s.url.includes('gdocs')) {
-          gdocsServer = s;
-          return;
-        }
-      }
-    } catch (e) { console.error('[gdocs] find server:', e); }
-  }
-
-  async function connectServer() {
-    if (!gdocsServer) return;
-    try {
-      await mcp.connectMcpServer(gdocsServer.id);
-      await findGdocsServer();
-      if (gdocsServer?.isConnected) await listDocs();
-    } catch (e) { error = `Connect failed: ${e}`; }
+      const tools = await mcp.listAllTools();
+      hasGdocsImport = tools.some(t => t.name === 'gdocs_import');
+    } catch (e) { console.error('[gdocs] list tools:', e); }
   }
 
   async function reauth() {
-    if (!gdocsServer) return;
+    error = null;
     try {
-      const info = await oauth.startOauth(gdocsServer.id);
-      window.open(info.authUrl, '_blank');
-      error = null;
-      const interval = setInterval(async () => {
-        await findGdocsServer();
-        if (gdocsServer?.isConnected) { clearInterval(interval); await listDocs(); }
-      }, 3000);
-      setTimeout(() => clearInterval(interval), 120_000);
-    } catch (e) { error = `Re-auth failed: ${e}`; }
+      await openOAuthFlow(GOOGLE_PROVIDER_ID);
+      // Popup closed → token stored. Try listing again to confirm.
+      await listDocs();
+    } catch (e) {
+      error = `Auth failed: ${e}`;
+    }
   }
 
   /** Call a daemon tool and return the text result. */
@@ -70,7 +54,6 @@
   }
 
   async function listDocs() {
-    if (!gdocsServer?.isConnected) return;
     searching = true;
     error = null;
     try {
@@ -84,12 +67,10 @@
   }
 
   async function importDoc(docId: string) {
-    if (!gdocsServer?.isConnected) return;
     importing = docId;
     error = null;
     success = null;
     try {
-      // Call gdocs_import skill tool — handles everything
       const text = await callTool('gdocs_import', { doc_id: docId });
       success = text;
     } catch (e) {
@@ -98,12 +79,16 @@
     }
     importing = null;
   }
+
+  const looksLikeAuthError = $derived(
+    !!error && /scope|auth|403|forbidden|authenticate|token/i.test(error),
+  );
 </script>
 
 <div class="space-y-4">
   <h2 class="text-lg font-medium">Google Docs Import</h2>
 
-  {#if error}
+  {#if error && !looksLikeAuthError}
     <div class="px-3 py-2 bg-red-900/30 text-red-300 text-xs rounded">
       {error}
       <button class="ml-2 underline" onclick={() => error = null}>dismiss</button>
@@ -115,25 +100,18 @@
 
   {#if loading}
     <div class="text-sm text-muted">Loading...</div>
-  {:else if !gdocsServer}
+  {:else if !hasGdocsImport}
     <div class="border border-border rounded-lg p-4 text-sm text-muted">
-      <p>No Google Docs MCP server found.</p>
-      <p class="mt-2 text-xs">Add one in <a href="/settings" class="text-accent hover:underline">Settings → MCP Servers</a>.</p>
-    </div>
-  {:else if !gdocsServer.isConnected}
-    <div class="border border-border rounded-lg p-4 text-sm">
-      <p class="text-muted">Google Docs server found but not connected.</p>
-      {#if gdocsServer.needsOauthLogin}
-        <p class="text-xs text-muted/50 mt-1">OAuth login required — connect from <a href="/settings" class="text-accent hover:underline">Settings</a>.</p>
-      {:else}
-        <button class="mt-2 text-xs px-3 py-1 rounded bg-accent/20 text-accent hover:bg-accent/30" onclick={connectServer}>Connect</button>
-      {/if}
+      <p>The <code>gdocs_import</code> tool isn't registered with the daemon.</p>
+      <p class="mt-2 text-xs">Start a client that provides it (e.g. Lumina ships the GDocs skill) and retry.</p>
     </div>
   {:else}
-    {#if error?.includes('scope') || error?.includes('auth') || error?.includes('403') || error?.includes('Forbidden') || error?.includes('authenticate')}
+    {#if looksLikeAuthError}
       <div class="border border-yellow-800 bg-yellow-900/20 rounded-lg p-3 text-sm">
-        <p class="text-yellow-300">OAuth token may have insufficient permissions.</p>
-        <button class="mt-2 text-xs px-3 py-1 rounded bg-accent/20 text-accent hover:bg-accent/30" onclick={reauth}>Re-authenticate with Google</button>
+        <p class="text-yellow-300">Looks like a Google auth issue.</p>
+        <button class="mt-2 text-xs px-3 py-1 rounded bg-accent/20 text-accent hover:bg-accent/30" onclick={reauth}>
+          Re-authenticate with Google
+        </button>
       </div>
     {/if}
 
@@ -171,7 +149,7 @@
       </div>
     {:else if !searching}
       <div class="text-xs text-muted/50 text-center py-4">
-        No documents found. Make sure the Google Docs server is authenticated.
+        No documents found. Make sure you've authenticated with Google.
       </div>
     {/if}
   {/if}

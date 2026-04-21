@@ -28,14 +28,31 @@ pub enum HttpMethod {
     Stream,
 }
 
-/// Endpoint info parsed from annotations like `#[rpc(get = "/path/{param}")]`
-/// or `#[rpc(stream = "/path")]`.
+/// Endpoint info parsed from annotations like `#[rpc(get = "/path/{param}")]`,
+/// `#[rpc(stream = "/path")]`, or with explicit query params
+/// `#[rpc(get = "/path/{id}?{filter}&{limit}")]`.
+///
+/// The underlying router (`matchit`) only matches on paths — the `?...`
+/// suffix is a documentation layer. At dispatch time the server parses the
+/// URL's real query string into a JSON object, which the macro-generated
+/// param extraction then sees alongside path params.
 #[derive(Debug, Clone)]
 pub struct RestEndpoint {
     pub http_method: HttpMethod,
+    /// The original template including any `?{…}&{…}` suffix. Kept for docs
+    /// and for client URL construction (which substitutes `{path}` params
+    /// and then appends query params from the call args).
     pub path_template: String,
-    /// Parameter names extracted from `{name}` segments in the path.
+    /// Just the path portion, with `?…` stripped. This is what the router
+    /// (matchit) sees and what goes into `RouteMeta.path_template` at
+    /// runtime.
+    pub match_path: String,
+    /// Parameter names extracted from `{name}` segments in the path portion.
     pub path_params: Vec<String>,
+    /// Parameter names declared in the explicit `?{a}&{b}…` suffix, in
+    /// declaration order. Documentation / tooling; the server still finds
+    /// them via the URL query string at dispatch time.
+    pub query_params: Vec<String>,
 }
 
 /// Classification of a method's RPC behavior.
@@ -63,6 +80,10 @@ pub struct ParsedParam {
     pub is_context: bool,
     /// The owned type for deserialization (e.g. `String` for `&str`, `T` for `&T`).
     pub owned_type: Type,
+    /// Whether the param's owned type is `Option<T>`. Missing fields on
+    /// dispatch decode as `None` rather than erroring — this lets GET query
+    /// strings omit optional filters naturally.
+    pub is_optional: bool,
 }
 
 /// A fully parsed trait method.
@@ -198,7 +219,8 @@ fn extract_path_params(path: &str) -> Vec<String> {
     params
 }
 
-/// Try to parse a route annotation like `get = "/path"` or `stream = "/path"`.
+/// Try to parse a route annotation like `get = "/path"`, `stream = "/path"`,
+/// or `get = "/path/{id}?{name}&{limit}"` (explicit query params).
 fn try_parse_rest(key: &str, value: &str) -> Option<RestEndpoint> {
     let http_method = match key {
         "get" => HttpMethod::Get,
@@ -208,12 +230,34 @@ fn try_parse_rest(key: &str, value: &str) -> Option<RestEndpoint> {
         "stream" => HttpMethod::Stream,
         _ => return None,
     };
-    let path_params = extract_path_params(value);
+    // Split the route into `<path>?<query>` if present. The path portion is
+    // what matchit uses to route; the query portion is documentation-only
+    // metadata for the macro to cross-check against method parameters.
+    let (path_part, query_params) = match value.split_once('?') {
+        Some((p, q)) => (p, extract_query_params(q)),
+        None => (value, Vec::new()),
+    };
+    let path_params = extract_path_params(path_part);
     Some(RestEndpoint {
         http_method,
         path_template: value.to_string(),
+        match_path: path_part.to_string(),
         path_params,
+        query_params,
     })
+}
+
+/// Extract the names inside `{foo}` segments from a `?{foo}&{bar}` suffix.
+fn extract_query_params(query: &str) -> Vec<String> {
+    query
+        .split('&')
+        .filter_map(|part| {
+            let part = part.trim();
+            let start = part.find('{')?;
+            let end = part.find('}')?;
+            Some(part[start + 1..end].to_string())
+        })
+        .collect()
 }
 
 /// Detect `#[rpc(...)]` attributes on a method.
@@ -314,6 +358,7 @@ fn parse_params(sig: &syn::Signature) -> syn::Result<Vec<ParsedParam>> {
         let ty = *pat_type.ty.clone();
         let (is_ref, is_str_ref, owned_type) = analyze_type(&ty);
         let is_context = is_request_context_type(&ty);
+        let is_optional = is_option_type(&owned_type);
 
         params.push(ParsedParam {
             name,
@@ -322,6 +367,7 @@ fn parse_params(sig: &syn::Signature) -> syn::Result<Vec<ParsedParam>> {
             is_str_ref,
             is_context,
             owned_type,
+            is_optional,
         });
     }
 
@@ -337,6 +383,16 @@ fn is_request_context_type(ty: &Type) -> bool {
         Type::Reference(ref_type) => is_request_context_type(&ref_type.elem),
         _ => false,
     }
+}
+
+/// Check if a type is `Option<T>` (or any path ending in `Option`).
+fn is_option_type(ty: &Type) -> bool {
+    if let Type::Path(path) = ty {
+        if let Some(seg) = path.path.segments.last() {
+            return seg.ident == "Option";
+        }
+    }
+    false
 }
 
 /// Determine if a type is a reference and compute its owned form.

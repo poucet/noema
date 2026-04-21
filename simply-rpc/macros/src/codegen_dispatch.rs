@@ -93,7 +93,9 @@ pub fn generate(parsed: &ParsedTrait) -> syn::Result<TokenStream> {
         .filter_map(|m| {
             let endpoint = m.rest_endpoint.as_ref()?;
             let kind = route_kind_tokens(&endpoint.http_method);
-            let path = &endpoint.path_template;
+            // matchit only understands the path portion — the optional
+            // `?{foo}&{bar}` suffix is documentation stripped at parse time.
+            let path = &endpoint.match_path;
             let method_name = &m.method_name;
             let description = match &m.doc_comment {
                 Some(doc) => quote! { Some(#doc) },
@@ -457,6 +459,20 @@ fn generate_rest_dispatch_arms(parsed: &ParsedTrait) -> TokenStream {
                                     Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
                                 },
                                 None => return Some(Err(::anyhow::anyhow!("missing field: {}", #name_str))),
+                            };
+                        });
+                    } else if p.is_optional {
+                        // `Option<T>` params default to `None` when absent —
+                        // lets GET query strings omit optional filters
+                        // naturally instead of requiring the caller to
+                        // always pass every field.
+                        param_bindings.push(quote! {
+                            let #name: #owned_type = match params.get(#name_str) {
+                                Some(v) => match ::serde_json::from_value(v.clone()) {
+                                    Ok(v) => v,
+                                    Err(e) => return Some(Err(::anyhow::anyhow!("deserialize '{}': {}", #name_str, e))),
+                                },
+                                None => None,
                             };
                         });
                     } else {

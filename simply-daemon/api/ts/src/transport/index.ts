@@ -72,6 +72,38 @@ export interface Transport {
 }
 
 // ---------------------------------------------------------------------------
+// OAuth popup flow
+// ---------------------------------------------------------------------------
+
+/**
+ * Open the daemon's unified OAuth init endpoint in a popup and wait for it
+ * to close. Works for both MCP server OAuth and skill-provider OAuth — the
+ * daemon resolves `id` as either via `resolve_for_auth`.
+ *
+ * `externalId` tags the flow initiator (Discord passes `discord:<snowflake>`,
+ * Slack would pass `slack:<team>:<user>`, etc). For the web admin we use the
+ * constant `admin:web` — the user's actual identity is resolved from the
+ * provider's userinfo email in the callback.
+ *
+ * Resolves when the popup closes (the daemon's success page auto-closes the
+ * window after ~1.5s). Rejects only if the popup was blocked.
+ */
+export async function openOAuthFlow(
+  id: string,
+  externalId: string = 'admin:web',
+): Promise<void> {
+  const base = getBaseUrl();
+  const url = `${base}/auth/mcp/${encodeURIComponent(id)}?external_id=${encodeURIComponent(externalId)}`;
+  const popup = window.open(url, '_blank');
+  if (!popup) throw new Error('OAuth popup was blocked. Allow popups for this site and try again.');
+  await new Promise<void>((resolve) => {
+    const iv = setInterval(() => {
+      if (popup.closed) { clearInterval(iv); resolve(); }
+    }, 500);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Singleton
 // ---------------------------------------------------------------------------
 
@@ -129,15 +161,32 @@ class HttpTransportImpl implements Transport {
     body?: unknown,
   ): Promise<T> {
     await _readyPromise;
-    const url = getBaseUrl() + path;
+    let url = getBaseUrl() + path;
     const init: RequestInit = {
       method: httpMethod,
       headers: { ...contextHeaders() },
     };
-    // Only send body for methods that support it
-    if (body !== undefined && !['GET', 'HEAD', 'DELETE'].includes(httpMethod)) {
-      (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(body);
+    const isBodyless = ['GET', 'HEAD', 'DELETE'].includes(httpMethod);
+    if (body !== undefined && body !== null) {
+      if (isBodyless) {
+        // HTTP doesn't allow bodies on GET/HEAD (and DELETE commonly omits
+        // them too). Encode the param object as a URL query string so the
+        // daemon's rest_handler can re-materialise it into a JSON object
+        // before dispatching. Skip null/undefined fields so Option<T> on
+        // the server deserialises as None rather than Some("").
+        if (typeof body === 'object') {
+          const qp = new URLSearchParams();
+          for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+            if (v === null || v === undefined) continue;
+            qp.append(k, typeof v === 'string' ? v : JSON.stringify(v));
+          }
+          const qs = qp.toString();
+          if (qs) url += (url.includes('?') ? '&' : '?') + qs;
+        }
+      } else {
+        (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(body);
+      }
     }
     const res = await fetch(url, init);
     if (!res.ok) {

@@ -70,7 +70,10 @@ fn generate_client_method(method: &ParsedMethod) -> syn::Result<TokenStream> {
         };
         if let ReturnKind::StreamBidi { input_type, output_type } = &method.return_kind {
             let method_str = &method.method_name;
-            let path_template = &endpoint.path_template;
+            // URL construction uses just the path — any `?{foo}&{bar}` suffix
+            // is documentation; real query params are serialised by the
+            // transport from the remaining call args.
+            let path_template = &endpoint.match_path;
 
             let path_expr = if endpoint.path_params.is_empty() {
                 quote! { #path_template.to_string() }
@@ -144,7 +147,10 @@ fn generate_rest_client_body(method: &ParsedMethod, endpoint: &RestEndpoint) -> 
         HttpMethod::Stream => unreachable!("stream methods handled separately"),
     };
 
-    let path_template = &endpoint.path_template;
+    // Path-only template — any `?{foo}&{bar}` suffix is stripped at parse
+    // time and the transport serialises non-path params into the query
+    // string for GET/HEAD/DELETE.
+    let path_template = &endpoint.match_path;
     let path_expr = if endpoint.path_params.is_empty() {
         quote! { #path_template.to_string() }
     } else {

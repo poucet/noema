@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTransport, mcpApi, oAuthApi, type McpServerInfo, type McpTool } from '@simply/client';
+  import { getTransport, mcpApi, oAuthApi, openOAuthFlow, type McpServerInfo, type McpTool } from '@simply/client';
 
   const t = getTransport();
   const mcp = mcpApi(t);
@@ -102,15 +102,9 @@
 
   async function startOauth(id: string) {
     try {
-      const info = await oauth.startOauth(id);
-      window.open(info.authUrl, '_blank');
-      // Poll for completion
-      const interval = setInterval(async () => {
-        await refresh();
-        const srv = servers.find(s => s.id === id);
-        if (srv && !srv.needsOauthLogin) clearInterval(interval);
-      }, 3000);
-      setTimeout(() => clearInterval(interval), 120_000);
+      await openOAuthFlow(id);
+      // Popup closed → token stored. Refresh server state.
+      await refresh();
     } catch (e) {
       console.error('[mcp] oauth failed:', e);
       error = `OAuth failed: ${e}`;

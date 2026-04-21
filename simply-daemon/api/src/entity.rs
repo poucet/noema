@@ -165,22 +165,28 @@ pub trait EntityApi: Send + Sync {
 
     /// List all entities for the authenticated user. Filter by `type_prefix`
     /// for `LIKE 'prefix%'` matching — e.g. `"document::"` for all document
-    /// kinds.
-    #[rpc(get = "/entity")]
+    /// kinds. If `root_of_relation` is set (e.g. `"structure::contained_in"`),
+    /// returns only entities with no outgoing edge of that relation — i.e.
+    /// the roots of that relation's forest. Useful for top-level document
+    /// listings that should skip tabs/nested children.
+    #[rpc(get = "/entity?{type_prefix}&{root_of_relation}")]
     async fn list_entities(
         &self,
         ctx: &RequestContext,
         type_prefix: Option<String>,
+        root_of_relation: Option<String>,
     ) -> anyhow::Result<Vec<EntitySummary>>;
 
-    /// Search entities by title (case-insensitive). Optionally filter by type
-    /// prefix.
-    #[rpc(get = "/entity/search/{query}")]
+    /// Search entities by title (case-insensitive). Optional `type_prefix`
+    /// and `root_of_relation` filters apply the same way as for
+    /// [`Self::list_entities`].
+    #[rpc(get = "/entity/search/{query}?{type_prefix}&{root_of_relation}")]
     async fn search_entities(
         &self,
         ctx: &RequestContext,
         query: &str,
         type_prefix: Option<String>,
+        root_of_relation: Option<String>,
     ) -> anyhow::Result<Vec<EntitySummary>>;
 
     // ----- Entity CRUD -----
@@ -192,6 +198,17 @@ pub trait EntityApi: Send + Sync {
         ctx: &RequestContext,
         entity_id: &str,
     ) -> anyhow::Result<EntitySummary>;
+
+    /// Look up an entity by its `"<scheme>:<id>"` origin string. Returns
+    /// `None` if no entity matches. Used by import skills to detect whether
+    /// an external document already has a local entity so they can re-import
+    /// (new version first, then delete the stale one).
+    #[rpc(get = "/entity/by_origin/{origin}")]
+    async fn get_entity_by_origin(
+        &self,
+        ctx: &RequestContext,
+        origin: &str,
+    ) -> anyhow::Result<Option<EntitySummary>>;
 
     /// Create a new entity, optionally with initial content.
     #[rpc(post = "/entity", no_tool)]
