@@ -25,96 +25,87 @@ Documents, tabs, and other structured content collapse onto `entities` + `entity
 - ⬜ 1.9 `EntityStore::add_relation(…, position: Option<i64>)`; `list_relations_{from,to}_ordered` helpers
 - ⬜ 1.10 Delete `DocumentSource` enum
 
-### Stage 2 — DocumentStore impls store data as entities (trait API unchanged)
+### Stage 2 — Coordinator: generic entity+content+relation primitives (additive)
 
-Internal data-shape shift. All existing callers (daemon `DocumentService`, gdocs via `DocumentApi`) continue to work untouched.
+Additive. `DocumentStore` and the old `documents` / `document_tabs` / `document_revisions` tables keep working unchanged — rewriting `DocumentStore` to back onto entities would force it to reach into `TextStore` (a layering violation), since its API returns inlined `content_markdown` while entity-backed storage keeps content in `content_blocks`. Old stuff stays live until Stage 7 deletes it.
 
-- ⬜ 2.1 Rewrite sqlite `DocumentStore` impl to store docs/tabs as entities + `structure::contained_in` relations + content_blocks
-- ⬜ 2.2 Drop `documents` / `document_tabs` / `document_revisions` tables in schema init
-- ⬜ 2.3 Rewrite memory `DocumentStore` impl to use in-memory EntityStore
-- ⬜ 2.4 Stub revision methods (create/get/list/set_current) as `unimplemented!()` or no-ops — revisions punted; no current callers depend on them working
-- ⬜ 2.5 Verify daemon + gdocs round-trip unchanged after nuke/reimport
+- ⬜ 2.1 `create_entity_with_content(kind, user, name, content?, origin?) -> EntityId`
+- ⬜ 2.2 `update_entity_content(id, text, content_origin) -> ContentBlockId` — new block, swap pointer, orphan old
+- ⬜ 2.3 `resolve_entity_text(id) -> Option<String>`
+- ⬜ 2.4 `get_entity_by_origin(user, origin)` / `list_entities_by_origin_scheme(user, scheme)` / `list_entities_by_type_prefix(user, prefix)`
+- ⬜ 2.5 `add_child(parent, child, relation, position?, metadata?)` / `list_children(parent, relation)` / `list_children_recursive(parent, relation)`
+- ⬜ 2.6 `move_entity(child, new_parent, new_position)` — atomic reparent + sibling renumber (used by drag-and-drop in Phase 2)
+- ⬜ 2.7 `set_entity_assets(id, &[AssetId])` / `get_entity_assets(id)` / `entities_referencing(asset_id)` for blob GC
+- ⬜ 2.8 `delete_entity_cascade(id, relations_to_follow)` — orchestrator walks `structure::contained_in`, removes entities, GCs orphan blocks
 
-### Stage 3 — Coordinator: generic entity+content+relation primitives (additive)
+### Stage 3 — Daemon `EntityApi` alongside `DocumentApi`
 
-- ⬜ 3.1 Coordinator holds `document_store: Arc<S::Document>` (wire through `new()` and `from_stores()`)
-- ⬜ 3.2 `create_entity_with_content(kind, user, name, content?, origin?) -> EntityId`
-- ⬜ 3.3 `update_entity_content(id, text, content_origin) -> ContentBlockId` — new block, swap pointer, orphan old
-- ⬜ 3.4 `resolve_entity_text(id) -> Option<String>`
-- ⬜ 3.5 `get_entity_by_origin(user, origin)` / `list_entities_by_origin_scheme(user, scheme)` / `list_entities_by_type_prefix(user, prefix)`
-- ⬜ 3.6 `add_child(parent, child, relation, position?, metadata?)` / `list_children(parent, relation)` / `list_children_recursive(parent, relation)`
-- ⬜ 3.7 `move_entity(child, new_parent, new_position)` — atomic reparent + sibling renumber (used by drag-and-drop in Phase 2)
-- ⬜ 3.8 `set_entity_assets(id, &[AssetId])` / `get_entity_assets(id)` / `entities_referencing(asset_id)` for blob GC
-- ⬜ 3.9 `delete_entity_cascade(id, relations_to_follow)` — orchestrator walks `structure::contained_in`, removes entities, GCs orphan blocks
+Both APIs coexist. Clients migrate individually in later stages. Old `documents` / `document_tabs` / `document_revisions` tables remain untouched.
 
-### Stage 4 — Daemon `EntityApi` alongside `DocumentApi`
+- ⬜ 3.1 New `simply-daemon-api/src/entity.rs` with `EntityApi` trait
+- ⬜ 3.2 `list_entities(type_prefix?)`, `get_entity(id)`, `create_entity(req)`, `rename_entity(id, name)`, `delete_entity(id)`
+- ⬜ 3.3 `get_entity_content(id) -> EntityContent`, `update_entity_content(id, req)`
+- ⬜ 3.4 `list_children(parent, relation) -> Vec<ChildEntity>`, `add_child`, `remove_child`, `move_child(parent, child, new_position)`
+- ⬜ 3.5 `search_entities(query, type_prefix?, limit)`
+- ⬜ 3.6 `EntitySummary` wire type: `has_content: bool`, `child_counts: map<relation, u32>` — for capability-based UI rendering
+- ⬜ 3.7 Lazy content fetch: structure responses omit content bodies
+- ⬜ 3.8 `Daemon::entity()` accessor alongside `Daemon::document()`
+- ⬜ 3.9 `EntityService` implements `EntityApi` over coordinator primitives
 
-Both APIs coexist. Clients migrate individually in later stages.
+### Stage 4 — gdocs skill → `EntityApi`
 
-- ⬜ 4.1 New `simply-daemon-api/src/entity.rs` with `EntityApi` trait
-- ⬜ 4.2 `list_entities(type_prefix?)`, `get_entity(id)`, `create_entity(req)`, `rename_entity(id, name)`, `delete_entity(id)`
-- ⬜ 4.3 `get_entity_content(id) -> EntityContent`, `update_entity_content(id, req)`
-- ⬜ 4.4 `list_children(parent, relation) -> Vec<ChildEntity>`, `add_child`, `remove_child`, `move_child(parent, child, new_position)`
-- ⬜ 4.5 `search_entities(query, type_prefix?, limit)`
-- ⬜ 4.6 `EntitySummary` wire type: `has_content: bool`, `child_counts: map<relation, u32>` — for capability-based UI rendering
-- ⬜ 4.7 Lazy content fetch: structure responses omit content bodies
-- ⬜ 4.8 `Daemon::entity()` accessor alongside `Daemon::document()`
-- ⬜ 4.9 `EntityService` implements `EntityApi` over coordinator primitives
-- ⬜ 4.10 Search `reindex()` walks entities via coordinator (parallel to the DocumentStore path — both produce equivalent output)
+- ⬜ 4.1 gdocs skill swaps `daemon.document()` → `daemon.entity()`
+- ⬜ 4.2 Import creates `document::tabbed` + child `document::tab` entities linked via `structure::contained_in` with `origin = "google_drive:<gdoc_id>"`
+- ⬜ 4.3 Tab-tree re-parenting uses `add_child` with `position = tab_index`
+- ⬜ 4.4 Verify re-import: existing entity with same origin is deleted + recreated (gdocs currently does this for docs; do it for the entity now)
 
-### Stage 5 — gdocs skill → `EntityApi`
+### Stage 5 — Admin UI: entity-first rendering
 
-- ⬜ 5.1 gdocs skill swaps `daemon.document()` → `daemon.entity()`
-- ⬜ 5.2 Import creates `document::tabbed` + child `document::tab` entities linked via `structure::contained_in` with `origin = "google_drive:<gdoc_id>"`
-- ⬜ 5.3 Tab-tree re-parenting uses `add_child` with `position = tab_index`
-- ⬜ 5.4 Verify re-import: existing entity with same origin is deleted + recreated (gdocs currently does this for docs; do it for the entity now)
+- ⬜ 5.1 New `EntitiesPage.svelte` — list all entities, filter by type prefix (default `document::%`)
+- ⬜ 5.2 New `EntityPage.svelte` — dispatches on `has_content` / `child_counts`
+- ⬜ 5.3 Markdown editor loads content lazily via `get_entity_content`
+- ⬜ 5.4 Tab tree nav sidebar + lazy-loaded tab content for `document::tabbed`
+- ⬜ 5.5 Regenerate TS bindings via `ts-rs`
+- ⬜ 5.6 Delete `DocumentsPage.svelte` / `DocumentPage.svelte` after cutover
 
-### Stage 6 — Admin UI: entity-first rendering
-
-- ⬜ 6.1 New `EntitiesPage.svelte` — list all entities, filter by type prefix (default `document::%`)
-- ⬜ 6.2 New `EntityPage.svelte` — dispatches on `has_content` / `child_counts`
-- ⬜ 6.3 Markdown editor loads content lazily via `get_entity_content`
-- ⬜ 6.4 Tab tree nav sidebar + lazy-loaded tab content for `document::tabbed`
-- ⬜ 6.5 Regenerate TS bindings via `ts-rs`
-- ⬜ 6.6 Delete `DocumentsPage.svelte` / `DocumentPage.svelte` after cutover
-
-### Stage 7 — Noema UI: document browsing + viewer
+### Stage 6 — Noema UI: document browsing + viewer
 
 Complete the paused document work (see `noema/ui/src/lib/DocumentsPanel.svelte` staged change).
 
-- ⬜ 7.1 Complete `DocumentsPanel.svelte` on top of `EntityApi.list_entities("document::")`
-- ⬜ 7.2 New `DocumentView.svelte` — dispatch on `kind` / `has_content` / `child_counts`
-- ⬜ 7.3 New `entities.ts` client module wrapping `@simply/client` `EntityApi` bindings
-- ⬜ 7.4 Lazy-load tab content for `document::tabbed`; direct markdown for flat kinds
-- ⬜ 7.5 Update chat `DocumentRef` resolution to use `EntityApi.get_entity_content`
+- ⬜ 6.1 Complete `DocumentsPanel.svelte` on top of `EntityApi.list_entities("document::")`
+- ⬜ 6.2 New `DocumentView.svelte` — dispatch on `kind` / `has_content` / `child_counts`
+- ⬜ 6.3 New `entities.ts` client module wrapping `@simply/client` `EntityApi` bindings
+- ⬜ 6.4 Lazy-load tab content for `document::tabbed`; direct markdown for flat kinds
+- ⬜ 6.5 Update chat `DocumentRef` resolution to use `EntityApi.get_entity_content`
 
-### Stage 8 — Delete `DocumentApi` + `DocumentStore`
+### Stage 7 — Delete `DocumentApi` + `DocumentStore` + old tables
 
-Zero callers remain after Stages 5–7. Cleanup commit.
+Zero callers remain after Stages 4–6. Cleanup commit.
 
-- ⬜ 8.1 Delete `simply-daemon-api/src/document.rs` + `services/document.rs`
-- ⬜ 8.2 Drop `Daemon::document()` accessor
-- ⬜ 8.3 Delete `DocumentStore` trait and all impls
-- ⬜ 8.4 Delete `Document` / `DocumentTab` / `DocumentRevision` types
-- ⬜ 8.5 Drop `StorageTypes::Document` / `Stores::document()`
-- ⬜ 8.6 Delete `document_resolver.rs` (superseded by `EntityApi.get_entity_content` + generic reference resolution)
+- ⬜ 7.1 Delete `simply-daemon-api/src/document.rs` + `services/document.rs`
+- ⬜ 7.2 Drop `Daemon::document()` accessor
+- ⬜ 7.3 Delete `DocumentStore` trait and all impls
+- ⬜ 7.4 Delete `Document` / `DocumentTab` / `DocumentRevision` types
+- ⬜ 7.5 Drop `StorageTypes::Document` / `Stores::document()`
+- ⬜ 7.6 Delete `document_resolver.rs` (superseded by `EntityApi.get_entity_content` + generic reference resolution)
+- ⬜ 7.7 Drop `documents` / `document_tabs` / `document_revisions` tables
 
-### Stage 9 — RAG pivot with entity-type filter + per-source frontmatter
+### Stage 8 — RAG pivot with entity-type filter + per-source frontmatter
 
-- ⬜ 9.1 `VectorChunk` keyed on `content_block_id`; denormalized `entity_id`, `entity_kind`, `title` for display
-- ⬜ 9.2 `vector_chunks.entity_kind` column for fast filter predicate
-- ⬜ 9.3 `EntityFilter { include: Vec<EntityTypeMatcher>, exclude: Vec<…> }` with `Exact(String)` / `Prefix(String)`; ts-rs exported
-- ⬜ 9.4 Chunker prepends per-source frontmatter before embedding (not stored)
-- ⬜ 9.5 `EmbedJob { content_block_id, frontmatter, text, owner_entity_id, entity_kind, title }`
-- ⬜ 9.6 `SearchHit { content_block_id, owner_entity_id, entity_kind, title, score, chunk_text }`
-- ⬜ 9.7 `SearchRequest` carries `EntityFilter`; search applies filter predicate in SQL
-- ⬜ 9.8 Reindex walks all `has_content` entities; frontmatter includes `{block_id, entity_id, entity_kind, title, ancestry}` (parent titles via `contained_in` walk)
-- ⬜ 9.9 Lumina RAG default filter: include `document::%` + `document::tab`; exclude `document::system_prompt`, `document::access_rule`
-- ⬜ 9.10 `lumina/src/chat.rs` dedupes hits by `content_block_id`; injects full blocks via `EntityApi.get_entity_content`
+- ⬜ 8.1 `VectorChunk` keyed on `content_block_id`; denormalized `entity_id`, `entity_kind`, `title` for display
+- ⬜ 8.2 `vector_chunks.entity_kind` column for fast filter predicate
+- ⬜ 8.3 `EntityFilter { include: Vec<EntityTypeMatcher>, exclude: Vec<…> }` with `Exact(String)` / `Prefix(String)`; ts-rs exported
+- ⬜ 8.4 Chunker prepends per-source frontmatter before embedding (not stored)
+- ⬜ 8.5 `EmbedJob { content_block_id, frontmatter, text, owner_entity_id, entity_kind, title }`
+- ⬜ 8.6 `SearchHit { content_block_id, owner_entity_id, entity_kind, title, score, chunk_text }`
+- ⬜ 8.7 `SearchRequest` carries `EntityFilter`; search applies filter predicate in SQL
+- ⬜ 8.8 Reindex walks all `has_content` entities; frontmatter includes `{block_id, entity_id, entity_kind, title, ancestry}` (parent titles via `contained_in` walk)
+- ⬜ 8.9 Lumina RAG default filter: include `document::%` + `document::tab`; exclude `document::system_prompt`, `document::access_rule`
+- ⬜ 8.10 `lumina/src/chat.rs` dedupes hits by `content_block_id`; injects full blocks via `EntityApi.get_entity_content`
 
-### Phase 2 — Directories UX (fast-follow after Stage 9)
+### Phase 2 — Directories UX (fast-follow after Stage 8)
 
-- ⬜ P2.1 `EntityApi.move_child` atomic reparent + sibling renumber (backend already exists in Stage 3.7)
+- ⬜ P2.1 `EntityApi.move_child` atomic reparent + sibling renumber (backend already exists in Stage 2.6)
 - ⬜ P2.2 Admin UI: directory tree in nav sidebar; "New folder" button; drag-and-drop filing
 - ⬜ P2.3 Noema UI: directory tree in DocumentsPanel; drag-and-drop filing
 
@@ -200,12 +191,11 @@ Stages 1-2 (connection auth, single-port OAuth, admin page) are complete.
 ## Dependencies
 
 ```
-UCM Stage 1 (schema + constants) ──► UCM Stages 2–9 (each depends on prior)
-UCM Stage 2 (DocumentStore backed by entities) ──► UCM Stage 3 (coordinator)
-UCM Stage 3 ──► UCM Stage 4 (EntityApi)
-UCM Stage 4 ──► UCM Stages 5–7 (gdocs, admin UI, Noema UI — can run in parallel)
-UCM Stages 5+6+7 ──► UCM Stage 8 (delete old API)
-UCM Stage 4 ──► UCM Stage 9 (RAG pivot — can start once EntityApi is usable)
+UCM Stage 1 (schema + constants) ──► UCM Stage 2 (coordinator primitives)
+UCM Stage 2 ──► UCM Stage 3 (EntityApi)
+UCM Stage 3 ──► UCM Stages 4–6 (gdocs, admin UI, Noema UI — can run in parallel)
+UCM Stages 4+5+6 ──► UCM Stage 7 (delete old API + old tables)
+UCM Stage 3 ──► UCM Stage 8 (RAG pivot — can start once EntityApi is usable)
 
 Events Stage 2 (Service Registry) ──► Events Stage 3 + 4 (parallel)
 Events Stage 3 + 4 ──► Events Stage 5 (Conditions + Workflow)
