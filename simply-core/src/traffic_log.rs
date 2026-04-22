@@ -9,12 +9,27 @@ use std::io::Write;
 /// Maximum characters to log for content (to protect privacy)
 const MAX_CONTENT_LOG_CHARS: usize = 200;
 
-/// Truncate a string for logging, adding ellipsis if truncated
+/// Largest valid UTF-8 char boundary ≤ `idx`. `&s[..n]` panics if `n`
+/// lands inside a multi-byte codepoint (emoji, non-ASCII, etc.), so any
+/// length-based truncation walks backwards to the last boundary first.
+fn floor_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    let mut i = idx;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Truncate a string for logging, adding ellipsis if truncated.
 fn truncate_for_log(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}... ({} chars total)", &s[..max_len], s.len())
+        let cut = floor_char_boundary(s, max_len);
+        format!("{}... ({} chars total)", &s[..cut], s.len())
     }
 }
 
@@ -61,7 +76,8 @@ pub fn log_mcp_response(tool_name: &str, result: &[llm::ToolResultContent]) {
     let summary: Vec<String> = result.iter().map(|c| match c {
         llm::ToolResultContent::Text { text } => {
             if text.len() > 500 {
-                format!("text({} chars): {}...", text.len(), &text[..200])
+                let cut = floor_char_boundary(text, 200);
+                format!("text({} chars): {}...", text.len(), &text[..cut])
             } else {
                 format!("text: {}", text)
             }
