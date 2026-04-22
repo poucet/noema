@@ -506,90 +506,23 @@ async fn stream_response(
                 }
             }
             Ok(DaemonEvent::ToolCall { id, name, arguments }) => {
-                // Skip the args codeblock entirely when the tool takes no
-                // arguments — a bare `null` or `{}` reads as noise.
-                let has_args = match &arguments {
-                    serde_json::Value::Null => false,
-                    serde_json::Value::Object(m) => !m.is_empty(),
-                    serde_json::Value::Array(a) => !a.is_empty(),
-                    _ => true,
-                };
-                let mut embed = CreateEmbed::new()
-                    .title(format!("\u{1f527} Using: {name}"))
-                    .color(0x5865F2);
-                if has_args {
-                    let args_str = truncate_for_discord(&crate::json_fmt::pretty_compact(&arguments));
-                    embed = embed.description(format!("```json\n{args_str}\n```"));
-                }
-                let call = ToolCall {
-                    id: id.clone(),
-                    name: name.clone(),
-                    arguments,
-                    extra: serde_json::Value::Null,
-                };
-                let row = serenity::builder::CreateActionRow::Buttons(vec![
-                    crate::paginator::tool_json_button(),
-                ]);
-                let posted = msg.channel_id
-                    .send_message(
-                        &lx.http,
-                        serenity::builder::CreateMessage::new()
-                            .embed(embed)
-                            .components(vec![row]),
-                    )
-                    .await?;
-                // Stash the structured call against the Discord message
-                // id so history replay can rehydrate the turn without
-                // needing a visible attachment.
-                if let Ok(json) = serde_json::to_string(&call) {
-                    if let Err(e) = lx.state.tool_state.put(
-                        posted.id.get(),
-                        crate::tool_state::KIND_TOOL_CALL,
-                        &json,
-                    ) {
-                        tracing::warn!(error = %e, "failed to stash tool_call");
-                    }
+                if let Err(e) = crate::tool_render::post_tool_call(
+                    &lx.http, msg.channel_id, &id, &name, arguments,
+                    Some(lx.state.tool_state.as_ref()),
+                ).await {
+                    tracing::warn!(tool = %name, error = %e, "failed to post tool call");
                 }
                 tool_names.insert(id, name);
             }
             Ok(DaemonEvent::ToolResult { id, result }) => {
-                tracing::debug!(
-                    result = %truncate(&crate::json_fmt::pretty_compact(&result), 500),
-                    "tool result",
-                );
-                let blocks: Vec<ToolResultContent> =
-                    serde_json::from_value(result).unwrap_or_default();
-                let tool_result = ToolResult {
-                    tool_call_id: id.clone(),
-                    content: blocks.clone(),
-                };
                 let tool_name = tool_names
                     .remove(&id)
                     .unwrap_or_else(|| "\u{1f4e6} Tool result".to_string());
-                let result_json = serde_json::to_string(&tool_result).ok();
-                let tool_state = lx.state.tool_state.clone();
-                match crate::tool_render::render_tool_result_to_channel(
-                    &lx.http,
-                    &lx.ctx.shard,
-                    msg.channel_id,
-                    &tool_name,
-                    Ok(blocks),
-                    vec![],
-                )
-                .await
-                {
-                    Ok(posted_id) => {
-                        if let Some(json) = result_json {
-                            if let Err(e) = tool_state.put(
-                                posted_id,
-                                crate::tool_state::KIND_TOOL_RESULT,
-                                &json,
-                            ) {
-                                tracing::warn!(error = %e, "failed to stash tool_result");
-                            }
-                        }
-                    }
-                    Err(e) => tracing::warn!(tool = %tool_name, error = %e, "failed to render tool result"),
+                if let Err(e) = crate::tool_render::post_tool_result(
+                    &lx.http, &lx.ctx.shard, msg.channel_id, &id, &tool_name, result,
+                    Some(lx.state.tool_state.as_ref()),
+                ).await {
+                    tracing::warn!(tool = %tool_name, error = %e, "failed to render tool result");
                 }
             }
             Ok(DaemonEvent::TurnComplete) => {
@@ -621,18 +554,6 @@ fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
     Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
 }
 
-fn truncate(text: &str, max: usize) -> &str {
-    if text.len() <= max { text } else { &text[..max] }
-}
-
-/// Truncate text to Discord's 2000 char limit.
-fn truncate_for_discord(text: &str) -> String {
-    if text.len() <= 2000 {
-        text.to_string()
-    } else {
-        text[..2000].to_string()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Model resolution

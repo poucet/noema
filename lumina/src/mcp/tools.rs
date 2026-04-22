@@ -185,6 +185,15 @@ pub struct SearchMessagesParams {
     pub limit: Option<u64>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct SayParams {
+    /// Short phrase to speak aloud in the current voice channel.
+    /// One or two sentences, plain text, no markdown or emoji. Your
+    /// full written reply still goes to the text channel; this tool
+    /// is ONLY for the spoken side of the conversation.
+    pub text: String,
+}
+
 /// Read the Discord guild id from the caller's RequestContext metadata.
 ///
 /// Every Lumina-originated session (text chat, voice) stamps
@@ -306,6 +315,18 @@ impl DiscordSkill {
     #[tool(name = "leave_voice")]
     async fn leave_voice(&self, ctx: RequestContext) -> String {
         match self.do_leave_voice(&ctx).await {
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    /// Speak a short phrase aloud in the voice channel Lumina is
+    /// connected to in this server. Only useful during an active voice
+    /// session; written text still goes to the text channel via the
+    /// normal assistant reply. Returns an error when not in voice.
+    #[tool(name = "say")]
+    async fn say(&self, ctx: RequestContext, Parameters(p): Parameters<SayParams>) -> String {
+        match self.do_say(&ctx, p).await {
             Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
@@ -503,6 +524,31 @@ impl DiscordSkill {
             "status": "success",
             "left": left,
             "message": if left { "Left voice channel." } else { "Not connected to voice in this server." },
+        }))
+    }
+
+    async fn do_say(
+        &self,
+        ctx: &RequestContext,
+        params: SayParams,
+    ) -> anyhow::Result<serde_json::Value> {
+        let text = params.text.trim();
+        if text.is_empty() {
+            anyhow::bail!("`text` is empty — nothing to say");
+        }
+        let guild_id = guild_from_ctx(ctx)?;
+        let voice_mgr = self.voice_manager()
+            .context("voice manager not initialized")?;
+        let queued = voice_mgr.play_tts(guild_id, text).await?;
+        if !queued {
+            anyhow::bail!(
+                "not connected to a voice channel in this server — use `join_voice` first"
+            );
+        }
+        Ok(json!({
+            "status": "success",
+            "spoke": true,
+            "chars": text.len(),
         }))
     }
 

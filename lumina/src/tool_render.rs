@@ -9,15 +9,19 @@ use std::time::Duration;
 use base64::Engine;
 use serde_json::Value;
 use serenity::all::ShardMessenger;
-use serenity::builder::{CreateAttachment, CreateEmbed, CreateMessage};
+use serenity::builder::{CreateActionRow, CreateAttachment, CreateEmbed, CreateMessage};
 use serenity::http::Http;
 use serenity::model::id::ChannelId;
-use simply_daemon_api::ToolResultContent;
+use simply_daemon_api::{ToolCall, ToolResult, ToolResultContent};
 
-use crate::paginator::{paginate_text, send_paginated_embeds_to_channel};
+use crate::json_fmt::pretty_compact;
+
+use crate::paginator::{paginate_text, send_paginated_embeds_to_channel, tool_json_button};
+use crate::tool_state::{ToolStateStore, KIND_TOOL_CALL, KIND_TOOL_RESULT};
 
 const PAGE_MAX_CHARS: usize = 1800;
 const PAGINATION_TIMEOUT: Duration = Duration::from_secs(120);
+const DISCORD_MAX_MESSAGE: usize = 2000;
 
 /// Format a JSON value into a human-readable Discord-friendly string.
 pub fn format_tool_output(text: &str) -> String {
@@ -267,4 +271,88 @@ pub async fn render_tool_result_to_channel(
     send_paginated_embeds_to_channel(
         http, shard, channel_id, tool_name, &pages, PAGINATION_TIMEOUT, extra_files,
     ).await
+}
+
+/// Post a tool-call embed with a "download JSON" button. When `tool_state`
+/// is `Some`, stash the call JSON keyed by the posted message id so history
+/// replay can rehydrate the turn without a visible attachment. Shared
+/// between the chat stream handler and the voice session receiver.
+pub async fn post_tool_call(
+    http: &Arc<Http>,
+    channel_id: ChannelId,
+    id: &str,
+    name: &str,
+    arguments: Value,
+    tool_state: Option<&ToolStateStore>,
+) -> anyhow::Result<u64> {
+    let has_args = match &arguments {
+        Value::Null => false,
+        Value::Object(m) => !m.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        _ => true,
+    };
+    let mut embed = CreateEmbed::new()
+        .title(format!("\u{1f527} Using: {name}"))
+        .color(0x5865F2);
+    if has_args {
+        embed = embed.description(format!("```json\n{}\n```", truncate_discord(&pretty_compact(&arguments))));
+    }
+    let row = CreateActionRow::Buttons(vec![tool_json_button()]);
+    let posted = channel_id
+        .send_message(http, CreateMessage::new().embed(embed).components(vec![row]))
+        .await?;
+    let posted_id = posted.id.get();
+    if let Some(store) = tool_state {
+        let call = ToolCall { id: id.to_string(), name: name.to_string(), arguments, extra: Value::Null };
+        if let Ok(json) = serde_json::to_string(&call) {
+            if let Err(e) = store.put(posted_id, KIND_TOOL_CALL, &json) {
+                tracing::warn!(error = %e, "failed to stash tool_call");
+            }
+        }
+    }
+    Ok(posted_id)
+}
+
+/// Post a tool-result via [`render_tool_result_to_channel`] and, when
+/// `tool_state` is `Some`, stash the full `ToolResult` JSON keyed by the
+/// posted message id. Shared between the chat stream handler and the voice
+/// session receiver so both surfaces render identically.
+///
+/// `result` is the raw `DaemonEvent::ToolResult.result` value. Non-
+/// `ToolResultContent` payloads fall back to a single text block.
+pub async fn post_tool_result(
+    http: &Arc<Http>,
+    shard: &ShardMessenger,
+    channel_id: ChannelId,
+    tool_call_id: &str,
+    tool_name: &str,
+    result: Value,
+    tool_state: Option<&ToolStateStore>,
+) -> anyhow::Result<u64> {
+    let content: Vec<ToolResultContent> = serde_json::from_value(result.clone()).unwrap_or_else(|_| {
+        let text = result.as_str().map(str::to_string).unwrap_or_else(|| pretty_compact(&result));
+        vec![ToolResultContent::Text { text }]
+    });
+    let posted_id = render_tool_result_to_channel(
+        http, shard, channel_id, tool_name, Ok(content.clone()), Vec::new(),
+    ).await?;
+    if let Some(store) = tool_state {
+        let tool_result = ToolResult { tool_call_id: tool_call_id.to_string(), content };
+        if let Ok(json) = serde_json::to_string(&tool_result) {
+            if let Err(e) = store.put(posted_id, KIND_TOOL_RESULT, &json) {
+                tracing::warn!(error = %e, "failed to stash tool_result");
+            }
+        }
+    }
+    Ok(posted_id)
+}
+
+fn truncate_discord(text: &str) -> String {
+    if text.len() <= DISCORD_MAX_MESSAGE {
+        text.to_string()
+    } else {
+        let mut end = DISCORD_MAX_MESSAGE;
+        while end > 0 && !text.is_char_boundary(end) { end -= 1; }
+        text[..end].to_string()
+    }
 }

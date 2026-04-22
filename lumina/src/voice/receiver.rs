@@ -8,12 +8,22 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serenity::model::id::{ChannelId, GuildId};
-use simply_daemon_api::{Daemon, ToolResultContent};
+use simply_daemon_api::DaemonEvent;
 use simply_voice::{AudioChunk, VoiceEvent, VoiceInput};
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 
 use super::VoiceMode;
+
+/// Flip on to get the same tool-call/result embeds in voice that chat
+/// posts. Off by default — each embed is a Discord round-trip that stalls
+/// the STT event handler, and voice is hands-free anyway.
+fn show_tool_activity() -> bool {
+    matches!(
+        std::env::var("LUMINA_VOICE_SHOW_TOOLS").as_deref(),
+        Ok("1" | "true" | "yes"),
+    )
+}
 
 /// Songbird event handler that receives decoded audio and sends to daemon STT.
 pub struct VoiceReceiver {
@@ -30,15 +40,12 @@ impl VoiceReceiver {
 impl VoiceEventHandler for VoiceReceiver {
     async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
         if let EventContext::VoiceTick(tick) = ctx {
-            // Collect decoded mono i16 16kHz audio from all speaking users
             let mut combined: Vec<i16> = Vec::new();
-
             for (_ssrc, data) in &tick.speaking {
                 if let Some(decoded) = data.decoded_voice.as_ref() {
                     if combined.is_empty() {
                         combined.extend_from_slice(decoded);
                     } else {
-                        // Mix multiple speakers
                         for (i, &sample) in decoded.iter().enumerate() {
                             if i < combined.len() {
                                 combined[i] = combined[i].saturating_add(sample);
@@ -47,65 +54,25 @@ impl VoiceEventHandler for VoiceReceiver {
                     }
                 }
             }
-
             if !combined.is_empty() {
-                // Already mono 16kHz i16 — convert to PCM16 LE bytes
-                let pcm16: Vec<u8> = combined.iter()
-                    .flat_map(|s| s.to_le_bytes())
-                    .collect();
-                let chunk = AudioChunk::new(pcm16);
-                // Use try_send to never block the songbird event loop
-                if self.stt_input.try_send(VoiceInput::Audio(chunk)).is_err() {
-                    tracing::trace!("STT channel full, dropping audio chunk");
-                }
+                let pcm16: Vec<u8> = combined.iter().flat_map(|s| s.to_le_bytes()).collect();
+                // try_send so we never block the songbird event loop.
+                let _ = self.stt_input.try_send(VoiceInput::Audio(AudioChunk::new(pcm16)));
             }
         }
         None
     }
 }
 
-/// Truncate a string to `max_chars` characters, respecting char boundaries.
-fn truncate_preview(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(max_chars).collect();
-        out.push_str("…");
-        out
-    }
-}
-
-/// Post a `DaemonEvent::ToolResult.result` to the text channel using the
-/// shared renderer so voice-session tool output looks the same as the
-/// `/tool call` surface (embeds, JSON-aware pagination, attachments).
-///
-/// Falls back to wrapping non-`ToolResultContent` payloads as a single
-/// text block so the renderer can still paginate them.
-async fn post_tool_result(
-    result: &serde_json::Value,
-    tool_name: &str,
-    text_channel: ChannelId,
-    http: &Arc<serenity::http::Http>,
-    voice_mgr: &Arc<super::VoiceManager>,
-) {
-    let blocks = match serde_json::from_value::<Vec<ToolResultContent>>(result.clone()) {
-        Ok(b) => b,
-        Err(_) => {
-            let text = result.as_str().map(|s| s.to_string())
-                .unwrap_or_else(|| crate::json_fmt::pretty_compact(result));
-            vec![ToolResultContent::Text { text }]
+/// Fire-and-forget channel post so the voice event handler doesn't stall
+/// on Discord round-trips.
+fn post_bg(http: &Arc<serenity::http::Http>, channel: ChannelId, body: String) {
+    let http = http.clone();
+    tokio::spawn(async move {
+        if let Err(e) = channel.say(&http, body).await {
+            tracing::warn!(error = %e, "voice: background channel post failed");
         }
-    };
-
-    let Some(shard) = voice_mgr.shard() else {
-        tracing::warn!("voice: shard not injected yet — tool result dropped");
-        return;
-    };
-    if let Err(e) = crate::tool_render::render_tool_result_to_channel(
-        http, shard, text_channel, tool_name, Ok(blocks), Vec::new(),
-    ).await {
-        tracing::warn!(tool = %tool_name, error = %e, "voice: failed to post tool result");
-    }
+    });
 }
 
 /// Send one user transcript to the daemon session and collect the LLM response,
@@ -119,10 +86,9 @@ async fn process_llm_turn(
     http: &Arc<serenity::http::Http>,
     voice_mgr: &Arc<super::VoiceManager>,
 ) -> Option<String> {
-    let send_result = daemon_session.send(simply_daemon_api::UserMessage {
+    if let Err(e) = daemon_session.send(simply_daemon_api::UserMessage {
         content: vec![simply_daemon_api::InputContent::Text { text: user_text.to_string() }],
-    }).await;
-    if let Err(e) = send_result {
+    }).await {
         tracing::error!(error = %e, "failed to send to session");
         return None;
     }
@@ -132,23 +98,34 @@ async fn process_llm_turn(
     // with the tool's name.
     let mut tool_names: HashMap<String, String> = HashMap::new();
     let mut response_text = String::new();
+    let show_tools = show_tool_activity();
     loop {
         match daemon_session.recv().await {
-            Ok(simply_daemon_api::DaemonEvent::TextDelta(delta)) => {
-                response_text.push_str(&delta);
-            }
-            Ok(simply_daemon_api::DaemonEvent::ToolCall { id, name, arguments }) => {
-                tracing::info!(tool = %name, "voice tool call");
-                let preview = truncate_preview(&serde_json::to_string(&arguments).unwrap_or_default(), 200);
-                let _ = text_channel.say(http, format!("🔧 `{name}` {preview}")).await;
+            Ok(DaemonEvent::TextDelta(delta)) => response_text.push_str(&delta),
+            Ok(DaemonEvent::ToolCall { id, name, arguments }) => {
+                if show_tools {
+                    // Voice sessions don't stash tool state — nobody scrolls
+                    // back through a voice turn's JSON.
+                    if let Err(e) = crate::tool_render::post_tool_call(
+                        http, text_channel, &id, &name, arguments, None,
+                    ).await {
+                        tracing::warn!(tool = %name, error = %e, "voice: failed to post tool call");
+                    }
+                }
                 tool_names.insert(id, name);
             }
-            Ok(simply_daemon_api::DaemonEvent::ToolResult { id, result }) => {
+            Ok(DaemonEvent::ToolResult { id, result }) => {
+                if !show_tools { continue; }
+                let Some(shard) = voice_mgr.shard() else { continue };
                 let name = tool_names.remove(&id).unwrap_or_else(|| "tool".to_string());
-                post_tool_result(&result, &name, text_channel, http, voice_mgr).await;
+                if let Err(e) = crate::tool_render::post_tool_result(
+                    http, shard, text_channel, &id, &name, result, None,
+                ).await {
+                    tracing::warn!(tool = %name, error = %e, "voice: failed to post tool result");
+                }
             }
-            Ok(simply_daemon_api::DaemonEvent::TurnComplete) => break,
-            Ok(simply_daemon_api::DaemonEvent::Error(e)) => {
+            Ok(DaemonEvent::TurnComplete) => break,
+            Ok(DaemonEvent::Error(e)) => {
                 tracing::error!(error = %e, "session error");
                 break;
             }
@@ -168,103 +145,68 @@ pub fn spawn_event_handler(
     mut stt_events: mpsc::Receiver<VoiceEvent>,
     http: Arc<serenity::http::Http>,
     voice_mgr: Arc<super::VoiceManager>,
-    call: Arc<Mutex<songbird::Call>>,
-    tts: Option<super::TtsBinding>,
+    has_tts: bool,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        tracing::info!(guild_id = %guild_id, mode = ?mode, "voice event handler started");
-
-        if let Some(binding) = tts.as_ref() {
-            if let Err(e) = voice_mgr.play_tts(&call, binding, "Hi, I'm Lumina, ready to help.").await {
+        // Welcome greeting — `play_tts` is already fire-and-forget and
+        // tracks its handle for barge-in, so no local spawn needed.
+        if has_tts {
+            if let Err(e) = voice_mgr.play_tts(guild_id, "Hi, I'm Lumina, ready to help.").await {
                 tracing::warn!(error = %e, "welcome TTS failed");
             }
         }
 
         while let Some(event) = stt_events.recv().await {
             match event {
-                VoiceEvent::UserTranscript(text) => {
-                    tracing::info!(guild_id = %guild_id, text = %text, "voice transcript");
+                VoiceEvent::UserTranscript(text) => match mode {
+                    VoiceMode::Transcribe => {
+                        post_bg(&http, text_channel, format!("🗣️ {text}"));
+                    }
+                    VoiceMode::Listen => {
+                        post_bg(&http, text_channel, format!("🗣️ {text}"));
 
-                    match mode {
-                        VoiceMode::Transcribe => {
-                            let _ = text_channel.say(&http, format!("🗣️ {text}")).await;
+                        // Take the DaemonSession out of the map so tool calls
+                        // (e.g. leave_voice, which takes sessions.lock()) can
+                        // run concurrently with the send/recv loop and don't
+                        // deadlock on our lock.
+                        let daemon_session = {
+                            let mut sessions = voice_mgr.sessions.lock().await;
+                            sessions.get_mut(&guild_id).and_then(|s| s.daemon_session.take())
+                        };
+
+                        let (response, daemon_session) = if let Some(mut ds) = daemon_session {
+                            let r = process_llm_turn(&mut ds, &text, text_channel, &http, &voice_mgr).await;
+                            (r, Some(ds))
+                        } else {
+                            (None, None)
+                        };
+
+                        if let Some(ds) = daemon_session {
+                            let mut sessions = voice_mgr.sessions.lock().await;
+                            if let Some(s) = sessions.get_mut(&guild_id) {
+                                s.daemon_session = Some(ds);
+                            }
                         }
-                        VoiceMode::Listen => {
-                            // Post transcript to text channel
-                            let _ = text_channel.say(&http, format!("🗣️ {text}")).await;
 
-                            // Take the DaemonSession out of the map so tool calls (e.g.
-                            // leave_voice, which takes sessions.lock()) can run concurrently
-                            // with the send/recv loop and don't deadlock on our lock.
-                            let daemon_session = {
-                                let mut sessions = voice_mgr.sessions.lock().await;
-                                sessions.get_mut(&guild_id).and_then(|s| s.daemon_session.take())
-                            };
-
-                            let (response, daemon_session) = if let Some(mut ds) = daemon_session {
-                                let response = process_llm_turn(&mut ds, &text, text_channel, &http, &voice_mgr).await;
-                                (response, Some(ds))
-                            } else {
-                                (None, None)
-                            };
-
-                            // Put the session back — unless it was removed (e.g. by a
-                            // concurrent leave_voice, in which case daemon_session drops).
-                            if let Some(ds) = daemon_session {
-                                let mut sessions = voice_mgr.sessions.lock().await;
-                                if let Some(s) = sessions.get_mut(&guild_id) {
-                                    s.daemon_session = Some(ds);
-                                }
-                            }
-
-                            if let Some(response_text) = response {
-                                let tts_ok = if let Some(binding) = tts.as_ref() {
-                                    match voice_mgr.play_tts(&call, binding, &response_text).await {
-                                        Ok(()) => {
-                                            tracing::info!("TTS response playing in voice channel");
-                                            true
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e, "TTS failed, falling back to text");
-                                            false
-                                        }
-                                    }
-                                } else {
-                                    false
-                                };
-
-                                // Always post text — as primary if TTS failed, as supplement if TTS worked
-                                if tts_ok {
-                                    let _ = text_channel.say(&http, format!("💬 {response_text}")).await;
-                                } else {
-                                    let _ = text_channel.say(&http, format!("🔇 {response_text}")).await;
-                                }
-                            }
+                        // The written reply always goes to the text channel;
+                        // voice output is opt-in via the `say` tool (see
+                        // voice/system_prompt.md).
+                        if let Some(text) = response {
+                            post_bg(&http, text_channel, format!("💬 {text}"));
                         }
                     }
                 }
                 VoiceEvent::Listening => {
-                    tracing::debug!(guild_id = %guild_id, "voice: listening");
-                    // Barge-in: VAD says the user started speaking, so stop any
-                    // TTS playback we're in the middle of. The full response is
-                    // still in the text channel, the user doesn't need to wait
-                    // for the audio to finish before giving a new command.
-                    {
-                        let mut handler = call.lock().await;
-                        handler.stop();
-                    }
-                }
-                VoiceEvent::Transcribing => {
-                    tracing::debug!(guild_id = %guild_id, "voice: transcribing");
+                    // Barge-in: abort any in-flight synth and stop playback
+                    // so a mid-synth utterance doesn't blurt over the user.
+                    voice_mgr.barge_in(guild_id).await;
                 }
                 VoiceEvent::Error(e) => {
                     tracing::error!(guild_id = %guild_id, error = %e, "voice STT error");
-                    let _ = text_channel.say(&http, format!("Voice error: {e}")).await;
+                    post_bg(&http, text_channel, format!("Voice error: {e}"));
                 }
                 _ => {}
             }
         }
-
-        tracing::info!(guild_id = %guild_id, "voice event handler stopped");
     })
 }

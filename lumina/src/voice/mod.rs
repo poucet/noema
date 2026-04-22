@@ -63,6 +63,14 @@ pub struct VoiceSession {
     /// would spawn a *second* receiver while the old one is still running,
     /// causing every transcript to be posted twice.
     pub receiver_task: Option<tokio::task::JoinHandle<()>>,
+    /// Handle on the current background TTS task, if any. Aborted on
+    /// barge-in so a mid-synthesis utterance doesn't blurt out over the
+    /// user's new turn — `handler.stop()` alone only kills already-queued
+    /// audio, not an in-flight synth HTTP call. Overwriting this field
+    /// (next `play_tts`) aborts any prior still-running task, which is
+    /// fine because the LLM should merge back-to-back speech into one
+    /// utterance anyway.
+    pub tts_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// What the voice session is doing.
@@ -207,6 +215,7 @@ impl VoiceManager {
                 daemon_session: None,
                 tts: None,
                 receiver_task: None,
+                tts_task: None,
             });
         }
 
@@ -314,8 +323,7 @@ impl VoiceManager {
             stt_events,
             http,
             Arc::clone(self),
-            call.clone(),
-            tts.clone(),
+            tts.is_some(),
         );
 
         let session = VoiceSession {
@@ -325,6 +333,7 @@ impl VoiceManager {
             daemon_session,
             tts,
             receiver_task: Some(receiver_task),
+            tts_task: None,
         };
         self.sessions.lock().await.insert(guild_id, session);
         tracing::info!(
@@ -345,6 +354,9 @@ impl VoiceManager {
         let session = self.sessions.lock().await.remove(guild_id);
         if let Some(ref s) = session {
             if let Some(ref handle) = s.receiver_task {
+                handle.abort();
+            }
+            if let Some(ref handle) = s.tts_task {
                 handle.abort();
             }
             tracing::info!(guild_id = %guild_id, "voice session stopped");
@@ -405,18 +417,71 @@ impl VoiceManager {
         Ok(resample_mono_to_stereo_48k(&mono, audio.format.sample_rate))
     }
 
-    /// Play TTS audio in the voice channel.
-    pub async fn play_tts(&self, call: &Arc<Mutex<Call>>, binding: &TtsBinding, text: &str) -> anyhow::Result<()> {
-        let stereo = self.synthesize_for_discord(text, binding).await?;
-        let bytes: Vec<u8> = stereo.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let input = songbird::input::RawAdapter::new(
-            std::io::Cursor::new(bytes),
-            48_000,
-            2,
-        );
-        let mut handler = call.lock().await;
-        handler.play_input(input.into());
-        Ok(())
+    /// Queue TTS playback for a guild and return immediately. The synth +
+    /// playback run on a background task whose handle is recorded in the
+    /// session's `tts_task`, replacing (and aborting) any still-running
+    /// prior one — so the LLM's tool call returns in milliseconds instead
+    /// of waiting on the TTS provider, and a barge-in can cleanly cancel
+    /// whatever's in flight.
+    ///
+    /// Returns `Ok(true)` when playback was queued, `Ok(false)` when the
+    /// bot isn't in voice (caller should surface that to the LLM).
+    pub async fn play_tts(self: &Arc<Self>, guild_id: GuildId, text: &str) -> anyhow::Result<bool> {
+        let binding = {
+            let sessions = self.sessions.lock().await;
+            match sessions.get(&guild_id).and_then(|s| s.tts.clone()) {
+                Some(b) => b,
+                None => return Ok(false),
+            }
+        };
+        let Some(songbird) = self.songbird.get() else {
+            anyhow::bail!("Songbird not initialized");
+        };
+        let Some(call) = songbird.get(guild_id) else { return Ok(false); };
+
+        let vm = self.clone();
+        let text = text.to_string();
+        let handle = tokio::spawn(async move {
+            let stereo = match vm.synthesize_for_discord(&text, &binding).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(error = %e, "tts synth failed");
+                    return;
+                }
+            };
+            let bytes: Vec<u8> = stereo.iter().flat_map(|s| s.to_le_bytes()).collect();
+            let input = songbird::input::RawAdapter::new(std::io::Cursor::new(bytes), 48_000, 2);
+            call.lock().await.play_input(input.into());
+        });
+
+        let mut sessions = self.sessions.lock().await;
+        if let Some(s) = sessions.get_mut(&guild_id) {
+            if let Some(prev) = s.tts_task.replace(handle) {
+                prev.abort();
+            }
+        }
+        Ok(true)
+    }
+
+    /// Barge-in: abort any in-flight TTS synth (before it plays) and stop
+    /// whatever's currently playing. Called when VAD detects the user has
+    /// started speaking — `handler.stop()` alone would only kill currently-
+    /// queued audio, not a mid-flight synth HTTP call that's about to add
+    /// a fresh track after the stop.
+    pub async fn barge_in(&self, guild_id: GuildId) {
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&guild_id) {
+                if let Some(task) = s.tts_task.take() {
+                    task.abort();
+                }
+            }
+        }
+        if let Some(songbird) = self.songbird.get() {
+            if let Some(call) = songbird.get(guild_id) {
+                call.lock().await.stop();
+            }
+        }
     }
 }
 
