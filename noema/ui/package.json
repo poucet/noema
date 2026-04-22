@@ -12,6 +12,7 @@
   "dependencies": {
     "@simply/client": "*",
     "@simply/entity-ui": "*",
+    "@tauri-apps/api": "^2",
     "@codemirror/commands": "^6.0.0",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language": "^6.0.0",

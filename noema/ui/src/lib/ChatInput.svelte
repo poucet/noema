@@ -1,4 +1,6 @@
 <script lang="ts">
+  import VoiceControls from './VoiceControls.svelte';
+
   type Props = {
     onSend: (text: string) => void;
     disabled?: boolean;
@@ -31,10 +33,20 @@
       send();
     }
   }
+
+  // Autosend transcribed speech so voice feels end-to-end. If the user had
+  // a draft in the textarea, prepend it so we don't lose their typing.
+  function onTranscription(transcript: string) {
+    const draft = text.trim();
+    const combined = draft ? `${draft} ${transcript}` : transcript;
+    text = '';
+    queueMicrotask(autoresize);
+    if (combined.trim() && !disabled) onSend(combined.trim());
+  }
 </script>
 
 <div class="border-t border-gray-700 bg-background p-4">
-  <div class="flex gap-2">
+  <div class="flex items-end gap-2">
     <textarea
       bind:this={textareaEl}
       bind:value={text}
@@ -45,10 +57,11 @@
       {disabled}
       class="flex-1 resize-none rounded-lg border border-gray-700 bg-surface px-3 py-2 text-foreground placeholder-muted focus:border-teal-500 focus:outline-none"
     ></textarea>
+    <VoiceControls {onTranscription} />
     <button
       onclick={send}
       disabled={disabled || !text.trim() || isLoading}
-      class="self-end rounded-lg bg-teal-600 px-4 py-2 font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+      class="rounded-lg bg-teal-600 px-4 py-2 font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {isLoading ? '…' : 'Send'}
     </button>

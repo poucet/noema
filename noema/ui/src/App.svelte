@@ -7,6 +7,7 @@
   import DocumentView from './lib/DocumentView.svelte';
   import ModelSelector from './lib/ModelSelector.svelte';
   import UserPicker from './lib/UserPicker.svelte';
+  import SettingsModal from './lib/SettingsModal.svelte';
   import { chatStore } from './lib/stores/chat.svelte';
   import { documentsBrowser } from './lib/stores/documents.svelte';
 
@@ -27,18 +28,61 @@
   let daemonVersion = $state<string | null>(null);
   let daemonError = $state<string | null>(null);
 
-  async function syncAdminUserId() {
-    // Respect an explicit UserPicker choice across reloads — only seed the
-    // user id from the Tauri host on first boot (when localStorage is empty).
-    if (getCurrentUser()) return;
-    const internals = (window as any).__TAURI_INTERNALS__;
-    if (!internals || typeof internals.invoke !== 'function') return;
+  interface BootUser {
+    id: string;
+    email: string | null;
+  }
+
+  async function resolveBootUser(): Promise<BootUser[]> {
     try {
-      const userId = await internals.invoke('admin_user_id');
-      if (typeof userId === 'string' && userId.length > 0) setCurrentUser(userId);
+      return await getTransport().rpc<BootUser[]>(
+        'admin.list_users',
+        'GET',
+        '/admin/api/users',
+      );
     } catch (e) {
-      console.warn('[noema] failed to fetch admin user id', e);
+      console.warn('[noema] list_users failed', e);
+      return [];
     }
+  }
+
+  async function tauriAdminUserId(): Promise<string | null> {
+    const internals = (window as any).__TAURI_INTERNALS__;
+    if (!internals || typeof internals.invoke !== 'function') return null;
+    try {
+      const id = await internals.invoke('admin_user_id');
+      return typeof id === 'string' && id.length > 0 ? id : null;
+    } catch (e) {
+      console.warn('[noema] admin_user_id invoke failed', e);
+      return null;
+    }
+  }
+
+  /**
+   * Pick the user id that should drive this session — on every boot, not just
+   * the first one. Covers three regressions we've hit:
+   *   1. Empty localStorage on fresh install → fall back to the Tauri host's
+   *      bootstrap user (email from settings.toml).
+   *   2. Stored id no longer in the DB (db nuke+reimport) → clear + refall.
+   *   3. Tauri host is unavailable → users[0] so we at least have *some*
+   *      scope instead of anonymous (which hides data in conversations /
+   *      documents stores).
+   */
+  async function syncAdminUserId() {
+    const users = await resolveBootUser();
+    const stored = getCurrentUser();
+    if (stored && users.some((u) => u.id === stored)) return;
+
+    const fromTauri = await tauriAdminUserId();
+    if (fromTauri && users.some((u) => u.id === fromTauri)) {
+      setCurrentUser(fromTauri);
+      return;
+    }
+    if (users.length > 0) {
+      setCurrentUser(users[0].id);
+      return;
+    }
+    setCurrentUser(null);
   }
 
   onMount(async () => {
@@ -120,25 +164,5 @@
     {/if}
   </div>
 
-  {#if showSettings}
-    <div
-      class="fixed inset-0 z-10 flex items-center justify-center bg-black/50"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div class="w-96 rounded-lg bg-surface p-6 shadow-xl">
-        <div class="mb-4 flex items-center justify-between">
-          <h2 class="text-lg font-semibold">Settings</h2>
-          <button
-            class="text-muted hover:text-foreground"
-            aria-label="Close settings"
-            onclick={() => (showSettings = false)}
-          >
-            ×
-          </button>
-        </div>
-        <p class="text-sm text-muted">Settings panel lands here.</p>
-      </div>
-    </div>
-  {/if}
+  <SettingsModal open={showSettings} onClose={() => (showSettings = false)} />
 </div>

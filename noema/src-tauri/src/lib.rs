@@ -9,6 +9,7 @@ mod commands;
 mod logging;
 mod state;
 mod types;
+mod voice;
 
 use config::PathManager;
 use std::sync::Arc;
@@ -26,6 +27,7 @@ pub fn run() {
     init_logging();
 
     let app_state = Arc::new(AppState::new());
+    let voice_capture_state = Arc::new(voice::VoiceCaptureState::default());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -50,6 +52,7 @@ pub fn run() {
             }
         }))
         .manage(app_state.clone())
+        .manage(voice_capture_state.clone())
         .setup({
             let app_state = app_state.clone();
             move |app| {
@@ -86,6 +89,9 @@ pub fn run() {
             commands::init::init_app,
             commands::init::daemon_base_url,
             commands::init::admin_user_id,
+            voice::list_audio_devices,
+            voice::start_voice_capture,
+            voice::stop_voice_capture,
             logging::log_debug,
         ])
         .run(tauri::generate_context!())

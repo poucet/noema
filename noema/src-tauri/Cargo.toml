@@ -38,6 +38,15 @@ url = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 tokio = { workspace = true, features = ["full"] }
 
+# Native audio capture — the webview's getUserMedia path would force HTTPS +
+# hide device selection; cpal lets us enumerate inputs and stream PCM directly
+# to the daemon's voice WS from Rust.
+cpal = "0.15"
+futures-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"
 dirs = { workspace = true }
