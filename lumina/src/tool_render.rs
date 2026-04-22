@@ -27,7 +27,7 @@ pub fn format_tool_output(text: &str) -> String {
     match &value {
         Value::Array(items) => format_array(items),
         Value::Object(obj) => format_object(obj, 0),
-        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| text.to_string()),
+        other => crate::json_fmt::pretty_compact(other),
     }
 }
 
@@ -218,7 +218,10 @@ pub async fn render_tool_result_to_channel(
                 .title(format!("Tool: {tool_name} (error)"))
                 .description(format!("{e}"))
                 .color(0xE74C3C);
-            let mut msg = CreateMessage::new().embed(embed);
+            let row = serenity::builder::CreateActionRow::Buttons(vec![
+                crate::paginator::tool_json_button(),
+            ]);
+            let mut msg = CreateMessage::new().embed(embed).components(vec![row]);
             for f in extra_files { msg = msg.add_file(f); }
             let posted = channel_id.send_message(http, msg).await?;
             return Ok(posted.id.get());
@@ -246,7 +249,10 @@ pub async fn render_tool_result_to_channel(
     }
 
     if !attachments.is_empty() {
-        let mut msg = CreateMessage::new();
+        let row = serenity::builder::CreateActionRow::Buttons(vec![
+            crate::paginator::tool_json_button(),
+        ]);
+        let mut msg = CreateMessage::new().components(vec![row]);
         for a in attachments { msg = msg.add_file(a); }
         for f in extra_files { msg = msg.add_file(f); }
         if !text_parts.is_empty() {

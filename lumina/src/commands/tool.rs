@@ -329,7 +329,7 @@ async fn cmd_info(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str)
     };
 
     let schema = serde_json::to_value(&tool.input_schema).unwrap_or_default();
-    let schema_pretty = serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string());
+    let schema_pretty = crate::json_fmt::pretty_compact(&schema);
     let schema_block = if schema_pretty.len() > 1600 {
         format!("{}\n... (truncated)", &schema_pretty[..1600])
     } else {
@@ -606,7 +606,7 @@ async fn send_tool_result(
             }
 
             if let Some(structured) = &r.structured_content {
-                text_parts.push(serde_json::to_string_pretty(structured).unwrap_or_default());
+                text_parts.push(crate::json_fmt::pretty_compact(structured));
             }
 
             let body = text_parts.join("\n");

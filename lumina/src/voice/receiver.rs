@@ -92,7 +92,7 @@ async fn post_tool_result(
         Ok(b) => b,
         Err(_) => {
             let text = result.as_str().map(|s| s.to_string())
-                .unwrap_or_else(|| serde_json::to_string_pretty(result).unwrap_or_default());
+                .unwrap_or_else(|| crate::json_fmt::pretty_compact(result));
             vec![ToolResultContent::Text { text }]
         }
     };

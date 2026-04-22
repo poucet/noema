@@ -117,6 +117,17 @@ fn nav_buttons(page: usize, total: usize) -> Vec<CreateActionRow> {
     ])]
 }
 
+/// A small "download the stashed tool JSON" button. `custom_id` is
+/// fixed (`tool_json`); the handler looks up the payload by the
+/// interaction's `message.id` so any tool-call / tool-result embed
+/// carrying this button works without knowing the message id up front.
+pub fn tool_json_button() -> CreateButton {
+    CreateButton::new("tool_json")
+        .style(ButtonStyle::Secondary)
+        .label("JSON")
+        .emoji(serenity::model::channel::ReactionType::Unicode("\u{1f4e5}".to_string()))
+}
+
 /// Send a paginated embed to a channel with prev/next buttons.
 ///
 /// `extra_files` are attached to the initial message only; Discord preserves
@@ -156,7 +167,24 @@ pub async fn send_paginated_embeds_to_channel(
         e
     };
 
-    let components = if total > 1 { nav_buttons(page, total) } else { vec![] };
+    // Combine pagination buttons (if any) with the JSON-download button.
+    // Discord allows up to 5 buttons per ActionRow, so they fit together.
+    let mut buttons: Vec<CreateButton> = if total > 1 {
+        vec![
+            CreateButton::new("page_prev")
+                .label("\u{25c0} Prev")
+                .style(ButtonStyle::Secondary)
+                .disabled(page == 0),
+            CreateButton::new("page_next")
+                .label("Next \u{25b6}")
+                .style(ButtonStyle::Secondary)
+                .disabled(page >= total - 1),
+        ]
+    } else {
+        Vec::new()
+    };
+    buttons.push(tool_json_button());
+    let components = vec![CreateActionRow::Buttons(buttons)];
     let mut initial = CreateMessage::new().embed(make_embed(page)).components(components);
     for f in extra_files {
         initial = initial.add_file(f);
@@ -168,9 +196,18 @@ pub async fn send_paginated_embeds_to_channel(
         return Ok(posted_id);
     }
 
+    // Filter to only pagination buttons — any other custom_id (notably
+    // `tool_json`) falls through to the global interaction_create
+    // handler in main.rs.
     let mut collector = msg
         .await_component_interactions(shard)
         .timeout(timeout)
+        .filter(|i| {
+            matches!(
+                i.data.custom_id.as_str(),
+                "page_prev" | "page_next"
+            )
+        })
         .stream();
 
     while let Some(interaction) = collector.next().await {
@@ -178,27 +215,43 @@ pub async fn send_paginated_embeds_to_channel(
             match interaction.data.custom_id.as_str() {
                 "page_prev" => page = page.saturating_sub(1),
                 "page_next" => page = (page + 1).min(total - 1),
+                // tool_json is handled by the global interaction dispatcher;
+                // ignore here so this collector doesn't swallow it.
                 _ => continue,
             }
 
+            let row = CreateActionRow::Buttons(vec![
+                CreateButton::new("page_prev")
+                    .label("\u{25c0} Prev")
+                    .style(ButtonStyle::Secondary)
+                    .disabled(page == 0),
+                CreateButton::new("page_next")
+                    .label("Next \u{25b6}")
+                    .style(ButtonStyle::Secondary)
+                    .disabled(page >= total - 1),
+                tool_json_button(),
+            ]);
             interaction
                 .create_response(
                     http,
                     CreateInteractionResponse::UpdateMessage(
                         CreateInteractionResponseMessage::new()
                             .embed(make_embed(page))
-                            .components(nav_buttons(page, total)),
+                            .components(vec![row]),
                     ),
                 )
                 .await?;
         }
     }
 
-    // Remove buttons after timeout
+    // After the pagination collector times out, keep only the download
+    // button (pagination is useless on a frozen embed).
     msg.channel_id.edit_message(
         http,
         msg.id,
-        EditMessage::new().embed(make_embed(page)).components(vec![]),
+        EditMessage::new().embed(make_embed(page)).components(vec![
+            CreateActionRow::Buttons(vec![tool_json_button()]),
+        ]),
     ).await?;
 
     Ok(posted_id)

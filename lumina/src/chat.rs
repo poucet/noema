@@ -42,6 +42,43 @@ Use these mentions when referring to what someone said.
 Be helpful, concise, and conversational.")
 }
 
+/// Handle a click on the "📥 JSON" button attached to a tool-call or
+/// tool-result embed. Looks up the stashed payload by the message the
+/// button sits on and replies ephemerally with the JSON as an attached
+/// file (visible only to the clicker, zero clutter in the channel).
+pub async fn handle_tool_json_button(
+    lx: &LuminaContext,
+    comp: &serenity::model::application::ComponentInteraction,
+) -> anyhow::Result<()> {
+    use serenity::builder::{
+        CreateAttachment, CreateInteractionResponse, CreateInteractionResponseMessage,
+    };
+
+    let msg_id = comp.message.id.get();
+    let found = lx.state.tool_state.get_many(&[msg_id]).unwrap_or_default();
+
+    let response = match found.get(&msg_id) {
+        Some((kind, payload)) => {
+            let filename = match kind.as_str() {
+                crate::tool_state::KIND_TOOL_CALL => format!("tool_call_{msg_id}.json"),
+                crate::tool_state::KIND_TOOL_RESULT => format!("tool_result_{msg_id}.json"),
+                _ => format!("tool_{msg_id}.json"),
+            };
+            let attachment = CreateAttachment::bytes(payload.as_bytes().to_vec(), filename);
+            CreateInteractionResponseMessage::new()
+                .ephemeral(true)
+                .add_file(attachment)
+        }
+        None => CreateInteractionResponseMessage::new()
+            .ephemeral(true)
+            .content("No stored JSON for this message (it may predate the lumina tool_state store)."),
+    };
+
+    comp.create_response(&lx.http, CreateInteractionResponse::Message(response))
+        .await?;
+    Ok(())
+}
+
 /// Handle an incoming message — checks if it should get an AI response,
 /// then processes it.
 pub async fn handle_message(lx: &LuminaContext, msg: &Message) {
@@ -469,21 +506,36 @@ async fn stream_response(
                 }
             }
             Ok(DaemonEvent::ToolCall { id, name, arguments }) => {
-                let args_str = truncate_for_discord(&serde_json::to_string_pretty(&arguments).unwrap_or_default());
-                let embed = CreateEmbed::new()
+                // Skip the args codeblock entirely when the tool takes no
+                // arguments — a bare `null` or `{}` reads as noise.
+                let has_args = match &arguments {
+                    serde_json::Value::Null => false,
+                    serde_json::Value::Object(m) => !m.is_empty(),
+                    serde_json::Value::Array(a) => !a.is_empty(),
+                    _ => true,
+                };
+                let mut embed = CreateEmbed::new()
                     .title(format!("\u{1f527} Using: {name}"))
-                    .description(format!("```json\n{args_str}\n```"))
                     .color(0x5865F2);
+                if has_args {
+                    let args_str = truncate_for_discord(&crate::json_fmt::pretty_compact(&arguments));
+                    embed = embed.description(format!("```json\n{args_str}\n```"));
+                }
                 let call = ToolCall {
                     id: id.clone(),
                     name: name.clone(),
                     arguments,
                     extra: serde_json::Value::Null,
                 };
+                let row = serenity::builder::CreateActionRow::Buttons(vec![
+                    crate::paginator::tool_json_button(),
+                ]);
                 let posted = msg.channel_id
                     .send_message(
                         &lx.http,
-                        serenity::builder::CreateMessage::new().embed(embed),
+                        serenity::builder::CreateMessage::new()
+                            .embed(embed)
+                            .components(vec![row]),
                     )
                     .await?;
                 // Stash the structured call against the Discord message
@@ -502,7 +554,7 @@ async fn stream_response(
             }
             Ok(DaemonEvent::ToolResult { id, result }) => {
                 tracing::debug!(
-                    result = %truncate(&serde_json::to_string_pretty(&result).unwrap_or_default(), 500),
+                    result = %truncate(&crate::json_fmt::pretty_compact(&result), 500),
                     "tool result",
                 );
                 let blocks: Vec<ToolResultContent> =

@@ -210,7 +210,7 @@ impl DiscordSkill {
     #[tool(name = "send_message")]
     async fn send_message(&self, Parameters(p): Parameters<SendMessageParams>) -> String {
         match self.do_send_message(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -219,7 +219,7 @@ impl DiscordSkill {
     #[tool(name = "reply_to_message")]
     async fn reply_to_message(&self, Parameters(p): Parameters<ReplyToMessageParams>) -> String {
         match self.do_reply_to_message(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -228,7 +228,7 @@ impl DiscordSkill {
     #[tool(name = "create_embed")]
     async fn create_embed(&self, Parameters(p): Parameters<CreateEmbedParams>) -> String {
         match self.do_create_embed(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -237,7 +237,7 @@ impl DiscordSkill {
     #[tool(name = "create_poll")]
     async fn create_poll(&self, Parameters(p): Parameters<CreatePollParams>) -> String {
         match self.do_create_poll(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -248,7 +248,7 @@ impl DiscordSkill {
     #[tool(name = "get_channel_history")]
     async fn get_channel_history(&self, Parameters(p): Parameters<ChannelHistoryParams>) -> String {
         match self.do_get_channel_history(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -257,7 +257,7 @@ impl DiscordSkill {
     #[tool(name = "search_messages")]
     async fn search_messages(&self, Parameters(p): Parameters<SearchMessagesParams>) -> String {
         match self.do_search_messages(p).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -266,7 +266,7 @@ impl DiscordSkill {
     #[tool(name = "list_channels")]
     async fn list_channels(&self, ctx: RequestContext) -> String {
         match self.do_list_channels(&ctx).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -275,7 +275,7 @@ impl DiscordSkill {
     #[tool(name = "get_emoji_list")]
     async fn get_emoji_list(&self, ctx: RequestContext) -> String {
         match self.do_get_emoji_list(&ctx).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -285,7 +285,7 @@ impl DiscordSkill {
     #[tool(name = "get_voice_states")]
     async fn get_voice_states(&self, ctx: RequestContext) -> String {
         match self.do_get_voice_states(&ctx).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -296,7 +296,7 @@ impl DiscordSkill {
     #[tool(name = "join_voice")]
     async fn join_voice(&self, ctx: RequestContext) -> String {
         match self.do_join_voice(&ctx).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }
@@ -306,7 +306,7 @@ impl DiscordSkill {
     #[tool(name = "leave_voice")]
     async fn leave_voice(&self, ctx: RequestContext) -> String {
         match self.do_leave_voice(&ctx).await {
-            Ok(v) => serde_json::to_string_pretty(&v).unwrap(),
+            Ok(v) => crate::json_fmt::pretty_compact(&v),
             Err(e) => format!("Error: {e}"),
         }
     }

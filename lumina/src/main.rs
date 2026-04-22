@@ -4,6 +4,7 @@
 
 mod chat;
 mod commands;
+pub mod json_fmt;
 pub mod mcp;
 pub mod paginator;
 pub mod tool_render;
@@ -335,6 +336,17 @@ impl EventHandler for Handler {
                     let lx = commands::LuminaContext::from_serenity(&ctx).await;
                     if let Err(e) = commands::tool::handle_modal(&lx, &modal).await {
                         tracing::error!(error = %e, "tool modal failed");
+                    }
+                }
+            }
+            serenity::model::application::Interaction::Component(comp) => {
+                // Only our own buttons are handled here; the paginator's
+                // prev/next buttons are consumed by its local collector
+                // and never reach this dispatcher.
+                if comp.data.custom_id == "tool_json" {
+                    let lx = commands::LuminaContext::from_serenity(&ctx).await;
+                    if let Err(e) = chat::handle_tool_json_button(&lx, &comp).await {
+                        tracing::error!(error = %e, "tool_json button failed");
                     }
                 }
             }
