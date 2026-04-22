@@ -4,6 +4,7 @@
 
 mod chat;
 mod commands;
+pub mod invite;
 pub mod json_fmt;
 pub mod mcp;
 pub mod paginator;
@@ -177,6 +178,17 @@ struct Handler {
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: serenity::model::gateway::Ready) {
         tracing::info!(user = %ready.user.name, "connected to Discord — use .sync to register commands");
+
+        // Log the invite URL on every boot so the operator can easily
+        // add Lumina to another server without digging through the
+        // developer portal. Mirrors what `/invite` serves to users.
+        match ctx.http.get_current_application_info().await {
+            Ok(info) => {
+                let url = invite::invite_url(info.id.get());
+                tracing::info!(invite_url = %url, "bot invite URL (share with server admins to add Lumina)");
+            }
+            Err(e) => tracing::warn!(error = %e, "could not fetch application info for invite URL"),
+        }
 
         {
             let data = ctx.data.read().await;

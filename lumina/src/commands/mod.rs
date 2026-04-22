@@ -7,6 +7,7 @@
 mod auth;
 pub mod chat;
 mod google;
+mod invite;
 mod model;
 mod ping;
 pub mod tool;
