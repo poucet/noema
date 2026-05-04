@@ -85,6 +85,10 @@ pub struct EntityContent {
     /// Markdown text for the entity's live content block, if any.
     /// `None` if the entity has no `content_block_id` set.
     pub content_markdown: Option<String>,
+    /// Hash of the returned Markdown body. Editors can send this back as
+    /// `expected_content_hash` to avoid overwriting external vault edits.
+    #[serde(default)]
+    pub content_hash: Option<String>,
     /// Assets referenced by the content (for blob GC to keep images alive).
     #[serde(default)]
     pub referenced_assets: Vec<AssetId>,
@@ -118,6 +122,8 @@ pub struct CreateEntityRequest {
 #[cfg_attr(feature = "ts", ts(export, export_to = "ts/src/generated/types/"))]
 pub struct UpdateEntityContentRequest {
     pub content: String,
+    #[serde(default)]
+    pub expected_content_hash: Option<String>,
     #[serde(default)]
     pub referenced_assets: Vec<AssetId>,
 }

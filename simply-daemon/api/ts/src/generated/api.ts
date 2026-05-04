@@ -177,6 +177,18 @@ export const userApi = (t: Transport) => ({
   getOrCreateUserByEmail: (email: string) => t.rpc<T.Scope>('user.get_or_create_user_by_email', 'POST', '/api/user/by-email', email),
 });
 
+// VaultApi
+export const vaultApi = (t: Transport) => ({
+  /** Export document entities into the Markdown vault. */
+  exportDocuments: (request: T.VaultExportRequest) => t.rpc<T.VaultExportSummary>('vault.export_documents', 'POST', '/api/vault/export', request),
+  /** Run a full vault reconciliation scan immediately. */
+  scan: () => t.rpc<T.VaultScanSummary>('vault.scan', 'POST', '/api/vault/scan'),
+  /** List unresolved vault conflicts. */
+  listConflicts: () => t.rpc<T.VaultConflictInfo[]>('vault.list_conflicts', 'GET', '/api/vault/conflicts'),
+  /** Resolve one vault conflict. */
+  resolveConflict: (request: T.ResolveVaultConflictRequest) => t.rpc<void>('vault.resolve_conflict', 'POST', '/api/vault/conflicts/resolve', request),
+});
+
 // VoiceApi
 export const voiceApi = (t: Transport) => ({
   /** List available voice providers. */
@@ -188,4 +200,3 @@ export const voiceApi = (t: Transport) => ({
   /** Disconnect a voice stream. */
   voiceDisconnect: (sessionId: string) => t.rpc<void>('voice.voice_disconnect', 'DELETE', `/api/voice/${sessionId}`),
 });
-

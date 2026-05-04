@@ -30,7 +30,7 @@
 //! - `AssetResolver` - Resolution trait for assets and entities
 //! - `EntityResolver` - Expand `EntityRef { id }` chat refs to markdown
 
-pub(crate) mod helper;
+pub mod helper;
 
 // Type-safe ID newtypes
 pub mod ids;

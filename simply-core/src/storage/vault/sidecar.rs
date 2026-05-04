@@ -2,11 +2,11 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::storage::ids::EntityId;
-use crate::storage::types::{VaultFile, VaultSyncStatus};
+use crate::storage::types::{EntityType, RelationType, VaultFile, VaultSyncStatus};
 
 pub const SIDECAR_DIR: &str = ".noema";
 pub const SIDECAR_FILE: &str = "vault-index.json";
@@ -17,6 +17,8 @@ pub struct VaultSidecarManifest {
     pub version: u32,
     #[serde(default)]
     pub files: BTreeMap<String, VaultSidecarFile>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub ignored_paths: BTreeSet<String>,
 }
 
 impl Default for VaultSidecarManifest {
@@ -24,6 +26,7 @@ impl Default for VaultSidecarManifest {
         Self {
             version: SIDECAR_VERSION,
             files: BTreeMap::new(),
+            ignored_paths: BTreeSet::new(),
         }
     }
 }
@@ -32,25 +35,38 @@ impl VaultSidecarManifest {
     pub fn from_vault_files(files: &[VaultFile]) -> Self {
         let mut manifest = Self::default();
         for file in files {
-            manifest.files.insert(
-                file.path.clone(),
-                VaultSidecarFile {
-                    entity_id: file.entity_id.clone(),
-                    file_key: file.file_key.clone(),
-                    mtime: file.mtime,
-                    content_hash: file.content_hash.clone(),
-                    frontmatter_hash: file.frontmatter_hash.clone(),
-                    sync_status: file.sync_status.clone(),
-                },
-            );
+            manifest
+                .files
+                .insert(file.path.clone(), VaultSidecarFile::from_vault_file(file));
         }
         manifest
+    }
+
+    pub fn preserve_user_fields_from(&mut self, existing: &Self) {
+        self.ignored_paths = existing.ignored_paths.clone();
+        for (path, existing_file) in &existing.files {
+            if let Some(file) = self.files.get_mut(path) {
+                file.preserve_metadata_from(existing_file);
+            }
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VaultSidecarFile {
     pub entity_id: EntityId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<EntityType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_entity_id: Option<EntityId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_relation: Option<RelationType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -59,6 +75,34 @@ pub struct VaultSidecarFile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frontmatter_hash: Option<String>,
     pub sync_status: VaultSyncStatus,
+}
+
+impl VaultSidecarFile {
+    pub fn from_vault_file(file: &VaultFile) -> Self {
+        Self {
+            entity_id: file.entity_id.clone(),
+            kind: None,
+            title: None,
+            origin: None,
+            parent_entity_id: None,
+            parent_relation: None,
+            position: None,
+            file_key: file.file_key.clone(),
+            mtime: file.mtime,
+            content_hash: file.content_hash.clone(),
+            frontmatter_hash: file.frontmatter_hash.clone(),
+            sync_status: file.sync_status.clone(),
+        }
+    }
+
+    pub fn preserve_metadata_from(&mut self, existing: &Self) {
+        self.kind = existing.kind.clone();
+        self.title = existing.title.clone();
+        self.origin = existing.origin.clone();
+        self.parent_entity_id = existing.parent_entity_id.clone();
+        self.parent_relation = existing.parent_relation.clone();
+        self.position = existing.position;
+    }
 }
 
 pub fn sidecar_path(root: &Path) -> PathBuf {

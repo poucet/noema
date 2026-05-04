@@ -20,6 +20,7 @@
 #[macro_use] mod search;
 #[macro_use] mod user;
 #[macro_use] mod skills;
+#[macro_use] mod vault;
 pub mod client;
 pub mod provider;
 pub mod remote;
@@ -38,6 +39,7 @@ pub use self::core::*;
 pub use search::*;
 pub use user::*;
 pub use skills::*;
+pub use vault::*;
 pub use types::*;
 pub use skill::{Skill, SkillFactory, OAuthRequirement};
 pub use provider::{ProviderKind, ToolProvider};
@@ -81,6 +83,7 @@ pub trait Daemon: Send + Sync {
     fn voice(&self) -> &dyn VoiceApi;
     fn core(&self) -> &dyn CoreApi;
     fn search(&self) -> &dyn SearchApi;
+    fn vault(&self) -> &dyn VaultApi;
     fn user(&self) -> &dyn UserApi;
     fn skills(&self) -> &dyn SkillsApi;
     fn tools(&self) -> &dyn simply_core::ToolService;
@@ -189,5 +192,11 @@ mod ts_export {
         SearchHit::export_all().expect("SearchHit");
         SearchRequest::export_all().expect("SearchRequest");
         ReindexStatus::export_all().expect("ReindexStatus");
+        VaultExportRequest::export_all().expect("VaultExportRequest");
+        VaultExportSummary::export_all().expect("VaultExportSummary");
+        VaultScanSummary::export_all().expect("VaultScanSummary");
+        VaultConflictInfo::export_all().expect("VaultConflictInfo");
+        ResolveVaultConflictRequest::export_all().expect("ResolveVaultConflictRequest");
+        VaultConflictResolutionAction::export_all().expect("VaultConflictResolutionAction");
     }
 }

@@ -10,11 +10,13 @@ use crate::storage::ids::{EntityId, VaultConflictId};
 use crate::storage::traits::VaultStore;
 use crate::storage::types::{VaultConflict, VaultConflictReason, VaultFile, VaultSyncStatus};
 use crate::storage::vault::scanner::{
-    ObservedVaultFile, VaultReconciliationAction, VaultScanOptions, normalize_relative_path,
-    plan_reconciliation_with_options, plan_scoped_reconciliation_with_options, scan_vault,
-    scan_vault_paths,
+    normalize_relative_path, plan_reconciliation_with_options,
+    plan_scoped_reconciliation_with_options, scan_vault, scan_vault_paths, ObservedVaultFile,
+    VaultReconciliationAction, VaultScanOptions,
 };
-use crate::storage::vault::sidecar::{VaultSidecarManifest, write_sidecar_manifest};
+use crate::storage::vault::sidecar::{
+    read_sidecar_manifest, write_sidecar_manifest, VaultSidecarManifest,
+};
 
 /// Summary returned after persisting a reconciliation plan.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -51,7 +53,7 @@ impl VaultReconciler {
     /// Full startup-style scan. Missing projected files are marked missing.
     pub async fn reconcile_full_scan(&self) -> Result<VaultReconciliationSummary> {
         let known_files = self.store.list_vault_files(None).await?;
-        let observed_files = scan_vault(&self.root, &self.options)?;
+        let observed_files = self.filter_ignored(scan_vault(&self.root, &self.options)?)?;
         let plan = plan_reconciliation_with_options(&known_files, &observed_files, &self.options);
         self.persist_plan(&known_files, &observed_files, plan.actions)
             .await
@@ -61,7 +63,8 @@ impl VaultReconciler {
     /// provided scope can be marked missing.
     pub async fn reconcile_paths(&self, paths: &[PathBuf]) -> Result<VaultReconciliationSummary> {
         let known_files = self.store.list_vault_files(None).await?;
-        let observed_files = scan_vault_paths(&self.root, paths, &self.options)?;
+        let observed_files =
+            self.filter_ignored(scan_vault_paths(&self.root, paths, &self.options)?)?;
         let missing_paths = scoped_missing_paths(&self.root, paths);
         let plan = plan_scoped_reconciliation_with_options(
             &known_files,
@@ -71,6 +74,16 @@ impl VaultReconciler {
         );
         self.persist_plan(&known_files, &observed_files, plan.actions)
             .await
+    }
+
+    fn filter_ignored(&self, files: Vec<ObservedVaultFile>) -> Result<Vec<ObservedVaultFile>> {
+        let ignored_paths = read_sidecar_manifest(&self.root)?
+            .map(|manifest| manifest.ignored_paths)
+            .unwrap_or_default();
+        Ok(files
+            .into_iter()
+            .filter(|file| !ignored_paths.contains(&file.path))
+            .collect())
     }
 
     async fn persist_plan(
@@ -174,7 +187,10 @@ impl VaultReconciler {
 
     async fn write_sidecar_snapshot(&self) -> Result<()> {
         let files = self.store.list_vault_files(None).await?;
-        let manifest = VaultSidecarManifest::from_vault_files(&files);
+        let mut manifest = VaultSidecarManifest::from_vault_files(&files);
+        if let Some(existing) = read_sidecar_manifest(&self.root)? {
+            manifest.preserve_user_fields_from(&existing);
+        }
         write_sidecar_manifest(&self.root, &manifest)
     }
 

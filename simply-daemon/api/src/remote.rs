@@ -27,6 +27,7 @@ pub struct RemoteDaemon {
     voice: RemoteVoiceApi,
     core: RemoteCoreApi,
     search: RemoteSearchApi,
+    vault: RemoteVaultApi,
     user: RemoteUserApi,
     skills: RemoteSkillsApi,
     /// Skills registered by this client, keyed by skill id.
@@ -89,6 +90,7 @@ impl RemoteDaemon {
             voice: RemoteVoiceApi::new(rpc.clone()),
             core: RemoteCoreApi::new(rpc.clone()),
             search: RemoteSearchApi::new(rpc.clone()),
+            vault: RemoteVaultApi::new(rpc.clone()),
             user: RemoteUserApi::new(rpc.clone()),
             skills: RemoteSkillsApi::new(rpc),
             registered_skills,
@@ -117,6 +119,7 @@ impl Daemon for RemoteDaemon {
     fn voice(&self) -> &dyn VoiceApi { &self.voice }
     fn core(&self) -> &dyn CoreApi { &self.core }
     fn search(&self) -> &dyn SearchApi { &self.search }
+    fn vault(&self) -> &dyn VaultApi { &self.vault }
     fn user(&self) -> &dyn UserApi { &self.user }
     fn skills(&self) -> &dyn SkillsApi { &self.skills }
     fn tools(&self) -> &dyn simply_core::ToolService { &self.mcp }

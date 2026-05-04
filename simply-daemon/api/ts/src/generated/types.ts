@@ -124,6 +124,7 @@ export interface RelatedEntity {
 export interface EntityContent {
   entityId: string;
   contentMarkdown: string | null;
+  contentHash?: string | null;
   referencedAssets: string[];
 }
 
@@ -137,6 +138,7 @@ export interface CreateEntityRequest {
 
 export interface UpdateEntityContentRequest {
   content: string;
+  expectedContentHash?: string | null;
   referencedAssets: string[];
 }
 
@@ -152,6 +154,51 @@ export interface MoveRelationRequest {
   relation: string;
   newToId: string;
   newPosition: number;
+}
+
+export interface VaultExportRequest {
+  entityIds: string[];
+  includeFrontmatterIdentity: boolean;
+}
+
+export interface VaultExportSummary {
+  exportedEntities: number;
+  exportedFiles: number;
+  skippedEntities: number;
+}
+
+export interface VaultScanSummary {
+  scannedFiles: number;
+  actions: number;
+  projectedFiles: number;
+  conflicts: number;
+  missingFiles: number;
+  unmanagedFiles: number;
+  contentSnapshots: number;
+  assetProjections: number;
+}
+
+export interface VaultConflictInfo {
+  id: string;
+  entityId: string | null;
+  path: string;
+  reason: string;
+  observedEntityId: string | null;
+  details: unknown | null;
+  createdAt: number;
+}
+
+export type VaultConflictResolutionAction =
+  | "ignore"
+  | "bind_to_entity"
+  | "accept_new_path"
+  | "fork_as_new_document"
+  | "restore_original_id";
+
+export interface ResolveVaultConflictRequest {
+  conflictId: string;
+  action: VaultConflictResolutionAction;
+  entityId: string | null;
 }
 
 export interface McpServerInfo {
