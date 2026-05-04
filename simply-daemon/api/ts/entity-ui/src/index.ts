@@ -13,6 +13,9 @@ export { default as MarkdownView } from './MarkdownView.svelte';
 export { default as DocumentEditor } from './DocumentEditor.svelte';
 export { default as EntityList } from './EntityList.svelte';
 export { default as EntityDetail } from './EntityDetail.svelte';
+export { default as MessageBubble } from './MessageBubble.svelte';
+export { default as EntityRefChip } from './EntityRefChip.svelte';
+export { default as DocumentMentionList } from './DocumentMentionList.svelte';
 
 // Shared browser state (list + selection + content loading + create/delete).
 export {
@@ -23,6 +26,28 @@ export {
   type EntityClient,
 } from './useEntitiesBrowser.svelte';
 
+export {
+  createDocumentMentionController,
+  documentMentionFuzzyScore,
+  documentMentionTitle,
+  findDocumentMention,
+  formatDocumentMention,
+  parseDocumentMentionContent,
+  type DocumentMentionController,
+  type MentionInsert,
+  type MentionRange,
+} from './documentMentions.svelte';
+
+export {
+  normalizeInputContent,
+  toChatDisplayMessage,
+  type AssetRefResolvedContent,
+  type ChatDisplayContent,
+  type ChatDisplayMessage,
+  type EntityRefResolvedContent,
+  type EntityResolvedContent,
+} from './chatContent';
+
 // Re-export the entity wire types so consumers can import from one place.
 export type {
   EntitySummary,
@@ -32,4 +57,7 @@ export type {
   UpdateEntityContentRequest,
   AddRelationRequest,
   MoveRelationRequest,
+  InputContent,
+  ResolvedContent,
+  ResolvedMessage,
 } from '@simply/client';

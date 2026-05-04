@@ -7,15 +7,19 @@ import {
   sessionApi,
   modelApi,
   type ConversationInfo,
-  type ResolvedMessage,
-  type ResolvedContent,
   type SessionInfo,
   type ModelInfo,
   type DaemonEvent,
   type ContentBlock,
+  type InputContent,
   type Transport,
   type Unsubscribe,
 } from '@simply/client';
+import {
+  normalizeInputContent,
+  toChatDisplayMessage,
+  type ChatDisplayContent,
+} from '@simply/entity-ui';
 
 // ---------------------------------------------------------------------------
 // Display types (presentation layer over ResolvedMessage)
@@ -23,7 +27,7 @@ import {
 
 export interface DisplayMessage {
   role: 'user' | 'assistant' | 'system';
-  content: ResolvedContent[];
+  content: ChatDisplayContent[];
   turnId?: string;
 }
 
@@ -110,7 +114,7 @@ class ChatStore {
     // Load messages
     try {
       const resolved = await this.conv.getMessages(conversationId);
-      this.messages = resolved.map(toDisplayMessage);
+      this.messages = resolved.map(toChatDisplayMessage);
     } catch (e) {
       this.messages = [];
       setError(this, 'Failed to load messages', e);
@@ -160,8 +164,9 @@ class ChatStore {
 
   // --- Messaging ---
 
-  async sendMessage(text: string) {
-    if (!this.currentSessionId || !text.trim()) return;
+  async sendMessage(content: InputContent[] | string) {
+    const inputContent = normalizeInputContent(content);
+    if (!this.currentSessionId || inputContent.length === 0) return;
 
     console.log('[chat] sendMessage, session:', this.currentSessionId);
     this.isLoading = true;
@@ -171,12 +176,12 @@ class ChatStore {
     // Optimistic: add user message to display
     this.messages = [...this.messages, {
       role: 'user',
-      content: [{ type: 'text', text }],
+      content: inputContent,
     }];
 
     try {
       await this.sess.sendMessage(this.currentSessionId, {
-        content: [{ type: 'text', text }],
+        content: inputContent,
       });
       console.log('[chat] sendMessage succeeded, waiting for events...');
     } catch (e) {
@@ -243,7 +248,7 @@ class ChatStore {
       // Skip text blocks — those are already handled incrementally via TextDelta.
       // Only handle non-text content blocks (tool calls, images, etc.)
       if (block.type === 'text') return;
-      const content = block as unknown as ResolvedContent;
+      const content = block as unknown as ChatDisplayContent;
       if (this.streamingMessage) {
         this.streamingMessage = {
           ...this.streamingMessage,
@@ -295,18 +300,6 @@ class ChatStore {
       this.currentSessionId = null;
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function toDisplayMessage(msg: ResolvedMessage): DisplayMessage {
-  return {
-    role: msg.role as 'user' | 'assistant' | 'system',
-    content: msg.content,
-    turnId: (msg as any).turn_id ?? msg.turnId,
-  };
 }
 
 // ---------------------------------------------------------------------------

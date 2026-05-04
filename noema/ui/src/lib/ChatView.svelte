@@ -47,7 +47,7 @@
   </div>
 
   <ChatInput
-    onSend={(t) => chatStore.sendMessage(t)}
+    onSend={(content) => chatStore.sendMessage(content)}
     disabled={chatStore.currentConversationId == null}
     isLoading={chatStore.isLoading}
   />

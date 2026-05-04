@@ -1,8 +1,8 @@
 // Chat store — reactive conversation state (selections, messages, streaming).
 //
 // Mirrors simply-daemon/admin/src/lib/stores/chat.svelte.ts. The flows are
-// the same because both clients talk to the daemon the same way; if this
-// keeps drifting in parallel, promote it to @simply/client.
+// the same because both clients talk to the daemon the same way. Shared
+// display/input helpers live in @simply/entity-ui.
 
 import {
   getTransport,
@@ -10,19 +10,25 @@ import {
   sessionApi,
   modelApi,
   type ConversationInfo,
-  type ResolvedMessage,
-  type ResolvedContent,
   type SessionInfo,
   type ModelInfo,
   type DaemonEvent,
   type ContentBlock,
+  type InputContent,
   type Transport,
   type Unsubscribe,
 } from '@simply/client';
+import {
+  normalizeInputContent,
+  toChatDisplayMessage,
+  type ChatDisplayContent,
+} from '@simply/entity-ui';
+
+export type DisplayContent = ChatDisplayContent;
 
 export interface DisplayMessage {
   role: 'user' | 'assistant' | 'system';
-  content: ResolvedContent[];
+  content: DisplayContent[];
   turnId?: string;
 }
 
@@ -102,7 +108,7 @@ class ChatStore {
 
     try {
       const resolved = await this.conv.getMessages(conversationId);
-      this.messages = resolved.map(toDisplayMessage);
+      this.messages = resolved.map(toChatDisplayMessage);
     } catch (e) {
       this.messages = [];
       setError(this, 'Failed to load messages', e);
@@ -148,8 +154,10 @@ class ChatStore {
     }
   }
 
-  async sendMessage(text: string) {
-    if (!this.currentSessionId || !text.trim()) return;
+  async sendMessage(content: InputContent[] | string) {
+    const inputContent = normalizeInputContent(content);
+
+    if (!this.currentSessionId || inputContent.length === 0) return;
 
     this.isLoading = true;
     this.error = null;
@@ -157,12 +165,12 @@ class ChatStore {
 
     this.messages = [...this.messages, {
       role: 'user',
-      content: [{ type: 'text', text }],
+      content: inputContent,
     }];
 
     try {
       await this.sess.sendMessage(this.currentSessionId, {
-        content: [{ type: 'text', text }],
+        content: inputContent,
       });
     } catch (e) {
       setError(this, 'Failed to send', e);
@@ -221,7 +229,7 @@ class ChatStore {
       const block = event.AssistantContent as ContentBlock;
       // Text blocks are already handled incrementally via TextDelta.
       if (block.type === 'text') return;
-      const content = block as unknown as ResolvedContent;
+      const content = block as unknown as ChatDisplayContent;
       if (this.streamingMessage) {
         this.streamingMessage = {
           ...this.streamingMessage,
@@ -269,14 +277,6 @@ class ChatStore {
       this.currentSessionId = null;
     }
   }
-}
-
-function toDisplayMessage(msg: ResolvedMessage): DisplayMessage {
-  return {
-    role: msg.role as 'user' | 'assistant' | 'system',
-    content: msg.content,
-    turnId: (msg as any).turn_id ?? msg.turnId,
-  };
 }
 
 export const chatStore = new ChatStore();
