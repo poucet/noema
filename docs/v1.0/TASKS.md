@@ -236,48 +236,48 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 ### Stage 5 — Initial export and read path
 
-- ⬜ 5.1 Export `document::tabbed` containers and ordered `document::tab` trees to vault directories/files
-- ⬜ 5.2 Export flat `document::*` entities with `content_block_id` as plain Markdown files
-- ⬜ 5.3 Populate sidecar identity entries during initial document export
-- ⬜ 5.4 Extend sidecar entries with tab-tree parent relation and position metadata for portable Google Doc recovery
-- ⬜ 5.5 Add optional frontmatter identity export profile for users who want self-contained files
-- ⬜ 5.6 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
-- ⬜ 5.7 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
-- ⬜ 5.8 Keep returned content shape stable for existing clients
+- ✅ 5.1 Export `document::tabbed` containers and ordered `document::tab` trees to vault directories/files
+- ✅ 5.2 Export flat `document::*` entities with `content_block_id` as plain Markdown files
+- ✅ 5.3 Populate sidecar identity entries during initial document export
+- ✅ 5.4 Extend sidecar entries with tab-tree parent relation and position metadata for portable Google Doc recovery
+- ✅ 5.5 Add optional frontmatter identity export profile for users who want self-contained files
+- ✅ 5.6 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
+- ✅ 5.7 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
+- ✅ 5.8 Keep returned content shape stable for existing clients
 
 ### Stage 6 — Vault-backed writes
 
-- ⬜ 6.1 Route vault-backed `EntityApi.update_entity_content` through a vault writer coordinator
-- ⬜ 6.2 Validate access and metadata changes before accepting Markdown/sidecar/frontmatter-derived state
-- ⬜ 6.3 Write with temp-file plus atomic rename inside the vault
-- ⬜ 6.4 Detect stale editor state with content hash checks before overwriting external edits
-- ⬜ 6.5 After successful file write, store a fresh `content_blocks` snapshot and update `entities.content_block_id`
-- ⬜ 6.6 Enqueue embedding refresh keyed to the new `content_block_id`
+- ✅ 6.1 Route vault-backed `EntityApi.update_entity_content` through a vault writer coordinator
+- ✅ 6.2 Validate access and metadata changes before accepting Markdown/sidecar/frontmatter-derived state
+- ✅ 6.3 Write with temp-file plus atomic rename inside the vault
+- ✅ 6.4 Detect stale editor state with content hash checks before overwriting external edits
+- ✅ 6.5 After successful file write, store a fresh `content_blocks` snapshot and update `entities.content_block_id`
+- ✅ 6.6 Enqueue embedding refresh keyed to the new `content_block_id`
 
 ### Stage 7 — External edits
 
-- ⬜ 7.1 Apply scanner-detected body edits to the entity snapshot by creating a new `content_blocks` record
-- ⬜ 7.2 Sync user-editable metadata such as title and tags through coordinator validation
-- ⬜ 7.3 Treat privacy changes from sidecar/frontmatter as access-policy requests, not direct writes
-- ⬜ 7.4 Keep identity field edits in conflict state until explicitly resolved when frontmatter identity mode is enabled
-- ⬜ 7.5 Rebuild `entity_assets` from parsed Markdown references after file changes
+- ✅ 7.1 Apply scanner-detected body edits to the entity snapshot by creating a new `content_blocks` record
+- ✅ 7.2 Sync user-editable metadata such as title and tags through coordinator validation
+- ✅ 7.3 Treat privacy changes from sidecar/frontmatter as access-policy requests, not direct writes
+- ✅ 7.4 Keep identity field edits in conflict state until explicitly resolved when frontmatter identity mode is enabled
+- ✅ 7.5 Rebuild `entity_assets` from parsed Markdown references after file changes
 
-### Stage 8 — Watcher integration
+### Stage 8 — Polling watcher integration
 
-- ⬜ 8.1 Add filesystem watcher that only queues paths for scanner reconciliation
-- ⬜ 8.2 Debounce rapid editor and sync-tool write bursts
-- ⬜ 8.3 Handle platform rename events as hints, not authoritative moves
-- ⬜ 8.4 Trigger startup/full scan regardless of watcher availability
-- ⬜ 8.5 Surface watcher errors without disabling manual/full scans
+- ✅ 8.1 Add polling filesystem watcher that only queues changed paths for scanner reconciliation
+- ✅ 8.2 Debounce rapid editor and sync-tool write bursts before reconciling queued paths
+- ✅ 8.3 Treat rename-like changes as delete/add path hints, not authoritative moves
+- ✅ 8.4 Trigger startup/full scan regardless of watcher availability
+- ✅ 8.5 Surface watcher errors without disabling manual/full scans
 
 ### Stage 9 — Conflict resolution API and UI
 
-- ⬜ 9.1 Add API to list vault conflicts with path, reason, canonical entity, and observed entity ID
-- ⬜ 9.2 Add "restore original ID" action for frontmatter-identity vaults whose ID was removed or changed
-- ⬜ 9.3 Add "fork as new document" action for copied files with duplicate IDs
-- ⬜ 9.4 Add "accept new path" action for copy/delete moves when the old canonical file is missing
-- ⬜ 9.5 Add "ignore/unmanage file" action for files that should stay outside Noema control
-- ⬜ 9.6 Add "bind file to existing entity" action for explicit recovery flows
+- ✅ 9.1 Add API to list vault conflicts with path, reason, canonical entity, and observed entity ID
+- ✅ 9.2 Add "restore original ID" action for frontmatter-identity vaults whose ID was removed or changed
+- ✅ 9.3 Add "fork as new document" action for copied files with duplicate IDs
+- ✅ 9.4 Add "accept new path" action for copy/delete moves when the old canonical file is missing
+- ✅ 9.5 Add sidecar-backed "ignore/unmanage file" action for files that should stay outside Noema control
+- ✅ 9.6 Add "bind file to existing entity" action for explicit recovery flows
 
 ### Stage 10 — Broader hardening
 
