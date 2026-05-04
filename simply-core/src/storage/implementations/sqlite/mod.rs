@@ -128,9 +128,63 @@ fn configure_connection(conn: &Connection, enable_wal: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_sqlite_store_create() {
         let _store = SqliteStore::in_memory().unwrap();
+    }
+
+    #[test]
+    fn test_in_memory_store_shares_read_and_write_handle() {
+        let store = SqliteStore::in_memory().unwrap();
+        assert!(Arc::ptr_eq(store.write_conn(), store.read_conn()));
+    }
+
+    #[test]
+    fn test_file_store_uses_wal_and_read_handle_observes_writes() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "noema-sqlite-read-write-{}-{nonce}.db",
+            std::process::id()
+        ));
+
+        let store = SqliteStore::open(&path).unwrap();
+        {
+            let conn = store.write_conn().lock().unwrap();
+            conn.execute(
+                "INSERT INTO users (id, email, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params!["user-1", "reader@example.com", 1_i64, 1_i64],
+            )
+            .unwrap();
+        }
+
+        {
+            let conn = store.read_conn().lock().unwrap();
+            let journal_mode: String = conn
+                .pragma_query_value(None, "journal_mode", |row| row.get(0))
+                .unwrap();
+            let email: String = conn
+                .query_row(
+                    "SELECT email FROM users WHERE id = ?1",
+                    params!["user-1"],
+                    |row| row.get(0),
+                )
+                .unwrap();
+
+            assert_eq!(journal_mode.to_lowercase(), "wal");
+            assert_eq!(email, "reader@example.com");
+        }
+
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("db-wal"));
+        let _ = std::fs::remove_file(path.with_extension("db-shm"));
     }
 }
