@@ -21,6 +21,7 @@ use simply_core::storage::types::RelationType;
 use simply_rpc::RequestContext;
 
 use crate::api::*;
+use crate::services::AccessPolicy;
 use crate::services::embedding_queue::{EmbedJob, EmbeddingQueue};
 
 pub struct SearchService<S: StorageTypes> {
@@ -56,17 +57,6 @@ impl<S: StorageTypes> SearchService<S> {
         }
     }
 
-    /// Can `user` read `entity`? Entities with no owner are world-readable;
-    /// owner matches always win; otherwise `!is_private` lets other users
-    /// through. Visibility policy flips don't touch the index — this
-    /// predicate is re-evaluated against live entity state on every hit.
-    fn has_access(user: Option<&UserId>, entity: &StoredEntity) -> bool {
-        match (&entity.user_id, user) {
-            (None, _) => true,
-            (Some(owner), Some(uid)) if owner == uid => true,
-            _ => !entity.is_private,
-        }
-    }
 }
 
 #[async_trait]
@@ -105,7 +95,7 @@ impl<S: StorageTypes> SearchApi for SearchService<S> {
         let mut hits = Vec::with_capacity(top_k);
         for r in results {
             let Some(entity) = by_id.get(r.chunk.entity_id.as_str()) else { continue };
-            if !Self::has_access(caller.as_ref(), entity) { continue; }
+            if !AccessPolicy::can_read(caller.as_ref(), entity) { continue; }
             hits.push(SearchHit {
                 content_block_id: r.chunk.content_block_id.to_string(),
                 entity_id: r.chunk.entity_id.to_string(),

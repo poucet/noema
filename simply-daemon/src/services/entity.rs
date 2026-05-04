@@ -13,7 +13,7 @@ use async_trait::async_trait;
 
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::helper::{content_hash, unix_timestamp};
-use simply_core::storage::ids::{AssetId as CoreAssetId, EntityId};
+use simply_core::storage::ids::{AssetId as CoreAssetId, EntityId, UserId};
 use simply_core::storage::traits::{
     EntityStore, StorageTypes, StoredEntity, Stores, TextStore, VaultStore,
 };
@@ -28,6 +28,7 @@ use simply_core::storage::vault::sidecar::{
 use simply_rpc::RequestContext;
 
 use crate::api::*;
+use crate::services::AccessPolicy;
 use crate::types::AssetId;
 
 /// Relations whose incoming/outgoing edge-counts are useful on an
@@ -87,25 +88,35 @@ impl<S: StorageTypes> EntityService<S> {
         self
     }
 
-    fn require_user(ctx: &RequestContext) -> anyhow::Result<simply_core::storage::ids::UserId> {
-        ctx.scope.user_id.as_ref()
-            .map(|id| simply_core::storage::ids::UserId::from_string(id))
-            .ok_or_else(|| anyhow::anyhow!("authentication required"))
-    }
-
-    /// Verify a user can access an entity (owner or the entity has no owner).
-    async fn verify_access(
+    async fn load_entity(
         &self,
-        user_id: &simply_core::storage::ids::UserId,
         entity_id: &EntityId,
     ) -> anyhow::Result<StoredEntity> {
-        let entity = self.stores.entity().get_entity(entity_id).await?
-            .ok_or_else(|| anyhow::anyhow!("entity not found: {entity_id}"))?;
-        match entity.user_id.as_ref() {
-            Some(uid) if uid == user_id => Ok(entity),
-            None => Ok(entity),
-            Some(_) => anyhow::bail!("access denied: entity belongs to another user"),
-        }
+        self.stores
+            .entity()
+            .get_entity(entity_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("entity not found: {entity_id}"))
+    }
+
+    async fn entity_for_read(
+        &self,
+        user_id: Option<&UserId>,
+        entity_id: &EntityId,
+    ) -> anyhow::Result<StoredEntity> {
+        let entity = self.load_entity(entity_id).await?;
+        AccessPolicy::ensure_read(user_id, &entity)?;
+        Ok(entity)
+    }
+
+    async fn entity_for_write(
+        &self,
+        user_id: &UserId,
+        entity_id: &EntityId,
+    ) -> anyhow::Result<StoredEntity> {
+        let entity = self.load_entity(entity_id).await?;
+        AccessPolicy::ensure_write(Some(user_id), &entity)?;
+        Ok(entity)
     }
 
     /// Convert a `StoredEntity` to a wire `EntitySummary`, populating
@@ -297,14 +308,18 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         type_prefix: Option<String>,
         root_of_relation: Option<String>,
     ) -> anyhow::Result<Vec<EntitySummary>> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let entities = match type_prefix.as_deref() {
             Some(prefix) if !prefix.is_empty() => {
                 self.stores.entity().list_entities_by_type_prefix(&user_id, prefix).await?
             }
             _ => self.stores.entity().list_entities(&user_id, None).await?,
         };
-        let roots = self.filter_roots(entities, root_of_relation.as_deref()).await?;
+        let readable = entities
+            .into_iter()
+            .filter(|e| AccessPolicy::can_read(Some(&user_id), e))
+            .collect();
+        let roots = self.filter_roots(readable, root_of_relation.as_deref()).await?;
         self.entities_to_summaries(roots).await
     }
 
@@ -315,7 +330,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         type_prefix: Option<String>,
         root_of_relation: Option<String>,
     ) -> anyhow::Result<Vec<EntitySummary>> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let all = match type_prefix.as_deref() {
             Some(prefix) if !prefix.is_empty() => {
                 self.stores.entity().list_entities_by_type_prefix(&user_id, prefix).await?
@@ -325,6 +340,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         let needle = query.to_lowercase();
         let matching: Vec<_> = all
             .into_iter()
+            .filter(|e| AccessPolicy::can_read(Some(&user_id), e))
             .filter(|e| e.name.as_deref().map_or(false, |n| n.to_lowercase().contains(&needle)))
             .take(50)
             .collect();
@@ -339,9 +355,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         entity_id: &str,
     ) -> anyhow::Result<EntitySummary> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        let entity = self.verify_access(&user_id, &id).await?;
+        let entity = self.entity_for_read(Some(&user_id), &id).await?;
         self.to_summary(entity).await
     }
 
@@ -350,7 +366,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         origin: &str,
     ) -> anyhow::Result<Option<EntitySummary>> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let entity = self
             .stores
             .entity()
@@ -367,7 +383,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         request: GetEntitiesRequest,
     ) -> anyhow::Result<Vec<EntityWithContent>> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         if request.ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -383,10 +399,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         let entities = self.stores.entity().get_entities(&entity_ids).await?;
         let accessible: Vec<_> = entities
             .into_iter()
-            .filter(|e| match e.user_id.as_ref() {
-                Some(uid) => uid == &user_id || !e.is_private,
-                None => true,
-            })
+            .filter(|e| AccessPolicy::can_read(Some(&user_id), e))
             .collect();
 
         // If content was requested, batch-fetch content blocks once for
@@ -441,7 +454,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         request: CreateEntityRequest,
     ) -> anyhow::Result<EntitySummary> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         if !is_user_creatable_kind(&request.kind) {
             anyhow::bail!(
                 "entity kind `{}` is not user-creatable (must start with `document::`)",
@@ -500,9 +513,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         entity_id: &str,
         name: &str,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        let mut entity = self.verify_access(&user_id, &id).await?;
+        let mut entity = self.entity_for_write(&user_id, &id).await?;
         entity.name = Some(name.to_string());
         self.stores.entity().update_entity(&id, &entity).await
     }
@@ -513,7 +526,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         entity_id: &str,
         new_kind: &str,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         if !is_user_creatable_kind(new_kind) {
             anyhow::bail!(
                 "entity kind `{}` cannot be set from the public API (must start with `document::`)",
@@ -521,7 +534,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             );
         }
         let id = EntityId::from_string(entity_id);
-        self.verify_access(&user_id, &id).await?;
+        self.entity_for_write(&user_id, &id).await?;
         self.stores
             .entity()
             .set_entity_type(&id, EntityType::new(new_kind))
@@ -533,9 +546,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         entity_id: &str,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        let _ = self.verify_access(&user_id, &id).await?;
+        let _ = self.entity_for_write(&user_id, &id).await?;
 
         // Walk structure::contained_in to remove the whole tree (e.g. a
         // tabbed doc with its tabs). Coordinator handles per-entity relation
@@ -552,9 +565,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         entity_id: &str,
     ) -> anyhow::Result<EntityContent> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        let entity = self.verify_access(&user_id, &id).await?;
+        let entity = self.entity_for_read(Some(&user_id), &id).await?;
 
         let content_markdown = self.resolve_entity_content_markdown(&entity).await?;
         let assets = self.coordinator.get_entity_assets(&id).await?;
@@ -577,9 +590,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         entity_id: &str,
         request: UpdateEntityContentRequest,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        let entity = self.verify_access(&user_id, &id).await?;
+        let entity = self.entity_for_write(&user_id, &id).await?;
 
         // Build a content origin based on the entity's own origin scheme.
         let content_origin = entity
@@ -622,9 +635,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         entity_id: &str,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        let entity = self.verify_access(&user_id, &id).await?;
+        let entity = self.entity_for_write(&user_id, &id).await?;
         let Some(queue) = self.embedding_queue.as_ref() else { return Ok(()); };
         let Some(block_id) = entity.content_block_id.as_ref() else { return Ok(()); };
         queue.flush(block_id.as_str()).await;
@@ -639,9 +652,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         entity_id: &str,
         relation: &str,
     ) -> anyhow::Result<Vec<RelatedEntity>> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        self.verify_access(&user_id, &id).await?;
+        self.entity_for_read(Some(&user_id), &id).await?;
 
         let rel = RelationType::new(relation);
         let related = self
@@ -655,6 +668,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             let Some(other) = self.stores.entity().get_entity(&other_id).await? else {
                 continue;
             };
+            if !AccessPolicy::can_read(Some(&user_id), &other) {
+                continue;
+            }
             out.push(RelatedEntity {
                 summary: self.to_summary(other).await?,
                 position: edge.position,
@@ -669,9 +685,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         entity_id: &str,
         relation: &str,
     ) -> anyhow::Result<Vec<RelatedEntity>> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        self.verify_access(&user_id, &id).await?;
+        self.entity_for_read(Some(&user_id), &id).await?;
 
         let rel = RelationType::new(relation);
         let related = self
@@ -685,6 +701,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             let Some(other) = self.stores.entity().get_entity(&other_id).await? else {
                 continue;
             };
+            if !AccessPolicy::can_read(Some(&user_id), &other) {
+                continue;
+            }
             out.push(RelatedEntity {
                 summary: self.to_summary(other).await?,
                 position: edge.position,
@@ -698,11 +717,11 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         request: AddRelationRequest,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let from = EntityId::from_string(&request.from_id);
         let to = EntityId::from_string(&request.to_id);
-        self.verify_access(&user_id, &from).await?;
-        self.verify_access(&user_id, &to).await?;
+        self.entity_for_write(&user_id, &from).await?;
+        self.entity_for_write(&user_id, &to).await?;
 
         let rel = RelationType::new(&request.relation);
         self.stores
@@ -718,10 +737,10 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         to_id: &str,
         relation: &str,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let from = EntityId::from_string(from_id);
         let to = EntityId::from_string(to_id);
-        self.verify_access(&user_id, &from).await?;
+        self.entity_for_write(&user_id, &from).await?;
 
         let rel = RelationType::new(relation);
         self.stores.entity().remove_relation(&from, &to, &rel).await
@@ -732,11 +751,11 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         ctx: &RequestContext,
         request: MoveRelationRequest,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let from = EntityId::from_string(&request.from_id);
         let new_to = EntityId::from_string(&request.new_to_id);
-        self.verify_access(&user_id, &from).await?;
-        self.verify_access(&user_id, &new_to).await?;
+        self.entity_for_write(&user_id, &from).await?;
+        self.entity_for_write(&user_id, &new_to).await?;
 
         let rel = RelationType::new(&request.relation);
         self.coordinator

@@ -281,7 +281,7 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 ### Stage 10 — Broader hardening
 
-- ⬜ 10.1 Centralize access policy before syncing privacy-sensitive frontmatter
+- ✅ 10.1 Centralize access policy before syncing privacy-sensitive frontmatter
 - ⬜ 10.2 Centralize lifecycle and GC before deleting vault-backed documents
 - ⬜ 10.3 Add relation registry invariants before directory-tree vault UX depends on `structure::contained_in`
 - ⬜ 10.4 Batch entity summary queries before rendering large vaults

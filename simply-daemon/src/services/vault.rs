@@ -15,7 +15,8 @@ use simply_core::storage::traits::{
     AssetStore, EntityStore, StorageTypes, StoredEntity, Stores, TextStore, VaultStore,
 };
 use simply_core::storage::types::{
-    BlobHash, ContentOrigin, Entity, EntityType, RelationType, VaultFile, VaultSyncStatus,
+    BlobHash, ContentOrigin, Entity, EntityType, RelationType, VaultConflict, VaultFile,
+    VaultSyncStatus,
 };
 use simply_core::storage::vault::files::{
     numbered_path_segment, read_markdown_body, read_markdown_text, sanitize_path_segment,
@@ -32,6 +33,7 @@ use simply_core::storage::vault::sidecar::{
 use simply_rpc::RequestContext;
 
 use crate::api::*;
+use crate::services::AccessPolicy;
 
 #[derive(Clone, Debug)]
 struct SidecarMetadata {
@@ -131,15 +133,7 @@ impl<S: StorageTypes> VaultService<S> {
         });
     }
 
-    fn require_user(ctx: &RequestContext) -> anyhow::Result<UserId> {
-        ctx.scope
-            .user_id
-            .as_ref()
-            .map(UserId::from_string)
-            .ok_or_else(|| anyhow::anyhow!("authentication required"))
-    }
-
-    async fn verify_access(
+    async fn entity_for_write(
         &self,
         user_id: &UserId,
         entity_id: &EntityId,
@@ -150,11 +144,8 @@ impl<S: StorageTypes> VaultService<S> {
             .get_entity(entity_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("entity not found: {entity_id}"))?;
-        match entity.user_id.as_ref() {
-            Some(uid) if uid == user_id => Ok(entity),
-            None => Ok(entity),
-            Some(_) => anyhow::bail!("access denied: entity belongs to another user"),
-        }
+        AccessPolicy::ensure_write(Some(user_id), &entity)?;
+        Ok(entity)
     }
 
     async fn export_roots(
@@ -181,7 +172,7 @@ impl<S: StorageTypes> VaultService<S> {
         let mut summary = VaultExportSummary::default();
         let mut sidecar_metadata = HashMap::new();
         for root in roots {
-            self.verify_access(user_id, &root.id).await?;
+            AccessPolicy::ensure_write(Some(user_id), &root)?;
             if root.entity_type.as_str() == "document::tabbed" {
                 let dir = self.root_dir_for(&root).await?;
                 let files = self
@@ -319,14 +310,7 @@ impl<S: StorageTypes> VaultService<S> {
                 id: entity.id.clone(),
                 kind: entity.entity_type.clone(),
                 origin: entity.origin.clone(),
-                privacy: Some(
-                    if entity.is_private {
-                        "private"
-                    } else {
-                        "public"
-                    }
-                    .to_string(),
-                ),
+                privacy: Some(AccessPolicy::privacy_label(entity).to_string()),
             };
             write_frontmatter_markdown(&self.root, &relative_path, &frontmatter, &system, &body)?
         } else {
@@ -645,7 +629,7 @@ impl<S: StorageTypes> VaultService<S> {
     async fn conflict_by_id(
         &self,
         conflict_id: &str,
-    ) -> anyhow::Result<simply_core::storage::types::VaultConflict> {
+    ) -> anyhow::Result<VaultConflict> {
         let id = VaultConflictId::from_string(conflict_id);
         self.stores
             .vault()
@@ -656,16 +640,39 @@ impl<S: StorageTypes> VaultService<S> {
             .ok_or_else(|| anyhow::anyhow!("vault conflict not found: {conflict_id}"))
     }
 
+    async fn conflict_visible_to(
+        &self,
+        user_id: &UserId,
+        conflict: &VaultConflict,
+    ) -> anyhow::Result<bool> {
+        for entity_id in [&conflict.entity_id, &conflict.observed_entity_id]
+            .into_iter()
+            .flatten()
+        {
+            let Some(entity) = self.stores.entity().get_entity(entity_id).await? else {
+                continue;
+            };
+            if !AccessPolicy::can_write(Some(user_id), &entity) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     async fn resolve(
         &self,
         user_id: &UserId,
         request: ResolveVaultConflictRequest,
     ) -> anyhow::Result<()> {
         let conflict = self.conflict_by_id(&request.conflict_id).await?;
+        if !self.conflict_visible_to(user_id, &conflict).await? {
+            anyhow::bail!("access denied: caller cannot modify vault conflict {}", conflict.id);
+        }
         match request.action {
             VaultConflictResolutionAction::Ignore => {
                 self.ignore_conflict_path(&conflict.path)?;
                 if let Some(entity_id) = conflict.entity_id.as_ref() {
+                    self.entity_for_write(user_id, entity_id).await?;
                     self.stores.vault().delete_vault_file(entity_id).await?;
                 }
                 self.stores
@@ -680,7 +687,7 @@ impl<S: StorageTypes> VaultService<S> {
                     .map(EntityId::from_string)
                     .or(conflict.entity_id.clone())
                     .ok_or_else(|| anyhow::anyhow!("bind requires an entity id"))?;
-                self.verify_access(user_id, &entity_id).await?;
+                self.entity_for_write(user_id, &entity_id).await?;
                 let (_, written) = observed_markdown_file(&self.root, &conflict.path)?;
                 self.upsert_vault_file(entity_id, &written).await?;
                 self.stores
@@ -693,7 +700,7 @@ impl<S: StorageTypes> VaultService<S> {
                     .entity_id
                     .clone()
                     .ok_or_else(|| anyhow::anyhow!("accept_new_path requires canonical entity"))?;
-                self.verify_access(user_id, &entity_id).await?;
+                self.entity_for_write(user_id, &entity_id).await?;
                 let (_, written) = observed_markdown_file(&self.root, &conflict.path)?;
                 self.upsert_vault_file(entity_id, &written).await?;
                 self.stores
@@ -727,7 +734,7 @@ impl<S: StorageTypes> VaultService<S> {
                 let entity_id = conflict.entity_id.clone().ok_or_else(|| {
                     anyhow::anyhow!("restore_original_id requires canonical entity")
                 })?;
-                let entity = self.verify_access(user_id, &entity_id).await?;
+                let entity = self.entity_for_write(user_id, &entity_id).await?;
                 let body = read_markdown_body(&self.root, &conflict.path)?.unwrap_or_default();
                 let frontmatter = Frontmatter {
                     title: entity.name.clone(),
@@ -737,14 +744,7 @@ impl<S: StorageTypes> VaultService<S> {
                     id: entity.id.clone(),
                     kind: entity.entity_type.clone(),
                     origin: entity.origin.clone(),
-                    privacy: Some(
-                        if entity.is_private {
-                            "private"
-                        } else {
-                            "public"
-                        }
-                        .to_string(),
-                    ),
+                    privacy: Some(AccessPolicy::privacy_label(&entity).to_string()),
                 };
                 let written = write_frontmatter_markdown(
                     &self.root,
@@ -779,21 +779,21 @@ impl<S: StorageTypes> VaultApi for VaultService<S> {
         ctx: &RequestContext,
         request: VaultExportRequest,
     ) -> anyhow::Result<VaultExportSummary> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         self.export_roots(&user_id, request).await
     }
 
     async fn scan(&self, ctx: &RequestContext) -> anyhow::Result<VaultScanSummary> {
-        let _ = Self::require_user(ctx)?;
+        let _ = AccessPolicy::require_user(ctx)?;
         self.scan_and_project().await
     }
 
     async fn list_conflicts(&self, ctx: &RequestContext) -> anyhow::Result<Vec<VaultConflictInfo>> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         let mut out = Vec::new();
         for conflict in self.stores.vault().list_vault_conflicts().await? {
-            if let Some(entity_id) = &conflict.entity_id {
-                self.verify_access(&user_id, entity_id).await?;
+            if !self.conflict_visible_to(&user_id, &conflict).await? {
+                continue;
             }
             out.push(VaultConflictInfo {
                 id: conflict.id.to_string(),
@@ -813,7 +813,7 @@ impl<S: StorageTypes> VaultApi for VaultService<S> {
         ctx: &RequestContext,
         request: ResolveVaultConflictRequest,
     ) -> anyhow::Result<()> {
-        let user_id = Self::require_user(ctx)?;
+        let user_id = AccessPolicy::require_user(ctx)?;
         self.resolve(&user_id, request).await
     }
 }
