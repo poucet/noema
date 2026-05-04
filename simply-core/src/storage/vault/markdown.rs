@@ -17,6 +17,13 @@ pub struct MarkdownDocument {
     pub body: String,
 }
 
+/// Borrowed split of a Markdown document before YAML parsing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkdownSplit<'a> {
+    pub raw_frontmatter: Option<&'a str>,
+    pub body: &'a str,
+}
+
 /// YAML frontmatter split into Noema-owned fields and preserved user metadata.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Frontmatter {
@@ -139,19 +146,9 @@ impl Frontmatter {
 
 /// Parse a Markdown document, splitting YAML frontmatter from the body.
 pub fn parse_markdown(input: &str) -> Result<MarkdownDocument> {
-    let Some(remainder) = input.strip_prefix(FRONTMATTER_DELIMITER) else {
-        return Ok(MarkdownDocument::without_frontmatter(input));
-    };
-
-    let Some(after_open) = remainder
-        .strip_prefix('\n')
-        .or_else(|| remainder.strip_prefix("\r\n"))
-    else {
-        return Ok(MarkdownDocument::without_frontmatter(input));
-    };
-
-    let Some((raw_frontmatter, body)) = split_frontmatter(after_open) else {
-        return Ok(MarkdownDocument::without_frontmatter(input));
+    let split = split_markdown(input);
+    let Some(raw_frontmatter) = split.raw_frontmatter else {
+        return Ok(MarkdownDocument::without_frontmatter(split.body));
     };
 
     let value = if raw_frontmatter.trim().is_empty() {
@@ -163,8 +160,40 @@ pub fn parse_markdown(input: &str) -> Result<MarkdownDocument> {
 
     Ok(MarkdownDocument {
         frontmatter: Some(Frontmatter::from_value(value)?),
-        body: body.to_string(),
+        body: split.body.to_string(),
     })
+}
+
+/// Split Markdown into raw YAML frontmatter and body without parsing YAML.
+pub fn split_markdown(input: &str) -> MarkdownSplit<'_> {
+    let Some(remainder) = input.strip_prefix(FRONTMATTER_DELIMITER) else {
+        return MarkdownSplit {
+            raw_frontmatter: None,
+            body: input,
+        };
+    };
+
+    let Some(after_open) = remainder
+        .strip_prefix('\n')
+        .or_else(|| remainder.strip_prefix("\r\n"))
+    else {
+        return MarkdownSplit {
+            raw_frontmatter: None,
+            body: input,
+        };
+    };
+
+    let Some((raw_frontmatter, body)) = split_frontmatter(after_open) else {
+        return MarkdownSplit {
+            raw_frontmatter: None,
+            body: input,
+        };
+    };
+
+    MarkdownSplit {
+        raw_frontmatter: Some(raw_frontmatter),
+        body,
+    }
 }
 
 /// Serialize Markdown with canonical Noema system fields and preserved user metadata.

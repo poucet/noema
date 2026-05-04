@@ -215,12 +215,12 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 ### Stage 3 — Read-only reconciliation
 
-- ⬜ 3.1 Add vault scanner that returns a reconciliation plan without mutating entities or files
-- ⬜ 3.2 Classify same-ID moves by updating the planned path for an existing `entity_id`
-- ⬜ 3.3 Classify missing known files without deleting or archiving the entity
-- ⬜ 3.4 Classify known path/file with removed or changed `id` as an identity conflict
-- ⬜ 3.5 Classify duplicate frontmatter IDs as conflicts; keep the prior canonical path when one exists
-- ⬜ 3.6 Classify unknown files with valid IDs, unknown files without IDs, invalid frontmatter, and unsupported kinds
+- ✅ 3.1 Add vault scanner that returns a reconciliation plan without mutating entities or files
+- ✅ 3.2 Classify same-ID moves by updating the planned path for an existing `entity_id`
+- ✅ 3.3 Classify missing known files without deleting or archiving the entity
+- ✅ 3.4 Classify known path/file with removed or changed `id` as an identity conflict
+- ✅ 3.5 Classify duplicate frontmatter IDs as conflicts; keep the prior canonical path when one exists
+- ✅ 3.6 Classify unknown files with valid IDs, unknown files without IDs, invalid frontmatter, and unsupported kinds
 
 ### Stage 4 — Projection reconciliation
 
