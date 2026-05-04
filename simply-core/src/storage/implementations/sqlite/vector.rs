@@ -126,7 +126,7 @@ impl VectorStore for SqliteStore {
             return Ok(());
         }
 
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
 
         // Ensure the vec0 table exists with the right dimensions
         let dimensions = chunks[0].embedding.len();
@@ -165,7 +165,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn search(&self, query: SearchQuery) -> Result<Vec<SearchResult>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
 
         let query_bytes: Vec<u8> = query
             .vector
@@ -229,7 +229,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn delete_by_content_block(&self, content_block_id: &ContentBlockId) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id FROM vector_chunks WHERE content_block_id = ?1",
         )?;
@@ -252,7 +252,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn delete_by_entity(&self, entity_id: &EntityId) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id FROM vector_chunks WHERE entity_id = ?1",
         )?;
@@ -275,7 +275,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn delete_all(&self) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         conn.execute("DELETE FROM vector_chunks_vec", [])?;
         conn.execute("DELETE FROM vector_chunks", [])?;
         Ok(())

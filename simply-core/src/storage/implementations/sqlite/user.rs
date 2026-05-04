@@ -43,7 +43,7 @@ pub (crate) fn init_schema(conn: &Connection) -> Result<()> {
 #[async_trait]
 impl UserStore for SqliteStore {
     async fn get_or_create_default_user(&self) -> Result<StoredUser> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
 
         // Try to get existing user
         let user: Option<StoredUser> = conn
@@ -75,7 +75,7 @@ impl UserStore for SqliteStore {
     }
 
     async fn get_user_by_email(&self, email: &str) -> Result<Option<StoredUser>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let user = conn
             .query_row(
                 "SELECT id, email FROM users WHERE email = ?1",
@@ -98,7 +98,7 @@ impl UserStore for SqliteStore {
         }
 
         // Create new user
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let id = UserId::new();
         let now = unix_timestamp();
 
@@ -111,7 +111,7 @@ impl UserStore for SqliteStore {
     }
 
     async fn get_user_by_id(&self, id: &UserId) -> Result<Option<StoredUser>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let user = conn
             .query_row(
                 "SELECT id, email FROM users WHERE id = ?1",
@@ -128,7 +128,7 @@ impl UserStore for SqliteStore {
     }
 
     async fn list_users(&self) -> Result<Vec<StoredUser>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare("SELECT id, email FROM users ORDER BY created_at")?;
         let users = stmt
             .query_map([], |row| {
@@ -142,7 +142,7 @@ impl UserStore for SqliteStore {
     }
 
     async fn delete_user(&self, id: &UserId) -> Result<bool> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         conn.execute(
             "DELETE FROM discord_user_mappings WHERE user_id = ?1",
             params![id.as_str()],
@@ -152,7 +152,7 @@ impl UserStore for SqliteStore {
     }
 
     async fn resolve_external_user(&self, external_id: &str) -> Result<Option<UserId>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let user_id = conn
             .query_row(
                 "SELECT user_id FROM discord_user_mappings WHERE discord_user_id = ?1",
@@ -172,7 +172,7 @@ impl UserStore for SqliteStore {
         }
 
         // Create new user + mapping atomically
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let id = UserId::new();
         let now = unix_timestamp();
 
@@ -190,7 +190,7 @@ impl UserStore for SqliteStore {
     }
 
     async fn link_external_id(&self, user_id: &UserId, external_id: &str) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO discord_user_mappings (discord_user_id, user_id) VALUES (?1, ?2)",
             params![external_id, user_id.as_str()],

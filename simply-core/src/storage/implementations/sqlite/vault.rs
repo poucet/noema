@@ -52,7 +52,7 @@ fn vault_conflict_columns() -> &'static str {
 #[async_trait]
 impl VaultStore for SqliteStore {
     async fn upsert_vault_file(&self, file: &VaultFile) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         conn.execute(
             "INSERT INTO vault_files \
                 (entity_id, path, file_key, mtime, content_hash, frontmatter_hash, sync_status, last_seen_at) \
@@ -81,7 +81,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn get_vault_file(&self, entity_id: &EntityId) -> Result<Option<VaultFile>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let sql = format!(
             "SELECT {} FROM vault_files WHERE entity_id = ?1",
             vault_file_columns()
@@ -94,7 +94,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn get_vault_file_by_path(&self, path: &str) -> Result<Option<VaultFile>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let sql = format!(
             "SELECT {} FROM vault_files WHERE path = ?1",
             vault_file_columns()
@@ -107,7 +107,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn list_vault_files(&self, status: Option<&VaultSyncStatus>) -> Result<Vec<VaultFile>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let sql = match status {
             Some(_) => format!(
                 "SELECT {} FROM vault_files WHERE sync_status = ?1 ORDER BY path ASC",
@@ -134,7 +134,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn delete_vault_file(&self, entity_id: &EntityId) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         conn.execute(
             "DELETE FROM vault_files WHERE entity_id = ?1",
             params![entity_id.as_str()],
@@ -144,7 +144,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn insert_vault_conflict(&self, conflict: &VaultConflict) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let details_json = conflict.details.as_ref().map(|d| d.to_string());
         conn.execute(
             "INSERT OR REPLACE INTO vault_conflicts \
@@ -165,7 +165,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn list_vault_conflicts(&self) -> Result<Vec<VaultConflict>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let sql = format!(
             "SELECT {} FROM vault_conflicts ORDER BY created_at DESC, path ASC",
             vault_conflict_columns()
@@ -179,7 +179,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn delete_vault_conflict(&self, id: &VaultConflictId) -> Result<bool> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let affected = conn
             .execute(
                 "DELETE FROM vault_conflicts WHERE id = ?1",
@@ -190,7 +190,7 @@ impl VaultStore for SqliteStore {
     }
 
     async fn clear_vault_conflicts_for_path(&self, path: &str) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         conn.execute("DELETE FROM vault_conflicts WHERE path = ?1", params![path])
             .context("Failed to clear vault conflicts for path")?;
         Ok(())

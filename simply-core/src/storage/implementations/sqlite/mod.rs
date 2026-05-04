@@ -15,6 +15,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 // Submodules with trait implementations
 mod asset;
@@ -49,15 +50,20 @@ pub(crate) use vector::init_schema as init_vector_schema;
 /// - `UserStore` - User account management
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+    read_conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteStore {
     /// Open or create a SQLite database at the given path
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         vector::register_sqlite_vec();
-        let conn = Connection::open(&path)?;
+        let conn = Connection::open(path.as_ref())?;
+        configure_connection(&conn, true)?;
+        let read_conn = Connection::open(path.as_ref())?;
+        configure_connection(&read_conn, true)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
+            read_conn: Arc::new(Mutex::new(read_conn)),
         };
         store.init_schema()?;
         Ok(store)
@@ -67,8 +73,11 @@ impl SqliteStore {
     pub fn in_memory() -> Result<Self> {
         vector::register_sqlite_vec();
         let conn = Connection::open_in_memory()?;
+        configure_connection(&conn, false)?;
+        let conn = Arc::new(Mutex::new(conn));
         let store = Self {
-            conn: Arc::new(Mutex::new(conn)),
+            conn: Arc::clone(&conn),
+            read_conn: conn,
         };
         store.init_schema()?;
         Ok(store)
@@ -77,6 +86,16 @@ impl SqliteStore {
     /// Get access to the connection (for trait implementations)
     pub fn conn(&self) -> &Arc<Mutex<Connection>> {
         &self.conn
+    }
+
+    /// Get access to the write connection.
+    pub fn write_conn(&self) -> &Arc<Mutex<Connection>> {
+        &self.conn
+    }
+
+    /// Get access to the read connection.
+    pub fn read_conn(&self) -> &Arc<Mutex<Connection>> {
+        &self.read_conn
     }
 
     fn init_schema(&self) -> Result<()> {
@@ -91,6 +110,19 @@ impl SqliteStore {
         migration::run_migrations(&conn)?;
         Ok(())
     }
+}
+
+fn configure_connection(conn: &Connection, enable_wal: bool) -> Result<()> {
+    conn.busy_timeout(Duration::from_secs(5))?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.pragma_update(None, "busy_timeout", 5000)?;
+
+    if enable_wal {
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

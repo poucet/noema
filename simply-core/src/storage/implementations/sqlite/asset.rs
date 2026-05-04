@@ -34,7 +34,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 #[async_trait]
 impl AssetStore for SqliteStore {
     async fn create_asset(&self, asset: Asset) -> Result<AssetId> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let now = unix_timestamp();
         let id = AssetId::from_string(Uuid::new_v4().to_string());
 
@@ -55,7 +55,7 @@ impl AssetStore for SqliteStore {
     }
 
     async fn get(&self, id: &AssetId) -> Result<Option<Stored<AssetId, Asset>>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let asset = conn
             .query_row(
                 "SELECT blob_hash, mime_type, size_bytes, is_private, created_at
@@ -80,7 +80,7 @@ impl AssetStore for SqliteStore {
     }
 
     async fn get_by_blob_hash(&self, hash: &crate::storage::types::BlobHash) -> Result<Option<Stored<AssetId, Asset>>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let asset = conn
             .query_row(
                 "SELECT id, mime_type, size_bytes, is_private, created_at
@@ -105,7 +105,7 @@ impl AssetStore for SqliteStore {
     }
 
     async fn exists(&self, id: &AssetId) -> Result<bool> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let exists = conn
             .query_row(
                 "SELECT 1 FROM assets WHERE id = ?1",
@@ -117,7 +117,7 @@ impl AssetStore for SqliteStore {
     }
 
     async fn list(&self) -> Result<Vec<AssetId>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare("SELECT id FROM assets ORDER BY created_at DESC")?;
         let ids = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
@@ -127,7 +127,7 @@ impl AssetStore for SqliteStore {
     }
 
     async fn delete(&self, id: &AssetId) -> Result<bool> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let deleted = conn.execute("DELETE FROM assets WHERE id = ?1", params![id.as_str()])?;
         Ok(deleted > 0)
     }

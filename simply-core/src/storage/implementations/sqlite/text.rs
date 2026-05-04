@@ -54,7 +54,7 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
 impl TextStore for SqliteStore {
     async fn store(&self, content: ContentBlock) -> Result<ContentBlockId> {
         let hash = content_hash(&content.text);
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
 
         let id = ContentBlockId::new();
         let now = unix_timestamp();
@@ -82,7 +82,7 @@ impl TextStore for SqliteStore {
     }
 
     async fn get(&self, id: &ContentBlockId) -> Result<Option<StoredTextBlock>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
 
         let result = conn.query_row(
             "SELECT id, content_hash, content_type, text, is_private, origin_kind, origin_user_id, origin_model_id, origin_source_id, origin_parent_id, created_at
@@ -113,7 +113,7 @@ impl TextStore for SqliteStore {
     }
 
     async fn get_text(&self, id: &ContentBlockId) -> Result<Option<String>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
 
         let result = conn.query_row(
             "SELECT text FROM content_blocks WHERE id = ?1",
@@ -136,7 +136,7 @@ impl TextStore for SqliteStore {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let placeholders = std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(",");
         let sql = format!(
             "SELECT id, text FROM content_blocks WHERE id IN ({placeholders})"
@@ -167,7 +167,7 @@ impl TextStore for SqliteStore {
     }
 
     async fn exists(&self, id: &ContentBlockId) -> Result<bool> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
 
         let count: i32 = conn
             .query_row(

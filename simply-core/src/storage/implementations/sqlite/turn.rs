@@ -139,7 +139,7 @@ impl TurnStore for SqliteStore {
     // ========== Turn Management ==========
 
     async fn create_turn(&self, role: Role) -> Result<StoredTurn> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let turn_id = TurnId::new();
         let now = unix_timestamp();
 
@@ -152,7 +152,7 @@ impl TurnStore for SqliteStore {
     }
 
     async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<StoredTurn>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT id, role, created_at FROM turns WHERE id = ?1",
             params![turn_id.as_str()],
@@ -179,7 +179,7 @@ impl TurnStore for SqliteStore {
     // ========== Span Management ==========
 
     async fn create_span(&self, turn_id: &TurnId, model_id: Option<&str>) -> Result<StoredSpan> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let id = SpanId::new();
         let now = unix_timestamp();
 
@@ -194,7 +194,7 @@ impl TurnStore for SqliteStore {
     }
 
     async fn get_spans(&self, turn_id: &TurnId) -> Result<Vec<StoredSpan>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT s.id, s.model_id, s.created_at,
                     (SELECT COUNT(*) FROM messages m WHERE m.span_id = s.id) as message_count
@@ -221,7 +221,7 @@ impl TurnStore for SqliteStore {
     }
 
     async fn get_span(&self, span_id: &SpanId) -> Result<Option<StoredSpan>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT s.id, s.model_id, s.created_at,
                     (SELECT COUNT(*) FROM messages m WHERE m.span_id = s.id) as message_count
@@ -254,7 +254,7 @@ impl TurnStore for SqliteStore {
         role: Role,
         content: &[StoredContent],
     ) -> Result<StoredMessage> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let message_id = MessageId::new();
         let now = unix_timestamp();
 
@@ -288,7 +288,7 @@ impl TurnStore for SqliteStore {
     }
 
     async fn get_messages(&self, span_id: &SpanId) -> Result<Vec<MessageWithContent>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, span_id, sequence_number, role, created_at
              FROM messages WHERE span_id = ?1
@@ -322,7 +322,7 @@ impl TurnStore for SqliteStore {
     }
 
     async fn get_message(&self, message_id: &MessageId) -> Result<Option<StoredMessage>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT id, span_id, sequence_number, role, created_at
              FROM messages WHERE id = ?1",
@@ -358,7 +358,7 @@ impl TurnStore for SqliteStore {
         turn_id: &TurnId,
         span_id: &SpanId,
     ) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
 
         // Get next sequence number for this conversation (only used for new insertions)
         let sequence_number: i32 = conn
@@ -383,7 +383,7 @@ impl TurnStore for SqliteStore {
         conversation_id: &ConversationId,
         turn_id: &TurnId,
     ) -> Result<Option<SpanId>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let result = conn.query_row(
             "SELECT span_id FROM conversation_selections WHERE conversation_id = ?1 AND turn_id = ?2",
             params![conversation_id, turn_id],
@@ -406,7 +406,7 @@ impl TurnStore for SqliteStore {
     ) -> Result<Vec<TurnWithContent>> {
         // Get all selections for this conversation, ordered by sequence_number
         let selections: Vec<(TurnId, SpanId)> = {
-            let conn = self.conn().lock().unwrap();
+            let conn = self.read_conn().lock().unwrap();
             let mut stmt = conn.prepare(
                 "SELECT turn_id, span_id FROM conversation_selections
                  WHERE conversation_id = ?1
@@ -453,7 +453,7 @@ impl TurnStore for SqliteStore {
     ) -> Result<Vec<TurnWithContent>> {
         // Get sequence number of the up_to turn in this conversation
         let up_to_seq: i32 = {
-            let conn = self.conn().lock().unwrap();
+            let conn = self.read_conn().lock().unwrap();
             conn.query_row(
                 "SELECT sequence_number FROM conversation_selections WHERE conversation_id = ?1 AND turn_id = ?2",
                 params![conversation_id, up_to_turn_id],
@@ -463,7 +463,7 @@ impl TurnStore for SqliteStore {
 
         // Get all selections before the up_to turn
         let selections: Vec<(TurnId, SpanId)> = {
-            let conn = self.conn().lock().unwrap();
+            let conn = self.read_conn().lock().unwrap();
             let mut stmt = conn.prepare(
                 "SELECT turn_id, span_id FROM conversation_selections
                  WHERE conversation_id = ?1 AND sequence_number < ?2
@@ -506,7 +506,7 @@ impl TurnStore for SqliteStore {
         up_to_turn_id: &TurnId,
         include_turn: bool,
     ) -> Result<usize> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
 
         // Get the sequence number of the cutoff turn
         let cutoff_seq: i32 = conn.query_row(
@@ -531,7 +531,7 @@ impl TurnStore for SqliteStore {
     }
 
     async fn get_turn_count(&self, conversation_id: &ConversationId) -> Result<usize> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let count: usize = conn.query_row(
             "SELECT COUNT(*) FROM conversation_selections WHERE conversation_id = ?1",
             params![conversation_id],

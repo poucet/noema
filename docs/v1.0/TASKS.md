@@ -285,7 +285,7 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 - ✅ 10.2 Centralize lifecycle and GC before deleting vault-backed documents
 - ✅ 10.3 Add relation registry invariants before directory-tree vault UX depends on `structure::contained_in`
 - ✅ 10.4 Batch entity summary queries before rendering large vaults
-- ⬜ 10.5 Move SQLite toward WAL and separate read/write access before watcher-driven background work grows
+- ✅ 10.5 Move SQLite toward WAL and separate read/write access before watcher-driven background work grows
 
 ---
 

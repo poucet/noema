@@ -184,7 +184,7 @@ impl EntityStore for SqliteStore {
         entity_type: EntityType,
         user_id: Option<&UserId>,
     ) -> Result<EntityId> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let now = unix_timestamp();
         let entity_id = EntityId::new();
 
@@ -204,7 +204,7 @@ impl EntityStore for SqliteStore {
     }
 
     async fn get_entity(&self, id: &EntityId) -> Result<Option<StoredEntity>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let sql = format!("SELECT {ENTITY_SELECT_COLUMNS} FROM entities WHERE id = ?1");
         match conn.query_row(&sql, params![id.as_str()], parse_entity_row) {
             Ok(entity) => Ok(Some(entity)),
@@ -217,7 +217,7 @@ impl EntityStore for SqliteStore {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let placeholders = std::iter::repeat("?").take(ids.len()).collect::<Vec<_>>().join(",");
         let sql = format!(
             "SELECT {ENTITY_SELECT_COLUMNS} FROM entities WHERE id IN ({placeholders})"
@@ -245,7 +245,7 @@ impl EntityStore for SqliteStore {
         user_id: &UserId,
         origin: &str,
     ) -> Result<Option<StoredEntity>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let sql = format!(
             "SELECT {ENTITY_SELECT_COLUMNS} FROM entities \
              WHERE user_id = ?1 AND origin = ?2"
@@ -262,7 +262,7 @@ impl EntityStore for SqliteStore {
         user_id: &UserId,
         entity_type: Option<&EntityType>,
     ) -> Result<Vec<StoredEntity>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let entities: Vec<StoredEntity> = match entity_type {
             Some(et) => {
                 let sql = format!(
@@ -293,7 +293,7 @@ impl EntityStore for SqliteStore {
         user_id: &UserId,
         prefix: &str,
     ) -> Result<Vec<StoredEntity>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let sql = format!(
             "SELECT {ENTITY_SELECT_COLUMNS} FROM entities \
              WHERE user_id = ?1 AND entity_type LIKE ?2 \
@@ -313,7 +313,7 @@ impl EntityStore for SqliteStore {
         user_id: &UserId,
         query: &EntityRangeQuery,
     ) -> Result<Vec<StoredEntity>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
 
         // Build query with optional type filter
         let (sql, type_filter): (String, Option<Vec<String>>) = match query.types_slice() {
@@ -374,7 +374,7 @@ impl EntityStore for SqliteStore {
     }
 
     async fn update_entity(&self, id: &EntityId, entity: &Entity) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let now = unix_timestamp();
         let metadata_json = entity.metadata.as_ref().map(|m| m.to_string());
 
@@ -398,7 +398,7 @@ impl EntityStore for SqliteStore {
     }
 
     async fn set_entity_type(&self, id: &EntityId, new_type: EntityType) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let now = unix_timestamp();
         conn.execute(
             "UPDATE entities SET entity_type = ?1, updated_at = ?2 WHERE id = ?3",
@@ -408,7 +408,7 @@ impl EntityStore for SqliteStore {
     }
 
     async fn delete_entity(&self, id: &EntityId) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
 
         // Delete relations first (both directions) — explicit, no DB cascade relied upon.
         conn.execute(
@@ -440,7 +440,7 @@ impl EntityStore for SqliteStore {
         position: Option<i64>,
         metadata: Option<serde_json::Value>,
     ) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         let metadata_json = metadata.map(|m| m.to_string());
 
         conn.execute(
@@ -463,7 +463,7 @@ impl EntityStore for SqliteStore {
         id: &EntityId,
         relation_type: Option<&RelationType>,
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
 
         let results: Vec<(EntityId, EntityRelation)> = match relation_type {
             Some(rt) => {
@@ -495,7 +495,7 @@ impl EntityStore for SqliteStore {
         id: &EntityId,
         relation_type: Option<&RelationType>,
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
 
         let results: Vec<(EntityId, EntityRelation)> = match relation_type {
             Some(rt) => {
@@ -527,7 +527,7 @@ impl EntityStore for SqliteStore {
         ids: &[EntityId],
         relation_types: &[RelationType],
     ) -> Result<RelationCountMap> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         count_relations_by_entity(&conn, "from_id", ids, relation_types)
     }
 
@@ -536,7 +536,7 @@ impl EntityStore for SqliteStore {
         ids: &[EntityId],
         relation_types: &[RelationType],
     ) -> Result<RelationCountMap> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         count_relations_by_entity(&conn, "to_id", ids, relation_types)
     }
 
@@ -545,7 +545,7 @@ impl EntityStore for SqliteStore {
         id: &EntityId,
         relation_type: &RelationType,
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT from_id, relation, position, metadata \
              FROM entity_relations \
@@ -566,7 +566,7 @@ impl EntityStore for SqliteStore {
         id: &EntityId,
         relation_type: &RelationType,
     ) -> Result<Vec<(EntityId, EntityRelation)>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT to_id, relation, position, metadata \
              FROM entity_relations \
@@ -588,7 +588,7 @@ impl EntityStore for SqliteStore {
         to_id: &EntityId,
         relation: &RelationType,
     ) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
 
         conn.execute(
             "DELETE FROM entity_relations WHERE from_id = ?1 AND to_id = ?2 AND relation = ?3",
@@ -603,7 +603,7 @@ impl EntityStore for SqliteStore {
     // ========================================================================
 
     async fn set_entity_assets(&self, entity_id: &EntityId, asset_ids: &[AssetId]) -> Result<()> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.write_conn().lock().unwrap();
         conn.execute(
             "DELETE FROM entity_assets WHERE entity_id = ?1",
             params![entity_id.as_str()],
@@ -618,7 +618,7 @@ impl EntityStore for SqliteStore {
     }
 
     async fn get_entity_assets(&self, entity_id: &EntityId) -> Result<Vec<AssetId>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT asset_id FROM entity_assets WHERE entity_id = ?1",
         )?;
@@ -633,7 +633,7 @@ impl EntityStore for SqliteStore {
     }
 
     async fn entities_referencing_asset(&self, asset_id: &AssetId) -> Result<Vec<EntityId>> {
-        let conn = self.conn().lock().unwrap();
+        let conn = self.read_conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT entity_id FROM entity_assets WHERE asset_id = ?1",
         )?;
