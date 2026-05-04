@@ -42,19 +42,60 @@ impl EntityType {
         self.0.starts_with("document::")
     }
 
-    // ----- Well-known top-level entity types -----
-    //
-    // Document subkinds (`document::note`, `::tabbed`, `::tab`, ...) and
-    // system organizational primitives (`system::directory`, `system::label`)
-    // are *not* enumerated here. Clients (admin UI, Noema UI, import skills)
-    // own their own lists of kinds and pass strings directly via
-    // `EntityType::new("document::whatever")`. Keeps the daemon from needing
-    // to ship a new constant every time a client wants a new flavour.
+    // ----- Well-known entity types -----
 
     /// Conversation entity (a view + turns + spans + messages).
     /// First-class daemon concept — owned by `SessionManager`.
     pub fn conversation() -> Self {
         Self::new("conversation")
+    }
+
+    pub fn document_tabbed() -> Self {
+        Self::new("document::tabbed")
+    }
+
+    pub fn document_note() -> Self {
+        Self::new("document::note")
+    }
+
+    pub fn document_todo() -> Self {
+        Self::new("document::todo")
+    }
+
+    pub fn document_prompt() -> Self {
+        Self::new("document::prompt")
+    }
+
+    pub fn document_knowledge() -> Self {
+        Self::new("document::knowledge")
+    }
+
+    pub fn document_context() -> Self {
+        Self::new("document::context")
+    }
+
+    pub fn document_intent() -> Self {
+        Self::new("document::intent")
+    }
+
+    pub fn document_system_prompt() -> Self {
+        Self::new("document::system_prompt")
+    }
+
+    pub fn document_access_rule() -> Self {
+        Self::new("document::access_rule")
+    }
+
+    pub fn document_tab() -> Self {
+        Self::new("document::tab")
+    }
+
+    pub fn system_directory() -> Self {
+        Self::new("system::directory")
+    }
+
+    pub fn system_label() -> Self {
+        Self::new("system::label")
     }
 }
 

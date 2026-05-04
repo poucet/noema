@@ -58,7 +58,7 @@ async fn test_session_add_and_commit() {
     session.commit().await.unwrap();
 
     // After commit, messages are persisted. Open a new session to verify.
-    let reopened = Session::<MemoryStorage>::open(coordinator, conversation_id).await.unwrap();
+    let mut reopened = Session::<MemoryStorage>::open(coordinator, conversation_id).await.unwrap();
     assert_eq!(reopened.len(), 1);
 }
 
@@ -128,7 +128,7 @@ async fn test_session_multi_content_blocks() {
     ])));
     session.commit().await.unwrap();
 
-    let reopened = Session::<MemoryStorage>::open(coordinator, conversation_id).await.unwrap();
+    let mut reopened = Session::<MemoryStorage>::open(coordinator, conversation_id).await.unwrap();
     let guard = reopened.messages().await.unwrap();
     // The message has 2 content blocks
     assert_eq!(guard[0].payload.content.len(), 2);
