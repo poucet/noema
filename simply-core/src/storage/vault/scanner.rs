@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::storage::helper::content_hash;
@@ -99,10 +99,68 @@ pub fn scan_vault(root: &Path, options: &VaultScanOptions) -> Result<Vec<Observe
     Ok(files)
 }
 
+/// Scan a set of vault-relative or absolute paths. Missing paths are ignored so
+/// the reconciliation planner can mark projected files missing.
+pub fn scan_vault_paths(
+    root: &Path,
+    paths: &[PathBuf],
+    options: &VaultScanOptions,
+) -> Result<Vec<ObservedVaultFile>> {
+    let mut files = Vec::new();
+    let mut seen = HashSet::new();
+
+    for path in paths {
+        let path = if path.is_absolute() {
+            path.clone()
+        } else {
+            root.join(path)
+        };
+
+        if !path.exists() {
+            continue;
+        }
+
+        if path.is_dir() {
+            scan_dir(root, &path, options, &mut files)?;
+        } else if path.is_file() && is_markdown_file(&path) {
+            let file = scan_file(root, &path, options)?;
+            if seen.insert(file.path.clone()) {
+                files.push(file);
+            }
+        }
+    }
+
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
 /// Build a reconciliation plan from projected known files and observed files.
 pub fn plan_reconciliation(
     known_files: &[VaultFile],
     observed_files: &[ObservedVaultFile],
+) -> VaultReconciliationPlan {
+    plan_reconciliation_inner(known_files, observed_files, MissingScope::All)
+}
+
+/// Build a scoped reconciliation plan. Only known files whose path appears in
+/// `missing_paths` can be marked missing, but all known files are still used for
+/// ID/path conflict detection.
+pub fn plan_scoped_reconciliation(
+    known_files: &[VaultFile],
+    observed_files: &[ObservedVaultFile],
+    missing_paths: &HashSet<String>,
+) -> VaultReconciliationPlan {
+    plan_reconciliation_inner(
+        known_files,
+        observed_files,
+        MissingScope::Paths(missing_paths),
+    )
+}
+
+fn plan_reconciliation_inner(
+    known_files: &[VaultFile],
+    observed_files: &[ObservedVaultFile],
+    missing_scope: MissingScope<'_>,
 ) -> VaultReconciliationPlan {
     let known_by_entity: HashMap<_, _> = known_files
         .iter()
@@ -181,7 +239,7 @@ pub fn plan_reconciliation(
         if covered_known_entities.contains(known.entity_id.as_str()) {
             continue;
         }
-        if observed_paths.contains(known.path.as_str()) {
+        if observed_paths.contains(known.path.as_str()) || !missing_scope.contains(&known.path) {
             continue;
         }
         actions.push(VaultReconciliationAction::MarkMissing {
@@ -191,6 +249,25 @@ pub fn plan_reconciliation(
     }
 
     VaultReconciliationPlan { actions }
+}
+
+enum MissingScope<'a> {
+    All,
+    Paths(&'a HashSet<String>),
+}
+
+impl MissingScope<'_> {
+    fn contains(&self, path: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Paths(paths) => paths.iter().any(|scope| {
+                path == scope
+                    || path
+                        .strip_prefix(scope)
+                        .is_some_and(|rest| rest.starts_with('/'))
+            }),
+        }
+    }
 }
 
 fn scan_dir(
@@ -483,7 +560,7 @@ fn is_markdown_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn normalize_relative_path(path: &Path) -> String {
+pub(crate) fn normalize_relative_path(path: &Path) -> String {
     path.components()
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()

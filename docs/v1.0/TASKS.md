@@ -224,11 +224,11 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 ### Stage 4 — Projection reconciliation
 
-- ⬜ 4.1 Persist scanner output to `vault_files` and `vault_conflicts` only; do not rewrite files automatically
-- ⬜ 4.2 Mark missing files with a recoverable status and a grace-policy hook
-- ⬜ 4.3 Add explicit conflict reasons and structured details for UI/API resolution
-- ⬜ 4.4 Add coordinator entry point for full vault scan at startup
-- ⬜ 4.5 Add coordinator entry point for scoped path rescans
+- ✅ 4.1 Persist scanner output to `vault_files` and `vault_conflicts` only; do not rewrite files automatically
+- ✅ 4.2 Mark missing files with a recoverable status and a grace-policy hook
+- ✅ 4.3 Add explicit conflict reasons and structured details for UI/API resolution
+- ✅ 4.4 Add coordinator entry point for full vault scan at startup
+- ✅ 4.5 Add coordinator entry point for scoped path rescans
 
 ### Stage 5 — Initial export and read path
 
