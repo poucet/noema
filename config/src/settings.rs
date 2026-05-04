@@ -6,6 +6,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 
 /// Application settings stored in settings.toml
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -32,6 +33,8 @@ pub struct Settings {
     /// Public URL for OAuth callbacks (defaults to http://localhost:{daemon_port}).
     /// Set this when hosting the daemon on a remote server.
     pub public_url: Option<String>,
+    /// Root directory for user-authored Markdown vault files.
+    pub vault_root: Option<PathBuf>,
 }
 
 /// Embedding provider configuration.
@@ -108,6 +111,23 @@ impl Settings {
     /// Remove an API key for a provider.
     pub fn remove_api_key(&mut self, provider: &str) {
         self.api_keys.remove(provider);
+    }
+
+    /// Resolve the Markdown vault root, falling back to the default data-dir
+    /// location when no explicit path is configured.
+    pub fn vault_root(&self) -> Option<PathBuf> {
+        self.vault_root
+            .clone()
+            .or_else(PathManager::default_vault_root)
+    }
+
+    /// Ensure the resolved Markdown vault root exists.
+    pub fn ensure_vault_root_exists(&self) -> std::io::Result<Option<PathBuf>> {
+        let Some(path) = self.vault_root() else {
+            return Ok(None);
+        };
+        fs::create_dir_all(&path)?;
+        Ok(Some(path))
     }
 
     /// Check if an API key is set for a provider.

@@ -8,6 +8,7 @@ mod entity;
 mod text;
 mod turn;
 mod user;
+mod vault;
 
 pub use asset::{AssetStore, StoredAsset};
 pub use blob::BlobStore;
@@ -15,6 +16,7 @@ pub use entity::{EntityStore, StoredEntity};
 pub use text::{TextStore, StoredTextBlock};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage};
 pub use user::{StoredUser, UserStore};
+pub use vault::VaultStore;
 
 /// Bundles all storage type associations into a single trait.
 ///
@@ -29,6 +31,7 @@ pub use user::{StoredUser, UserStore};
 ///     type Text = SqliteStore;
 ///     type User = SqliteStore;
 ///     type Entity = SqliteStore;
+///     type Vault = SqliteStore;
 /// }
 ///
 /// // Then use as a single type parameter:
@@ -50,6 +53,8 @@ pub trait StorageTypes: Send + Sync + 'static {
     /// documents, notes, tabs, assets). Also carries `entity_relations`
     /// and `entity_assets`.
     type Entity: EntityStore + Send + Sync;
+    /// Markdown vault projection and reconciliation conflict storage.
+    type Vault: VaultStore + Send + Sync;
 }
 
 use std::sync::Arc;
@@ -82,4 +87,6 @@ pub trait Stores<S: StorageTypes>: Send + Sync {
     fn text(&self) -> Arc<S::Text>;
     /// Unified entity storage (conversations, documents, entity_relations, entity_assets)
     fn entity(&self) -> Arc<S::Entity>;
+    /// Markdown vault projection storage.
+    fn vault(&self) -> Arc<S::Vault>;
 }

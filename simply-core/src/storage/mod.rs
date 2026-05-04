@@ -20,6 +20,7 @@
 //! - `AssetStore` - Asset metadata storage
 //! - `BlobStore` - Content-addressable binary storage
 //! - `UserStore` - User account management
+//! - `VaultStore` - Markdown vault projection and conflicts
 //!
 //! ## Session API
 //!
@@ -62,7 +63,7 @@ pub mod entity_resolver;
 // Traits
 pub use traits::{
     AssetStore, BlobStore, EntityStore, StorageTypes,
-    StoredEntity, StoredUser, Stores, TextStore, TurnStore, UserStore,
+    StoredEntity, StoredUser, Stores, TextStore, TurnStore, UserStore, VaultStore,
 };
 
 // Types
@@ -75,6 +76,8 @@ pub use types::{
     Message, MessageWithContent, Span, Turn, TurnWithContent,
     // Entity
     Entity, EntityRelation, EntityType, RelationType,
+    // Vault
+    VaultConflict, VaultConflictReason, VaultFile, VaultSyncStatus,
     // Stored wrappers
     Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped,
     // User
@@ -91,14 +94,13 @@ pub use content::InputContent;
 #[cfg(feature = "sqlite")]
 pub use implementations::sqlite::SqliteStore;
 
-
 pub use implementations::fs::FsBlobStore;
 
 // Memory implementations (for testing)
 pub use implementations::memory::{
     MemoryAssetStore, MemoryBlobStore,
     MemoryEntityStore, MemoryStorage, MemoryTextStore, MemoryTurnStore,
-    MemoryUserStore,
+    MemoryUserStore, MemoryVaultStore,
 };
 
 // Entity resolution

@@ -10,6 +10,7 @@ pub mod entity;
 pub mod stored;
 pub mod temporal;
 pub mod user;
+pub mod vault;
 
 // Re-exports for convenience
 pub use asset::Asset;
@@ -20,3 +21,4 @@ pub use entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationT
 pub use stored::{stored, stored_editable, Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped};
 pub use temporal::ActivitySummary;
 pub use user::User;
+pub use vault::{VaultConflict, VaultConflictReason, VaultFile, VaultSyncStatus};

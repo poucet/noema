@@ -24,6 +24,7 @@ impl StorageTypes for SqliteStorage {
     type Turn = SqliteStore;
     type User = SqliteStore;
     type Entity = SqliteStore;
+    type Vault = SqliteStore;
 }
 
 /// Store instances for SQLite storage. Shares a single connection pool
@@ -70,4 +71,5 @@ impl Stores<SqliteStorage> for SqliteStores {
     fn asset(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
     fn text(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
     fn entity(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
+    fn vault(&self) -> Arc<SqliteStore> { self.sqlite.clone() }
 }

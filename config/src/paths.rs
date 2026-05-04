@@ -51,6 +51,11 @@ impl PathManager {
         Self::data_dir().map(|d: PathBuf| d.join("blob_storage"))
     }
 
+    /// Default directory for user-authored Markdown vault files.
+    pub fn default_vault_root() -> Option<PathBuf> {
+        Self::data_dir().map(|d: PathBuf| d.join("vault"))
+    }
+
     /// Get the path for a specific blob by its SHA-256 hash
     /// Files are sharded by the first 2 characters of the hash
     pub fn blob_path(hash: &str) -> Option<PathBuf> {
@@ -126,6 +131,9 @@ impl PathManager {
             std::fs::create_dir_all(&d)?;
         }
         if let Some(d) = Self::blob_storage_dir() {
+            std::fs::create_dir_all(&d)?;
+        }
+        if let Some(d) = Self::default_vault_root() {
             std::fs::create_dir_all(&d)?;
         }
         if let Some(d) = Self::logs_dir() {

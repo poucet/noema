@@ -10,6 +10,7 @@ mod text;
 mod turn;
 mod types;
 mod user;
+mod vault;
 
 pub use asset::MockAssetStore;
 pub use blob::MockBlobStore;
@@ -18,3 +19,4 @@ pub use text::MockTextStore;
 pub use turn::MockTurnStore;
 pub use types::MockStorage;
 pub use user::MockUserStore;
+pub use vault::MockVaultStore;

@@ -18,6 +18,7 @@ export interface Settings {
   user_email: string | null;
   default_model: string | null;
   daemon_port: number | null;
+  vault_root: string | null;
   api_keys: string[];
 }
 

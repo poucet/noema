@@ -199,11 +199,11 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 ### Stage 1 — Storage foundations
 
-- ⬜ 1.1 Add a real SQLite migration runner with `schema_migrations`; keep existing schema creation behavior as the initial migration baseline
-- ⬜ 1.2 Add configurable `vault_root` with default under Noema data dir; ensure directory creation is explicit and idempotent
-- ⬜ 1.3 Add `vault_files` projection table for `entity_id`, `path`, `file_key`, `mtime`, content hash, frontmatter hash, status, and last-seen timestamp
-- ⬜ 1.4 Add `vault_conflicts` table for duplicate IDs, changed IDs, missing files, unmanaged files, and invalid frontmatter
-- ⬜ 1.5 Add storage traits for reading/writing vault projection rows and conflict records; implement SQLite first
+- ✅ 1.1 Add a real SQLite migration runner with `schema_migrations`; keep existing schema creation behavior as the initial migration baseline
+- ✅ 1.2 Add configurable `vault_root` with default under Noema data dir; ensure directory creation is explicit and idempotent
+- ✅ 1.3 Add `vault_files` projection table for `entity_id`, `path`, `file_key`, `mtime`, content hash, frontmatter hash, status, and last-seen timestamp
+- ✅ 1.4 Add `vault_conflicts` table for duplicate IDs, changed IDs, missing files, unmanaged files, and invalid frontmatter
+- ✅ 1.5 Add storage traits for reading/writing vault projection rows and conflict records; implement SQLite first
 
 ### Stage 2 — Markdown parser and serializer
 

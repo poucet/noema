@@ -106,12 +106,20 @@ where
         let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
         let token_store = Arc::clone(&self.token_store);
         let settings = config::Settings::load();
+        if let Err(e) = settings.ensure_vault_root_exists() {
+            tracing::warn!(error = %e, "failed to ensure vault root exists");
+        }
 
         // On a fresh database the admin UI and clients send X-User-Id for a user
         // that may not yet exist in `users`, causing FK failures on the first
         // entity/document insert. If settings specify a `user_email`, ensure a
         // matching row is present up front.
-        if let Some(email) = settings.user_email.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(email) = settings
+            .user_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             match self.stores.user().get_or_create_user_by_email(email).await {
                 Ok(user) => tracing::info!(user_id = %user.id, email = %email, "bootstrapped user from settings"),
                 Err(e) => tracing::warn!(email = %email, error = %e, "failed to bootstrap user from settings"),

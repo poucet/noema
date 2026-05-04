@@ -39,6 +39,7 @@ pub async fn get_settings(State(_state): State<AdminState>) -> Json<serde_json::
         "user_email": settings.user_email,
         "default_model": settings.default_model,
         "daemon_port": settings.daemon_port,
+        "vault_root": settings.vault_root().map(|p| p.to_string_lossy().to_string()),
         "api_keys": settings.configured_providers(),
     }))
 }
@@ -47,6 +48,7 @@ pub async fn get_settings(State(_state): State<AdminState>) -> Json<serde_json::
 pub struct UpdateSettingsRequest {
     pub user_email: Option<String>,
     pub default_model: Option<String>,
+    pub vault_root: Option<String>,
 }
 
 pub async fn update_settings(
@@ -54,8 +56,27 @@ pub async fn update_settings(
     Json(req): Json<UpdateSettingsRequest>,
 ) -> Response {
     let mut settings = config::Settings::load();
-    if let Some(v) = req.user_email { settings.user_email = Some(v); }
-    if let Some(v) = req.default_model { settings.default_model = Some(v); }
+    if let Some(v) = req.user_email {
+        settings.user_email = Some(v);
+    }
+    if let Some(v) = req.default_model {
+        settings.default_model = Some(v);
+    }
+    if let Some(v) = req.vault_root {
+        let trimmed = v.trim();
+        settings.vault_root = if trimmed.is_empty() {
+            None
+        } else {
+            Some(std::path::PathBuf::from(trimmed))
+        };
+        if let Err(e) = settings.ensure_vault_root_exists() {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create vault root: {e}"),
+            )
+                .into_response();
+        }
+    }
     match settings.save() {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),

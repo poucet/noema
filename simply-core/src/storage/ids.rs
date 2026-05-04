@@ -117,6 +117,9 @@ define_id!(MessageContentId, "Unique identifier for a content item within a mess
 // Vector chunks (embedding/RAG)
 define_id!(ChunkId, "Unique identifier for an embedding vector chunk");
 
+// Vault sync
+define_id!(VaultConflictId, "Unique identifier for a vault reconciliation conflict");
+
 // Users
 define_id!(UserId, "Unique identifier for a user");
 

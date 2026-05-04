@@ -19,10 +19,12 @@ use std::sync::{Arc, Mutex};
 // Submodules with trait implementations
 mod asset;
 mod entity;
+mod migration;
 mod temporal;
 mod text;
 mod turn;
 mod user;
+mod vault;
 mod vector;
 
 // Re-export init_schema functions for use in SqliteStore::init_schema
@@ -86,6 +88,7 @@ impl SqliteStore {
         init_asset_schema(&conn)?;
         init_temporal_schema(&conn)?;
         init_vector_schema(&conn)?;
+        migration::run_migrations(&conn)?;
         Ok(())
     }
 }

@@ -9,6 +9,7 @@ mod entity;
 mod text;
 mod turn;
 mod user;
+mod vault;
 
 pub use asset::MemoryAssetStore;
 pub use blob::MemoryBlobStore;
@@ -16,6 +17,7 @@ pub use entity::MemoryEntityStore;
 pub use text::MemoryTextStore;
 pub use turn::MemoryTurnStore;
 pub use user::MemoryUserStore;
+pub use vault::MemoryVaultStore;
 
 use crate::storage::traits::StorageTypes;
 
@@ -29,4 +31,5 @@ impl StorageTypes for MemoryStorage {
     type Turn = MemoryTurnStore;
     type User = MemoryUserStore;
     type Entity = MemoryEntityStore;
+    type Vault = MemoryVaultStore;
 }
