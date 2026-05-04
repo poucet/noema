@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::storage::ids::{AssetId, EntityId, UserId};
 use crate::storage::types::entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
@@ -12,6 +13,9 @@ use crate::storage::types::StoredEditable;
 
 /// Stored representation of an Entity (mutable - can be renamed, archived, etc.)
 pub type StoredEntity = StoredEditable<EntityId, Entity>;
+
+/// Relation counts keyed by entity id, then relation name.
+pub type RelationCountMap = HashMap<EntityId, BTreeMap<String, u32>>;
 
 /// Trait for entity storage operations
 ///
@@ -133,6 +137,58 @@ pub trait EntityStore: Send + Sync {
         id: &EntityId,
         relation_type: Option<&RelationType>,
     ) -> Result<Vec<(EntityId, EntityRelation)>>;
+
+    /// Count outgoing relations for many entities in one logical operation.
+    /// Implementations with a query engine should override this with a grouped
+    /// query; the default preserves correctness for simple stores.
+    async fn count_relations_from(
+        &self,
+        ids: &[EntityId],
+        relation_types: &[RelationType],
+    ) -> Result<RelationCountMap> {
+        let mut counts = RelationCountMap::new();
+        for id in ids {
+            for relation_type in relation_types {
+                let count = self
+                    .get_relations_from(id, Some(relation_type))
+                    .await?
+                    .len() as u32;
+                if count > 0 {
+                    counts
+                        .entry(id.clone())
+                        .or_default()
+                        .insert(relation_type.as_str().to_string(), count);
+                }
+            }
+        }
+        Ok(counts)
+    }
+
+    /// Count incoming relations for many entities in one logical operation.
+    /// Implementations with a query engine should override this with a grouped
+    /// query; the default preserves correctness for simple stores.
+    async fn count_relations_to(
+        &self,
+        ids: &[EntityId],
+        relation_types: &[RelationType],
+    ) -> Result<RelationCountMap> {
+        let mut counts = RelationCountMap::new();
+        for id in ids {
+            for relation_type in relation_types {
+                let count = self
+                    .get_relations_to(id, Some(relation_type))
+                    .await?
+                    .len() as u32;
+                if count > 0 {
+                    counts
+                        .entry(id.clone())
+                        .or_default()
+                        .insert(relation_type.as_str().to_string(), count);
+                }
+            }
+        }
+        Ok(counts)
+    }
 
     /// Get relations to an entity, ordered by `position` ascending (NULLs last).
     /// Used to list ordered children such as the tabs inside a tabbed document.

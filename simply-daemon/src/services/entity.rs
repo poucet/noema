@@ -5,7 +5,7 @@
 //! entity_assets mappings, content-block replacement) happens consistently.
 //! Reads hit `entity_store` directly where possible.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -39,6 +39,13 @@ const SUMMARY_COUNT_RELATIONS: &[&str] = &[
     "structure::contained_in",
     "reference::to",
 ];
+
+fn summary_count_relation_types() -> Vec<RelationType> {
+    SUMMARY_COUNT_RELATIONS
+        .iter()
+        .map(|relation| RelationType::new(*relation))
+        .collect()
+}
 
 /// Kinds callers of the public API are allowed to create or convert entities
 /// into. Restricted to the `document::` namespace so callers can't
@@ -177,39 +184,17 @@ impl<S: StorageTypes> EntityService<S> {
             .await
     }
 
-    /// Convert a `StoredEntity` to a wire `EntitySummary`, populating
-    /// `has_content`, `owner_email`, and per-relation incoming/outgoing edge
-    /// counts for the relations we surface by default.
-    async fn to_summary(&self, entity: StoredEntity) -> anyhow::Result<EntitySummary> {
+    async fn summary_with_counts(
+        &self,
+        entity: StoredEntity,
+        incoming_counts: BTreeMap<String, u32>,
+        outgoing_counts: BTreeMap<String, u32>,
+        has_vault_content: bool,
+    ) -> anyhow::Result<EntitySummary> {
         let owner_email = match (&entity.user_id, &self.user_email_cache) {
             (Some(uid), Some(cache)) => cache.get(&self.stores, uid).await,
             _ => None,
         };
-
-        // Query incoming + outgoing counts for the well-known relations. Each
-        // direction is a round-trip; for bulk listings the caller should page
-        // or specialize. Zero-count relations are omitted so clients can
-        // cheaply check existence via `.has(rel)`.
-        let mut incoming_counts: BTreeMap<String, u32> = BTreeMap::new();
-        let mut outgoing_counts: BTreeMap<String, u32> = BTreeMap::new();
-        for rel_name in SUMMARY_COUNT_RELATIONS {
-            let rel = RelationType::new(*rel_name);
-            let incoming = self.stores.entity().get_relations_to(&entity.id, Some(&rel)).await?;
-            if !incoming.is_empty() {
-                incoming_counts.insert((*rel_name).to_string(), incoming.len() as u32);
-            }
-            let outgoing = self.stores.entity().get_relations_from(&entity.id, Some(&rel)).await?;
-            if !outgoing.is_empty() {
-                outgoing_counts.insert((*rel_name).to_string(), outgoing.len() as u32);
-            }
-        }
-
-        let has_vault_content = self
-            .stores
-            .vault()
-            .get_vault_file(&entity.id)
-            .await?
-            .is_some();
 
         Ok(EntitySummary {
             id: entity.id.to_string(),
@@ -227,13 +212,79 @@ impl<S: StorageTypes> EntityService<S> {
         })
     }
 
+    /// Convert a `StoredEntity` to a wire `EntitySummary`, populating
+    /// `has_content`, `owner_email`, and per-relation incoming/outgoing edge
+    /// counts for the relations we surface by default.
+    async fn to_summary(&self, entity: StoredEntity) -> anyhow::Result<EntitySummary> {
+        let ids = vec![entity.id.clone()];
+        let relation_types = summary_count_relation_types();
+        let mut incoming_by_entity = self
+            .stores
+            .entity()
+            .count_relations_to(&ids, &relation_types)
+            .await?;
+        let incoming_counts = incoming_by_entity.remove(&entity.id).unwrap_or_default();
+        let mut outgoing_by_entity = self
+            .stores
+            .entity()
+            .count_relations_from(&ids, &relation_types)
+            .await?;
+        let outgoing_counts = outgoing_by_entity.remove(&entity.id).unwrap_or_default();
+        let has_vault_content = self
+            .stores
+            .vault()
+            .get_vault_file(&entity.id)
+            .await?
+            .is_some();
+
+        self.summary_with_counts(entity, incoming_counts, outgoing_counts, has_vault_content)
+            .await
+    }
+
     async fn entities_to_summaries(
         &self,
         entities: Vec<StoredEntity>,
     ) -> anyhow::Result<Vec<EntitySummary>> {
+        if entities.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let ids: Vec<EntityId> = entities.iter().map(|entity| entity.id.clone()).collect();
+        let relation_types = summary_count_relation_types();
+        let incoming_counts = self
+            .stores
+            .entity()
+            .count_relations_to(&ids, &relation_types)
+            .await?;
+        let outgoing_counts = self
+            .stores
+            .entity()
+            .count_relations_from(&ids, &relation_types)
+            .await?;
+        let vault_entity_ids: HashSet<EntityId> = self
+            .stores
+            .vault()
+            .list_vault_files(None)
+            .await?
+            .into_iter()
+            .map(|file| file.entity_id)
+            .collect();
+
         let mut out = Vec::with_capacity(entities.len());
-        for e in entities {
-            out.push(self.to_summary(e).await?);
+        for entity in entities {
+            let incoming = incoming_counts
+                .get(&entity.id)
+                .cloned()
+                .unwrap_or_default();
+            let outgoing = outgoing_counts
+                .get(&entity.id)
+                .cloned()
+                .unwrap_or_default();
+            let has_vault_content = vault_entity_ids.contains(&entity.id);
+            out.push(
+                self.summary_with_counts(entity, incoming, outgoing, has_vault_content)
+                    .await?,
+            );
         }
         Ok(out)
     }

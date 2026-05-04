@@ -2,12 +2,13 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, ToSql};
+use std::collections::{BTreeMap, HashMap};
 
 use super::SqliteStore;
 use crate::storage::helper::unix_timestamp;
 use crate::storage::ids::{AssetId, ContentBlockId, EntityId, UserId};
-use crate::storage::traits::{EntityStore, StoredEntity};
+use crate::storage::traits::{EntityStore, RelationCountMap, StoredEntity};
 use crate::storage::types::entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 use crate::storage::types::stored_editable;
 
@@ -118,6 +119,60 @@ fn parse_relation_row(
     ))
 }
 
+fn count_relations_by_entity(
+    conn: &Connection,
+    id_column: &str,
+    ids: &[EntityId],
+    relation_types: &[RelationType],
+) -> Result<RelationCountMap> {
+    if ids.is_empty() || relation_types.is_empty() {
+        return Ok(RelationCountMap::new());
+    }
+
+    let id_placeholders = std::iter::repeat("?")
+        .take(ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let relation_placeholders = std::iter::repeat("?")
+        .take(relation_types.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT {id_column}, relation, COUNT(*) \
+         FROM entity_relations \
+         WHERE {id_column} IN ({id_placeholders}) \
+           AND relation IN ({relation_placeholders}) \
+         GROUP BY {id_column}, relation"
+    );
+
+    let mut params_vec: Vec<Box<dyn ToSql>> =
+        Vec::with_capacity(ids.len() + relation_types.len());
+    for id in ids {
+        params_vec.push(Box::new(id.as_str().to_string()));
+    }
+    for relation_type in relation_types {
+        params_vec.push(Box::new(relation_type.as_str().to_string()));
+    }
+    let params_refs: Vec<&dyn ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(params_refs.as_slice())?;
+    let mut counts: RelationCountMap = HashMap::new();
+    while let Some(row) = rows.next()? {
+        let entity_id: String = row.get(0)?;
+        let relation: String = row.get(1)?;
+        let count: i64 = row.get(2)?;
+        if count > 0 {
+            counts
+                .entry(EntityId::from_string(entity_id))
+                .or_insert_with(BTreeMap::new)
+                .insert(relation, count as u32);
+        }
+    }
+
+    Ok(counts)
+}
+
 // ============================================================================
 // EntityStore Implementation
 // ============================================================================
@@ -169,7 +224,7 @@ impl EntityStore for SqliteStore {
         );
 
         let mut stmt = conn.prepare(&sql)?;
-        let found: std::collections::HashMap<String, StoredEntity> = stmt
+        let found: HashMap<String, StoredEntity> = stmt
             .query_map(
                 rusqlite::params_from_iter(ids.iter().map(|id| id.as_str())),
                 parse_entity_row,
@@ -465,6 +520,24 @@ impl EntityStore for SqliteStore {
         };
 
         Ok(results)
+    }
+
+    async fn count_relations_from(
+        &self,
+        ids: &[EntityId],
+        relation_types: &[RelationType],
+    ) -> Result<RelationCountMap> {
+        let conn = self.conn().lock().unwrap();
+        count_relations_by_entity(&conn, "from_id", ids, relation_types)
+    }
+
+    async fn count_relations_to(
+        &self,
+        ids: &[EntityId],
+        relation_types: &[RelationType],
+    ) -> Result<RelationCountMap> {
+        let conn = self.conn().lock().unwrap();
+        count_relations_by_entity(&conn, "to_id", ids, relation_types)
     }
 
     async fn list_relations_to_ordered(

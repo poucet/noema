@@ -2,11 +2,11 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 
 use crate::storage::ids::{AssetId, ContentBlockId, EntityId, UserId};
-use crate::storage::traits::{EntityStore, StoredEntity};
+use crate::storage::traits::{EntityStore, RelationCountMap, StoredEntity};
 use crate::storage::types::entity::{Entity, EntityRangeQuery, EntityRelation, EntityType, RelationType};
 use crate::storage::types::stored_editable;
 
@@ -76,6 +76,46 @@ pub struct MemoryEntityStore {
 impl MemoryEntityStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn count_relations_by_direction(
+        &self,
+        ids: &[EntityId],
+        relation_types: &[RelationType],
+        outgoing: bool,
+    ) -> RelationCountMap {
+        if ids.is_empty() || relation_types.is_empty() {
+            return RelationCountMap::new();
+        }
+
+        let id_filter: HashSet<&str> = ids.iter().map(|id| id.as_str()).collect();
+        let relation_filter: HashSet<&str> =
+            relation_types.iter().map(|relation| relation.as_str()).collect();
+        let relations = self.relations.lock().unwrap();
+        let mut counts: RelationCountMap = HashMap::new();
+
+        for entry in relations.values() {
+            if !relation_filter.contains(entry.relation.as_str()) {
+                continue;
+            }
+            let entity_id = if outgoing {
+                &entry.from_id
+            } else {
+                &entry.to_id
+            };
+            if !id_filter.contains(entity_id.as_str()) {
+                continue;
+            }
+
+            let relation_counts = counts
+                .entry(entity_id.clone())
+                .or_insert_with(BTreeMap::new);
+            *relation_counts
+                .entry(entry.relation.as_str().to_string())
+                .or_insert(0) += 1;
+        }
+
+        counts
     }
 }
 
@@ -299,6 +339,22 @@ impl EntityStore for MemoryEntityStore {
             })
             .collect();
         Ok(result)
+    }
+
+    async fn count_relations_from(
+        &self,
+        ids: &[EntityId],
+        relation_types: &[RelationType],
+    ) -> Result<RelationCountMap> {
+        Ok(self.count_relations_by_direction(ids, relation_types, true))
+    }
+
+    async fn count_relations_to(
+        &self,
+        ids: &[EntityId],
+        relation_types: &[RelationType],
+    ) -> Result<RelationCountMap> {
+        Ok(self.count_relations_by_direction(ids, relation_types, false))
     }
 
     async fn list_relations_to_ordered(
