@@ -777,8 +777,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         self.entity_for_write(&user_id, &to).await?;
 
         let rel = RelationType::new(&request.relation);
-        self.stores
-            .entity()
+        self.coordinator
             .add_relation(&from, &to, rel, request.position, None)
             .await
     }
@@ -794,9 +793,10 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         let from = EntityId::from_string(from_id);
         let to = EntityId::from_string(to_id);
         self.entity_for_write(&user_id, &from).await?;
+        self.entity_for_write(&user_id, &to).await?;
 
         let rel = RelationType::new(relation);
-        self.stores.entity().remove_relation(&from, &to, &rel).await
+        self.coordinator.remove_relation(&from, &to, &rel).await
     }
 
     async fn move_relation(

@@ -14,6 +14,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use llm::{ContentBlock, Role};
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -829,9 +830,180 @@ impl<S: StorageTypes> StorageCoordinator<S> {
             .await
     }
 
+    fn relation_has_tree_invariants(relation: &RelationType) -> bool {
+        relation == &RelationType::structure_contained_in()
+    }
+
+    async fn ensure_tree_relation_allowed(
+        &self,
+        child: &EntityId,
+        parent: &EntityId,
+        relation: &RelationType,
+    ) -> Result<()> {
+        if child == parent {
+            anyhow::bail!("{} cannot relate an entity to itself", relation);
+        }
+
+        self.entity_store
+            .get_entity(child)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("child entity not found: {child}"))?;
+        self.entity_store
+            .get_entity(parent)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("parent entity not found: {parent}"))?;
+
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut stack = vec![parent.clone()];
+        while let Some(node) = stack.pop() {
+            for (next_parent, _) in self
+                .entity_store
+                .get_relations_from(&node, Some(relation))
+                .await?
+            {
+                if &next_parent == child {
+                    anyhow::bail!("{} cannot create a cycle", relation);
+                }
+                if seen.insert(next_parent.as_str().to_string()) {
+                    stack.push(next_parent);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn remove_tree_parents(
+        &self,
+        child: &EntityId,
+        relation: &RelationType,
+    ) -> Result<Vec<EntityId>> {
+        let existing_parents = self
+            .entity_store
+            .get_relations_from(child, Some(relation))
+            .await?;
+        let mut removed = Vec::with_capacity(existing_parents.len());
+        for (parent_id, _) in existing_parents {
+            self.entity_store
+                .remove_relation(child, &parent_id, relation)
+                .await?;
+            removed.push(parent_id);
+        }
+        Ok(removed)
+    }
+
+    async fn renumber_children(
+        &self,
+        parent: &EntityId,
+        relation: &RelationType,
+    ) -> Result<()> {
+        let siblings = self
+            .entity_store
+            .list_relations_to_ordered(parent, relation)
+            .await?;
+        for (position, (child_id, rel)) in siblings.into_iter().enumerate() {
+            self.entity_store
+                .add_relation(
+                    &child_id,
+                    parent,
+                    relation.clone(),
+                    Some(position as i64),
+                    rel.metadata,
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn insert_tree_child(
+        &self,
+        parent: &EntityId,
+        child: &EntityId,
+        relation: &RelationType,
+        position: Option<i64>,
+        metadata: Option<serde_json::Value>,
+    ) -> Result<()> {
+        let siblings = self
+            .entity_store
+            .list_relations_to_ordered(parent, relation)
+            .await?;
+        let mut ordered: Vec<(EntityId, Option<serde_json::Value>)> = siblings
+            .into_iter()
+            .filter(|(sibling_id, _)| sibling_id != child)
+            .map(|(sibling_id, rel)| (sibling_id, rel.metadata))
+            .collect();
+
+        let requested_position = position
+            .unwrap_or(ordered.len() as i64)
+            .clamp(0, ordered.len() as i64);
+        let insert_at = requested_position as usize;
+        ordered.insert(insert_at, (child.clone(), metadata));
+
+        for (position, (child_id, metadata)) in ordered.into_iter().enumerate() {
+            self.entity_store
+                .add_relation(
+                    &child_id,
+                    parent,
+                    relation.clone(),
+                    Some(position as i64),
+                    metadata,
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Add a relation through the coordinator so relation-specific invariants
+    /// are enforced consistently. `structure::contained_in` is treated as a
+    /// tree edge: each child has one parent, cycles are rejected, and sibling
+    /// positions are normalized after writes.
+    pub async fn add_relation(
+        &self,
+        from: &EntityId,
+        to: &EntityId,
+        relation: RelationType,
+        position: Option<i64>,
+        metadata: Option<serde_json::Value>,
+    ) -> Result<()> {
+        if !Self::relation_has_tree_invariants(&relation) {
+            return self
+                .entity_store
+                .add_relation(from, to, relation, position, metadata)
+                .await;
+        }
+
+        self.ensure_tree_relation_allowed(from, to, &relation).await?;
+        let previous_parents = self.remove_tree_parents(from, &relation).await?;
+        self.insert_tree_child(to, from, &relation, position, metadata)
+            .await?;
+
+        for parent in previous_parents {
+            if &parent != to {
+                self.renumber_children(&parent, &relation).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove a relation through the coordinator so relation-specific cleanup
+    /// remains centralized.
+    pub async fn remove_relation(
+        &self,
+        from: &EntityId,
+        to: &EntityId,
+        relation: &RelationType,
+    ) -> Result<()> {
+        self.entity_store.remove_relation(from, to, relation).await?;
+        if Self::relation_has_tree_invariants(relation) {
+            self.renumber_children(to, relation).await?;
+        }
+        Ok(())
+    }
+
     /// Add a `child ──relation──> parent` edge, ordered by `position` when set.
-    /// Wraps `EntityStore::add_relation` with the consistent argument names
-    /// used throughout the coordinator.
+    /// Uses the same relation invariant path as the public coordinator API.
     pub async fn add_child(
         &self,
         parent: &EntityId,
@@ -840,8 +1012,7 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         position: Option<i64>,
         metadata: Option<serde_json::Value>,
     ) -> Result<()> {
-        self.entity_store
-            .add_relation(child, parent, relation, position, metadata)
+        self.add_relation(child, parent, relation, position, metadata)
             .await
     }
 
@@ -874,7 +1045,6 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         parent: &EntityId,
         relation: &RelationType,
     ) -> Result<Vec<(StoredEntity, EntityId, Option<i64>)>> {
-        use std::collections::HashSet;
         let mut out = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         let mut queue: Vec<EntityId> = vec![parent.clone()];
@@ -909,6 +1079,18 @@ impl<S: StorageTypes> StorageCoordinator<S> {
         new_position: i64,
         relation: &RelationType,
     ) -> Result<()> {
+        if Self::relation_has_tree_invariants(relation) {
+            return self
+                .add_relation(
+                    child,
+                    new_parent,
+                    relation.clone(),
+                    Some(new_position),
+                    None,
+                )
+                .await;
+        }
+
         // Drop any existing parents under this relation (there should normally
         // be at most one).
         let existing_parents = self
