@@ -12,7 +12,7 @@ mod vault;
 
 pub use asset::{AssetStore, StoredAsset};
 pub use blob::BlobStore;
-pub use entity::{EntityStore, StoredEntity};
+pub use entity::{EntityStore, RelationCountMap, StoredEntity};
 pub use text::{TextStore, StoredTextBlock};
 pub use turn::{TurnStore, StoredTurn, StoredSpan, StoredMessage};
 pub use user::{StoredUser, UserStore};
