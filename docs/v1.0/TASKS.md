@@ -236,12 +236,14 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 ### Stage 5 — Initial export and read path
 
-- ⬜ 5.1 Export one flat kind first, probably `document::note`, from `entities.content_block_id` to vault Markdown
-- ⬜ 5.2 Populate sidecar identity entries during initial document export
-- ⬜ 5.3 Add optional frontmatter identity export profile for users who want self-contained files
-- ⬜ 5.4 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
-- ⬜ 5.5 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
-- ⬜ 5.6 Keep returned content shape stable for existing clients
+- ⬜ 5.1 Export `document::tabbed` containers and ordered `document::tab` trees to vault directories/files
+- ⬜ 5.2 Export flat `document::*` entities with `content_block_id` as plain Markdown files
+- ⬜ 5.3 Populate sidecar identity entries during initial document export
+- ⬜ 5.4 Extend sidecar entries with tab-tree parent relation and position metadata for portable Google Doc recovery
+- ⬜ 5.5 Add optional frontmatter identity export profile for users who want self-contained files
+- ⬜ 5.6 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
+- ⬜ 5.7 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
+- ⬜ 5.8 Keep returned content shape stable for existing clients
 
 ### Stage 6 — Vault-backed writes
 

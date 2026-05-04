@@ -102,6 +102,39 @@ not a second graph database. Reconciliation writes sidecar snapshots from
 `vault_files` after projection updates; future startup recovery can use the sidecar
 when SQLite has no local projection yet.
 
+For structured documents such as Google Docs imports, the sidecar also needs enough
+structure metadata to recover the tab tree: parent entity ID, relation type, and
+position for each exported tab file. SQLite remains canonical while Noema is running;
+the sidecar is the portable projection.
+
+## Multi-Tab Documents
+
+Google-imported documents already enter UCM as a `document::tabbed` container with
+ordered `document::tab` children linked by `structure::contained_in`. Vault export
+should preserve that shape instead of flattening all tabs into one Markdown file.
+
+Recommended initial layout:
+
+```text
+My Google Doc/
+  index.md
+  01 Introduction.md
+  02 Project Plan/
+    index.md
+    01 Scope.md
+    02 Timeline.md
+```
+
+Rules:
+
+- The container entity maps to `My Google Doc/index.md`.
+- Leaf tabs can export as numbered Markdown files.
+- Tabs that also contain child tabs export as directories with their own `index.md`.
+- Ordering comes from `structure::contained_in.position`, not filename parsing.
+- File and directory names are presentation only; sidecar/projection identity is
+  authoritative.
+- Assets remain normal relative files under the vault attachment policy.
+
 ## Projection Tables
 
 The vault projection tracks observed files and reconciliation state:
