@@ -47,7 +47,7 @@ Noema supports plain Markdown files without requiring system-owned frontmatter. 
 default identity mode is projection-first:
 
 - SQLite `vault_files` is canonical for `entity_id` to path mapping.
-- A future `.noema/vault-index.json` sidecar can make that projection portable without
+- The `.noema/vault-index.json` sidecar makes that projection portable without
   editing user Markdown files.
 - Existing user frontmatter is preserved and can later feed user-editable metadata
   such as title and tags after validation.
@@ -98,7 +98,9 @@ making the vault portable across machines or database restores:
 ```
 
 SQLite remains the fast local projection. The sidecar is a durable interchange file,
-not a second graph database.
+not a second graph database. Reconciliation writes sidecar snapshots from
+`vault_files` after projection updates; future startup recovery can use the sidecar
+when SQLite has no local projection yet.
 
 ## Projection Tables
 

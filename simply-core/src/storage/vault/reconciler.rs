@@ -14,6 +14,7 @@ use crate::storage::vault::scanner::{
     plan_reconciliation_with_options, plan_scoped_reconciliation_with_options, scan_vault,
     scan_vault_paths,
 };
+use crate::storage::vault::sidecar::{VaultSidecarManifest, write_sidecar_manifest};
 
 /// Summary returned after persisting a reconciliation plan.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -167,7 +168,14 @@ impl VaultReconciler {
             }
         }
 
+        self.write_sidecar_snapshot().await?;
         Ok(summary)
+    }
+
+    async fn write_sidecar_snapshot(&self) -> Result<()> {
+        let files = self.store.list_vault_files(None).await?;
+        let manifest = VaultSidecarManifest::from_vault_files(&files);
+        write_sidecar_manifest(&self.root, &manifest)
     }
 
     async fn upsert_synced_file(

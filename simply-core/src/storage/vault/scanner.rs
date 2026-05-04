@@ -10,6 +10,7 @@ use crate::storage::helper::content_hash;
 use crate::storage::ids::EntityId;
 use crate::storage::types::{EntityType, VaultConflictReason, VaultFile};
 use crate::storage::vault::markdown::{parse_markdown, split_markdown};
+use crate::storage::vault::sidecar::SIDECAR_DIR;
 
 /// File observed during a vault scan.
 #[derive(Clone, Debug, PartialEq)]
@@ -343,6 +344,9 @@ fn scan_dir(
         let path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
+            if entry.file_name() == std::ffi::OsStr::new(SIDECAR_DIR) {
+                continue;
+            }
             scan_dir(root, &path, options, files)?;
         } else if file_type.is_file() && is_markdown_file(&path) {
             files.push(scan_file(root, &path, options)?);

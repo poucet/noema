@@ -232,11 +232,12 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 - ✅ 4.3 Add explicit conflict reasons and structured details for UI/API resolution
 - ✅ 4.4 Add coordinator entry point for full vault scan at startup
 - ✅ 4.5 Add coordinator entry point for scoped path rescans
+- ✅ 4.6 Export `.noema/vault-index.json` sidecar snapshots from the vault projection without touching Markdown frontmatter
 
 ### Stage 5 — Initial export and read path
 
 - ⬜ 5.1 Export one flat kind first, probably `document::note`, from `entities.content_block_id` to vault Markdown
-- ⬜ 5.2 Add sidecar manifest export for Noema-owned identity metadata without editing Markdown frontmatter
+- ⬜ 5.2 Populate sidecar identity entries during initial document export
 - ⬜ 5.3 Add optional frontmatter identity export profile for users who want self-contained files
 - ⬜ 5.4 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
 - ⬜ 5.5 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
