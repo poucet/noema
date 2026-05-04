@@ -13,7 +13,7 @@
   import {
     createEntitiesBrowser,
     type EntityClient,
-  } from './useEntitiesBrowser.svelte.ts';
+  } from './useEntitiesBrowser.svelte.js';
 
   type Props = {
     /** Generated `entityApi(transport)` client, or a `Transport` to wrap. */

@@ -142,6 +142,16 @@ export interface UpdateEntityContentRequest {
   referencedAssets: string[];
 }
 
+export interface GetEntitiesRequest {
+  ids: string[];
+  includeContent: boolean;
+}
+
+export interface EntityWithContent {
+  summary: EntitySummary;
+  content: EntityContent | null;
+}
+
 export interface AddRelationRequest {
   fromId: string;
   toId: string;
@@ -250,6 +260,28 @@ export interface UpdateMcpServerRequest {
 export interface OAuthFlowInfo {
   authUrl: string;
   state: string;
+}
+
+export interface RegisterOAuthProviderRequest {
+  displayName: string;
+  authorizationUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  clientId: string;
+  clientSecret?: string | null;
+  userinfoUrl?: string | null;
+}
+
+export interface OAuthProviderInfo {
+  id: string;
+  displayName: string;
+  authorizationUrl: string;
+  tokenUrl: string;
+  userinfoUrl: string | null;
+  clientId: string;
+  hasClientSecret: boolean;
+  clientSecretSuffix: string;
+  registeredScopes: string[];
 }
 
 export interface AssetInfo {

@@ -9,7 +9,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import EntityList from './EntityList.svelte';
-  import type { EntitiesBrowser } from './useEntitiesBrowser.svelte.ts';
+  import type { EntitiesBrowser } from './useEntitiesBrowser.svelte.js';
 
   type Props = {
     browser: EntitiesBrowser;

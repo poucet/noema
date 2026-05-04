@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import EntityDetail from './EntityDetail.svelte';
-  import type { EntitiesBrowser } from './useEntitiesBrowser.svelte.ts';
+  import type { EntitiesBrowser } from './useEntitiesBrowser.svelte.js';
 
   type Props = {
     browser: EntitiesBrowser;
