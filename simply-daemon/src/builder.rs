@@ -174,13 +174,14 @@ where
                 vault_root.clone(),
             )
             .with_embedding(embedding_queue.clone() as Arc<dyn EmbeddingQueue>)
+            .with_vector_store(Arc::clone(&self.vector_store))
             .with_user_email_cache(Arc::clone(&user_email_cache))
         );
         let core = Arc::new(CoreService::new(kill_tx));
         let user_svc = Arc::new(UserService::new(Arc::clone(&self.stores)));
         let search = Arc::new(SearchService::new(
             embedding_provider,
-            self.vector_store,
+            Arc::clone(&self.vector_store),
             embedding_queue.clone() as Arc<dyn EmbeddingQueue>,
             Arc::clone(&self.stores),
         ));

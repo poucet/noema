@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use simply_core::embedding::VectorStore;
 use simply_core::storage::coordinator::StorageCoordinator;
 use simply_core::storage::helper::{content_hash, unix_timestamp};
 use simply_core::storage::ids::{AssetId as CoreAssetId, EntityId, UserId};
@@ -53,6 +54,7 @@ pub struct EntityService<S: StorageTypes> {
     coordinator: Arc<StorageCoordinator<S>>,
     stores: Arc<dyn Stores<S>>,
     embedding_queue: Option<Arc<dyn crate::services::embedding_queue::EmbeddingQueue>>,
+    vector_store: Option<Arc<dyn VectorStore>>,
     user_email_cache: Option<Arc<crate::services::user::UserEmailCache>>,
     vault_root: PathBuf,
 }
@@ -67,6 +69,7 @@ impl<S: StorageTypes> EntityService<S> {
             coordinator,
             stores,
             embedding_queue: None,
+            vector_store: None,
             user_email_cache: None,
             vault_root,
         }
@@ -77,6 +80,11 @@ impl<S: StorageTypes> EntityService<S> {
         queue: Arc<dyn crate::services::embedding_queue::EmbeddingQueue>,
     ) -> Self {
         self.embedding_queue = Some(queue);
+        self
+    }
+
+    pub fn with_vector_store(mut self, store: Arc<dyn VectorStore>) -> Self {
+        self.vector_store = Some(store);
         self
     }
 
@@ -117,6 +125,56 @@ impl<S: StorageTypes> EntityService<S> {
         let entity = self.load_entity(entity_id).await?;
         AccessPolicy::ensure_write(Some(user_id), &entity)?;
         Ok(entity)
+    }
+
+    async fn clear_vault_conflicts_for_entity(
+        &self,
+        entity_id: &EntityId,
+    ) -> anyhow::Result<()> {
+        for conflict in self.stores.vault().list_vault_conflicts().await? {
+            if conflict.entity_id.as_ref() == Some(entity_id)
+                || conflict.observed_entity_id.as_ref() == Some(entity_id)
+            {
+                self.stores.vault().delete_vault_conflict(&conflict.id).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn cleanup_entity_projection(
+        &self,
+        entity_id: &EntityId,
+    ) -> anyhow::Result<()> {
+        if let Some(vector_store) = &self.vector_store {
+            vector_store.delete_by_entity(entity_id).await?;
+        }
+        self.stores.vault().delete_vault_file(entity_id).await?;
+        self.clear_vault_conflicts_for_entity(entity_id).await
+    }
+
+    async fn delete_entity_tree(
+        &self,
+        entity_id: &EntityId,
+    ) -> anyhow::Result<()> {
+        let contained_in = RelationType::structure_contained_in();
+        let descendants = self
+            .coordinator
+            .list_children_recursive(entity_id, &contained_in)
+            .await?;
+
+        let mut entity_ids: Vec<EntityId> = descendants
+            .into_iter()
+            .map(|(entity, _, _)| entity.id)
+            .collect();
+        entity_ids.push(entity_id.clone());
+
+        for id in &entity_ids {
+            self.cleanup_entity_projection(id).await?;
+        }
+
+        self.coordinator
+            .delete_entity_cascade(entity_id, &[contained_in])
+            .await
     }
 
     /// Convert a `StoredEntity` to a wire `EntitySummary`, populating
@@ -550,12 +608,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         let id = EntityId::from_string(entity_id);
         let _ = self.entity_for_write(&user_id, &id).await?;
 
-        // Walk structure::contained_in to remove the whole tree (e.g. a
-        // tabbed doc with its tabs). Coordinator handles per-entity relation
-        // and asset-mapping cleanup.
-        self.coordinator
-            .delete_entity_cascade(&id, &[RelationType::structure_contained_in()])
-            .await
+        self.delete_entity_tree(&id).await
     }
 
     // ----- Content --------------------------------------------------------
