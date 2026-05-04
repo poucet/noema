@@ -27,7 +27,7 @@ pub enum ObservedVaultIdentity {
         entity_id: EntityId,
         kind: EntityType,
     },
-    MissingId {
+    Unidentified {
         kind: Option<EntityType>,
     },
     InvalidFrontmatter {
@@ -78,14 +78,26 @@ pub enum VaultReconciliationAction {
     },
 }
 
+/// Defines whether Noema derives managed identity from Markdown frontmatter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VaultIdentityMode {
+    /// Identity comes from the vault projection/sidecar state. Frontmatter is
+    /// user-owned metadata and is not interpreted as Noema identity.
+    Projection,
+    /// Identity comes from Noema-owned frontmatter fields when present.
+    Frontmatter,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VaultScanOptions {
+    pub identity_mode: VaultIdentityMode,
     pub supported_kind_prefixes: Vec<String>,
 }
 
 impl Default for VaultScanOptions {
     fn default() -> Self {
         Self {
+            identity_mode: VaultIdentityMode::Projection,
             supported_kind_prefixes: vec!["document::".to_string()],
         }
     }
@@ -139,7 +151,16 @@ pub fn plan_reconciliation(
     known_files: &[VaultFile],
     observed_files: &[ObservedVaultFile],
 ) -> VaultReconciliationPlan {
-    plan_reconciliation_inner(known_files, observed_files, MissingScope::All)
+    plan_reconciliation_with_options(known_files, observed_files, &VaultScanOptions::default())
+}
+
+/// Build a reconciliation plan with explicit vault identity policy.
+pub fn plan_reconciliation_with_options(
+    known_files: &[VaultFile],
+    observed_files: &[ObservedVaultFile],
+    options: &VaultScanOptions,
+) -> VaultReconciliationPlan {
+    plan_reconciliation_inner(known_files, observed_files, MissingScope::All, options)
 }
 
 /// Build a scoped reconciliation plan. Only known files whose path appears in
@@ -150,10 +171,26 @@ pub fn plan_scoped_reconciliation(
     observed_files: &[ObservedVaultFile],
     missing_paths: &HashSet<String>,
 ) -> VaultReconciliationPlan {
+    plan_scoped_reconciliation_with_options(
+        known_files,
+        observed_files,
+        missing_paths,
+        &VaultScanOptions::default(),
+    )
+}
+
+/// Build a scoped reconciliation plan with explicit vault identity policy.
+pub fn plan_scoped_reconciliation_with_options(
+    known_files: &[VaultFile],
+    observed_files: &[ObservedVaultFile],
+    missing_paths: &HashSet<String>,
+    options: &VaultScanOptions,
+) -> VaultReconciliationPlan {
     plan_reconciliation_inner(
         known_files,
         observed_files,
         MissingScope::Paths(missing_paths),
+        options,
     )
 }
 
@@ -161,6 +198,7 @@ fn plan_reconciliation_inner(
     known_files: &[VaultFile],
     observed_files: &[ObservedVaultFile],
     missing_scope: MissingScope<'_>,
+    options: &VaultScanOptions,
 ) -> VaultReconciliationPlan {
     let known_by_entity: HashMap<_, _> = known_files
         .iter()
@@ -174,6 +212,8 @@ fn plan_reconciliation_inner(
         .iter()
         .map(|file| file.path.as_str())
         .collect();
+    let missing_known_by_hash =
+        missing_known_by_content_hash(known_files, &observed_paths, &missing_scope);
 
     let mut actions = Vec::new();
     let mut covered_known_entities = HashSet::new();
@@ -187,11 +227,13 @@ fn plan_reconciliation_inner(
                     .or_default()
                     .push(file);
             }
-            ObservedVaultIdentity::MissingId { kind } => {
+            ObservedVaultIdentity::Unidentified { kind } => {
                 classify_unidentified_file(
                     file,
                     kind.as_ref().map(EntityType::as_str),
+                    options.identity_mode,
                     &known_by_path,
+                    &missing_known_by_hash,
                     &mut covered_known_entities,
                     &mut actions,
                 );
@@ -270,6 +312,24 @@ impl MissingScope<'_> {
     }
 }
 
+fn missing_known_by_content_hash<'a>(
+    known_files: &'a [VaultFile],
+    observed_paths: &HashSet<&str>,
+    missing_scope: &MissingScope<'_>,
+) -> HashMap<&'a str, Vec<&'a VaultFile>> {
+    let mut by_hash: HashMap<&str, Vec<&VaultFile>> = HashMap::new();
+    for known in known_files {
+        if observed_paths.contains(known.path.as_str()) || !missing_scope.contains(&known.path) {
+            continue;
+        }
+        by_hash
+            .entry(known.content_hash.as_str())
+            .or_default()
+            .push(known);
+    }
+    by_hash
+}
+
 fn scan_dir(
     root: &Path,
     dir: &Path,
@@ -295,7 +355,6 @@ fn scan_file(root: &Path, path: &Path, options: &VaultScanOptions) -> Result<Obs
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read vault file {}", path.display()))?;
     let split = split_markdown(&text);
-    let parsed = parse_markdown(&text);
 
     let relative_path = normalize_relative_path(
         path.strip_prefix(root)
@@ -308,10 +367,13 @@ fn scan_file(root: &Path, path: &Path, options: &VaultScanOptions) -> Result<Obs
     let content_hash = content_hash(split.body);
     let mtime = metadata.modified().ok().and_then(modified_millis);
 
-    let identity = match parsed {
-        Ok(document) => classify_frontmatter(document.frontmatter, options),
-        Err(e) => ObservedVaultIdentity::InvalidFrontmatter {
-            error: e.to_string(),
+    let identity = match options.identity_mode {
+        VaultIdentityMode::Projection => ObservedVaultIdentity::Unidentified { kind: None },
+        VaultIdentityMode::Frontmatter => match parse_markdown(&text) {
+            Ok(document) => classify_frontmatter(document.frontmatter, options),
+            Err(e) => ObservedVaultIdentity::InvalidFrontmatter {
+                error: e.to_string(),
+            },
         },
     };
 
@@ -329,7 +391,7 @@ fn classify_frontmatter(
     options: &VaultScanOptions,
 ) -> ObservedVaultIdentity {
     let Some(frontmatter) = frontmatter else {
-        return ObservedVaultIdentity::MissingId { kind: None };
+        return ObservedVaultIdentity::Unidentified { kind: None };
     };
     let kind = frontmatter.kind;
     let entity_id = frontmatter.id;
@@ -347,33 +409,66 @@ fn classify_frontmatter(
             entity_id,
             kind: kind.unwrap_or_else(|| EntityType::new("document::note")),
         },
-        None => ObservedVaultIdentity::MissingId { kind },
+        None => ObservedVaultIdentity::Unidentified { kind },
     }
 }
 
 fn classify_unidentified_file(
     file: &ObservedVaultFile,
     kind: Option<&str>,
+    identity_mode: VaultIdentityMode,
     known_by_path: &HashMap<&str, &VaultFile>,
+    missing_known_by_content_hash: &HashMap<&str, Vec<&VaultFile>>,
     covered_known_entities: &mut HashSet<String>,
     actions: &mut Vec<VaultReconciliationAction>,
 ) {
     if let Some(known) = known_by_path.get(file.path.as_str()) {
         covered_known_entities.insert(known.entity_id.as_str().to_string());
-        actions.push(VaultReconciliationAction::Conflict {
-            path: file.path.clone(),
-            reason: VaultConflictReason::missing_id(),
-            entity_id: Some(known.entity_id.clone()),
-            observed_entity_id: None,
-            details: json!({ "kind": kind }),
-        });
-    } else {
+        match identity_mode {
+            VaultIdentityMode::Projection => actions.push(VaultReconciliationAction::KeepSynced {
+                entity_id: known.entity_id.clone(),
+                path: file.path.clone(),
+            }),
+            VaultIdentityMode::Frontmatter => actions.push(VaultReconciliationAction::Conflict {
+                path: file.path.clone(),
+                reason: VaultConflictReason::missing_id(),
+                entity_id: Some(known.entity_id.clone()),
+                observed_entity_id: None,
+                details: json!({ "kind": kind }),
+            }),
+        }
+        return;
+    }
+
+    if identity_mode == VaultIdentityMode::Projection {
+        if let Some(candidates) = missing_known_by_content_hash.get(file.content_hash.as_str()) {
+            if let [known] = candidates.as_slice() {
+                covered_known_entities.insert(known.entity_id.as_str().to_string());
+                actions.push(VaultReconciliationAction::UpdatePath {
+                    entity_id: known.entity_id.clone(),
+                    from_path: known.path.clone(),
+                    to_path: file.path.clone(),
+                });
+                return;
+            }
+        }
+
         actions.push(VaultReconciliationAction::Unmanaged {
             path: file.path.clone(),
-            reason: VaultConflictReason::missing_id(),
-            details: json!({ "kind": kind }),
+            reason: VaultConflictReason::unmanaged_file(),
+            details: json!({
+                "kind": kind,
+                "identity_mode": "projection",
+            }),
         });
+        return;
     }
+
+    actions.push(VaultReconciliationAction::Unmanaged {
+        path: file.path.clone(),
+        reason: VaultConflictReason::missing_id(),
+        details: json!({ "kind": kind }),
+    });
 }
 
 fn classify_invalid_file(
@@ -540,7 +635,7 @@ fn observed_entity_id(file: &ObservedVaultFile) -> Option<EntityId> {
 fn observed_kind(file: &ObservedVaultFile) -> Option<EntityType> {
     match &file.identity {
         ObservedVaultIdentity::Managed { kind, .. } => Some(kind.clone()),
-        ObservedVaultIdentity::MissingId { kind } => kind.clone(),
+        ObservedVaultIdentity::Unidentified { kind } => kind.clone(),
         ObservedVaultIdentity::UnsupportedKind { kind, .. } => kind.clone(),
         ObservedVaultIdentity::InvalidFrontmatter { .. } => None,
     }
@@ -579,12 +674,16 @@ mod tests {
     use crate::storage::types::VaultSyncStatus;
 
     fn known(entity_id: &str, path: &str) -> VaultFile {
+        known_with_hash(entity_id, path, "hash")
+    }
+
+    fn known_with_hash(entity_id: &str, path: &str, content_hash: &str) -> VaultFile {
         VaultFile {
             entity_id: EntityId::from_string(entity_id),
             path: path.to_string(),
             file_key: None,
             mtime: None,
-            content_hash: "hash".to_string(),
+            content_hash: content_hash.to_string(),
             frontmatter_hash: None,
             sync_status: VaultSyncStatus::synced(),
             last_seen_at: 0,
@@ -601,6 +700,16 @@ mod tests {
                 entity_id: EntityId::from_string(entity_id),
                 kind: EntityType::new("document::note"),
             },
+        }
+    }
+
+    fn unidentified(path: &str, content_hash: &str) -> ObservedVaultFile {
+        ObservedVaultFile {
+            path: path.to_string(),
+            mtime: None,
+            content_hash: content_hash.to_string(),
+            frontmatter_hash: None,
+            identity: ObservedVaultIdentity::Unidentified { kind: None },
         }
     }
 
@@ -680,18 +789,64 @@ mod tests {
 
     #[test]
     fn classifies_unknown_missing_id_as_unmanaged() {
-        let observed = ObservedVaultFile {
-            path: "loose.md".to_string(),
-            mtime: None,
-            content_hash: "hash".to_string(),
-            frontmatter_hash: None,
-            identity: ObservedVaultIdentity::MissingId { kind: None },
-        };
+        let observed = unidentified("loose.md", "hash");
         let plan = plan_reconciliation(&[], &[observed]);
 
         assert!(matches!(
             &plan.actions[..],
             [VaultReconciliationAction::Unmanaged { reason, .. }]
+                if reason.as_str() == "unmanaged_file"
+        ));
+    }
+
+    #[test]
+    fn keeps_known_plain_markdown_synced_by_path_by_default() {
+        let plan = plan_reconciliation(
+            &[known("ent_1", "doc.md")],
+            &[unidentified("doc.md", "new_hash")],
+        );
+
+        assert_eq!(
+            plan.actions,
+            vec![VaultReconciliationAction::KeepSynced {
+                entity_id: EntityId::from_string("ent_1"),
+                path: "doc.md".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn infers_frontmatterless_move_by_unique_hash() {
+        let plan = plan_reconciliation(
+            &[known_with_hash("ent_1", "old.md", "same_hash")],
+            &[unidentified("new.md", "same_hash")],
+        );
+
+        assert_eq!(
+            plan.actions,
+            vec![VaultReconciliationAction::UpdatePath {
+                entity_id: EntityId::from_string("ent_1"),
+                from_path: "old.md".to_string(),
+                to_path: "new.md".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn frontmatter_identity_mode_requires_id_for_known_path() {
+        let options = VaultScanOptions {
+            identity_mode: VaultIdentityMode::Frontmatter,
+            ..VaultScanOptions::default()
+        };
+        let plan = plan_reconciliation_with_options(
+            &[known("ent_1", "doc.md")],
+            &[unidentified("doc.md", "new_hash")],
+            &options,
+        );
+
+        assert!(matches!(
+            &plan.actions[..],
+            [VaultReconciliationAction::Conflict { reason, .. }]
                 if reason.as_str() == "missing_id"
         ));
     }

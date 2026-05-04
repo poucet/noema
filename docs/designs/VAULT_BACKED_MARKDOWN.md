@@ -36,14 +36,26 @@ file write succeeds.
 - One markdown-backed entity has at most one canonical vault file.
 - Entity ID is identity. Path and filename are mutable presentation.
 - File watcher events are hints. Startup/full vault scans are authoritative.
-- Frontmatter is a sync interface, not a trust boundary.
-- System-owned metadata is validated before it changes SQLite state.
+- Frontmatter is optional and user-editable. It is not a trust boundary.
+- System-owned metadata lives in SQLite and optional Noema sidecar state by default.
 - Conflicts are explicit states. Noema should not merge, delete, or reassign identity
   automatically when identity is ambiguous.
 
-## Frontmatter
+## Identity Metadata
 
-Each managed file carries stable identity in YAML frontmatter:
+Noema supports plain Markdown files without requiring system-owned frontmatter. The
+default identity mode is projection-first:
+
+- SQLite `vault_files` is canonical for `entity_id` to path mapping.
+- A future `.noema/vault-index.json` sidecar can make that projection portable without
+  editing user Markdown files.
+- Existing user frontmatter is preserved and can later feed user-editable metadata
+  such as title and tags after validation.
+- Top-level frontmatter keys such as `id` and `kind` are not interpreted as Noema
+  identity unless the vault opts into a frontmatter identity profile.
+
+When a vault explicitly enables frontmatter identity, each managed file carries stable
+identity in YAML frontmatter:
 
 ```yaml
 ---
@@ -55,7 +67,7 @@ tags: []
 ---
 ```
 
-Field ownership:
+Field ownership in that opt-in profile:
 
 | Field | Ownership | Notes |
 |-------|-----------|-------|
@@ -66,6 +78,27 @@ Field ownership:
 | `title` | User-editable | Can sync to `entities.name`. |
 | `tags` | User-editable | Can project to tag relations or metadata. |
 | Other keys | User-editable metadata | Preserved unless reserved by Noema. |
+
+## Portable Sidecar
+
+The sidecar keeps Noema-owned identity outside user-editable Markdown while still
+making the vault portable across machines or database restores:
+
+```json
+{
+  "version": 1,
+  "files": {
+    "Notes/example.md": {
+      "entity_id": "ent_...",
+      "kind": "document::note",
+      "content_hash": "..."
+    }
+  }
+}
+```
+
+SQLite remains the fast local projection. The sidecar is a durable interchange file,
+not a second graph database.
 
 ## Projection Tables
 
@@ -100,17 +133,19 @@ drive restores.
 
 ## Reconciliation Rules
 
-The scanner compares vault files, frontmatter, file keys, hashes, and the SQLite
-projection.
+The scanner compares vault files, optional frontmatter identity, file keys, hashes,
+and the SQLite projection.
 
 | Observation | Action |
 |-------------|--------|
-| Same `id`, new path | Update `vault_files.path`. |
-| Known path/file with removed `id` | Conflict; offer to restore the original ID. |
-| Known path/file with changed `id` | Conflict; do not mutate entity identity. |
-| Multiple files with same `id` | Keep prior canonical path if present; mark extras as duplicate-ID conflicts. |
-| Unknown file with valid unknown `id` | Import or bind, depending policy. |
-| Unknown file without `id` | Leave unmanaged or assign ID through explicit import. |
+| Known path without Noema frontmatter | Keep synced in projection-first mode. |
+| Unknown path whose body hash uniquely matches a missing projected file | Treat as a likely move and update `vault_files.path`. |
+| Unknown plain Markdown file | Leave unmanaged or assign ID through explicit import. |
+| Same frontmatter `id`, new path in frontmatter identity mode | Update `vault_files.path`. |
+| Known path/file with removed `id` in frontmatter identity mode | Conflict; offer to restore the original ID. |
+| Known path/file with changed `id` in frontmatter identity mode | Conflict; do not mutate entity identity. |
+| Multiple files with same frontmatter `id` | Keep prior canonical path if present; mark extras as duplicate-ID conflicts. |
+| Unknown file with valid unknown frontmatter `id` | Import or bind, depending policy. |
 | Previously known file missing | Mark missing. Delete/archive only after explicit policy or user action. |
 
 Duplicate IDs should default to "fork as new document" when the user copied a file.
@@ -122,7 +157,7 @@ confirmation.
 Vault-backed document updates go through one coordinator:
 
 1. Validate access and requested metadata changes.
-2. Serialize frontmatter from canonical entity state.
+2. Serialize the Markdown body and optional identity metadata according to vault policy.
 3. Write to a temporary file inside the vault.
 4. Rename atomically over the canonical path.
 5. Re-read or hash the final file.

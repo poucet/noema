@@ -10,8 +10,9 @@ use crate::storage::ids::{EntityId, VaultConflictId};
 use crate::storage::traits::VaultStore;
 use crate::storage::types::{VaultConflict, VaultConflictReason, VaultFile, VaultSyncStatus};
 use crate::storage::vault::scanner::{
-    normalize_relative_path, plan_reconciliation, plan_scoped_reconciliation, scan_vault,
-    scan_vault_paths, ObservedVaultFile, VaultReconciliationAction, VaultScanOptions,
+    ObservedVaultFile, VaultReconciliationAction, VaultScanOptions, normalize_relative_path,
+    plan_reconciliation_with_options, plan_scoped_reconciliation_with_options, scan_vault,
+    scan_vault_paths,
 };
 
 /// Summary returned after persisting a reconciliation plan.
@@ -50,7 +51,7 @@ impl VaultReconciler {
     pub async fn reconcile_full_scan(&self) -> Result<VaultReconciliationSummary> {
         let known_files = self.store.list_vault_files(None).await?;
         let observed_files = scan_vault(&self.root, &self.options)?;
-        let plan = plan_reconciliation(&known_files, &observed_files);
+        let plan = plan_reconciliation_with_options(&known_files, &observed_files, &self.options);
         self.persist_plan(&known_files, &observed_files, plan.actions)
             .await
     }
@@ -61,7 +62,12 @@ impl VaultReconciler {
         let known_files = self.store.list_vault_files(None).await?;
         let observed_files = scan_vault_paths(&self.root, paths, &self.options)?;
         let missing_paths = scoped_missing_paths(&self.root, paths);
-        let plan = plan_scoped_reconciliation(&known_files, &observed_files, &missing_paths);
+        let plan = plan_scoped_reconciliation_with_options(
+            &known_files,
+            &observed_files,
+            &missing_paths,
+            &self.options,
+        );
         self.persist_plan(&known_files, &observed_files, plan.actions)
             .await
     }

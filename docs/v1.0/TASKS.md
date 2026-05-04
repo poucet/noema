@@ -209,7 +209,7 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 - ✅ 2.1 Add pure frontmatter parser that splits YAML metadata from Markdown body without database side effects
 - ✅ 2.2 Add serializer that preserves unknown user metadata and emits canonical system fields in stable order
-- ✅ 2.3 Define reserved/system-owned fields: `id`, `kind`, `origin`, and policy-controlled `privacy`
+- ✅ 2.3 Define opt-in frontmatter identity fields: `id`, `kind`, `origin`, and policy-controlled `privacy`
 - ✅ 2.4 Define user-editable fields: `title`, `tags`, and preserved extra metadata
 - ✅ 2.5 Add Markdown asset-reference extraction for relative links and image embeds, but do not update `entity_assets` yet
 
@@ -218,9 +218,12 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 - ✅ 3.1 Add vault scanner that returns a reconciliation plan without mutating entities or files
 - ✅ 3.2 Classify same-ID moves by updating the planned path for an existing `entity_id`
 - ✅ 3.3 Classify missing known files without deleting or archiving the entity
-- ✅ 3.4 Classify known path/file with removed or changed `id` as an identity conflict
+- ✅ 3.4 Classify known path/file with removed or changed `id` as an identity conflict when frontmatter identity mode is enabled
 - ✅ 3.5 Classify duplicate frontmatter IDs as conflicts; keep the prior canonical path when one exists
-- ✅ 3.6 Classify unknown files with valid IDs, unknown files without IDs, invalid frontmatter, and unsupported kinds
+- ✅ 3.6 Classify unknown files with valid IDs, unknown files without IDs, invalid frontmatter, and unsupported kinds for frontmatter identity mode
+- ✅ 3.7 Add projection-first identity mode so known plain Markdown files sync without Noema-owned frontmatter
+- ✅ 3.8 Infer frontmatterless moves by unique body hash when the prior projected path is missing
+- ✅ 3.9 Treat unknown plain Markdown as unmanaged/importable rather than a missing-ID conflict
 
 ### Stage 4 — Projection reconciliation
 
@@ -233,15 +236,16 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 ### Stage 5 — Initial export and read path
 
 - ⬜ 5.1 Export one flat kind first, probably `document::note`, from `entities.content_block_id` to vault Markdown
-- ⬜ 5.2 Add canonical frontmatter during export: `id`, `kind`, `origin`, `privacy`, `title`, and `tags`
-- ⬜ 5.3 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
-- ⬜ 5.4 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
-- ⬜ 5.5 Keep returned content shape stable for existing clients
+- ⬜ 5.2 Add sidecar manifest export for Noema-owned identity metadata without editing Markdown frontmatter
+- ⬜ 5.3 Add optional frontmatter identity export profile for users who want self-contained files
+- ⬜ 5.4 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
+- ⬜ 5.5 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
+- ⬜ 5.6 Keep returned content shape stable for existing clients
 
 ### Stage 6 — Vault-backed writes
 
 - ⬜ 6.1 Route vault-backed `EntityApi.update_entity_content` through a vault writer coordinator
-- ⬜ 6.2 Validate access and metadata changes before accepting frontmatter-derived state
+- ⬜ 6.2 Validate access and metadata changes before accepting Markdown/sidecar/frontmatter-derived state
 - ⬜ 6.3 Write with temp-file plus atomic rename inside the vault
 - ⬜ 6.4 Detect stale editor state with content hash checks before overwriting external edits
 - ⬜ 6.5 After successful file write, store a fresh `content_blocks` snapshot and update `entities.content_block_id`
@@ -251,8 +255,8 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 - ⬜ 7.1 Apply scanner-detected body edits to the entity snapshot by creating a new `content_blocks` record
 - ⬜ 7.2 Sync user-editable metadata such as title and tags through coordinator validation
-- ⬜ 7.3 Treat frontmatter privacy changes as access-policy requests, not direct writes
-- ⬜ 7.4 Keep identity field edits in conflict state until explicitly resolved
+- ⬜ 7.3 Treat privacy changes from sidecar/frontmatter as access-policy requests, not direct writes
+- ⬜ 7.4 Keep identity field edits in conflict state until explicitly resolved when frontmatter identity mode is enabled
 - ⬜ 7.5 Rebuild `entity_assets` from parsed Markdown references after file changes
 
 ### Stage 8 — Watcher integration
@@ -266,7 +270,7 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 ### Stage 9 — Conflict resolution API and UI
 
 - ⬜ 9.1 Add API to list vault conflicts with path, reason, canonical entity, and observed entity ID
-- ⬜ 9.2 Add "restore original ID" action for files whose frontmatter ID was removed or changed
+- ⬜ 9.2 Add "restore original ID" action for frontmatter-identity vaults whose ID was removed or changed
 - ⬜ 9.3 Add "fork as new document" action for copied files with duplicate IDs
 - ⬜ 9.4 Add "accept new path" action for copy/delete moves when the old canonical file is missing
 - ⬜ 9.5 Add "ignore/unmanage file" action for files that should stay outside Noema control

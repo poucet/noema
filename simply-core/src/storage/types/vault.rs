@@ -69,6 +69,10 @@ impl VaultConflictReason {
         Self::new("missing_id")
     }
 
+    pub fn unmanaged_file() -> Self {
+        Self::new("unmanaged_file")
+    }
+
     pub fn invalid_frontmatter() -> Self {
         Self::new("invalid_frontmatter")
     }

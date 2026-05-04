@@ -48,9 +48,10 @@ Per-user per-MCP-server persistent tokens, Discord role-based access control, ad
 ### 4. Vault-Backed Markdown
 Make normal Markdown files canonical for human-authored `document::*` bodies while
 SQLite remains canonical for identity, relations, access policy, conversations,
-embeddings, runtime state, and indexes. Adds configurable `vault_root`, frontmatter
-identity, vault projection tables, scanner-first reconciliation, conflict resolution,
-atomic writes, external edit sync, and watcher integration. **Design:**
+embeddings, runtime state, and indexes. Adds configurable `vault_root`,
+projection-first identity, optional sidecar/frontmatter identity, vault projection
+tables, scanner-first reconciliation, conflict resolution, atomic writes, external
+edit sync, and watcher integration. **Design:**
 [VAULT_BACKED_MARKDOWN.md](../designs/VAULT_BACKED_MARKDOWN.md).
 
 ---
