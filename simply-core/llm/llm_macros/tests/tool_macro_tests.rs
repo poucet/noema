@@ -379,7 +379,15 @@ fn test_json_schema_generation() {
     let schema = schema_for!(ComplexFunctionArgs);
 
     // Verify schema has the expected structure
-    assert!(schema.schema.object.is_some());
+    let schema_obj = schema.as_object().expect("schema should be an object");
+    assert_eq!(
+        schema_obj.get("type").and_then(serde_json::Value::as_str),
+        Some("object")
+    );
+    assert!(schema_obj
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .is_some());
 }
 
 // Test 21: Error handling in call wrapper
