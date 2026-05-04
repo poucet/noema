@@ -482,4 +482,33 @@ mod tests {
         let ids: Vec<_> = children.iter().map(|(id, _)| id.clone()).collect();
         assert_eq!(ids, vec![a, b]);
     }
+
+    #[tokio::test]
+    async fn test_relation_counts_batch_by_direction() {
+        let store = MemoryEntityStore::new();
+        let doc = store.create_entity(EntityType::document_tabbed(), None).await.unwrap();
+        let tab_a = store.create_entity(EntityType::document_tab(), None).await.unwrap();
+        let tab_b = store.create_entity(EntityType::document_tab(), None).await.unwrap();
+        let note = store.create_entity(EntityType::document_note(), None).await.unwrap();
+        let contained_in = RelationType::structure_contained_in();
+        let reference_to = RelationType::reference_to();
+
+        store.add_relation(&tab_a, &doc, contained_in.clone(), Some(0), None).await.unwrap();
+        store.add_relation(&tab_b, &doc, contained_in.clone(), Some(1), None).await.unwrap();
+        store.add_relation(&doc, &note, reference_to.clone(), None, None).await.unwrap();
+        store.add_relation(&tab_a, &note, reference_to.clone(), None, None).await.unwrap();
+
+        let ids = vec![doc.clone(), tab_a.clone(), tab_b.clone(), note.clone()];
+        let relation_types = vec![contained_in.clone(), reference_to.clone()];
+        let incoming = store.count_relations_to(&ids, &relation_types).await.unwrap();
+        let outgoing = store.count_relations_from(&ids, &relation_types).await.unwrap();
+
+        assert_eq!(incoming[&doc][contained_in.as_str()], 2);
+        assert_eq!(incoming[&note][reference_to.as_str()], 2);
+        assert!(!incoming.contains_key(&tab_a));
+        assert_eq!(outgoing[&tab_a][contained_in.as_str()], 1);
+        assert_eq!(outgoing[&tab_a][reference_to.as_str()], 1);
+        assert_eq!(outgoing[&doc][reference_to.as_str()], 1);
+        assert!(!outgoing.contains_key(&note));
+    }
 }
