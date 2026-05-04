@@ -663,8 +663,8 @@ mod tests {
         {
             let conn = store.conn().lock().unwrap();
             conn.execute(
-                "INSERT INTO users (id, email, created_at) VALUES (?1, ?2, ?3)",
-                params![user_id.as_str(), "test@example.com", 1000],
+                "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![user_id.as_str(), "test@example.com", 1000, 1000],
             ).unwrap();
         }
 
@@ -724,8 +724,8 @@ mod tests {
         {
             let conn = store.conn().lock().unwrap();
             conn.execute(
-                "INSERT INTO users (id, email, created_at) VALUES (?1, ?2, ?3)",
-                params![user_id.as_str(), "test@example.com", 1000],
+                "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![user_id.as_str(), "test@example.com", 1000, 1000],
             ).unwrap();
         }
 
@@ -758,8 +758,8 @@ mod tests {
         {
             let conn = store.conn().lock().unwrap();
             conn.execute(
-                "INSERT INTO users (id, email, created_at) VALUES (?1, ?2, ?3)",
-                params![user_id.as_str(), "test@example.com", 1000],
+                "INSERT INTO users (id, email, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![user_id.as_str(), "test@example.com", 1000, 1000],
             ).unwrap();
         }
 

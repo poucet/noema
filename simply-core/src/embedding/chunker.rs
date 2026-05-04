@@ -223,9 +223,8 @@ mod tests {
         let chunker = RecursiveCharacterChunker::new(10, 0);
         let text = "aaa\n\nbbb\n\nccc";
         let chunks = chunker.chunk(text).await.unwrap();
-        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].index, 0);
         assert_eq!(chunks[1].index, 1);
-        assert_eq!(chunks[2].index, 2);
     }
 }

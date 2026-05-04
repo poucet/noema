@@ -58,7 +58,7 @@ async fn test_session_add_and_commit() {
     session.commit().await.unwrap();
 
     // After commit, messages are persisted. Open a new session to verify.
-    let mut reopened = Session::<MemoryStorage>::open(coordinator, conversation_id).await.unwrap();
+    let reopened = Session::<MemoryStorage>::open(coordinator, conversation_id).await.unwrap();
     assert_eq!(reopened.len(), 1);
 }
 

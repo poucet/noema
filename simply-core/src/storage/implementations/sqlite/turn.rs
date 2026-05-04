@@ -639,6 +639,17 @@ mod tests {
         SqliteStore::in_memory().unwrap()
     }
 
+    fn insert_content_block(store: &SqliteStore, id: &ContentBlockId, text: &str) {
+        let conn = store.write_conn().lock().unwrap();
+        conn.execute(
+            "INSERT INTO content_blocks \
+                (id, content_hash, content_type, text, is_private, origin_kind, created_at) \
+             VALUES (?1, ?2, 'plain', ?3, 0, 'system', 1)",
+            params![id.as_str(), format!("hash:{text}"), text],
+        )
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn test_turn_crud() {
         let store = create_test_store();
@@ -669,6 +680,7 @@ mod tests {
 
         // Add message
         let content_block_id = ContentBlockId::new();
+        insert_content_block(&store, &content_block_id, "hello");
         let content = vec![StoredContent::text_ref(content_block_id)];
         let _message = store
             .add_message(&span.id, Role::User, &content)
@@ -697,6 +709,7 @@ mod tests {
         let turn1 = store.create_turn(llm::Role::User).await.unwrap();
         let span1 = store.create_span(&turn1.id, None).await.unwrap();
         let content_block_id = ContentBlockId::new();
+        insert_content_block(&store, &content_block_id, "user message");
         let content = vec![StoredContent::text_ref(content_block_id)];
         store.add_message(&span1.id, Role::User, &content).await.unwrap();
         store.select_span(&conversation_id, &turn1.id, &span1.id).await.unwrap();
@@ -705,6 +718,7 @@ mod tests {
         let turn2 = store.create_turn(llm::Role::Assistant).await.unwrap();
         let span2 = store.create_span(&turn2.id, Some("claude")).await.unwrap();
         let content_block_id2 = ContentBlockId::new();
+        insert_content_block(&store, &content_block_id2, "assistant message");
         let content2 = vec![StoredContent::text_ref(content_block_id2)];
         store.add_message(&span2.id, Role::Assistant, &content2).await.unwrap();
         store.select_span(&conversation_id, &turn2.id, &span2.id).await.unwrap();
