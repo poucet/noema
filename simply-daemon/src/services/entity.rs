@@ -6,15 +6,25 @@
 //! Reads hit `entity_store` directly where possible.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use simply_core::storage::coordinator::StorageCoordinator;
+use simply_core::storage::helper::{content_hash, unix_timestamp};
 use simply_core::storage::ids::{AssetId as CoreAssetId, EntityId};
-use simply_core::storage::traits::{EntityStore, StorageTypes, Stores, StoredEntity, TextStore};
+use simply_core::storage::traits::{
+    EntityStore, StorageTypes, StoredEntity, Stores, TextStore, VaultStore,
+};
 use simply_core::storage::types::entity::origin_scheme;
-use simply_core::storage::types::{ContentOrigin, EntityType, RelationType};
+use simply_core::storage::types::{
+    ContentOrigin, EntityType, RelationType, VaultFile, VaultSyncStatus,
+};
+use simply_core::storage::vault::files::{read_markdown_body, write_markdown_preserving_frontmatter};
+use simply_core::storage::vault::sidecar::{
+    read_sidecar_manifest, write_sidecar_manifest, VaultSidecarManifest,
+};
 use simply_rpc::RequestContext;
 
 use crate::api::*;
@@ -43,18 +53,21 @@ pub struct EntityService<S: StorageTypes> {
     stores: Arc<dyn Stores<S>>,
     embedding_queue: Option<Arc<dyn crate::services::embedding_queue::EmbeddingQueue>>,
     user_email_cache: Option<Arc<crate::services::user::UserEmailCache>>,
+    vault_root: PathBuf,
 }
 
 impl<S: StorageTypes> EntityService<S> {
     pub fn new(
         coordinator: Arc<StorageCoordinator<S>>,
         stores: Arc<dyn Stores<S>>,
+        vault_root: PathBuf,
     ) -> Self {
         Self {
             coordinator,
             stores,
             embedding_queue: None,
             user_email_cache: None,
+            vault_root,
         }
     }
 
@@ -122,6 +135,13 @@ impl<S: StorageTypes> EntityService<S> {
             }
         }
 
+        let has_vault_content = self
+            .stores
+            .vault()
+            .get_vault_file(&entity.id)
+            .await?
+            .is_some();
+
         Ok(EntitySummary {
             id: entity.id.to_string(),
             kind: entity.entity_type.as_str().to_string(),
@@ -132,18 +152,82 @@ impl<S: StorageTypes> EntityService<S> {
             is_private: entity.is_private,
             created_at: entity.content.created_at,
             updated_at: entity.content.updated_at,
-            has_content: entity.content_block_id.is_some(),
+            has_content: entity.content_block_id.is_some() || has_vault_content,
             incoming_counts,
             outgoing_counts,
         })
     }
 
-    async fn entities_to_summaries(&self, entities: Vec<StoredEntity>) -> anyhow::Result<Vec<EntitySummary>> {
+    async fn entities_to_summaries(
+        &self,
+        entities: Vec<StoredEntity>,
+    ) -> anyhow::Result<Vec<EntitySummary>> {
         let mut out = Vec::with_capacity(entities.len());
         for e in entities {
             out.push(self.to_summary(e).await?);
         }
         Ok(out)
+    }
+
+    async fn resolve_entity_content_markdown(
+        &self,
+        entity: &StoredEntity,
+    ) -> anyhow::Result<Option<String>> {
+        if let Some(vault_file) = self.stores.vault().get_vault_file(&entity.id).await? {
+            if let Some(body) = read_markdown_body(&self.vault_root, &vault_file.path)? {
+                return Ok(Some(body));
+            }
+        }
+
+        match entity.content_block_id.as_ref() {
+            Some(block_id) => self.stores.text().get_text(block_id).await,
+            None => Ok(None),
+        }
+    }
+
+    async fn write_vault_content_if_managed(
+        &self,
+        entity_id: &EntityId,
+        text: &str,
+        expected_content_hash: Option<&str>,
+    ) -> anyhow::Result<Option<VaultFile>> {
+        let Some(existing) = self.stores.vault().get_vault_file(entity_id).await? else {
+            return Ok(None);
+        };
+
+        if let Some(expected) = expected_content_hash {
+            let current = read_markdown_body(&self.vault_root, &existing.path)?.unwrap_or_default();
+            let current_hash = content_hash(&current);
+            if current_hash != expected {
+                anyhow::bail!(
+                    "vault file changed since editor loaded: expected {expected}, found {current_hash}"
+                );
+            }
+        }
+
+        let written = write_markdown_preserving_frontmatter(&self.vault_root, &existing.path, text)?;
+        let file = VaultFile {
+            entity_id: entity_id.clone(),
+            path: written.relative_path,
+            file_key: existing.file_key,
+            mtime: written.mtime,
+            content_hash: written.content_hash,
+            frontmatter_hash: written.frontmatter_hash,
+            sync_status: VaultSyncStatus::synced(),
+            last_seen_at: unix_timestamp(),
+        };
+        self.stores.vault().upsert_vault_file(&file).await?;
+        self.write_sidecar_snapshot().await?;
+        Ok(Some(file))
+    }
+
+    async fn write_sidecar_snapshot(&self) -> anyhow::Result<()> {
+        let files = self.stores.vault().list_vault_files(None).await?;
+        let mut manifest = VaultSidecarManifest::from_vault_files(&files);
+        if let Some(existing) = read_sidecar_manifest(&self.vault_root)? {
+            manifest.preserve_user_fields_from(&existing);
+        }
+        write_sidecar_manifest(&self.vault_root, &manifest)
     }
 
     /// If `relation` is set, drop any entity that has an outgoing edge of
@@ -305,7 +389,8 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             })
             .collect();
 
-        // If content was requested, batch-fetch all content blocks once.
+        // If content was requested, batch-fetch content blocks once for
+        // non-vault entities. Vault-backed bodies are read from files below.
         let text_by_block = if request.include_content {
             let block_ids: Vec<_> = accessible
                 .iter()
@@ -319,11 +404,21 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
         let mut out = Vec::with_capacity(accessible.len());
         for entity in accessible {
             let content = if request.include_content {
-                entity.content_block_id.as_ref().map(|block_id| {
-                    let body = text_by_block.get(block_id).cloned().unwrap_or_default();
+                let body = if let Some(vault_file) = self.stores.vault().get_vault_file(&entity.id).await? {
+                    read_markdown_body(&self.vault_root, &vault_file.path)?
+                } else {
+                    entity
+                        .content_block_id
+                        .as_ref()
+                        .map(|block_id| text_by_block.get(block_id).cloned().unwrap_or_default())
+                };
+
+                body.map(|body| {
+                    let hash = content_hash(&body);
                     EntityContent {
                         entity_id: entity.id.to_string(),
                         content_markdown: Some(body),
+                        content_hash: Some(hash),
                         // referenced_assets are not fetched in bulk yet;
                         // callers that need them can still use the
                         // per-entity get_entity_content endpoint.
@@ -459,9 +554,9 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
     ) -> anyhow::Result<EntityContent> {
         let user_id = Self::require_user(ctx)?;
         let id = EntityId::from_string(entity_id);
-        self.verify_access(&user_id, &id).await?;
+        let entity = self.verify_access(&user_id, &id).await?;
 
-        let content_markdown = self.coordinator.resolve_entity_text(&id).await?;
+        let content_markdown = self.resolve_entity_content_markdown(&entity).await?;
         let assets = self.coordinator.get_entity_assets(&id).await?;
         let referenced_assets: Vec<AssetId> = assets
             .into_iter()
@@ -470,6 +565,7 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
 
         Ok(EntityContent {
             entity_id: entity_id.to_string(),
+            content_hash: content_markdown.as_deref().map(content_hash),
             content_markdown,
             referenced_assets,
         })
@@ -497,6 +593,13 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
                 _ => ContentOrigin::user(user_id.clone()),
             })
             .unwrap_or_else(|| ContentOrigin::user(user_id.clone()));
+
+        self.write_vault_content_if_managed(
+            &id,
+            &request.content,
+            request.expected_content_hash.as_deref(),
+        )
+        .await?;
 
         self.coordinator
             .update_entity_content(&id, &request.content, content_origin)

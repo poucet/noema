@@ -106,9 +106,6 @@ where
         let (kill_tx, kill_rx) = tokio::sync::mpsc::channel(1);
         let token_store = Arc::clone(&self.token_store);
         let settings = config::Settings::load();
-        if let Err(e) = settings.ensure_vault_root_exists() {
-            tracing::warn!(error = %e, "failed to ensure vault root exists");
-        }
 
         // On a fresh database the admin UI and clients send X-User-Id for a user
         // that may not yet exist in `users`, causing FK failures on the first
@@ -166,23 +163,36 @@ where
             "embedding provider initialized"
         );
 
+        let vault_root = settings
+            .ensure_vault_root_exists()?
+            .ok_or_else(|| anyhow::anyhow!("vault root unavailable"))?;
         let user_email_cache = Arc::new(crate::services::user::UserEmailCache::new());
         let entity = Arc::new(
             EntityService::new(
                 Arc::clone(&self.coordinator),
                 Arc::clone(&self.stores),
+                vault_root.clone(),
             )
-                .with_embedding(embedding_queue.clone() as Arc<dyn EmbeddingQueue>)
-                .with_user_email_cache(Arc::clone(&user_email_cache))
+            .with_embedding(embedding_queue.clone() as Arc<dyn EmbeddingQueue>)
+            .with_user_email_cache(Arc::clone(&user_email_cache))
         );
         let core = Arc::new(CoreService::new(kill_tx));
         let user_svc = Arc::new(UserService::new(Arc::clone(&self.stores)));
         let search = Arc::new(SearchService::new(
             embedding_provider,
             self.vector_store,
-            embedding_queue,
+            embedding_queue.clone() as Arc<dyn EmbeddingQueue>,
             Arc::clone(&self.stores),
         ));
+        let vault = Arc::new(
+            VaultService::new(
+                vault_root,
+                Arc::clone(&self.coordinator),
+                Arc::clone(&self.stores),
+            )
+            .with_embedding(embedding_queue.clone() as Arc<dyn EmbeddingQueue>)
+        );
+        Arc::clone(&vault).spawn_polling_watcher();
 
         // Note: McpApi is NOT registered here — it's added to the ServiceRouter
         // separately, pointing at ToolRegistry (which delegates management to
@@ -196,6 +206,7 @@ where
                 .register(<dyn OAuthApi>::service(mcp.clone()))
                 .register(<dyn VoiceApi>::service(voice.clone()))
                 .register(<dyn SearchApi>::service(search.clone()))
+                .register(<dyn VaultApi>::service(vault.clone()))
                 .register(<dyn UserApi>::service(user_svc.clone())),
         );
 
@@ -219,6 +230,7 @@ where
             voice,
             core,
             search,
+            vault,
             user_svc,
             tools.clone(),
         )?;

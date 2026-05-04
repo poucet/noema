@@ -50,6 +50,7 @@ pub struct EmbeddedDaemon<S: StorageTypes> {
     voice: Arc<VoiceService>,
     core: Arc<CoreService>,
     search: Arc<SearchService<S>>,
+    vault: Arc<VaultService<S>>,
     user_svc: Arc<UserService<S>>,
     tools: Arc<ToolRegistry>,
 }
@@ -67,6 +68,7 @@ impl<S: StorageTypes> EmbeddedDaemon<S>
         voice: Arc<VoiceService>,
         core: Arc<CoreService>,
         search: Arc<SearchService<S>>,
+        vault: Arc<VaultService<S>>,
         user_svc: Arc<UserService<S>>,
         tools: Arc<ToolRegistry>,
     ) -> anyhow::Result<Arc<Self>> {
@@ -81,6 +83,7 @@ impl<S: StorageTypes> EmbeddedDaemon<S>
             voice,
             core,
             search,
+            vault,
             user_svc,
             tools,
         });
@@ -98,6 +101,7 @@ impl<S: StorageTypes> EmbeddedDaemon<S>
     pub fn voice_service(&self) -> Arc<VoiceService> { Arc::clone(&self.voice) }
     pub fn core_service(&self) -> Arc<CoreService> { Arc::clone(&self.core) }
     pub fn search_service(&self) -> Arc<SearchService<S>> { Arc::clone(&self.search) }
+    pub fn vault_service(&self) -> Arc<VaultService<S>> { Arc::clone(&self.vault) }
     pub fn user_service(&self) -> Arc<UserService<S>> { Arc::clone(&self.user_svc) }
 
     /// Get the ToolRegistry (for DaemonHandle to pass to the server).
@@ -414,6 +418,7 @@ impl<S: StorageTypes> Daemon for EmbeddedDaemon<S>
     fn voice(&self) -> &dyn VoiceApi { &*self.voice }
     fn core(&self) -> &dyn CoreApi { &*self.core }
     fn search(&self) -> &dyn SearchApi { &*self.search }
+    fn vault(&self) -> &dyn VaultApi { &*self.vault }
     fn user(&self) -> &dyn UserApi { &*self.user_svc }
     fn skills(&self) -> &dyn SkillsApi { &*self.tools }
     fn tools(&self) -> &dyn ToolService { &*self.tools }
