@@ -867,3 +867,219 @@ impl<S: StorageTypes> EntityApi for EntityService<S> {
             .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use simply_core::embedding::{SearchQuery, SearchResult, VectorChunk, VectorStore};
+    use simply_core::storage::implementations::memory::{
+        MemoryAssetStore, MemoryBlobStore, MemoryEntityStore, MemoryStorage, MemoryTextStore,
+        MemoryTurnStore, MemoryUserStore, MemoryVaultStore,
+    };
+    use simply_core::storage::ids::VaultConflictId;
+    use simply_core::storage::traits::{EntityStore, Stores, VaultStore};
+    use simply_core::storage::types::{VaultConflict, VaultConflictReason};
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingVectorStore {
+        deleted_entities: Mutex<Vec<EntityId>>,
+    }
+
+    impl RecordingVectorStore {
+        fn deleted_entities(&self) -> Vec<EntityId> {
+            self.deleted_entities.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl VectorStore for RecordingVectorStore {
+        async fn upsert(&self, _: &[VectorChunk]) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn search(&self, _: SearchQuery) -> anyhow::Result<Vec<SearchResult>> {
+            Ok(Vec::new())
+        }
+
+        async fn delete_by_content_block(
+            &self,
+            _: &simply_core::storage::ids::ContentBlockId,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_by_entity(&self, entity_id: &EntityId) -> anyhow::Result<()> {
+            self.deleted_entities
+                .lock()
+                .unwrap()
+                .push(entity_id.clone());
+            Ok(())
+        }
+
+        async fn delete_all(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct TestStores {
+        blob: Arc<MemoryBlobStore>,
+        asset: Arc<MemoryAssetStore>,
+        text: Arc<MemoryTextStore>,
+        turn: Arc<MemoryTurnStore>,
+        user: Arc<MemoryUserStore>,
+        entity: Arc<MemoryEntityStore>,
+        vault: Arc<MemoryVaultStore>,
+    }
+
+    impl TestStores {
+        fn new() -> Self {
+            Self {
+                blob: Arc::new(MemoryBlobStore::new()),
+                asset: Arc::new(MemoryAssetStore::new()),
+                text: Arc::new(MemoryTextStore::new()),
+                turn: Arc::new(MemoryTurnStore::new()),
+                user: Arc::new(MemoryUserStore::new()),
+                entity: Arc::new(MemoryEntityStore::new()),
+                vault: Arc::new(MemoryVaultStore::new()),
+            }
+        }
+    }
+
+    impl Stores<MemoryStorage> for TestStores {
+        fn turn(&self) -> Arc<MemoryTurnStore> {
+            Arc::clone(&self.turn)
+        }
+
+        fn user(&self) -> Arc<MemoryUserStore> {
+            Arc::clone(&self.user)
+        }
+
+        fn blob(&self) -> Arc<MemoryBlobStore> {
+            Arc::clone(&self.blob)
+        }
+
+        fn asset(&self) -> Arc<MemoryAssetStore> {
+            Arc::clone(&self.asset)
+        }
+
+        fn text(&self) -> Arc<MemoryTextStore> {
+            Arc::clone(&self.text)
+        }
+
+        fn entity(&self) -> Arc<MemoryEntityStore> {
+            Arc::clone(&self.entity)
+        }
+
+        fn vault(&self) -> Arc<MemoryVaultStore> {
+            Arc::clone(&self.vault)
+        }
+    }
+
+    fn make_service() -> (
+        EntityService<MemoryStorage>,
+        Arc<TestStores>,
+        Arc<RecordingVectorStore>,
+    ) {
+        let stores = Arc::new(TestStores::new());
+        let coordinator = Arc::new(StorageCoordinator::new(
+            stores.blob(),
+            stores.asset(),
+            stores.text(),
+            stores.entity(),
+            stores.turn(),
+        ));
+        let stores_dyn: Arc<dyn Stores<MemoryStorage>> = stores.clone();
+        let vector_store = Arc::new(RecordingVectorStore::default());
+        let vector_dyn: Arc<dyn VectorStore> = vector_store.clone();
+        let service = EntityService::new(coordinator, stores_dyn, std::env::temp_dir())
+            .with_vector_store(vector_dyn);
+
+        (service, stores, vector_store)
+    }
+
+    fn vault_file(entity_id: EntityId, path: &str) -> VaultFile {
+        VaultFile {
+            entity_id,
+            path: path.to_string(),
+            file_key: None,
+            mtime: Some(1),
+            content_hash: format!("hash:{path}"),
+            frontmatter_hash: None,
+            sync_status: VaultSyncStatus::synced(),
+            last_seen_at: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_entity_tree_cleans_vault_conflicts_and_vectors() {
+        let (service, stores, vector_store) = make_service();
+        let parent = service
+            .coordinator
+            .create_entity_with_content(
+                EntityType::document_tabbed(),
+                None,
+                Some("Parent"),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let child = service
+            .coordinator
+            .create_entity_with_content(
+                EntityType::document_tab(),
+                None,
+                Some("Child"),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let relation = RelationType::structure_contained_in();
+        service
+            .coordinator
+            .add_child(&parent, &child, relation, Some(0), None)
+            .await
+            .unwrap();
+
+        stores
+            .vault()
+            .upsert_vault_file(&vault_file(parent.clone(), "parent.md"))
+            .await
+            .unwrap();
+        stores
+            .vault()
+            .upsert_vault_file(&vault_file(child.clone(), "parent/child.md"))
+            .await
+            .unwrap();
+        stores
+            .vault()
+            .insert_vault_conflict(&VaultConflict {
+                id: VaultConflictId::from_string("conflict-1"),
+                entity_id: Some(parent.clone()),
+                path: "parent-copy.md".to_string(),
+                reason: VaultConflictReason::duplicate_id(),
+                observed_entity_id: Some(child.clone()),
+                details: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+
+        service.delete_entity_tree(&parent).await.unwrap();
+
+        assert!(stores.entity().get_entity(&parent).await.unwrap().is_none());
+        assert!(stores.entity().get_entity(&child).await.unwrap().is_none());
+        assert!(stores.vault().get_vault_file(&parent).await.unwrap().is_none());
+        assert!(stores.vault().get_vault_file(&child).await.unwrap().is_none());
+        assert!(stores.vault().list_vault_conflicts().await.unwrap().is_empty());
+
+        let mut deleted = vector_store.deleted_entities();
+        deleted.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let mut expected = vec![parent, child];
+        expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        assert_eq!(deleted, expected);
+    }
+}
