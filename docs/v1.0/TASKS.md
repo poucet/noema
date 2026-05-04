@@ -2,7 +2,7 @@
 
 **Roadmap:** [ROADMAP.md](ROADMAP.md)
 
-Three workstreams. Tasks within each are roughly sequential.
+Four workstreams. Tasks within each are roughly sequential.
 
 ---
 
@@ -188,6 +188,100 @@ Stages 1-2 (connection auth, single-port OAuth, admin page) are complete.
 
 ---
 
+## 4. Vault-Backed Markdown
+
+**Design:** [VAULT_BACKED_MARKDOWN.md](../designs/VAULT_BACKED_MARKDOWN.md)
+
+Human-authored `document::*` content becomes normal Markdown files in a configurable
+vault. SQLite remains canonical for entity identity, relations, access policy,
+runtime state, embeddings, and fast indexes. `content_blocks` remain immutable
+snapshots so existing content APIs and RAG can migrate without a flag day.
+
+### Stage 1 — Storage foundations
+
+- ⬜ 1.1 Add a real SQLite migration runner with `schema_migrations`; keep existing schema creation behavior as the initial migration baseline
+- ⬜ 1.2 Add configurable `vault_root` with default under Noema data dir; ensure directory creation is explicit and idempotent
+- ⬜ 1.3 Add `vault_files` projection table for `entity_id`, `path`, `file_key`, `mtime`, content hash, frontmatter hash, status, and last-seen timestamp
+- ⬜ 1.4 Add `vault_conflicts` table for duplicate IDs, changed IDs, missing files, unmanaged files, and invalid frontmatter
+- ⬜ 1.5 Add storage traits for reading/writing vault projection rows and conflict records; implement SQLite first
+
+### Stage 2 — Markdown parser and serializer
+
+- ⬜ 2.1 Add pure frontmatter parser that splits YAML metadata from Markdown body without database side effects
+- ⬜ 2.2 Add serializer that preserves unknown user metadata and emits canonical system fields in stable order
+- ⬜ 2.3 Define reserved/system-owned fields: `id`, `kind`, `origin`, and policy-controlled `privacy`
+- ⬜ 2.4 Define user-editable fields: `title`, `tags`, and preserved extra metadata
+- ⬜ 2.5 Add Markdown asset-reference extraction for relative links and image embeds, but do not update `entity_assets` yet
+
+### Stage 3 — Read-only reconciliation
+
+- ⬜ 3.1 Add vault scanner that returns a reconciliation plan without mutating entities or files
+- ⬜ 3.2 Classify same-ID moves by updating the planned path for an existing `entity_id`
+- ⬜ 3.3 Classify missing known files without deleting or archiving the entity
+- ⬜ 3.4 Classify known path/file with removed or changed `id` as an identity conflict
+- ⬜ 3.5 Classify duplicate frontmatter IDs as conflicts; keep the prior canonical path when one exists
+- ⬜ 3.6 Classify unknown files with valid IDs, unknown files without IDs, invalid frontmatter, and unsupported kinds
+
+### Stage 4 — Projection reconciliation
+
+- ⬜ 4.1 Persist scanner output to `vault_files` and `vault_conflicts` only; do not rewrite files automatically
+- ⬜ 4.2 Mark missing files with a recoverable status and a grace-policy hook
+- ⬜ 4.3 Add explicit conflict reasons and structured details for UI/API resolution
+- ⬜ 4.4 Add coordinator entry point for full vault scan at startup
+- ⬜ 4.5 Add coordinator entry point for scoped path rescans
+
+### Stage 5 — Initial export and read path
+
+- ⬜ 5.1 Export one flat kind first, probably `document::note`, from `entities.content_block_id` to vault Markdown
+- ⬜ 5.2 Add canonical frontmatter during export: `id`, `kind`, `origin`, `privacy`, `title`, and `tags`
+- ⬜ 5.3 Add an entity content resolver that reads vault-backed bodies from files and falls back to `content_blocks`
+- ⬜ 5.4 Route `EntityApi.get_entity_content` through the resolver instead of deciding storage location in the service method
+- ⬜ 5.5 Keep returned content shape stable for existing clients
+
+### Stage 6 — Vault-backed writes
+
+- ⬜ 6.1 Route vault-backed `EntityApi.update_entity_content` through a vault writer coordinator
+- ⬜ 6.2 Validate access and metadata changes before accepting frontmatter-derived state
+- ⬜ 6.3 Write with temp-file plus atomic rename inside the vault
+- ⬜ 6.4 Detect stale editor state with content hash checks before overwriting external edits
+- ⬜ 6.5 After successful file write, store a fresh `content_blocks` snapshot and update `entities.content_block_id`
+- ⬜ 6.6 Enqueue embedding refresh keyed to the new `content_block_id`
+
+### Stage 7 — External edits
+
+- ⬜ 7.1 Apply scanner-detected body edits to the entity snapshot by creating a new `content_blocks` record
+- ⬜ 7.2 Sync user-editable metadata such as title and tags through coordinator validation
+- ⬜ 7.3 Treat frontmatter privacy changes as access-policy requests, not direct writes
+- ⬜ 7.4 Keep identity field edits in conflict state until explicitly resolved
+- ⬜ 7.5 Rebuild `entity_assets` from parsed Markdown references after file changes
+
+### Stage 8 — Watcher integration
+
+- ⬜ 8.1 Add filesystem watcher that only queues paths for scanner reconciliation
+- ⬜ 8.2 Debounce rapid editor and sync-tool write bursts
+- ⬜ 8.3 Handle platform rename events as hints, not authoritative moves
+- ⬜ 8.4 Trigger startup/full scan regardless of watcher availability
+- ⬜ 8.5 Surface watcher errors without disabling manual/full scans
+
+### Stage 9 — Conflict resolution API and UI
+
+- ⬜ 9.1 Add API to list vault conflicts with path, reason, canonical entity, and observed entity ID
+- ⬜ 9.2 Add "restore original ID" action for files whose frontmatter ID was removed or changed
+- ⬜ 9.3 Add "fork as new document" action for copied files with duplicate IDs
+- ⬜ 9.4 Add "accept new path" action for copy/delete moves when the old canonical file is missing
+- ⬜ 9.5 Add "ignore/unmanage file" action for files that should stay outside Noema control
+- ⬜ 9.6 Add "bind file to existing entity" action for explicit recovery flows
+
+### Stage 10 — Broader hardening
+
+- ⬜ 10.1 Centralize access policy before syncing privacy-sensitive frontmatter
+- ⬜ 10.2 Centralize lifecycle and GC before deleting vault-backed documents
+- ⬜ 10.3 Add relation registry invariants before directory-tree vault UX depends on `structure::contained_in`
+- ⬜ 10.4 Batch entity summary queries before rendering large vaults
+- ⬜ 10.5 Move SQLite toward WAL and separate read/write access before watcher-driven background work grows
+
+---
+
 ## Dependencies
 
 ```
@@ -202,4 +296,10 @@ Events Stage 3 + 4 ──► Events Stage 5 (Conditions + Workflow)
 
 Multi-user Stage 3 (Per-User MCP OAuth) ──► Multi-user Stage 4 (Role-Based Access)
 Multi-user Stage 4 ──► Multi-user Stage 5 (Admin UI)
+
+UCM Stage 3 (EntityApi) ──► Vault Stage 5 (content resolver)
+Vault Stage 1 ──► Vault Stage 2 ──► Vault Stage 3 ──► Vault Stage 4
+Vault Stage 4 ──► Vault Stage 5 ──► Vault Stage 6 ──► Vault Stage 7
+Vault Stage 7 ──► Vault Stage 8 ──► Vault Stage 9
+Vault Stage 10 tracks shared hardening and can be pulled forward as dependencies require
 ```

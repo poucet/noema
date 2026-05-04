@@ -45,6 +45,14 @@ Reactive event system — timers, platform events (Discord, desktop), LLM-compil
 ### 3. Multi-user Polish
 Per-user per-MCP-server persistent tokens, Discord role-based access control, admin user management UI.
 
+### 4. Vault-Backed Markdown
+Make normal Markdown files canonical for human-authored `document::*` bodies while
+SQLite remains canonical for identity, relations, access policy, conversations,
+embeddings, runtime state, and indexes. Adds configurable `vault_root`, frontmatter
+identity, vault projection tables, scanner-first reconciliation, conflict resolution,
+atomic writes, external edit sync, and watcher integration. **Design:**
+[VAULT_BACKED_MARKDOWN.md](../designs/VAULT_BACKED_MARKDOWN.md).
+
 ---
 
 ## Known Deferred Items
