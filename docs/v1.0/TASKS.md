@@ -207,11 +207,11 @@ snapshots so existing content APIs and RAG can migrate without a flag day.
 
 ### Stage 2 — Markdown parser and serializer
 
-- ⬜ 2.1 Add pure frontmatter parser that splits YAML metadata from Markdown body without database side effects
-- ⬜ 2.2 Add serializer that preserves unknown user metadata and emits canonical system fields in stable order
-- ⬜ 2.3 Define reserved/system-owned fields: `id`, `kind`, `origin`, and policy-controlled `privacy`
-- ⬜ 2.4 Define user-editable fields: `title`, `tags`, and preserved extra metadata
-- ⬜ 2.5 Add Markdown asset-reference extraction for relative links and image embeds, but do not update `entity_assets` yet
+- ✅ 2.1 Add pure frontmatter parser that splits YAML metadata from Markdown body without database side effects
+- ✅ 2.2 Add serializer that preserves unknown user metadata and emits canonical system fields in stable order
+- ✅ 2.3 Define reserved/system-owned fields: `id`, `kind`, `origin`, and policy-controlled `privacy`
+- ✅ 2.4 Define user-editable fields: `title`, `tags`, and preserved extra metadata
+- ✅ 2.5 Add Markdown asset-reference extraction for relative links and image embeds, but do not update `entity_assets` yet
 
 ### Stage 3 — Read-only reconciliation
 

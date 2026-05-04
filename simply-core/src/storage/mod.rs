@@ -56,14 +56,17 @@ pub mod implementations;
 // Entity resolution for chat @mentions / RAG-style expansion.
 pub mod entity_resolver;
 
+// Markdown vault helpers.
+pub mod vault;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================
 
 // Traits
 pub use traits::{
-    AssetStore, BlobStore, EntityStore, StorageTypes,
-    StoredEntity, StoredUser, Stores, TextStore, TurnStore, UserStore, VaultStore,
+    AssetStore, BlobStore, EntityStore, StorageTypes, StoredEntity, StoredUser, Stores, TextStore,
+    TurnStore, UserStore, VaultStore,
 };
 
 // Types
@@ -71,17 +74,35 @@ pub use types::{
     // Asset
     Asset,
     // ContentBlock
-    ContentBlock, ContentOrigin, ContentType, OriginKind,
-    // Conversation structure (turns, spans, messages)
-    Message, MessageWithContent, Span, Turn, TurnWithContent,
-    // Entity
-    Entity, EntityRelation, EntityType, RelationType,
-    // Vault
-    VaultConflict, VaultConflictReason, VaultFile, VaultSyncStatus,
+    ContentBlock,
+    ContentOrigin,
+    ContentType,
     // Stored wrappers
-    Editable, Hashed, Keyed, Stored, StoredEditable, Timestamped,
+    Editable,
+    // Entity
+    Entity,
+    EntityRelation,
+    EntityType,
+    Hashed,
+    Keyed,
+    // Conversation structure (turns, spans, messages)
+    Message,
+    MessageWithContent,
+    OriginKind,
+    RelationType,
+    Span,
+    Stored,
+    StoredEditable,
+    Timestamped,
+    Turn,
+    TurnWithContent,
     // User
     User,
+    // Vault
+    VaultConflict,
+    VaultConflictReason,
+    VaultFile,
+    VaultSyncStatus,
 };
 
 // Session
@@ -98,12 +119,9 @@ pub use implementations::fs::FsBlobStore;
 
 // Memory implementations (for testing)
 pub use implementations::memory::{
-    MemoryAssetStore, MemoryBlobStore,
-    MemoryEntityStore, MemoryStorage, MemoryTextStore, MemoryTurnStore,
-    MemoryUserStore, MemoryVaultStore,
+    MemoryAssetStore, MemoryBlobStore, MemoryEntityStore, MemoryStorage, MemoryTextStore,
+    MemoryTurnStore, MemoryUserStore, MemoryVaultStore,
 };
 
 // Entity resolution
-pub use entity_resolver::{
-    EntityFormatter, EntityResolver, ResolvedEntity, StoreEntityResolver,
-};
+pub use entity_resolver::{EntityFormatter, EntityResolver, ResolvedEntity, StoreEntityResolver};

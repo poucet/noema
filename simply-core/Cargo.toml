@@ -22,6 +22,7 @@ rmcp = { workspace = true, features = ["client", "transport-streamable-http-clie
 config = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 schemars = { workspace = true }
 chrono = { workspace = true }
 askama = "0.12"
