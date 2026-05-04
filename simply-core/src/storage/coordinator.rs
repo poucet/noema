@@ -1223,6 +1223,10 @@ impl<S: StorageTypes> ContentResolver for StorageCoordinator<S> {
 mod tests {
     use super::*;
     use crate::storage::content::StoredContent;
+    use crate::storage::implementations::memory::{
+        MemoryAssetStore, MemoryBlobStore, MemoryEntityStore, MemoryStorage, MemoryTextStore,
+        MemoryTurnStore,
+    };
     use crate::storage::implementations::mock::{
         MockAssetStore, MockBlobStore, MockEntityStore, MockStorage, MockTextStore,
         MockTurnStore,
@@ -1237,6 +1241,26 @@ mod tests {
             Arc::new(MockEntityStore),
             Arc::new(MockTurnStore),
         )
+    }
+
+    fn make_memory_coordinator() -> StorageCoordinator<MemoryStorage> {
+        StorageCoordinator::new(
+            Arc::new(MemoryBlobStore::new()),
+            Arc::new(MemoryAssetStore::new()),
+            Arc::new(MemoryTextStore::new()),
+            Arc::new(MemoryEntityStore::new()),
+            Arc::new(MemoryTurnStore::new()),
+        )
+    }
+
+    async fn create_test_entity(
+        coordinator: &StorageCoordinator<MemoryStorage>,
+        kind: EntityType,
+    ) -> EntityId {
+        coordinator
+            .create_entity_with_content(kind, None, None, None, None)
+            .await
+            .unwrap()
     }
 
     fn make_coordinator_with_stores(
@@ -1398,5 +1422,118 @@ mod tests {
             }
             other => panic!("Expected ToolCall, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn test_contained_in_rejects_self_parent() {
+        let coordinator = make_memory_coordinator();
+        let entity = create_test_entity(&coordinator, EntityType::document_note()).await;
+        let relation = RelationType::structure_contained_in();
+
+        let err = coordinator
+            .add_child(&entity, &entity, relation, Some(0), None)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("itself"));
+    }
+
+    #[tokio::test]
+    async fn test_contained_in_rejects_cycles() {
+        let coordinator = make_memory_coordinator();
+        let root = create_test_entity(&coordinator, EntityType::document_tabbed()).await;
+        let child = create_test_entity(&coordinator, EntityType::document_tab()).await;
+        let grandchild = create_test_entity(&coordinator, EntityType::document_tab()).await;
+        let relation = RelationType::structure_contained_in();
+
+        coordinator
+            .add_child(&root, &child, relation.clone(), Some(0), None)
+            .await
+            .unwrap();
+        coordinator
+            .add_child(&child, &grandchild, relation.clone(), Some(0), None)
+            .await
+            .unwrap();
+
+        let err = coordinator
+            .add_child(&grandchild, &root, relation, Some(0), None)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("cycle"));
+    }
+
+    #[tokio::test]
+    async fn test_contained_in_move_keeps_single_parent_and_renumbers() {
+        let coordinator = make_memory_coordinator();
+        let first_parent = create_test_entity(&coordinator, EntityType::document_tabbed()).await;
+        let second_parent = create_test_entity(&coordinator, EntityType::document_tabbed()).await;
+        let pinned_child = create_test_entity(&coordinator, EntityType::document_tab()).await;
+        let moved_child = create_test_entity(&coordinator, EntityType::document_tab()).await;
+        let relation = RelationType::structure_contained_in();
+
+        coordinator
+            .add_child(&first_parent, &pinned_child, relation.clone(), Some(0), None)
+            .await
+            .unwrap();
+        coordinator
+            .add_child(&first_parent, &moved_child, relation.clone(), Some(1), None)
+            .await
+            .unwrap();
+        coordinator
+            .add_child(&second_parent, &moved_child, relation.clone(), Some(0), None)
+            .await
+            .unwrap();
+
+        let first_children = coordinator
+            .list_children(&first_parent, &relation)
+            .await
+            .unwrap();
+        assert_eq!(first_children.len(), 1);
+        assert_eq!(first_children[0].0.id, pinned_child);
+        assert_eq!(first_children[0].1, Some(0));
+
+        let second_children = coordinator
+            .list_children(&second_parent, &relation)
+            .await
+            .unwrap();
+        assert_eq!(second_children.len(), 1);
+        assert_eq!(second_children[0].0.id, moved_child);
+        assert_eq!(second_children[0].1, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_contained_in_remove_renumbers_siblings() {
+        let coordinator = make_memory_coordinator();
+        let parent = create_test_entity(&coordinator, EntityType::document_tabbed()).await;
+        let first = create_test_entity(&coordinator, EntityType::document_tab()).await;
+        let second = create_test_entity(&coordinator, EntityType::document_tab()).await;
+        let third = create_test_entity(&coordinator, EntityType::document_tab()).await;
+        let relation = RelationType::structure_contained_in();
+
+        coordinator
+            .add_child(&parent, &first, relation.clone(), Some(0), None)
+            .await
+            .unwrap();
+        coordinator
+            .add_child(&parent, &second, relation.clone(), Some(1), None)
+            .await
+            .unwrap();
+        coordinator
+            .add_child(&parent, &third, relation.clone(), Some(2), None)
+            .await
+            .unwrap();
+
+        coordinator
+            .remove_relation(&second, &parent, &relation)
+            .await
+            .unwrap();
+
+        let children = coordinator.list_children(&parent, &relation).await.unwrap();
+        let ids_and_positions: Vec<_> = children
+            .into_iter()
+            .map(|(entity, position)| (entity.id, position))
+            .collect();
+        assert_eq!(ids_and_positions, vec![(first, Some(0)), (third, Some(1))]);
     }
 }
