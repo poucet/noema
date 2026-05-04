@@ -7,10 +7,16 @@ import {
   type SearchHit,
   type ReindexStatus,
   type EmbeddingQueueStatus,
+  type ResolveVaultConflictRequest,
+  type VaultConflictInfo,
+  type VaultExportRequest,
+  type VaultExportSummary,
+  type VaultScanSummary,
   type Transport,
   createTransport,
   getCurrentUser,
   setCurrentUser,
+  vaultApi,
 } from '@simply/client';
 
 // Re-export user context functions for existing consumers
@@ -106,6 +112,16 @@ export const api = {
     t().rpc<ReindexStatus>('search.reindex', 'POST', '/api/search/reindex'),
   getQueueStatus: () =>
     t().rpc<EmbeddingQueueStatus>('search.queue_status', 'GET', '/api/search/status'),
+
+  // Vault-backed Markdown
+  exportVaultDocuments: (request: VaultExportRequest): Promise<VaultExportSummary> =>
+    vaultApi(t()).exportDocuments(request),
+  scanVault: (): Promise<VaultScanSummary> =>
+    vaultApi(t()).scan(),
+  listVaultConflicts: (): Promise<VaultConflictInfo[]> =>
+    vaultApi(t()).listConflicts(),
+  resolveVaultConflict: (request: ResolveVaultConflictRequest): Promise<void> =>
+    vaultApi(t()).resolveConflict(request),
 };
 
 export const PROVIDERS = [

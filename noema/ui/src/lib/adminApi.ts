@@ -6,7 +6,15 @@
 // the settings panels into a `@simply/admin-ui` package is the obvious next
 // step — same play we did with @simply/entity-ui.)
 
-import { getTransport } from '@simply/client';
+import {
+  getTransport,
+  vaultApi,
+  type ResolveVaultConflictRequest,
+  type VaultConflictInfo,
+  type VaultExportRequest,
+  type VaultExportSummary,
+  type VaultScanSummary,
+} from '@simply/client';
 
 export interface SetupStatus {
   is_configured: boolean;
@@ -35,6 +43,14 @@ export const adminApi = {
     t().rpc('admin.set_api_key', 'POST', '/admin/api/api-key', { provider, api_key: apiKey }),
   removeApiKey: (provider: string) =>
     t().rpc('admin.remove_api_key', 'DELETE', `/admin/api/api-key/${provider}`),
+  exportVaultDocuments: (request: VaultExportRequest): Promise<VaultExportSummary> =>
+    vaultApi(t()).exportDocuments(request),
+  scanVault: (): Promise<VaultScanSummary> =>
+    vaultApi(t()).scan(),
+  listVaultConflicts: (): Promise<VaultConflictInfo[]> =>
+    vaultApi(t()).listConflicts(),
+  resolveVaultConflict: (request: ResolveVaultConflictRequest): Promise<void> =>
+    vaultApi(t()).resolveConflict(request),
 };
 
 export const PROVIDERS = [

@@ -15,6 +15,15 @@ export const DEFAULT_NEW_KIND = 'document::note';
  *  listing a container's contents is an *incoming* query. */
 export const CONTAINED_IN = 'structure::contained_in';
 
+async function sha256Hex(text: string): Promise<string | null> {
+  if (!globalThis.crypto?.subtle) return null;
+  const encoded = new TextEncoder().encode(text);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', encoded);
+  return Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export function createEntitiesBrowser(client: EntityClient | Transport) {
   // Accept either the already-bound client or a transport (for convenience).
   const api: EntityClient =
@@ -151,9 +160,11 @@ export function createEntitiesBrowser(client: EntityClient | Transport) {
     try {
       await api.updateEntityContent(viewEntity.id, {
         content,
+        expectedContentHash: viewContent?.contentHash ?? null,
         referencedAssets: viewContent?.referencedAssets ?? [],
       });
-      if (viewContent) viewContent = { ...viewContent, contentMarkdown: content };
+      const contentHash = await sha256Hex(content);
+      if (viewContent) viewContent = { ...viewContent, contentMarkdown: content, contentHash };
     } catch (e) {
       console.error('Failed to save content:', e);
     }
