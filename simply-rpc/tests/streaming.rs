@@ -11,8 +11,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, ServiceRouter, RpcConnection, RpcService};
-use tokio::sync::broadcast;
+use simply_rpc::{HttpMethod, RequestContext, RpcConnection, RpcService, ServiceRouter};
+use tokio::sync::{broadcast, mpsc};
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -43,7 +43,10 @@ pub trait ChannelApi: Send + Sync {
 
     /// Subscribe to an existing channel's events.
     #[rpc(stream = "/chan/{channel_id}/subscribe")]
-    async fn subscribe(&self, channel_id: &str) -> anyhow::Result<broadcast::Receiver<ChannelEvent>>;
+    async fn subscribe(
+        &self,
+        channel_id: &str,
+    ) -> anyhow::Result<broadcast::Receiver<ChannelEvent>>;
 
     /// List all channels.
     #[rpc(get = "/chan")]
@@ -122,7 +125,14 @@ impl ChannelApi for InMemoryChannels {
 async fn dispatch_stream_tuple_returns_value_and_stream() {
     let svc = ChannelApiService(Arc::new(InMemoryChannels::new()));
 
-    let dr = svc.dispatch("chan.open_channel", json!("test")).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.open_channel",
+            &RequestContext::default(),
+            json!("test"),
+        )
+        .await
+        .unwrap();
 
     let info: ChannelInfo = serde_json::from_value(dr.result.unwrap()).unwrap();
     assert_eq!(info.id, "ch_test");
@@ -135,7 +145,14 @@ async fn dispatch_stream_tuple_stream_is_live() {
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = ChannelApiService(impl_.clone());
 
-    let dr = svc.dispatch("chan.open_channel", json!("live")).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.open_channel",
+            &RequestContext::default(),
+            json!("live"),
+        )
+        .await
+        .unwrap();
     let mut rx = dr.streams.into_iter().next().unwrap();
 
     {
@@ -157,9 +174,22 @@ async fn dispatch_bare_stream_returns_true_and_stream() {
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = ChannelApiService(impl_.clone());
 
-    svc.dispatch("chan.open_channel", json!("sub")).await.unwrap();
+    svc.dispatch(
+        "chan.open_channel",
+        &RequestContext::default(),
+        json!("sub"),
+    )
+    .await
+    .unwrap();
 
-    let dr = svc.dispatch("chan.subscribe", json!("ch_sub")).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.subscribe",
+            &RequestContext::default(),
+            json!("ch_sub"),
+        )
+        .await
+        .unwrap();
     assert_eq!(dr.result.unwrap(), Value::Bool(true));
     assert_eq!(dr.streams.len(), 1);
 }
@@ -169,8 +199,21 @@ async fn dispatch_bare_stream_is_live() {
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = ChannelApiService(impl_.clone());
 
-    svc.dispatch("chan.open_channel", json!("sub2")).await.unwrap();
-    let dr = svc.dispatch("chan.subscribe", json!("ch_sub2")).await.unwrap();
+    svc.dispatch(
+        "chan.open_channel",
+        &RequestContext::default(),
+        json!("sub2"),
+    )
+    .await
+    .unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.subscribe",
+            &RequestContext::default(),
+            json!("ch_sub2"),
+        )
+        .await
+        .unwrap();
     let mut rx = dr.streams.into_iter().next().unwrap();
 
     {
@@ -192,13 +235,33 @@ async fn dispatch_non_stream_on_streaming_trait() {
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = ChannelApiService(impl_.clone());
 
-    let dr = svc.dispatch("chan.list_channels", Value::Null).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.list_channels",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .unwrap();
     let channels: Vec<ChannelInfo> = serde_json::from_value(dr.result.unwrap()).unwrap();
     assert!(channels.is_empty());
     assert!(dr.streams.is_empty());
 
-    svc.dispatch("chan.open_channel", json!("mixed")).await.unwrap();
-    let dr = svc.dispatch("chan.list_channels", Value::Null).await.unwrap();
+    svc.dispatch(
+        "chan.open_channel",
+        &RequestContext::default(),
+        json!("mixed"),
+    )
+    .await
+    .unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.list_channels",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .unwrap();
     let channels: Vec<ChannelInfo> = serde_json::from_value(dr.result.unwrap()).unwrap();
     assert_eq!(channels.len(), 1);
     assert!(dr.streams.is_empty());
@@ -209,12 +272,32 @@ async fn dispatch_close_on_streaming_trait() {
     let impl_ = Arc::new(InMemoryChannels::new());
     let svc = ChannelApiService(impl_.clone());
 
-    svc.dispatch("chan.open_channel", json!("doomed")).await.unwrap();
-    let dr = svc.dispatch("chan.close_channel", json!("ch_doomed")).await.unwrap();
+    svc.dispatch(
+        "chan.open_channel",
+        &RequestContext::default(),
+        json!("doomed"),
+    )
+    .await
+    .unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.close_channel",
+            &RequestContext::default(),
+            json!("ch_doomed"),
+        )
+        .await
+        .unwrap();
     assert_eq!(dr.result.unwrap(), Value::Bool(true));
     assert!(dr.streams.is_empty());
 
-    let dr = svc.dispatch("chan.list_channels", Value::Null).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.list_channels",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .unwrap();
     let channels: Vec<ChannelInfo> = serde_json::from_value(dr.result.unwrap()).unwrap();
     assert!(channels.is_empty());
 }
@@ -222,7 +305,14 @@ async fn dispatch_close_on_streaming_trait() {
 #[tokio::test]
 async fn service_stream_type_is_broadcast_receiver() {
     let svc = ChannelApiService(Arc::new(InMemoryChannels::new()));
-    let dr = svc.dispatch("chan.open_channel", json!("typed")).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.open_channel",
+            &RequestContext::default(),
+            json!("typed"),
+        )
+        .await
+        .unwrap();
     let _rx: broadcast::Receiver<ChannelEvent> = dr.streams.into_iter().next().unwrap();
 }
 
@@ -234,7 +324,9 @@ async fn service_stream_type_is_broadcast_receiver() {
 fn stream_meta_has_paths() {
     let meta = &CHANNEL_API_META;
 
-    let stream_methods: Vec<_> = meta.routes.iter()
+    let stream_methods: Vec<_> = meta
+        .routes
+        .iter()
         .filter(|m| m.kind == simply_rpc::RouteKind::Stream)
         .collect();
     assert_eq!(stream_methods.len(), 2);
@@ -248,12 +340,16 @@ fn stream_meta_has_paths() {
 fn stream_and_rest_meta_coexist() {
     let meta = &CHANNEL_API_META;
 
-    let routes: Vec<_> = meta.routes.iter()
+    let routes: Vec<_> = meta
+        .routes
+        .iter()
         .filter(|m| m.kind != simply_rpc::RouteKind::Stream)
         .collect();
     assert_eq!(routes.len(), 2); // list_channels + close_channel
 
-    let stream_methods: Vec<_> = meta.routes.iter()
+    let stream_methods: Vec<_> = meta
+        .routes
+        .iter()
         .filter(|m| m.kind == simply_rpc::RouteKind::Stream)
         .collect();
     assert_eq!(stream_methods.len(), 2); // open_channel + subscribe
@@ -264,8 +360,14 @@ fn stream_meta_doc_comments() {
     let meta = &CHANNEL_API_META;
     let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
-    assert_eq!(find("chan.open_channel").description, Some("Open a new channel. Returns info + event stream."));
-    assert_eq!(find("chan.subscribe").description, Some("Subscribe to an existing channel's events."));
+    assert_eq!(
+        find("chan.open_channel").description,
+        Some("Open a new channel. Returns info + event stream.")
+    );
+    assert_eq!(
+        find("chan.subscribe").description,
+        Some("Subscribe to an existing channel's events.")
+    );
 }
 
 // ===========================================================================
@@ -282,7 +384,15 @@ async fn rest_dispatch_list_on_streaming_trait() {
     let rd = make_channel_rd(Arc::new(InMemoryChannels::new()));
 
     // REST methods work through ServiceRouter
-    let result = rd.dispatch(HttpMethod::Get, "/chan", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/chan",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let channels: Vec<ChannelInfo> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert!(channels.is_empty());
 }
@@ -294,10 +404,24 @@ async fn rest_dispatch_delete_on_streaming_trait() {
     let rd = make_channel_rd(impl_.clone());
 
     // Create via WS dispatch
-    svc.dispatch("chan.open_channel", json!("rest_del")).await.unwrap();
+    svc.dispatch(
+        "chan.open_channel",
+        &RequestContext::default(),
+        json!("rest_del"),
+    )
+    .await
+    .unwrap();
 
     // Delete via REST dispatch
-    let result = rd.dispatch(HttpMethod::Delete, "/chan/ch_rest_del", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Delete,
+            "/chan/ch_rest_del",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
@@ -306,8 +430,19 @@ async fn rest_dispatch_stream_path_returns_none() {
     let rd = make_channel_rd(Arc::new(InMemoryChannels::new()));
 
     // Stream paths should NOT be dispatched as REST
-    let result = rd.dispatch(HttpMethod::Get, "/chan/new", Value::Null).await.map(|rr| rr.result);
-    assert!(result.is_none(), "stream paths should not match REST dispatch");
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/chan/new",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
+    assert!(
+        result.is_none(),
+        "stream paths should not match REST dispatch"
+    );
 }
 
 // ===========================================================================
@@ -318,6 +453,7 @@ struct MockStreamClient {
     rd: ServiceRouter,
     svc: Arc<ChannelApiService<dyn ChannelApi>>,
     impl_: Arc<InMemoryChannels>,
+    pending_streams: tokio::sync::Mutex<Vec<broadcast::Receiver<ChannelEvent>>>,
 }
 
 impl MockStreamClient {
@@ -325,57 +461,90 @@ impl MockStreamClient {
         let impl_ = Arc::new(InMemoryChannels::new());
         let svc = <dyn ChannelApi>::service(impl_.clone());
         let rd = ServiceRouter::new().register(svc.clone());
-        Self { rd, svc, impl_ }
+        Self {
+            rd,
+            svc,
+            impl_,
+            pending_streams: tokio::sync::Mutex::new(Vec::new()),
+        }
     }
 }
 
 #[async_trait]
 impl RpcConnection for MockStreamClient {
-    type Stream = broadcast::Receiver<ChannelEvent>;
-
-    async fn rpc_call(&self, method: &str, params: Value) -> anyhow::Result<Value> {
-        match self.svc.dispatch(method, params).await {
-            Some(dr) => dr.result,
+    async fn rpc_call(
+        &self,
+        method: &str,
+        params: Value,
+        ctx: &RequestContext,
+    ) -> anyhow::Result<Value> {
+        match self.svc.dispatch(method, ctx, params).await {
+            Some(dr) => {
+                self.pending_streams.lock().await.extend(dr.streams);
+                dr.result
+            }
             None => Err(anyhow::anyhow!("unknown method: {method}")),
         }
     }
 
-    async fn register_stream(&self, id: &str) -> Self::Stream {
-        let channels = self.impl_.channels.lock().await;
-        let (_, tx) = channels
-            .iter()
-            .find(|(info, _)| info.id == id)
-            .expect("channel should exist for register_stream");
-        tx.subscribe()
+    async fn register_stream(
+        &self,
+        _method: &str,
+    ) -> anyhow::Result<(mpsc::Sender<Value>, mpsc::Receiver<Value>)> {
+        let mut stream = self
+            .pending_streams
+            .lock()
+            .await
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("no pending stream"))?;
+        let (input_tx, _input_rx) = mpsc::channel(1);
+        let (output_tx, output_rx) = mpsc::channel(16);
+        tokio::spawn(async move {
+            while let Ok(event) = stream.recv().await {
+                let Ok(value) = serde_json::to_value(event) else {
+                    continue;
+                };
+                if output_tx.send(value).await.is_err() {
+                    break;
+                }
+            }
+        });
+        Ok((input_tx, output_rx))
     }
-
-    async fn unregister_stream(&self, _id: &str) {}
 
     async fn rest_call(
         &self,
         http_method: HttpMethod,
         path: &str,
         body: Value,
+        ctx: &RequestContext,
     ) -> anyhow::Result<Value> {
-        match self.rd.dispatch(http_method, path, body).await {
+        match self.rd.dispatch(http_method, path, ctx, body).await {
             Some(rr) => rr.result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
     }
 }
 
-impl_remote_channel_api!(MockStreamClient);
+fn make_remote() -> (RemoteChannelApi, Arc<InMemoryChannels>) {
+    let mock = Arc::new(MockStreamClient::new());
+    let impl_ = mock.impl_.clone();
+    (RemoteChannelApi::new(mock), impl_)
+}
 
 #[tokio::test]
 async fn client_open_channel_returns_info_and_stream() {
-    let client = MockStreamClient::new();
+    let (client, impl_) = make_remote();
 
     let (info, mut rx) = client.open_channel("client_test").await.unwrap();
     assert_eq!(info.id, "ch_client_test");
 
     {
-        let channels = client.impl_.channels.lock().await;
-        let (_, tx) = channels.iter().find(|(i, _)| i.id == "ch_client_test").unwrap();
+        let channels = impl_.channels.lock().await;
+        let (_, tx) = channels
+            .iter()
+            .find(|(i, _)| i.id == "ch_client_test")
+            .unwrap();
         tx.send(ChannelEvent("from_client".into())).unwrap();
     }
 
@@ -385,14 +554,17 @@ async fn client_open_channel_returns_info_and_stream() {
 
 #[tokio::test]
 async fn client_subscribe_returns_stream() {
-    let client = MockStreamClient::new();
+    let (client, impl_) = make_remote();
 
     client.open_channel("sub_test").await.unwrap();
     let mut rx = client.subscribe("ch_sub_test").await.unwrap();
 
     {
-        let channels = client.impl_.channels.lock().await;
-        let (_, tx) = channels.iter().find(|(i, _)| i.id == "ch_sub_test").unwrap();
+        let channels = impl_.channels.lock().await;
+        let (_, tx) = channels
+            .iter()
+            .find(|(i, _)| i.id == "ch_sub_test")
+            .unwrap();
         tx.send(ChannelEvent("subscribed".into())).unwrap();
     }
 
@@ -402,7 +574,7 @@ async fn client_subscribe_returns_stream() {
 
 #[tokio::test]
 async fn client_non_stream_methods_work() {
-    let client = MockStreamClient::new();
+    let (client, _impl_) = make_remote();
 
     assert!(client.list_channels().await.unwrap().is_empty());
 
@@ -449,19 +621,31 @@ async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
 
         let body = match http_method {
             HttpMethod::Post | HttpMethod::Put => {
-                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024).await.unwrap_or_default();
-                if bytes.is_empty() { Value::Null }
-                else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) }
+                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024)
+                    .await
+                    .unwrap_or_default();
+                if bytes.is_empty() {
+                    Value::Null
+                } else {
+                    serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+                }
             }
             _ => Value::Null,
         };
 
-        match rd.dispatch(http_method, &path, body).await {
+        match rd
+            .dispatch(http_method, &path, &RequestContext::default(), body)
+            .await
+        {
             Some(rr) => match rr.result {
                 Ok(value) => AxumJson(value).into_response(),
                 Err(e) => {
                     let msg = e.to_string();
-                    let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
+                    let status = if msg.contains("not found") {
+                        StatusCode::NOT_FOUND
+                    } else {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    };
                     (status, msg).into_response()
                 }
             },
@@ -469,9 +653,7 @@ async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
         }
     }
 
-    let app = Router::new()
-        .fallback(handler)
-        .with_state(dispatcher);
+    let app = Router::new().fallback(handler).with_state(dispatcher);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -487,10 +669,13 @@ async fn start_ws_test_server() -> (String, Arc<InMemoryChannels>) {
 fn path_matches(template: &str, path: &str) -> bool {
     let t_segs: Vec<&str> = template.trim_start_matches('/').split('/').collect();
     let p_segs: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-    if t_segs.len() != p_segs.len() { return false; }
-    t_segs.iter().zip(p_segs.iter()).all(|(t, p)| {
-        t.starts_with('{') || t == p
-    })
+    if t_segs.len() != p_segs.len() {
+        return false;
+    }
+    t_segs
+        .iter()
+        .zip(p_segs.iter())
+        .all(|(t, p)| t.starts_with('{') || t == p)
 }
 
 /// Extract named params from a path given a template.
@@ -500,7 +685,7 @@ fn extract_params(template: &str, path: &str) -> std::collections::HashMap<Strin
     let mut params = std::collections::HashMap::new();
     for (t, p) in t_segs.iter().zip(p_segs.iter()) {
         if t.starts_with('{') && t.ends_with('}') {
-            params.insert(t[1..t.len()-1].to_string(), p.to_string());
+            params.insert(t[1..t.len() - 1].to_string(), p.to_string());
         }
     }
     params
@@ -526,25 +711,40 @@ async fn http_crud_alongside_streams() {
     {
         let (tx, _) = broadcast::channel(16);
         impl_.channels.lock().await.push((
-            ChannelInfo { id: "ch_test".into(), name: "test".into() },
+            ChannelInfo {
+                id: "ch_test".into(),
+                name: "test".into(),
+            },
             tx,
         ));
     }
 
     // List via REST
     let channels: Vec<ChannelInfo> = reqwest::get(format!("{base}/chan"))
-        .await.unwrap().json().await.unwrap();
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(channels.len(), 1);
     assert_eq!(channels[0].id, "ch_test");
 
     // Delete via REST
     let client = reqwest::Client::new();
-    let resp = client.delete(format!("{base}/chan/ch_test")).send().await.unwrap();
+    let resp = client
+        .delete(format!("{base}/chan/ch_test"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
 
     // Verify deleted
     let channels: Vec<ChannelInfo> = reqwest::get(format!("{base}/chan"))
-        .await.unwrap().json().await.unwrap();
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert!(channels.is_empty());
 }
 
@@ -568,7 +768,14 @@ async fn ws_stream_dispatch_produces_events() {
     let svc = ChannelApiService(impl_.clone());
 
     // Dispatch the stream method (this is what the WS upgrade handler would do)
-    let dr = svc.dispatch("chan.open_channel", json!("ws_test")).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.open_channel",
+            &RequestContext::default(),
+            json!("ws_test"),
+        )
+        .await
+        .unwrap();
     let info: ChannelInfo = serde_json::from_value(dr.result.unwrap()).unwrap();
     assert_eq!(info.id, "ch_ws_test");
 
@@ -592,11 +799,25 @@ async fn ws_subscribe_dispatch_multiple_listeners() {
     let svc = ChannelApiService(impl_.clone());
 
     // Open channel
-    let dr = svc.dispatch("chan.open_channel", json!("multi")).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.open_channel",
+            &RequestContext::default(),
+            json!("multi"),
+        )
+        .await
+        .unwrap();
     let mut rx1 = dr.streams.into_iter().next().unwrap();
 
     // Subscribe (second listener)
-    let dr = svc.dispatch("chan.subscribe", json!("ch_multi")).await.unwrap();
+    let dr = svc
+        .dispatch(
+            "chan.subscribe",
+            &RequestContext::default(),
+            json!("ch_multi"),
+        )
+        .await
+        .unwrap();
     let mut rx2 = dr.streams.into_iter().next().unwrap();
 
     // Both should receive the event
@@ -623,7 +844,6 @@ async fn ws_real_websocket_open_and_receive() {
     let port = listener.local_addr().unwrap().port();
 
     let svc_clone = svc.clone();
-    let impl_clone = impl_.clone();
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
@@ -634,7 +854,10 @@ async fn ws_real_websocket_open_and_receive() {
         let params: Value = serde_json::from_str(msg.to_text().unwrap()).unwrap_or(Value::Null);
 
         // Dispatch
-        let dr = svc_clone.dispatch("chan.open_channel", params).await.unwrap();
+        let dr = svc_clone
+            .dispatch("chan.open_channel", &RequestContext::default(), params)
+            .await
+            .unwrap();
         let info_json = serde_json::to_string(&dr.result.unwrap()).unwrap();
 
         // Send SessionInfo as first message
@@ -646,7 +869,9 @@ async fn ws_real_websocket_open_and_receive() {
             match rx.recv().await {
                 Ok(event) => {
                     let json = serde_json::to_string(&event).unwrap();
-                    if ws_tx.send(Message::Text(json.into())).await.is_err() { break; }
+                    if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                        break;
+                    }
                 }
                 Err(_) => break,
             }
@@ -654,14 +879,17 @@ async fn ws_real_websocket_open_and_receive() {
     });
 
     // Client connects with raw tokio-tungstenite
-    let (mut ws, _resp) = tokio_tungstenite::connect_async(
-        format!("ws://127.0.0.1:{port}/chan/new")
-    ).await.unwrap();
+    let (mut ws, _resp) =
+        tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/chan/new"))
+            .await
+            .unwrap();
 
     // Send channel name as first message
     ws.send(tokio_tungstenite::tungstenite::Message::Text(
-        json!("ws_raw").to_string().into()
-    )).await.unwrap();
+        json!("ws_raw").to_string().into(),
+    ))
+    .await
+    .unwrap();
 
     // Receive ChannelInfo
     let msg = ws.next().await.unwrap().unwrap();

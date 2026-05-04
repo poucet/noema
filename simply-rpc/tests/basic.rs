@@ -7,14 +7,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, ServiceRouter, RpcConnection, RpcService, check_compat};
+use simply_rpc::{check_compat, HttpMethod, RequestContext, RpcConnection, ServiceRouter};
 use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------
 // Test trait — exercises all non-streaming patterns
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 pub struct Item {
     pub id: String,
     pub name: String,
@@ -117,10 +117,24 @@ fn make_rd(items: Vec<Item>) -> ServiceRouter {
 #[tokio::test]
 async fn dispatch_list_no_params() {
     let rd = make_rd(vec![
-        Item { id: "1".into(), name: "Alpha".into() },
-        Item { id: "2".into(), name: "Beta".into() },
+        Item {
+            id: "1".into(),
+            name: "Alpha".into(),
+        },
+        Item {
+            id: "2".into(),
+            name: "Beta".into(),
+        },
     ]);
-    let result = rd.dispatch(HttpMethod::Get, "/items", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/items",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let items: Vec<Item> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].name, "Alpha");
@@ -128,8 +142,19 @@ async fn dispatch_list_no_params() {
 
 #[tokio::test]
 async fn dispatch_single_str_ref_param() {
-    let rd = make_rd(vec![Item { id: "abc".into(), name: "Thing".into() }]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/abc", Value::Null).await.map(|rr| rr.result);
+    let rd = make_rd(vec![Item {
+        id: "abc".into(),
+        name: "Thing".into(),
+    }]);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/items/abc",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let item: Item = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(item.id, "abc");
     assert_eq!(item.name, "Thing");
@@ -138,10 +163,26 @@ async fn dispatch_single_str_ref_param() {
 #[tokio::test]
 async fn dispatch_owned_param() {
     let rd = make_rd(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/items", json!({"id": "x", "name": "X"})).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Post,
+            "/items",
+            &RequestContext::default(),
+            json!({"id": "x", "name": "X"}),
+        )
+        .await
+        .map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 
-    let result = rd.dispatch(HttpMethod::Get, "/items", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/items",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let items: Vec<Item> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, "x");
@@ -149,11 +190,30 @@ async fn dispatch_owned_param() {
 
 #[tokio::test]
 async fn dispatch_multi_params() {
-    let rd = make_rd(vec![Item { id: "1".into(), name: "Old".into() }]);
-    let result = rd.dispatch(HttpMethod::Put, "/items/1", json!({"name": "New"})).await.map(|rr| rr.result);
+    let rd = make_rd(vec![Item {
+        id: "1".into(),
+        name: "Old".into(),
+    }]);
+    let result = rd
+        .dispatch(
+            HttpMethod::Put,
+            "/items/1",
+            &RequestContext::default(),
+            json!({"name": "New"}),
+        )
+        .await
+        .map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 
-    let result = rd.dispatch(HttpMethod::Get, "/items/1", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/items/1",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let item: Item = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(item.name, "New");
 }
@@ -161,10 +221,24 @@ async fn dispatch_multi_params() {
 #[tokio::test]
 async fn dispatch_raw_return() {
     let rd = make_rd(vec![
-        Item { id: "1".into(), name: "A".into() },
-        Item { id: "2".into(), name: "B".into() },
+        Item {
+            id: "1".into(),
+            name: "A".into(),
+        },
+        Item {
+            id: "2".into(),
+            name: "B".into(),
+        },
     ]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/count", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/items/count",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let count: usize = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(count, 2);
 }
@@ -172,20 +246,44 @@ async fn dispatch_raw_return() {
 #[tokio::test]
 async fn dispatch_unknown_path_returns_none() {
     let rd = make_rd(vec![]);
-    assert!(rd.dispatch(HttpMethod::Get, "/other/path", Value::Null).await.is_none());
+    assert!(rd
+        .dispatch(
+            HttpMethod::Get,
+            "/other/path",
+            &RequestContext::default(),
+            Value::Null
+        )
+        .await
+        .is_none());
 }
 
 #[tokio::test]
 async fn dispatch_skip_method_not_dispatched() {
     let rd = make_rd(vec![]);
     // Skip methods have no REST annotation, so no path matches
-    assert!(rd.dispatch(HttpMethod::Post, "/items/dangerous", Value::Null).await.is_none());
+    assert!(rd
+        .dispatch(
+            HttpMethod::Post,
+            "/items/dangerous",
+            &RequestContext::default(),
+            Value::Null
+        )
+        .await
+        .is_none());
 }
 
 #[tokio::test]
 async fn dispatch_error_propagated() {
     let rd = make_rd(vec![]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/missing", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/items/missing",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     assert!(result.unwrap().is_err());
 }
 
@@ -193,7 +291,15 @@ async fn dispatch_error_propagated() {
 async fn dispatch_bad_params_returns_error() {
     let rd = make_rd(vec![]);
     // rename_item expects {name} in body but we send null
-    let result = rd.dispatch(HttpMethod::Put, "/items/1", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Put,
+            "/items/1",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     assert!(result.unwrap().is_err());
 }
 
@@ -209,8 +315,19 @@ fn make_rest_dispatcher(items: Vec<Item>) -> ServiceRouter {
 
 #[tokio::test]
 async fn rest_dispatcher_routes_correctly() {
-    let rd = make_rest_dispatcher(vec![Item { id: "1".into(), name: "One".into() }]);
-    let result = rd.dispatch(HttpMethod::Get, "/items/count", Value::Null).await.map(|rr| rr.result);
+    let rd = make_rest_dispatcher(vec![Item {
+        id: "1".into(),
+        name: "One".into(),
+    }]);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/items/count",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let count: usize = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(count, 1);
 }
@@ -218,7 +335,15 @@ async fn rest_dispatcher_routes_correctly() {
 #[tokio::test]
 async fn rest_dispatcher_unknown_path_returns_none() {
     let rd = make_rest_dispatcher(vec![]);
-    let result = rd.dispatch(HttpMethod::Get, "/nope/nothing", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/nope/nothing",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     assert!(result.is_none());
 }
 
@@ -238,8 +363,15 @@ impl MockClient {
 
 #[async_trait]
 impl RpcConnection for MockClient {
-    async fn rpc_call(&self, method: &str, _params: Value) -> anyhow::Result<Value> {
-        Err(anyhow::anyhow!("rpc_call should not be used for REST methods: {method}"))
+    async fn rpc_call(
+        &self,
+        method: &str,
+        _params: Value,
+        _ctx: &RequestContext,
+    ) -> anyhow::Result<Value> {
+        Err(anyhow::anyhow!(
+            "rpc_call should not be used for REST methods: {method}"
+        ))
     }
 
     async fn rest_call(
@@ -247,24 +379,20 @@ impl RpcConnection for MockClient {
         http_method: HttpMethod,
         path: &str,
         body: Value,
+        ctx: &RequestContext,
     ) -> anyhow::Result<Value> {
-        match self.rd.dispatch(http_method, path, body).await {
+        match self.rd.dispatch(http_method, path, ctx, body).await {
             Some(rr) => rr.result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
     }
 
-    async fn register_stream(&self, _id: &str) -> mpsc::Receiver<Value> {
-        let (_, rx) = mpsc::channel(1);
-        rx
-    }
-
-    async fn unregister_stream(&self, _id: &str) {}
-
-    async fn register_bidi_stream_raw(
-        &self, _method: &str, _path: &str,
+    async fn register_stream(
+        &self,
+        _method: &str,
     ) -> anyhow::Result<(mpsc::Sender<Value>, mpsc::Receiver<Value>)> {
-        anyhow::bail!("not supported")
+        let (tx, rx) = mpsc::channel(1);
+        Ok((tx, rx))
     }
 }
 
@@ -274,9 +402,10 @@ fn make_remote(items: Vec<Item>) -> RemoteItemApi {
 
 #[tokio::test]
 async fn client_list_items() {
-    let client = make_remote(vec![
-        Item { id: "a".into(), name: "A".into() },
-    ]);
+    let client = make_remote(vec![Item {
+        id: "a".into(),
+        name: "A".into(),
+    }]);
     let items = client.list_items().await.unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].name, "A");
@@ -284,9 +413,10 @@ async fn client_list_items() {
 
 #[tokio::test]
 async fn client_get_item() {
-    let client = make_remote(vec![
-        Item { id: "x".into(), name: "X".into() },
-    ]);
+    let client = make_remote(vec![Item {
+        id: "x".into(),
+        name: "X".into(),
+    }]);
     let item = client.get_item("x").await.unwrap();
     assert_eq!(item.id, "x");
 }
@@ -294,16 +424,23 @@ async fn client_get_item() {
 #[tokio::test]
 async fn client_add_item() {
     let client = make_remote(vec![]);
-    client.add_item(Item { id: "new".into(), name: "New".into() }).await.unwrap();
+    client
+        .add_item(Item {
+            id: "new".into(),
+            name: "New".into(),
+        })
+        .await
+        .unwrap();
     let items = client.list_items().await.unwrap();
     assert_eq!(items.len(), 1);
 }
 
 #[tokio::test]
 async fn client_rename_item() {
-    let client = make_remote(vec![
-        Item { id: "1".into(), name: "Old".into() },
-    ]);
+    let client = make_remote(vec![Item {
+        id: "1".into(),
+        name: "Old".into(),
+    }]);
     client.rename_item("1", "New").await.unwrap();
     let item = client.get_item("1").await.unwrap();
     assert_eq!(item.name, "New");
@@ -311,24 +448,28 @@ async fn client_rename_item() {
 
 #[tokio::test]
 async fn client_raw_return() {
-    let client = make_remote(vec![
-        Item { id: "1".into(), name: "A".into() },
-    ]);
+    let client = make_remote(vec![Item {
+        id: "1".into(),
+        name: "A".into(),
+    }]);
     let count = client.count_items().await;
     assert_eq!(count, 1);
 }
 
 #[tokio::test]
 async fn client_skip_method_returns_error() {
-    let client = MockClient::new(vec![]);
+    let client = make_remote(vec![]);
     let result = client.dangerous().await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not available over RPC"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("not available over RPC"));
 }
 
 #[tokio::test]
 async fn client_error_propagated() {
-    let client = MockClient::new(vec![]);
+    let client = make_remote(vec![]);
     let result = client.get_item("missing").await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not found"));
@@ -352,7 +493,11 @@ fn meta_generated_for_service() {
 
 #[test]
 fn rest_meta_generated() {
-    let paths: Vec<&str> = ITEM_API_META.routes.iter().map(|m| m.path_template).collect();
+    let paths: Vec<&str> = ITEM_API_META
+        .routes
+        .iter()
+        .map(|m| m.path_template)
+        .collect();
     assert!(paths.contains(&"/items"));
     assert!(paths.contains(&"/items/{id}"));
     assert!(paths.contains(&"/items/count"));

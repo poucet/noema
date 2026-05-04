@@ -6,13 +6,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use simply_rpc::{HttpMethod, ServiceRouter, RestService, RpcConnection, RpcService};
+use simply_rpc::{HttpMethod, RequestContext, RpcConnection, RpcService, ServiceRouter};
+use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------
 // Test types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 pub struct Widget {
     pub id: String,
     pub label: String,
@@ -91,7 +92,10 @@ impl WidgetApi for InMemoryWidgets {
     }
 
     async fn get_widget(&self, id: &str) -> anyhow::Result<Widget> {
-        self.widgets.lock().await.iter()
+        self.widgets
+            .lock()
+            .await
+            .iter()
             .find(|w| w.id == id)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("not found: {id}"))
@@ -114,7 +118,9 @@ impl WidgetApi for InMemoryWidgets {
 
     async fn rename_widget(&self, id: &str, label: &str) -> anyhow::Result<()> {
         let mut widgets = self.widgets.lock().await;
-        let w = widgets.iter_mut().find(|w| w.id == id)
+        let w = widgets
+            .iter_mut()
+            .find(|w| w.id == id)
             .ok_or_else(|| anyhow::anyhow!("not found: {id}"))?;
         w.label = label.to_string();
         Ok(())
@@ -181,12 +187,30 @@ fn rest_meta_http_methods_correct() {
     let meta = &WIDGET_API_META;
     let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
-    assert_eq!(find("widget.list_widgets").http_method(), Some(HttpMethod::Get));
-    assert_eq!(find("widget.get_widget").http_method(), Some(HttpMethod::Get));
-    assert_eq!(find("widget.create_widget").http_method(), Some(HttpMethod::Post));
-    assert_eq!(find("widget.delete_widget").http_method(), Some(HttpMethod::Delete));
-    assert_eq!(find("widget.rename_widget").http_method(), Some(HttpMethod::Put));
-    assert_eq!(find("widget.send_command").http_method(), Some(HttpMethod::Post));
+    assert_eq!(
+        find("widget.list_widgets").http_method(),
+        Some(HttpMethod::Get)
+    );
+    assert_eq!(
+        find("widget.get_widget").http_method(),
+        Some(HttpMethod::Get)
+    );
+    assert_eq!(
+        find("widget.create_widget").http_method(),
+        Some(HttpMethod::Post)
+    );
+    assert_eq!(
+        find("widget.delete_widget").http_method(),
+        Some(HttpMethod::Delete)
+    );
+    assert_eq!(
+        find("widget.rename_widget").http_method(),
+        Some(HttpMethod::Put)
+    );
+    assert_eq!(
+        find("widget.send_command").http_method(),
+        Some(HttpMethod::Post)
+    );
     assert_eq!(find("widget.kill").http_method(), Some(HttpMethod::Post));
 }
 
@@ -200,7 +224,10 @@ fn rest_meta_path_templates_correct() {
     assert_eq!(find("widget.create_widget").path_template, "/widget");
     assert_eq!(find("widget.delete_widget").path_template, "/widget/{id}");
     assert_eq!(find("widget.rename_widget").path_template, "/widget/{id}");
-    assert_eq!(find("widget.send_command").path_template, "/widget/{id}/command");
+    assert_eq!(
+        find("widget.send_command").path_template,
+        "/widget/{id}/command"
+    );
     assert_eq!(find("widget.kill").path_template, "/widget/kill");
 }
 
@@ -209,10 +236,22 @@ fn rest_meta_doc_comments_extracted() {
     let meta = &WIDGET_API_META;
     let find = |name: &str| meta.routes.iter().find(|m| m.method_name == name).unwrap();
 
-    assert_eq!(find("widget.list_widgets").description, Some("List all widgets"));
-    assert_eq!(find("widget.get_widget").description, Some("Get a widget by ID"));
-    assert_eq!(find("widget.create_widget").description, Some("Create a new widget"));
-    assert_eq!(find("widget.kill").description, Some("Kill the service (excluded from tools)"));
+    assert_eq!(
+        find("widget.list_widgets").description,
+        Some("List all widgets")
+    );
+    assert_eq!(
+        find("widget.get_widget").description,
+        Some("Get a widget by ID")
+    );
+    assert_eq!(
+        find("widget.create_widget").description,
+        Some("Create a new widget")
+    );
+    assert_eq!(
+        find("widget.kill").description,
+        Some("Kill the service (excluded from tools)")
+    );
 }
 
 #[test]
@@ -222,7 +261,10 @@ fn rest_meta_no_tool_flag() {
 
     assert!(!find("widget.list_widgets").no_tool);
     assert!(!find("widget.get_widget").no_tool);
-    assert!(find("widget.kill").no_tool, "kill should have no_tool = true");
+    assert!(
+        find("widget.kill").no_tool,
+        "kill should have no_tool = true"
+    );
 }
 
 // ===========================================================================
@@ -232,18 +274,43 @@ fn rest_meta_no_tool_flag() {
 #[tokio::test]
 async fn rest_dispatch_get_collection() {
     let rd = make_rd_from_widgets(vec![
-        Widget { id: "1".into(), label: "A".into() },
-        Widget { id: "2".into(), label: "B".into() },
+        Widget {
+            id: "1".into(),
+            label: "A".into(),
+        },
+        Widget {
+            id: "2".into(),
+            label: "B".into(),
+        },
     ]);
-    let result = rd.dispatch(HttpMethod::Get, "/widget", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/widget",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let items: Vec<Widget> = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(items.len(), 2);
 }
 
 #[tokio::test]
 async fn rest_dispatch_get_single() {
-    let rd = make_rd_from_widgets(vec![Widget { id: "abc".into(), label: "Thing".into() }]);
-    let result = rd.dispatch(HttpMethod::Get, "/widget/abc", Value::Null).await.map(|rr| rr.result);
+    let rd = make_rd_from_widgets(vec![Widget {
+        id: "abc".into(),
+        label: "Thing".into(),
+    }]);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/widget/abc",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(widget.id, "abc");
 }
@@ -251,24 +318,62 @@ async fn rest_dispatch_get_single() {
 #[tokio::test]
 async fn rest_dispatch_post_body() {
     let rd = make_rd_from_widgets(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/widget", json!({"id": "new", "label": "New Widget"})).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Post,
+            "/widget",
+            &RequestContext::default(),
+            json!({"id": "new", "label": "New Widget"}),
+        )
+        .await
+        .map(|rr| rr.result);
     let widget: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(widget.id, "new");
 }
 
 #[tokio::test]
 async fn rest_dispatch_delete() {
-    let rd = make_rd_from_widgets(vec![Widget { id: "del".into(), label: "D".into() }]);
-    let result = rd.dispatch(HttpMethod::Delete, "/widget/del", Value::Null).await.map(|rr| rr.result);
+    let rd = make_rd_from_widgets(vec![Widget {
+        id: "del".into(),
+        label: "D".into(),
+    }]);
+    let result = rd
+        .dispatch(
+            HttpMethod::Delete,
+            "/widget/del",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
 #[tokio::test]
 async fn rest_dispatch_put_path_and_body() {
-    let rd = make_rd_from_widgets(vec![Widget { id: "1".into(), label: "Old".into() }]);
-    let result = rd.dispatch(HttpMethod::Put, "/widget/1", json!({"label": "New"})).await.map(|rr| rr.result);
+    let rd = make_rd_from_widgets(vec![Widget {
+        id: "1".into(),
+        label: "Old".into(),
+    }]);
+    let result = rd
+        .dispatch(
+            HttpMethod::Put,
+            "/widget/1",
+            &RequestContext::default(),
+            json!({"label": "New"}),
+        )
+        .await
+        .map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
-    let result = rd.dispatch(HttpMethod::Get, "/widget/1", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Get,
+            "/widget/1",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     let w: Widget = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(w.label, "New");
 }
@@ -276,7 +381,15 @@ async fn rest_dispatch_put_path_and_body() {
 #[tokio::test]
 async fn rest_dispatch_nested_path() {
     let rd = make_rd_from_widgets(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/widget/w1/command", json!({"action": "restart"})).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Post,
+            "/widget/w1/command",
+            &RequestContext::default(),
+            json!({"action": "restart"}),
+        )
+        .await
+        .map(|rr| rr.result);
     let r: String = serde_json::from_value(result.unwrap().unwrap()).unwrap();
     assert_eq!(r, "w1:restart");
 }
@@ -284,14 +397,30 @@ async fn rest_dispatch_nested_path() {
 #[tokio::test]
 async fn rest_dispatch_post_no_params() {
     let rd = make_rd_from_widgets(vec![]);
-    let result = rd.dispatch(HttpMethod::Post, "/widget/kill", Value::Null).await.map(|rr| rr.result);
+    let result = rd
+        .dispatch(
+            HttpMethod::Post,
+            "/widget/kill",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await
+        .map(|rr| rr.result);
     assert_eq!(result.unwrap().unwrap(), Value::Bool(true));
 }
 
 #[tokio::test]
 async fn rest_dispatch_unknown_path_returns_none() {
     let rd = make_rd_from_widgets(vec![]);
-    assert!(rd.dispatch(HttpMethod::Get, "/other/path", Value::Null).await.is_none());
+    assert!(rd
+        .dispatch(
+            HttpMethod::Get,
+            "/other/path",
+            &RequestContext::default(),
+            Value::Null
+        )
+        .await
+        .is_none());
 }
 
 // ===========================================================================
@@ -314,84 +443,109 @@ impl MockWsClient {
 
 #[async_trait]
 impl RpcConnection for MockWsClient {
-    type Stream = tokio::sync::broadcast::Receiver<String>;
-
-    async fn rpc_call(&self, method: &str, params: Value) -> anyhow::Result<Value> {
-        match self.svc.dispatch(method, params).await {
+    async fn rpc_call(
+        &self,
+        method: &str,
+        params: Value,
+        ctx: &RequestContext,
+    ) -> anyhow::Result<Value> {
+        match self.svc.dispatch(method, ctx, params).await {
             Some(dr) => dr.result,
             None => Err(anyhow::anyhow!("unknown method: {method}")),
         }
     }
 
-    async fn register_stream(&self, _id: &str) -> Self::Stream {
-        let (tx, rx) = tokio::sync::broadcast::channel(1);
-        drop(tx);
-        rx
+    async fn register_stream(
+        &self,
+        _method: &str,
+    ) -> anyhow::Result<(mpsc::Sender<Value>, mpsc::Receiver<Value>)> {
+        let (tx, rx) = mpsc::channel(1);
+        Ok((tx, rx))
     }
-
-    async fn unregister_stream(&self, _id: &str) {}
 
     async fn rest_call(
         &self,
         http_method: HttpMethod,
         path: &str,
         body: Value,
+        ctx: &RequestContext,
     ) -> anyhow::Result<Value> {
-        match self.rd.dispatch(http_method, path, body).await {
+        match self.rd.dispatch(http_method, path, ctx, body).await {
             Some(rr) => rr.result,
             None => Err(anyhow::anyhow!("no REST handler for path: {path}")),
         }
     }
 }
 
-impl_remote_widget_api!(MockWsClient);
+fn make_remote(widgets: Vec<Widget>) -> RemoteWidgetApi {
+    RemoteWidgetApi::new(Arc::new(MockWsClient::new(widgets)))
+}
 
 #[tokio::test]
 async fn client_list_widgets() {
-    let client = MockWsClient::new(vec![
-        Widget { id: "a".into(), label: "A".into() },
-    ]);
+    let client = make_remote(vec![Widget {
+        id: "a".into(),
+        label: "A".into(),
+    }]);
     let items = client.list_widgets().await.unwrap();
     assert_eq!(items.len(), 1);
 }
 
 #[tokio::test]
 async fn client_get_widget() {
-    let client = MockWsClient::new(vec![Widget { id: "x".into(), label: "X".into() }]);
+    let client = make_remote(vec![Widget {
+        id: "x".into(),
+        label: "X".into(),
+    }]);
     let w = client.get_widget("x").await.unwrap();
     assert_eq!(w.label, "X");
 }
 
 #[tokio::test]
 async fn client_create_and_list() {
-    let client = MockWsClient::new(vec![]);
-    client.create_widget(Widget { id: "n".into(), label: "N".into() }).await.unwrap();
+    let client = make_remote(vec![]);
+    client
+        .create_widget(Widget {
+            id: "n".into(),
+            label: "N".into(),
+        })
+        .await
+        .unwrap();
     assert_eq!(client.list_widgets().await.unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn client_delete_widget() {
-    let client = MockWsClient::new(vec![Widget { id: "d".into(), label: "D".into() }]);
+    let client = make_remote(vec![Widget {
+        id: "d".into(),
+        label: "D".into(),
+    }]);
     client.delete_widget("d").await.unwrap();
     assert!(client.list_widgets().await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn client_rename_widget() {
-    let client = MockWsClient::new(vec![Widget { id: "1".into(), label: "Old".into() }]);
+    let client = make_remote(vec![Widget {
+        id: "1".into(),
+        label: "Old".into(),
+    }]);
     client.rename_widget("1", "New").await.unwrap();
     assert_eq!(client.get_widget("1").await.unwrap().label, "New");
 }
 
 #[tokio::test]
 async fn client_send_command() {
-    let client = MockWsClient::new(vec![]);
-    assert_eq!(client.send_command("abc", "reboot").await.unwrap(), "abc:reboot");
+    let client = make_remote(vec![]);
+    assert_eq!(
+        client.send_command("abc", "reboot").await.unwrap(),
+        "abc:reboot"
+    );
 }
 
 #[tokio::test]
 async fn client_skip_method_errors() {
-    let client = MockWsClient::new(vec![]);
+    let client = make_remote(vec![]);
     let err = client.internal_op().await.unwrap_err();
     assert!(err.to_string().contains("not available over RPC"));
 }
@@ -431,19 +585,31 @@ async fn start_test_server(widgets: Vec<Widget>) -> String {
 
         let body = match http_method {
             HttpMethod::Post | HttpMethod::Put => {
-                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024).await.unwrap_or_default();
-                if bytes.is_empty() { Value::Null }
-                else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) }
+                let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024)
+                    .await
+                    .unwrap_or_default();
+                if bytes.is_empty() {
+                    Value::Null
+                } else {
+                    serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+                }
             }
             _ => Value::Null,
         };
 
-        match rd.dispatch(http_method, &path, body).await {
+        match rd
+            .dispatch(http_method, &path, &RequestContext::default(), body)
+            .await
+        {
             Some(rr) => match rr.result {
                 Ok(value) => AxumJson(value).into_response(),
                 Err(e) => {
                     let msg = e.to_string();
-                    let status = if msg.contains("not found") { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
+                    let status = if msg.contains("not found") {
+                        StatusCode::NOT_FOUND
+                    } else {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    };
                     (status, msg).into_response()
                 }
             },
@@ -451,9 +617,7 @@ async fn start_test_server(widgets: Vec<Widget>) -> String {
         }
     }
 
-    let app = Router::new()
-        .fallback(handler)
-        .with_state(dispatcher);
+    let app = Router::new().fallback(handler).with_state(dispatcher);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -468,9 +632,16 @@ async fn start_test_server(widgets: Vec<Widget>) -> String {
 #[tokio::test]
 async fn http_get_list() {
     let base = start_test_server(vec![
-        Widget { id: "1".into(), label: "A".into() },
-        Widget { id: "2".into(), label: "B".into() },
-    ]).await;
+        Widget {
+            id: "1".into(),
+            label: "A".into(),
+        },
+        Widget {
+            id: "2".into(),
+            label: "B".into(),
+        },
+    ])
+    .await;
 
     let resp = reqwest::get(format!("{base}/widget")).await.unwrap();
     assert_eq!(resp.status(), 200);
@@ -482,9 +653,11 @@ async fn http_get_list() {
 
 #[tokio::test]
 async fn http_get_by_id() {
-    let base = start_test_server(vec![
-        Widget { id: "abc".into(), label: "Thing".into() },
-    ]).await;
+    let base = start_test_server(vec![Widget {
+        id: "abc".into(),
+        label: "Thing".into(),
+    }])
+    .await;
 
     let resp = reqwest::get(format!("{base}/widget/abc")).await.unwrap();
     assert_eq!(resp.status(), 200);
@@ -497,7 +670,9 @@ async fn http_get_by_id() {
 async fn http_get_not_found() {
     let base = start_test_server(vec![]).await;
 
-    let resp = reqwest::get(format!("{base}/widget/missing")).await.unwrap();
+    let resp = reqwest::get(format!("{base}/widget/missing"))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 404);
 }
 
@@ -506,9 +681,12 @@ async fn http_post_create() {
     let base = start_test_server(vec![]).await;
 
     let client = reqwest::Client::new();
-    let resp = client.post(format!("{base}/widget"))
+    let resp = client
+        .post(format!("{base}/widget"))
         .json(&json!({"id": "new", "label": "New Widget"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let widget: Widget = resp.json().await.unwrap();
     assert_eq!(widget.id, "new");
@@ -522,12 +700,18 @@ async fn http_post_create() {
 
 #[tokio::test]
 async fn http_delete() {
-    let base = start_test_server(vec![
-        Widget { id: "del".into(), label: "D".into() },
-    ]).await;
+    let base = start_test_server(vec![Widget {
+        id: "del".into(),
+        label: "D".into(),
+    }])
+    .await;
 
     let client = reqwest::Client::new();
-    let resp = client.delete(format!("{base}/widget/del")).send().await.unwrap();
+    let resp = client
+        .delete(format!("{base}/widget/del"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
 
     // Verify deleted
@@ -538,14 +722,19 @@ async fn http_delete() {
 
 #[tokio::test]
 async fn http_put_rename() {
-    let base = start_test_server(vec![
-        Widget { id: "1".into(), label: "Old".into() },
-    ]).await;
+    let base = start_test_server(vec![Widget {
+        id: "1".into(),
+        label: "Old".into(),
+    }])
+    .await;
 
     let client = reqwest::Client::new();
-    let resp = client.put(format!("{base}/widget/1"))
+    let resp = client
+        .put(format!("{base}/widget/1"))
         .json(&json!({"label": "New"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
 
     // Verify renamed
@@ -559,9 +748,12 @@ async fn http_post_nested_path() {
     let base = start_test_server(vec![]).await;
 
     let client = reqwest::Client::new();
-    let resp = client.post(format!("{base}/widget/w1/command"))
+    let resp = client
+        .post(format!("{base}/widget/w1/command"))
         .json(&json!({"action": "restart"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     let result: String = resp.json().await.unwrap();
     assert_eq!(result, "w1:restart");
@@ -572,7 +764,11 @@ async fn http_post_no_body() {
     let base = start_test_server(vec![]).await;
 
     let client = reqwest::Client::new();
-    let resp = client.post(format!("{base}/widget/kill")).send().await.unwrap();
+    let resp = client
+        .post(format!("{base}/widget/kill"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
 }
 
@@ -589,7 +785,11 @@ async fn http_delete_not_found() {
     let base = start_test_server(vec![]).await;
 
     let client = reqwest::Client::new();
-    let resp = client.delete(format!("{base}/widget/nope")).send().await.unwrap();
+    let resp = client
+        .delete(format!("{base}/widget/nope"))
+        .send()
+        .await
+        .unwrap();
     // Should be 404 or 500 with "not found" message
     assert_ne!(resp.status(), 200);
 }
@@ -600,30 +800,55 @@ async fn http_full_crud_sequence() {
     let client = reqwest::Client::new();
 
     // Create two widgets
-    client.post(format!("{base}/widget"))
+    client
+        .post(format!("{base}/widget"))
         .json(&json!({"id": "a", "label": "Alpha"}))
-        .send().await.unwrap();
-    client.post(format!("{base}/widget"))
+        .send()
+        .await
+        .unwrap();
+    client
+        .post(format!("{base}/widget"))
         .json(&json!({"id": "b", "label": "Beta"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
     // List: should have 2
     let items: Vec<Widget> = reqwest::get(format!("{base}/widget"))
-        .await.unwrap().json().await.unwrap();
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(items.len(), 2);
 
     // Rename b
-    client.put(format!("{base}/widget/b"))
+    client
+        .put(format!("{base}/widget/b"))
         .json(&json!({"label": "Bravo"}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     let w: Widget = reqwest::get(format!("{base}/widget/b"))
-        .await.unwrap().json().await.unwrap();
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(w.label, "Bravo");
 
     // Delete a
-    client.delete(format!("{base}/widget/a")).send().await.unwrap();
+    client
+        .delete(format!("{base}/widget/a"))
+        .send()
+        .await
+        .unwrap();
     let items: Vec<Widget> = reqwest::get(format!("{base}/widget"))
-        .await.unwrap().json().await.unwrap();
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, "b");
 }
@@ -634,16 +859,34 @@ async fn http_full_crud_sequence() {
 
 #[tokio::test]
 async fn ws_dispatch_still_works_for_stream() {
-    let svc = make_svc(vec![Widget { id: "1".into(), label: "A".into() }]);
-    let dr = svc.dispatch("widget.watch_widgets", Value::Null).await;
+    let svc = make_svc(vec![Widget {
+        id: "1".into(),
+        label: "A".into(),
+    }]);
+    let dr = svc
+        .dispatch(
+            "widget.watch_widgets",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await;
     assert!(dr.is_some());
     assert!(!dr.unwrap().streams.is_empty());
 }
 
 #[tokio::test]
 async fn ws_dispatch_still_works_for_non_rest() {
-    let svc = make_svc(vec![Widget { id: "1".into(), label: "A".into() }]);
-    let dr = svc.dispatch("widget.widget_count", Value::Null).await;
+    let svc = make_svc(vec![Widget {
+        id: "1".into(),
+        label: "A".into(),
+    }]);
+    let dr = svc
+        .dispatch(
+            "widget.widget_count",
+            &RequestContext::default(),
+            Value::Null,
+        )
+        .await;
     let count: usize = serde_json::from_value(dr.unwrap().result.unwrap()).unwrap();
     assert_eq!(count, 1);
 }
