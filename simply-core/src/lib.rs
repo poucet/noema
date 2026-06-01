@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod embedding;
+pub mod events;
 pub mod mcp;
 pub mod session_manager;
 pub mod storage;
@@ -17,3 +18,5 @@ pub use session_manager::{
 };
 
 pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
+
+pub use events::{Event, EventBus, EventFilter, EventSource, EventSubscriber};
