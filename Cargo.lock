@@ -8484,6 +8484,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "telegram-bot"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "config",
+ "mcp-gdocs",
+ "reqwest 0.12.28",
+ "rmcp",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "simply-daemon",
+ "simply-daemon-api",
+ "simply-rpc",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "urlencoding",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

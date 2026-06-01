@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["commands", "config", "simply-core", "simply-core/llm", "simply-voice", "simply-daemon", "simply-daemon/api", "simply-daemon/api/macros", "simply-rpc", "simply-rpc/macros", "noema/src-tauri", "mcp-gdocs", "lumina", "lumina/macros"]
+members = ["commands", "config", "simply-core", "simply-core/llm", "simply-voice", "simply-daemon", "simply-daemon/api", "simply-daemon/api/macros", "simply-rpc", "simply-rpc/macros", "noema/src-tauri", "mcp-gdocs", "lumina", "lumina/macros", "telegram-bot"]
 default-members = ["simply-daemon"]
 
 [workspace.package]
@@ -20,6 +20,7 @@ llm = { path = "simply-core/llm" }
 lumina-macros = { path = "lumina/macros" }
 simply-voice = { path = "simply-voice" }
 mcp-gdocs = { path = "mcp-gdocs" }
+telegram-bot = { path = "telegram-bot" }
 simply-rpc-macros = { path = "simply-rpc/macros" }
 commands_macros = { path = "commands/commands_macros" }
 llm_macros = { path = "simply-core/llm/llm_macros" }

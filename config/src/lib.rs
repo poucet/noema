@@ -2,11 +2,13 @@ pub mod crypto;
 pub mod lumina;
 pub mod paths;
 pub mod settings;
+pub mod telegram;
 
 pub use crypto::{decrypt_string, encrypt_string};
 pub use lumina::{LuminaConfig, VoiceConfig};
 pub use paths::PathManager;
 pub use settings::{EmbeddingConfig, Settings, DEFAULT_DAEMON_PORT};
+pub use telegram::{TelegramBotConfig, TelegramConfig};
 
 /// Load environment variables from .env files.
 /// First loads from ~/.env (home directory), then from ./.env (project directory).

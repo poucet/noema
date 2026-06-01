@@ -99,6 +99,10 @@ impl PathManager {
         Self::config_dir().map(|d| d.join("lumina.toml"))
     }
 
+    pub fn telegram_config_path() -> Option<PathBuf> {
+        Self::config_dir().map(|d| d.join("telegram.toml"))
+    }
+
     /// Directory for Lumina-owned state (separate from the daemon DB so
     /// nuking Lumina state doesn't touch `noema.db`).
     pub fn lumina_data_dir() -> Option<PathBuf> {
@@ -110,6 +114,13 @@ impl PathManager {
     /// history replay without attaching the JSON to Discord messages.
     pub fn lumina_tool_state_path() -> Option<PathBuf> {
         Self::lumina_data_dir().map(|d| d.join("tool_state.db"))
+    }
+
+    /// Directory for Telegram-owned state. Conversation memory is currently
+    /// in-process, but the directory is created up front for future durable
+    /// bridge state without touching `noema.db`.
+    pub fn telegram_data_dir() -> Option<PathBuf> {
+        Self::data_dir().map(|d| d.join("telegram"))
     }
 
     pub fn mcp_config_path() -> Option<PathBuf> {
@@ -143,6 +154,9 @@ impl PathManager {
             std::fs::create_dir_all(&d)?;
         }
         if let Some(d) = Self::lumina_data_dir() {
+            std::fs::create_dir_all(&d)?;
+        }
+        if let Some(d) = Self::telegram_data_dir() {
             std::fs::create_dir_all(&d)?;
         }
         Ok(())

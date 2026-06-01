@@ -1,0 +1,15 @@
+#!/bin/bash
+# telegram — run the Simply Telegram bot
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+export RUST_LOG="${RUST_LOG:-telegram=debug,simply_daemon=info,simply_daemon::services::registry=debug,simply_daemon::services::tools=debug,mcp_gdocs=debug}"
+export TELEGRAM_LOG_FILE="$REPO_ROOT/logs/telegram.log"
+
+# Start Telegram bot (auto-connects to existing daemon or starts embedded)
+mkdir -p "$(dirname "$TELEGRAM_LOG_FILE")"
+: > "$TELEGRAM_LOG_FILE"
+echo "Starting telegram... (log: $TELEGRAM_LOG_FILE)"
+cd "$REPO_ROOT" && exec cargo run -p telegram-bot

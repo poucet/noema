@@ -48,6 +48,7 @@ noema/
 ├── simply-rpc/            # RPC framework, #[rpc_service] macro
 ├── simply-voice/          # STT/TTS providers (Voxtral, Whisper, ElevenLabs, Gemini)
 ├── lumina/                # Discord bot (serenity + songbird)
+├── telegram-bot/          # Telegram bot (long polling + daemon sessions)
 ├── mcp-gdocs/             # Google Docs skill + MCP server
 ├── noema/                 # Tauri desktop shell
 ├── commands/              # Command framework
@@ -60,6 +61,7 @@ noema/
 graph TD
     AdminUI[Admin UI - Svelte] -->|HTTP/WS| Daemon[simply-daemon]
     Lumina[Lumina - Discord] -->|WS| Daemon
+    Telegram[Telegram Bot] -->|WS| Daemon
     Noema[Noema - Tauri] -->|embed| Daemon
     Daemon --> ToolRegistry
     ToolRegistry --> McpProvider[McpToolProvider]
