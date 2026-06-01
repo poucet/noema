@@ -20,6 +20,6 @@ pub use session_manager::{
 pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 
 pub use events::{
-    parse_fuzzy, Event, EventBus, EventFilter, EventSource, EventSubscriber, Schedule, Timer,
-    TimerFired, TimerSource,
+    parse_fuzzy, ActionSpec, Event, EventBus, EventFilter, EventSource, EventSubscriber,
+    IntentDocument, Schedule, Timer, TimerFired, TimerSource, Trigger,
 };

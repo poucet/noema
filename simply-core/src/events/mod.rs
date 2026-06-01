@@ -11,10 +11,15 @@
 
 mod bus;
 mod fuzzy_time;
+mod intent;
 mod timer;
 
 pub use bus::{Event, EventBus, EventFilter, EventSubscriber};
 pub use fuzzy_time::parse_fuzzy;
+pub use intent::{
+    ActionSpec, CompoundTrigger, ConditionMode, EventMatch, EventTrigger, IntentDocument,
+    Recurrence, TimePrecision, TimerTrigger, Trigger,
+};
 pub use timer::{Schedule, Timer, TimerFired, TimerSource};
 
 use async_trait::async_trait;
