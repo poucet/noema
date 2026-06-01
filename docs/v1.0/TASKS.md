@@ -116,7 +116,7 @@ Zero callers remain after Stages 4–6. Cleanup commit.
 ### Stage 1 — Event Bus + Timer Source
 
 - ✅ 1.1 Event bus in `simply-core` — pub/sub with typed event payloads
-- 🔄 1.2 Timer event source: cron, interval, one-shot, fuzzy time expressions
+- ✅ 1.2 Timer event source: cron, interval, one-shot, fuzzy time expressions
 - ⬜ 1.3 Intent documents in UCM with `type: intent` frontmatter
 - ⬜ 1.4 Intent execution table (SQLite) — stores runtime state (last fired, next fire, status)
 - ⬜ 1.5 Action AST: `Expr` with `Literal` and `Template` variants (minimal subset)

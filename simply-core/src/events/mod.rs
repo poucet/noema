@@ -10,8 +10,12 @@
 //! engine build on top of it.
 
 mod bus;
+mod fuzzy_time;
+mod timer;
 
 pub use bus::{Event, EventBus, EventFilter, EventSubscriber};
+pub use fuzzy_time::parse_fuzzy;
+pub use timer::{Schedule, Timer, TimerFired, TimerSource};
 
 use async_trait::async_trait;
 

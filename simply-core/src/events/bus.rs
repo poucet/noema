@@ -228,7 +228,7 @@ mod tests {
                 },
             },
         );
-        assert_eq!(event.field("member.name").unwrap(), "grace");
+        assert_eq!(event.field("member.name").unwrap().as_str(), Some("grace"));
         assert!(event.field("member.missing").is_none());
         assert!(event.field("nope.name").is_none());
     }
@@ -271,7 +271,7 @@ mod tests {
 
         let event = sub.recv().await.unwrap();
         assert_eq!(event.event_type, "discord.message");
-        assert_eq!(event.field("id").unwrap(), "m1");
+        assert_eq!(event.field("id").unwrap().as_str(), Some("m1"));
     }
 
     #[tokio::test]

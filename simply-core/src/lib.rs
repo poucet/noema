@@ -19,4 +19,7 @@ pub use session_manager::{
 
 pub use mcp::{McpConfig, McpRegistry, McpToolRegistry, ServerConfig};
 
-pub use events::{Event, EventBus, EventFilter, EventSource, EventSubscriber};
+pub use events::{
+    parse_fuzzy, Event, EventBus, EventFilter, EventSource, EventSubscriber, Schedule, Timer,
+    TimerFired, TimerSource,
+};
