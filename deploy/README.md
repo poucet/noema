@@ -119,4 +119,3 @@ First-time only: run `./start.sh <domain>` on the server once to seed
   change it, update `proxy_pass` in `nginx-lumina.conf` too.
 - The image builds only the `lumina` binary; the wizard is embedded, so there's
   no Node / admin-UI build. The admin SPA is intentionally not shipped.
-- `Caddyfile` is unused (this deploy uses host nginx) — safe to delete.
