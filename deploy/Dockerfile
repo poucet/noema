@@ -26,9 +26,11 @@ COPY . .
 # here, not the primary package — but we make it explicit so no Node is needed.)
 ENV SKIP_ADMIN_BUILD=1
 
+# `-p lumina` is required: the workspace's default-members is just simply-daemon,
+# so a bare `--bin lumina` from the root won't find the lumina bin.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --bin lumina \
+    cargo build --release -p lumina --bin lumina \
     && cp target/release/lumina /usr/local/bin/lumina
 
 # ---------------------------------------------------------------------------
