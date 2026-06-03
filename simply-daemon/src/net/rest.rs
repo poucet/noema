@@ -28,6 +28,7 @@ use crate::net::admin_api::{self, AdminState};
 use crate::net::auth_routes::{self, SessionStore};
 use crate::net::mcp_auth::{self, McpAuthState};
 use crate::net::server::ConnectionTracker;
+use crate::net::setup;
 use crate::net::protocol::*;
 use crate::token_store::TransientTokenStore;
 
@@ -79,8 +80,27 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .with_state(admin_state);
 
     let settings = config::Settings::load();
-    let public_url = settings.public_url
+    let public_url = settings.public_url.clone()
         .unwrap_or_else(|| format!("http://localhost:{}", config.port));
+
+    // First-run setup: with no owner email yet, mint a one-time token and
+    // advertise the setup URL (logged + written to SETUP-URL.txt so the deploy
+    // script can echo it). Reaching `/setup` requires this token; it dies once
+    // setup completes and the process restarts configured.
+    let configured = settings.user_email.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let setup_state = if configured {
+        setup::SetupState { token: None }
+    } else {
+        let token: Arc<str> = Arc::from(
+            format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()).as_str(),
+        );
+        let url = format!("{}/setup?token={}", public_url.trim_end_matches('/'), token);
+        tracing::info!(%url, "first-run setup — open this URL in a browser to configure Lumina");
+        if let Some(dir) = config::PathManager::data_dir() {
+            let _ = std::fs::write(dir.join("SETUP-URL.txt"), format!("{url}\n"));
+        }
+        setup::SetupState { token: Some(token) }
+    };
 
     let mcp_auth_state = McpAuthState {
         token_store: Arc::clone(&config.token_store),
@@ -100,6 +120,12 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/auth/mcp/{server_id}", get(mcp_auth::auth_initiate))
         .with_state(mcp_auth_state);
 
+    // First-run setup wizard (token-gated; 404s once configured).
+    let setup_routes = Router::new()
+        .route("/setup", get(setup::page))
+        .route("/setup/api/complete", axum::routing::post(setup::complete))
+        .with_state(setup_state);
+
     // RPC routes under /api/* — uses fallback handler for dynamic dispatch
     let api_routes = Router::new()
         .fallback(rest_or_stream_handler)
@@ -118,6 +144,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
         .route("/ws", get(ws_upgrade_handler))
         .merge(auth_routes)
         .merge(mcp_auth_routes)
+        .merge(setup_routes)
         .merge(admin_routes)
         .nest("/api", api_routes);
 

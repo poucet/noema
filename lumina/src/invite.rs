@@ -44,11 +44,20 @@ pub fn required_permissions() -> Permissions {
 /// while logged in as someone with **Manage Server** on the target
 /// guild; Discord walks you through the "Add to server" dialog.
 pub fn invite_url(app_id: u64) -> String {
-    let perms = required_permissions().bits();
-    format!(
-        "https://discord.com/oauth2/authorize\
-         ?client_id={app_id}\
-         &scope=bot+applications.commands\
-         &permissions={perms}"
-    )
+    // Permissions/scopes come from `config` so the daemon's setup page builds
+    // the same link without depending on this crate; the test below guards that
+    // `required_permissions()` stays equal to the shared constant.
+    let perms = config::DISCORD_INVITE_PERMISSIONS;
+    let scopes = config::DISCORD_INVITE_SCOPES.replace(' ', "+");
+    format!("https://discord.com/oauth2/authorize?client_id={app_id}&scope={scopes}&permissions={perms}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permissions_match_shared_constant() {
+        assert_eq!(required_permissions().bits(), config::DISCORD_INVITE_PERMISSIONS);
+    }
 }

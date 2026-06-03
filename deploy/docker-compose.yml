@@ -1,0 +1,32 @@
+# Lumina server deployment.
+#
+# TLS termination + the OAuth-route allowlist are handled by your existing HOST
+# nginx (see nginx-lumina.conf), not by anything in this compose file.
+#
+# `network_mode: host` makes the embedded daemon bind the HOST's 127.0.0.1:9800,
+# so host nginx can proxy to it. 9800 is loopback-only — never internet-facing.
+# The bot itself dials OUT to Discord; it needs no inbound ports.
+#
+# `restart: unless-stopped` is load-bearing: finishing the web setup wizard
+# exits the process so it restarts already-configured (Discord token in place).
+#
+# Run ./start.sh <domain> to launch and get the setup link. All per-server
+# config (Discord token, Google OAuth, API keys) is entered in the browser
+# wizard and written to data/config/*.toml — nothing secret lives in compose.
+
+services:
+  lumina:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: lumina:latest
+    container_name: lumina
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - NOEMA_DATA_DIR=/data
+      - RUST_LOG=${RUST_LOG:-info}
+    volumes:
+      # All config + state (SQLite, CAS blob store, vault) on the host, so it
+      # survives rebuilds and is editable over SSH.
+      - ./data:/data

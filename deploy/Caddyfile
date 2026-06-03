@@ -1,0 +1,2 @@
+# Unused. This deployment uses host nginx (see nginx-lumina.conf), not Caddy.
+# Kept only because the environment blocked deleting it — safe to remove.

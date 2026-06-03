@@ -39,12 +39,22 @@ async fn main() -> anyhow::Result<()> {
     let lumina_cfg = config::LuminaConfig::load();
     let settings = config::Settings::load();
 
-    let token = lumina_cfg
-        .bot_token()
-        .expect("DISCORD_BOT_TOKEN env var or discord.bot_token in lumina.toml is required");
-
-    // Connect to daemon — embedded (host or connect) or remote-only
+    // Connect to daemon — embedded (host or connect) or remote-only. Done
+    // FIRST so the first-run setup wizard at /setup is reachable even before a
+    // Discord token exists.
     let daemon = connect_daemon(&settings).await?;
+
+    // No Discord token yet → we can't reach the gateway. Stay up in setup mode
+    // (the daemon is serving /setup); completing setup writes lumina.toml and
+    // restarts the process, which then takes the normal path below.
+    let Some(token) = lumina_cfg.bot_token().map(str::to_string) else {
+        tracing::warn!(
+            "No Discord token yet — running in setup mode. \
+             Open the setup URL in your browser (see SETUP-URL.txt or the log line above)."
+        );
+        std::future::pending::<()>().await;
+        return Ok(());
+    };
 
     // Open the Lumina-owned tool-state DB (Discord message id →
     // structured ToolCall/ToolResult JSON). Separate file under

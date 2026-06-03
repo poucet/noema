@@ -1,0 +1,15 @@
+# Keep the Docker build context small — only Rust sources are needed.
+target
+**/target
+node_modules
+**/node_modules
+**/dist
+.git
+.jj
+logs
+deploy/data
+*.log
+
+# Embedded assets compiled into the daemon via include_str! MUST stay in the
+# build context — never ignore them (e.g. don't add a blanket *.html rule).
+!simply-daemon/src/**/*.html

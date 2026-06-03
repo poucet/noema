@@ -1,0 +1,51 @@
+# Lumina (Discord bot + embedded simply-daemon) — server image.
+#
+# Build context is the WORKSPACE ROOT (see docker-compose.yml: context = ..),
+# so paths below are relative to the repo root.
+#
+# Only the `lumina` binary is built. It pulls in `simply-daemon` via the
+# default `embedded` feature, which hosts the daemon in-process and listens on
+# 127.0.0.1:9800 — never on a public interface (Caddy proxies the OAuth routes).
+
+# ---------------------------------------------------------------------------
+# Builder
+# ---------------------------------------------------------------------------
+FROM rust:1-bookworm AS builder
+
+# Native deps: openssl (reqwest), sqlite/rusqlite (bundled needs a C toolchain,
+# present in the rust image), plus cmake/clang for any crate using bindgen.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev cmake clang libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+
+# SKIP_ADMIN_BUILD=1 guarantees the daemon's build.rs never runs the admin-UI
+# npm build. (It is already skipped because simply-daemon is a transitive dep
+# here, not the primary package — but we make it explicit so no Node is needed.)
+ENV SKIP_ADMIN_BUILD=1
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --bin lumina \
+    && cp target/release/lumina /usr/local/bin/lumina
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/lumina /usr/local/bin/lumina
+
+# All config + state (SQLite, vault, blob storage) lives under NOEMA_DATA_DIR,
+# which we mount as a volume so it survives container rebuilds.
+ENV NOEMA_DATA_DIR=/data
+ENV RUST_LOG=info
+VOLUME ["/data"]
+
+ENTRYPOINT ["/usr/local/bin/lumina"]
