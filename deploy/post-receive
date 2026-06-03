@@ -1,0 +1,65 @@
+#!/bin/bash
+# Git hook to deploy Lumina when code is pushed to main.
+#
+# Install on the server by extracting it from the pushed repo into the bare
+# repo's hooks dir and making it executable:
+#
+#   git --git-dir=~/projects/lumina.git show main:deploy/post-receive \
+#       > ~/projects/lumina.git/hooks/post-receive
+#   chmod +x ~/projects/lumina.git/hooks/post-receive
+#
+# Unlike the other apps, Lumina's compose file lives in the deploy/ subdir, so
+# we cd into $DEPLOY_DIR/deploy. Persistent state (deploy/data — config, SQLite,
+# CAS blobs) is untracked/gitignored and survives `checkout -f`.
+#
+# NOTE: this is a Rust build, so the first `git push` blocks for several minutes
+# while it compiles (subsequent builds reuse the cargo cache and are faster).
+
+set -u
+
+GIT_REPO="$HOME/projects/lumina.git"
+DEPLOY_DIR="$HOME/apps/lumina"
+COMPOSE_DIR="$DEPLOY_DIR/deploy"
+BRANCH="main"
+LOG_DIR="$HOME/logs"
+LOG_FILE="$LOG_DIR/lumina-deploy-$(date +%Y%m%d-%H%M%S).log"
+
+mkdir -p "$LOG_DIR"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=== lumina deployment started at $(date) ==="
+
+while read oldrev newrev ref; do
+  if [[ "$ref" != "refs/heads/$BRANCH" ]]; then
+    echo "Ignoring push to $ref (not $BRANCH)"
+    continue
+  fi
+
+  echo "Deploying $BRANCH to $DEPLOY_DIR"
+
+  mkdir -p "$DEPLOY_DIR"
+  git --work-tree="$DEPLOY_DIR" --git-dir="$GIT_REPO" checkout -f "$BRANCH"
+
+  cd "$COMPOSE_DIR" || { echo "!!! missing $COMPOSE_DIR"; exit 1; }
+
+  # Build first so a broken build doesn't take down the running container.
+  echo "Building container image..."
+  if ! docker compose build; then
+    echo "!!! docker compose build FAILED — keeping previous container running"
+    exit 1
+  fi
+
+  # Rolling replace. `up -d` only recreates when the image/config changed, so
+  # no-op pushes are essentially free. Persistent data/ is bind-mounted and
+  # untouched.
+  echo "Starting container..."
+  docker compose up -d --remove-orphans
+
+  echo "Pruning dangling images to reclaim disk..."
+  docker image prune -f
+
+  echo "Current container status:"
+  docker compose ps
+
+  echo "=== lumina deployment finished at $(date) ==="
+done

@@ -86,6 +86,31 @@ from `settings.toml`) and `./start.sh <domain>` again.
 2. Google redirects to `https://<domain>/auth/mcp/callback`.
 3. nginx proxies that route to the daemon, which stores their token. Done.
 
+## Git-push deploy (auto-deploy on push)
+
+`deploy/post-receive` is a hook for the bare deploy repo
+(`~/projects/lumina.git`) that, on every push to `main`, checks the code out
+into `~/apps/lumina`, rebuilds the image, and rolling-restarts the container.
+Persistent `deploy/data/` (config, DB, blobs) is untracked and survives.
+
+Install it once on the server:
+
+```bash
+git --git-dir=~/projects/lumina.git show main:deploy/post-receive \
+    > ~/projects/lumina.git/hooks/post-receive
+chmod +x ~/projects/lumina.git/hooks/post-receive
+```
+
+After that, from your laptop:
+
+```bash
+git push deploy HEAD:refs/heads/main     # builds + restarts on the server
+```
+
+First-time only: run `./start.sh <domain>` on the server once to seed
+`public_url` and get the setup link; later pushes just rebuild + restart.
+(The Rust build means the first push blocks a few minutes while it compiles.)
+
 ## Notes
 
 - Admin login via Google (so the admin pages can be opened over the internet as
