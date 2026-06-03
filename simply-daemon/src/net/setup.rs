@@ -116,7 +116,10 @@ pub async fn complete(
     // Respond first, then exit so the supervisor restarts us already configured;
     // on the next boot the Discord token in lumina.toml lets the bot connect.
     tokio::spawn(async {
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        // Wait long enough for the 200 to flow back through nginx + Cloudflare to
+        // the browser before the process exits (an early exit severs the
+        // connection → the user sees a 502 instead of the success screen).
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         tracing::info!("setup complete — restarting to apply configuration");
         std::process::exit(0);
     });

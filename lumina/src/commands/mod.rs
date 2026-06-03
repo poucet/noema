@@ -59,7 +59,9 @@ impl TypeMapKey for SharedState {
 pub struct LuminaContext {
     pub ctx: Context,
     pub daemon: Arc<dyn Daemon>,
-    pub config: config::LuminaConfig,
+    // `::config` (leading colon) = the external `config` crate, not the sibling
+    // `commands::config` module (the /config command), which would shadow it.
+    pub config: ::config::LuminaConfig,
     pub state: Arc<SharedState>,
 }
 

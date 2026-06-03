@@ -44,16 +44,21 @@ async fn main() -> anyhow::Result<()> {
     // Discord token exists.
     let daemon = connect_daemon(&settings).await?;
 
-    // No Discord token yet → we can't reach the gateway. Stay up in setup mode
-    // (the daemon is serving /setup); completing setup writes lumina.toml and
-    // restarts the process, which then takes the normal path below.
-    let Some(token) = lumina_cfg.bot_token().map(str::to_string) else {
-        tracing::warn!(
-            "No Discord token yet — running in setup mode. \
-             Open the setup URL in your browser (see SETUP-URL.txt or the log line above)."
-        );
-        std::future::pending::<()>().await;
-        return Ok(());
+    // Only connect to Discord when FULLY set up: we need both the owner email
+    // (settings.toml) and a bot token (lumina.toml). Otherwise stay up in setup
+    // mode so the daemon keeps serving /setup. This also avoids trying a stale
+    // token after `reset-setup.sh` clears the owner email but leaves the token.
+    let configured = settings.user_email.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+    let token = match (configured, lumina_cfg.bot_token()) {
+        (true, Some(t)) => t.to_string(),
+        _ => {
+            tracing::warn!(
+                "Not fully configured yet — running in setup mode. Finish setup in your \
+                 browser (see SETUP-URL.txt or the log line above)."
+            );
+            std::future::pending::<()>().await;
+            return Ok(());
+        }
     };
 
     // Open the Lumina-owned tool-state DB (Discord message id →
@@ -104,7 +109,18 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     tracing::info!("lumina starting");
-    client.start().await?;
+    // Don't let a Discord failure (e.g. a reset/invalid bot token → 401) crash
+    // the process: that would also take down the embedded daemon and its setup
+    // wizard, creating a crash loop you can't fix. Log and stay up instead; the
+    // operator fixes the token via setup and restarts to reconnect.
+    if let Err(e) = client.start().await {
+        tracing::error!(
+            error = %e,
+            "Discord connection failed — keeping the daemon (and setup wizard) up. \
+             Fix the bot token via setup, then restart to reconnect."
+        );
+        std::future::pending::<()>().await;
+    }
 
     Ok(())
 }
