@@ -155,24 +155,32 @@ async fn register_skills(daemon: &Arc<dyn Daemon>, discord: &mcp::DiscordSkill) 
 // ---------------------------------------------------------------------------
 
 fn setup_logging() {
+    use tracing_subscriber::prelude::*;
+
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             "lumina=debug,simply_daemon=info,simply_core=debug,mcp_gdocs=debug".into()
         });
 
-    if let Ok(log_path) = std::env::var("LUMINA_LOG_FILE") {
-        let file = std::fs::File::create(&log_path).expect("failed to create log file");
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .with_writer(file)
-            .with_ansi(false)
-            .init();
-        eprintln!("Logging to {log_path}");
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .init();
-    };
+    // Always log to stdout (captured by `docker compose logs`). Additionally,
+    // when a data dir is available, mirror logs to <data>/logs/lumina.log
+    // (daily-rolled) so they're visible on the host bind mount.
+    let file_layer = config::PathManager::logs_dir().and_then(|dir| {
+        std::fs::create_dir_all(&dir).ok()?;
+        let (writer, guard) =
+            tracing_appender::non_blocking(tracing_appender::rolling::daily(&dir, "lumina.log"));
+        // The worker guard must outlive the program or buffered logs are lost.
+        static GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+            std::sync::OnceLock::new();
+        let _ = GUARD.set(guard);
+        Some(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(writer))
+    });
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(file_layer)
+        .init();
 }
 
 // ---------------------------------------------------------------------------

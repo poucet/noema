@@ -17,6 +17,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Response};
 use serde::Deserialize;
 
+use llm::{GeneralModelProvider, ModelProvider};
+
 use crate::oauth::providers::{self, OAuthProvider};
 
 const SETUP_HTML: &str = include_str!("setup.html");
@@ -70,11 +72,18 @@ pub async fn page(State(state): State<SetupState>, Query(q): Query<PageQuery>) -
 }
 
 #[derive(Deserialize)]
+pub struct ApiKeyEntry {
+    provider: String,
+    api_key: String,
+}
+
+#[derive(Deserialize)]
 pub struct CompleteReq {
     email: String,
     default_model: String,
-    llm_provider: String,
-    llm_api_key: String,
+    /// One or more LLM provider keys (mistral, claude, openai, …).
+    #[serde(default)]
+    api_keys: Vec<ApiKeyEntry>,
     discord_bot_token: String,
     #[serde(default)]
     owner_id: Option<u64>,
@@ -115,6 +124,43 @@ pub async fn complete(
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
+#[derive(Deserialize)]
+pub struct ModelsReq {
+    provider: String,
+    api_key: String,
+}
+
+/// POST /setup/api/models — list a provider's real model ids using the
+/// just-entered key. Done server-side because browsers can't call LLM APIs
+/// directly (CORS), and it gives canonical ids so users don't hand-type them.
+pub async fn models(
+    State(state): State<SetupState>,
+    headers: HeaderMap,
+    Json(req): Json<ModelsReq>,
+) -> Response {
+    let provided = headers.get("X-Setup-Token").and_then(|v| v.to_str().ok());
+    if is_configured() || !token_ok(&state, provided) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let (provider, key) = (req.provider.trim(), req.api_key.trim());
+    if provider.is_empty() || key.is_empty() {
+        return (StatusCode::BAD_REQUEST, "provider and api_key required").into_response();
+    }
+    match list_provider_models(provider, key).await {
+        Ok(ids) => Json(serde_json::json!({ "models": ids })).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("could not list models: {e}")).into_response(),
+    }
+}
+
+/// Build a provider from the raw key (no settings needed) and list its models
+/// as full `provider/model` ids.
+async fn list_provider_models(provider: &str, api_key: &str) -> anyhow::Result<Vec<String>> {
+    let p = GeneralModelProvider::from_name_with_key(provider, Some(api_key))?;
+    let mut models = p.list_models().await?;
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(models.into_iter().map(|d| format!("{provider}/{}", d.id)).collect())
+}
+
 /// Persist the wizard's answers across settings.toml / lumina.toml / oauth_providers.toml.
 fn apply(req: CompleteReq) -> Result<(), String> {
     let trim_opt = |s: Option<String>| {
@@ -128,7 +174,12 @@ fn apply(req: CompleteReq) -> Result<(), String> {
     if let Some(pu) = trim_opt(req.public_url) {
         settings.public_url = Some(pu);
     }
-    settings.set_api_key(req.llm_provider.trim(), req.llm_api_key.trim())?;
+    for entry in &req.api_keys {
+        let (provider, key) = (entry.provider.trim(), entry.api_key.trim());
+        if !provider.is_empty() && !key.is_empty() {
+            settings.set_api_key(provider, key)?;
+        }
+    }
     settings.save()?;
 
     // lumina.toml — Discord identity.

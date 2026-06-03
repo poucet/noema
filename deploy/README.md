@@ -57,6 +57,7 @@ editable over SSH. The wizard writes the `config/*.toml` files for you:
 | `data/database/noema.db`           | SQLite (sessions, entities, content)       |
 | `data/blob_storage/`               | content-addressed (CAS) blob store         |
 | `data/vault/`                      | Markdown vault files                       |
+| `data/logs/lumina.log`             | app logs (daily-rolled; also in `docker compose logs`) |
 | `data/SETUP-URL.txt`               | the current setup link (deleted on setup)  |
 
 ## Prerequisites
@@ -77,8 +78,15 @@ vim data/config/settings.toml      # e.g. add an api key / change model
 docker compose restart lumina
 ```
 
-To re-run the wizard from scratch, clear the owner email (remove `user_email`
-from `settings.toml`) and `./start.sh <domain>` again.
+To re-run the setup wizard from scratch, use the helper — it clears the owner
+email, restarts, and prints a fresh setup link:
+
+```bash
+./reset-setup.sh
+```
+
+Logs are both in `docker compose logs -f lumina` and on disk at
+`data/logs/lumina.log` (daily-rolled).
 
 ## How a Discord user imports Google Docs
 

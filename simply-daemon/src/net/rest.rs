@@ -123,6 +123,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<ServerHandle> {
     // First-run setup wizard (token-gated; 404s once configured).
     let setup_routes = Router::new()
         .route("/setup", get(setup::page))
+        .route("/setup/api/models", axum::routing::post(setup::models))
         .route("/setup/api/complete", axum::routing::post(setup::complete))
         .with_state(setup_state);
 
