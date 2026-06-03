@@ -6,6 +6,7 @@
 
 mod auth;
 pub mod chat;
+mod config;
 mod google;
 mod invite;
 mod model;
