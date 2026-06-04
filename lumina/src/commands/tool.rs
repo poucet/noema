@@ -236,10 +236,8 @@ async fn cmd_call(lx: &LuminaContext, cmd: &CommandInteraction, tool_name: &str)
     let params = extract_params(&schema);
 
     if params.is_empty() {
-        // No params — execute immediately
-        let result = lx.daemon.tools()
-            .call_tool(tool_name, serde_json::Value::Object(Default::default()))
-            .await;
+        // No params — execute immediately, scoped to the invoking Discord user.
+        let result = call_tool_as_user(lx, cmd.user.id.get(), tool_name, serde_json::Map::new()).await;
         send_tool_result_from_service(lx, cmd, tool_name, result).await
     } else {
         // Build modal with input fields (Discord max: 5 components)
@@ -482,9 +480,7 @@ pub async fn handle_modal(lx: &LuminaContext, modal: &serenity::model::applicati
         CreateInteractionResponseMessage::new(),
     )).await?;
 
-    let result = lx.daemon.tools()
-        .call_tool(tool_name, serde_json::Value::Object(args))
-        .await;
+    let result = call_tool_as_user(lx, modal.user.id.get(), tool_name, args).await;
 
     send_tool_result_from_service(lx, modal.channel_id, tool_name, result).await?;
     modal.delete_response(&lx.http).await.ok();
@@ -676,6 +672,31 @@ impl From<serenity::model::id::ChannelId> for SendTarget<'_> {
 fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
+}
+
+/// Call a tool on behalf of the invoking Discord user.
+///
+/// Resolves the Discord id to a daemon `RequestContext` (carrying user identity
+/// and any stored OAuth tokens) and dispatches via `call_tool_direct` — the same
+/// scoped path normal chat and `/google` use. The anonymous `tools().call_tool()`
+/// shortcut is what made `/tool call entity__list_entities` fail with
+/// "authentication required": it dropped the caller's identity. Returns
+/// `Vec<ToolResultContent>` so callers render through the unified `tool_render`.
+async fn call_tool_as_user(
+    lx: &LuminaContext,
+    discord_user_id: u64,
+    tool_name: &str,
+    args: serde_json::Map<String, serde_json::Value>,
+) -> anyhow::Result<Vec<simply_daemon_api::ToolResultContent>> {
+    let ctx = lx.ctx_for(discord_user_id).await;
+    let request = simply_daemon_api::CallToolRequestParams::new(tool_name.to_string())
+        .with_arguments(args);
+    let result = lx.daemon.mcp().call_tool_direct(&ctx, request).await?;
+    Ok(result.content.into_iter().map(|c| match c.raw {
+        rmcp::model::RawContent::Text(t) => simply_daemon_api::ToolResultContent::text(t.text),
+        rmcp::model::RawContent::Image(img) => simply_daemon_api::ToolResultContent::image(img.data, img.mime_type),
+        _ => simply_daemon_api::ToolResultContent::text("[unsupported content type]"),
+    }).collect())
 }
 
 async fn send_result(
