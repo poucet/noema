@@ -4,7 +4,6 @@
 //! Use `register_command!` for stateful commands that need custom constructors.
 //! No manual dispatch table — `inventory` collects them at link time.
 
-mod auth;
 pub mod chat;
 mod config;
 mod google;
