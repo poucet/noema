@@ -68,27 +68,29 @@ impl super::SlashCommand for Google {
     }
 
     async fn autocomplete(&self, lx: &LuminaContext, ac: &CommandInteraction) -> anyhow::Result<()> {
-        let opts = ac.data.options();
-        let sub = match opts.first() {
-            Some(o) if o.name == "import" => o,
-            _ => return Ok(()),
-        };
-
-        let partial = if let ResolvedValue::SubCommand(ref sub_opts) = sub.value {
-            sub_opts.iter().find_map(|o| match o {
-                ResolvedOption { name: "doc", value: ResolvedValue::String(s), .. } => Some(s.to_string()),
-                _ => None,
-            }).unwrap_or_default()
-        } else { String::new() };
+        // The focused autocomplete value. `data.autocomplete()` recurses into the
+        // `import` subcommand and returns the `doc` option being typed — its value
+        // arrives with kind Autocomplete, NOT a plain String, so the old code read
+        // it as `ResolvedValue::String` and always got an empty string (→ nothing
+        // ever filtered).
+        let Some(focused) = ac.data.autocomplete() else { return Ok(()); };
+        if focused.name != "doc" {
+            return Ok(());
+        }
+        let partial = focused.value.to_string();
 
         tracing::debug!(partial = %partial, discord_id = ac.user.id.get(), "gdocs autocomplete: calling gdocs_list");
 
-        // Fetch a broad set of the user's docs and substring-filter by title
-        // client-side. Google Drive's `name contains` only does word-prefix
-        // matching, so filtering here gives true substring matching on the title.
+        // Filter server-side so it works across the WHOLE Drive (not just a
+        // fetched page): gdocs_list's `query` does `name contains` on Drive.
+        // Then keep a client-side name filter to drop any content-only matches
+        // (the server query also matches body text) so the title picker is tight.
         let needle = partial.to_lowercase();
         let choices = match call_tool(lx, ac.user.id.get(), "gdocs_list",
-            serde_json::json!({ "limit": 100 }),
+            serde_json::json!({
+                "query": if partial.is_empty() { None } else { Some(&partial) },
+                "limit": 100,
+            }),
         ).await {
             Ok(text) => {
                 let docs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap_or_else(|e| {
