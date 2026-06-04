@@ -72,12 +72,15 @@ impl SlashCommand for Config {
             return lx.reply_ephemeral(cmd, &format!("Failed to save config: {e}")).await;
         }
 
-        // Also update the live in-memory config: `/chat new` reads the shared
-        // ConfigKey on each invocation, so the AI category takes effect at once.
-        // The status channel is captured by the gateway handler at startup, so
-        // it only applies after a restart.
-        {
-            let mut data = lx.ctx.data.write().await;
+        // Also update the live in-memory config so `/chat new` (which reads the
+        // shared ConfigKey) picks up the AI category without a restart. This MUST
+        // be deferred to a spawned task: the interaction dispatcher holds a READ
+        // lock on ctx.data for the duration of this command, so write-locking
+        // inline would deadlock (the command would hang and never respond). The
+        // spawned write runs once dispatch releases the read lock.
+        let ctx = lx.ctx.clone();
+        tokio::spawn(async move {
+            let mut data = ctx.data.write().await;
             if let Some(c) = data.get_mut::<crate::ConfigKey>() {
                 if let Some(id) = status_channel {
                     c.discord.status_channel_id = Some(id);
@@ -86,7 +89,7 @@ impl SlashCommand for Config {
                     c.discord.ai_chats_category_id = Some(id);
                 }
             }
-        }
+        });
 
         let mut msg = String::from("✅ Saved:");
         if let Some(id) = ai_category {
