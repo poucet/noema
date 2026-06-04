@@ -366,9 +366,12 @@ impl GoogleDocsClient {
         // Filter to only Google Docs
         let mut q = "mimeType='application/vnd.google-apps.document'".to_string();
 
-        // Add user query if provided
+        // Add user query if provided. Match the title (name) as well as content —
+        // `fullText contains` alone only searches body text, so searching by a
+        // document's title wouldn't reliably match.
         if let Some(user_query) = query {
-            q = format!("{} and fullText contains '{}'", q, user_query.replace('\'', "\\'"));
+            let esc = user_query.replace('\'', "\\'");
+            q = format!("{q} and (name contains '{esc}' or fullText contains '{esc}')");
         }
 
         url = format!("{}&q={}", url, urlencoding::encode(&q));

@@ -83,26 +83,33 @@ impl super::SlashCommand for Google {
 
         tracing::debug!(partial = %partial, discord_id = ac.user.id.get(), "gdocs autocomplete: calling gdocs_list");
 
-        // Use gdocs_list tool for autocomplete
+        // Fetch a broad set of the user's docs and substring-filter by title
+        // client-side. Google Drive's `name contains` only does word-prefix
+        // matching, so filtering here gives true substring matching on the title.
+        let needle = partial.to_lowercase();
         let choices = match call_tool(lx, ac.user.id.get(), "gdocs_list",
-            serde_json::json!({ "query": if partial.is_empty() { None } else { Some(&partial) }, "limit": 25 }),
+            serde_json::json!({ "limit": 100 }),
         ).await {
             Ok(text) => {
-                tracing::debug!(text_len = text.len(), "gdocs_list returned");
-                let docs: Vec<serde_json::Value> = match serde_json::from_str(&text) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        tracing::warn!(error = %e, text = %text, "failed to parse gdocs_list response");
-                        Vec::new()
-                    }
-                };
-                tracing::debug!(doc_count = docs.len(), "gdocs_list parsed");
-                docs.iter().take(25).filter_map(|d| {
-                    let id = d.get("id")?.as_str()?;
-                    let name = d.get("name")?.as_str()?;
-                    let display = if name.len() > 100 { format!("{}...", &name[..97]) } else { name.to_string() };
-                    Some(AutocompleteChoice::new(display, id))
-                }).collect()
+                let docs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "failed to parse gdocs_list response");
+                    Vec::new()
+                });
+                tracing::debug!(doc_count = docs.len(), needle = %needle, "gdocs autocomplete: filtering");
+                docs.iter()
+                    .filter_map(|d| Some((d.get("id")?.as_str()?, d.get("name")?.as_str()?)))
+                    .filter(|(_, name)| needle.is_empty() || name.to_lowercase().contains(&needle))
+                    .take(25)
+                    .map(|(id, name)| {
+                        // char-safe truncation to Discord's 100-char choice limit
+                        let display = if name.chars().count() > 100 {
+                            format!("{}…", name.chars().take(99).collect::<String>())
+                        } else {
+                            name.to_string()
+                        };
+                        AutocompleteChoice::new(display, id)
+                    })
+                    .collect()
             }
             Err(e) => {
                 tracing::warn!(error = %e, "gdocs_list call failed");
