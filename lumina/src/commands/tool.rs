@@ -549,81 +549,6 @@ fn parse_smart_value(s: &str) -> serde_json::Value {
     serde_json::Value::String(s.to_string())
 }
 
-/// Format a CallToolResult into Discord messages (embed + optional attachments).
-async fn send_tool_result(
-    lx: &LuminaContext,
-    channel_id: serenity::model::id::ChannelId,
-    tool_name: &str,
-    result: anyhow::Result<simply_daemon_api::CallToolResult>,
-) -> anyhow::Result<()> {
-    match result {
-        Ok(r) => {
-            let is_error = r.is_error.unwrap_or(false);
-            let color = if is_error { 0xE74C3C } else { 0x2ECC71 };
-            let mut text_parts = Vec::new();
-
-            for content in &r.content {
-                match &content.raw {
-                    rmcp::model::RawContent::Text(t) => {
-                        text_parts.push(t.text.to_string());
-                    }
-                    rmcp::model::RawContent::Image(img) => {
-                        if let Ok(bytes) = base64_decode(&img.data) {
-                            let ext = img.mime_type.split('/').last().unwrap_or("png");
-                            let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("result.{ext}"));
-                            channel_id.send_message(&lx.http, CreateMessage::new().add_file(attachment)).await?;
-                        }
-                    }
-                    rmcp::model::RawContent::Audio(audio) => {
-                        if let Ok(bytes) = base64_decode(&audio.data) {
-                            let ext = audio.mime_type.split('/').last().unwrap_or("mp3");
-                            let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("result.{ext}"));
-                            channel_id.send_message(&lx.http, CreateMessage::new().add_file(attachment)).await?;
-                        }
-                    }
-                    rmcp::model::RawContent::Resource(res) => {
-                        match &res.resource {
-                            rmcp::model::ResourceContents::TextResourceContents { text, .. } => {
-                                text_parts.push(text.to_string());
-                            }
-                            rmcp::model::ResourceContents::BlobResourceContents { blob, mime_type, .. } => {
-                                if let Ok(bytes) = base64_decode(blob) {
-                                    let ext = mime_type.as_deref().and_then(|m| m.split('/').last()).unwrap_or("bin");
-                                    let attachment = serenity::builder::CreateAttachment::bytes(bytes, format!("result.{ext}"));
-                                    channel_id.send_message(&lx.http, CreateMessage::new().add_file(attachment)).await?;
-                                }
-                            }
-                        }
-                    }
-                    rmcp::model::RawContent::ResourceLink(link) => {
-                        text_parts.push(format!("Resource: {}", link.uri));
-                    }
-                }
-            }
-
-            if let Some(structured) = &r.structured_content {
-                text_parts.push(crate::json_fmt::pretty_compact(structured));
-            }
-
-            let body = text_parts.join("\n");
-            let body = if body.len() > 4000 { format!("{}...", &body[..3997]) } else { body };
-            let embed = CreateEmbed::new()
-                .title(format!("Tool: {tool_name}"))
-                .description(body)
-                .color(color);
-            channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
-        }
-        Err(e) => {
-            let embed = CreateEmbed::new()
-                .title(format!("Tool: {tool_name} (error)"))
-                .description(format!("{e}"))
-                .color(0xE74C3C);
-            channel_id.send_message(&lx.http, CreateMessage::new().embed(embed)).await?;
-        }
-    }
-    Ok(())
-}
-
 /// Send a ToolService result (Vec<ToolResultContent>) as a Discord response.
 ///
 /// Defers the Command target's interaction (tool calls may take time),
@@ -669,11 +594,6 @@ impl From<serenity::model::id::ChannelId> for SendTarget<'_> {
     fn from(id: serenity::model::id::ChannelId) -> Self { Self::Channel(id) }
 }
 
-fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
-    use base64::Engine;
-    Ok(base64::engine::general_purpose::STANDARD.decode(data)?)
-}
-
 /// Call a tool on behalf of the invoking Discord user.
 ///
 /// Resolves the Discord id to a daemon `RequestContext` (carrying user identity
@@ -699,18 +619,3 @@ async fn call_tool_as_user(
     }).collect())
 }
 
-async fn send_result(
-    lx: &LuminaContext,
-    cmd: &CommandInteraction,
-    tool_name: &str,
-    result: anyhow::Result<simply_daemon_api::CallToolResult>,
-) -> anyhow::Result<()> {
-    // Acknowledge first, then send result to the channel
-    cmd.create_response(&lx.http, CreateInteractionResponse::Defer(
-        CreateInteractionResponseMessage::new(),
-    )).await?;
-    send_tool_result(lx, cmd.channel_id, tool_name, result).await?;
-    // Delete the deferred "thinking" message
-    cmd.delete_response(&lx.http).await.ok();
-    Ok(())
-}
