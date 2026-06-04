@@ -10,9 +10,16 @@ use super::LuminaContext;
 #[slash_command(description = "Link your Discord account to the daemon via Google sign-in")]
 async fn auth(lx: &LuminaContext, cmd: &CommandInteraction) -> anyhow::Result<()> {
     let base_url = lx.daemon.core().public_url().await?;
-    let discord_id = cmd.user.id.get().to_string();
+    let external_id = format!("discord:{}", cmd.user.id.get());
 
-    let auth_url = format!("{base_url}/auth/login?discord_id={discord_id}");
+    // Use the per-user OAuth flow at /auth/mcp/{provider} — the only auth path
+    // exposed publicly (nginx allowlists /auth/mcp/*). `/auth/login` was never a
+    // real route. The callback get-or-creates the user by Google email and links
+    // this discord external_id to that user.
+    let auth_url = format!(
+        "{base_url}/auth/mcp/google?external_id={}",
+        urlencoding::encode(&external_id),
+    );
 
     let response = CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
