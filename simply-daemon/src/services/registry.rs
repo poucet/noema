@@ -23,6 +23,48 @@ use crate::api::*;
 use crate::mcp::McpService;
 use super::tools::DaemonToolService;
 
+/// Newly-minted token from a refresh-token exchange.
+struct RefreshedToken {
+    access_token: String,
+    expires_in: Option<u64>,
+    refresh_token: Option<String>,
+}
+
+/// Exchange a refresh token for a fresh access token at the provider's token endpoint.
+async fn refresh_access_token(
+    provider: &crate::oauth::providers::OAuthProvider,
+    refresh_token: &str,
+) -> anyhow::Result<RefreshedToken> {
+    let client = reqwest::Client::new();
+    let mut params: Vec<(&str, &str)> = vec![
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+        ("client_id", provider.client_id.as_str()),
+    ];
+    let secret;
+    if let Some(s) = &provider.client_secret {
+        secret = s.clone();
+        params.push(("client_secret", &secret));
+    }
+    let resp = client.post(&provider.token_url).form(&params).send().await?;
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("refresh token exchange failed: {body}");
+    }
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        access_token: String,
+        expires_in: Option<u64>,
+        refresh_token: Option<String>,
+    }
+    let r: Resp = resp.json().await?;
+    Ok(RefreshedToken {
+        access_token: r.access_token,
+        expires_in: r.expires_in,
+        refresh_token: r.refresh_token,
+    })
+}
+
 /// Unified tool registry — all tool providers in one place.
 pub struct ToolRegistry {
     /// Daemon's own REST API methods exposed as tools.
@@ -108,12 +150,14 @@ impl ToolRegistry {
             }
         }
 
-        // OAuth providers (used by skills and OAuth MCP servers) — tokens keyed by provider_id.
+        // OAuth providers (used by skills and OAuth MCP servers) — tokens keyed
+        // by provider_id. Refreshes an expired access token from its refresh
+        // token when possible, so persisted logins keep working after expiry.
         let known = crate::oauth::providers::known_providers();
         for provider_id in &known {
             if !ctx.tokens.contains_key(provider_id) {
-                if let Some(token) = self.token_store.get(&user_id, provider_id) {
-                    ctx.tokens.insert(provider_id.clone(), token.access_token);
+                if let Some(access) = self.resolve_access_token(&user_id, provider_id).await {
+                    ctx.tokens.insert(provider_id.clone(), access);
                 }
             }
         }
@@ -127,6 +171,43 @@ impl ToolRegistry {
         );
 
         ctx
+    }
+
+    /// Resolve a usable access token for (user, provider): return the stored one
+    /// if still valid, otherwise refresh it using the stored refresh token.
+    /// Returns None if there's no token, no refresh token, or the refresh fails.
+    async fn resolve_access_token(
+        &self,
+        user_id: &simply_core::storage::ids::UserId,
+        provider_id: &str,
+    ) -> Option<String> {
+        let token = self.token_store.get_raw(user_id, provider_id)?;
+        if !token.is_expired() {
+            return Some(token.access_token);
+        }
+        let refresh = token.refresh_token.clone()?;
+        let provider = crate::oauth::providers::lookup_provider(provider_id)?;
+        match refresh_access_token(&provider, &refresh).await {
+            Ok(r) => {
+                self.token_store.store(
+                    user_id,
+                    provider_id,
+                    crate::token_store::McpUserToken {
+                        access_token: r.access_token.clone(),
+                        // Google usually omits refresh_token on refresh — keep ours.
+                        refresh_token: r.refresh_token.or(token.refresh_token),
+                        expires_at: r.expires_in.map(|s| crate::token_store::now_unix() + s as i64),
+                        identity: token.identity,
+                    },
+                );
+                tracing::info!(provider_id, user_id = %user_id, "refreshed expired OAuth access token");
+                Some(r.access_token)
+            }
+            Err(e) => {
+                tracing::warn!(provider_id, error = %e, "OAuth token refresh failed");
+                None
+            }
+        }
     }
 
     /// Get a ToolService bound to a specific request context (user + tokens +
