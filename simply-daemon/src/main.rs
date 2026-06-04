@@ -31,7 +31,10 @@ async fn main() -> anyhow::Result<()> {
 
     let stores = Arc::new(simply_daemon::storage::SqliteStores::open()?);
     let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
-    let token_store = Arc::new(simply_daemon::services::token_store::TransientTokenStore::new());
+    let token_store = Arc::new(match config::PathManager::data_dir() {
+        Some(d) => simply_daemon::services::token_store::TransientTokenStore::with_persistence(d.join("tokens.json")),
+        None => simply_daemon::services::token_store::TransientTokenStore::new(),
+    });
     let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
 
     let handle = simply_daemon::builder::DaemonBuilder {

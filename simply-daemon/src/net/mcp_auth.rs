@@ -11,7 +11,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -211,6 +210,8 @@ pub async fn auth_callback(
     struct TokenResponse {
         access_token: String,
         expires_in: Option<u64>,
+        /// Present when the provider grants offline access (we request it).
+        refresh_token: Option<String>,
     }
 
     let token_resp: TokenResponse = match resp.json().await {
@@ -220,7 +221,7 @@ pub async fn auth_callback(
 
     let expires_at = token_resp
         .expires_in
-        .map(|secs| Instant::now() + Duration::from_secs(secs));
+        .map(|secs| crate::token_store::now_unix() + secs as i64);
 
     // Resolve the user: email is canonical. Get-or-create a user by email and
     // link the external_id to it. If the external_id was previously linked
@@ -258,6 +259,7 @@ pub async fn auth_callback(
         &oauth_state.provider_id,
         McpUserToken {
             access_token: token_resp.access_token,
+            refresh_token: token_resp.refresh_token,
             expires_at,
             identity: Some(email.clone()),
         },

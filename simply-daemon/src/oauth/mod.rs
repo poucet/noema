@@ -228,6 +228,7 @@ async fn complete_server_token_exchange(
     let server_user = UserId::from_string(&format!("server:{server_id}"));
     token_store.store(&server_user, server_id, McpUserToken {
         access_token: tokens.access_token.clone(),
+        refresh_token: None,
         expires_at: None,
         identity: None,
     });

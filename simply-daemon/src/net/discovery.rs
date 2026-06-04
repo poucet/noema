@@ -111,7 +111,10 @@ pub async fn connect_or_host(
     let stores = Arc::new(SqliteStores::open()?);
     let user_store = stores.sqlite();
     let vector_store: Arc<dyn simply_core::embedding::VectorStore> = stores.sqlite();
-    let token_store = Arc::new(crate::token_store::TransientTokenStore::new());
+    let token_store = Arc::new(match config::PathManager::data_dir() {
+        Some(d) => crate::token_store::TransientTokenStore::with_persistence(d.join("tokens.json")),
+        None => crate::token_store::TransientTokenStore::new(),
+    });
     let coordinator = Arc::new(simply_core::storage::coordinator::StorageCoordinator::from_stores(&*stores));
     let handle = crate::builder::DaemonBuilder {
         stores: Arc::clone(&stores) as _,
